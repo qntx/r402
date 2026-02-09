@@ -23,6 +23,8 @@ pub mod client;
 pub mod facilitator;
 
 #[cfg(feature = "server")]
+pub mod paygate;
+#[cfg(feature = "server")]
 pub mod server;
 #[cfg(feature = "server")]
 pub mod types;
