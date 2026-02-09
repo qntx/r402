@@ -46,7 +46,7 @@ pub struct ExactEvmClient<S> {
 
 impl<S: Signer + Send + Sync> ExactEvmClient<S> {
     /// Creates a new exact scheme client with the given signer.
-    pub fn new(signer: S) -> Self {
+    pub const fn new(signer: S) -> Self {
         Self { signer }
     }
 

@@ -35,7 +35,7 @@ impl ExactEvmServer {
 
     /// Creates a server scheme with custom network configurations.
     #[must_use]
-    pub fn with_networks(networks: Vec<NetworkConfig>) -> Self {
+    pub const fn with_networks(networks: Vec<NetworkConfig>) -> Self {
         Self { networks }
     }
 
@@ -104,24 +104,23 @@ impl SchemeServer for ExactEvmServer {
 
     fn parse_price(&self, price: &Value, network: &str) -> Result<AssetAmount, SchemeError> {
         // Already an AssetAmount (object with "amount" key)
-        if let Some(obj) = price.as_object() {
-            if let Some(amount) = obj.get("amount") {
-                let asset =
-                    obj.get("asset")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| -> SchemeError {
-                            format!("Asset address required for AssetAmount on {network}").into()
-                        })?;
+        if let Some(obj) = price.as_object()
+            && let Some(amount) = obj.get("amount")
+        {
+            let asset =
+                obj.get("asset")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| -> SchemeError {
+                        format!("Asset address required for AssetAmount on {network}").into()
+                    })?;
 
-                return Ok(AssetAmount {
-                    amount: amount
-                        .as_str()
-                        .map(String::from)
-                        .unwrap_or_else(|| amount.to_string()),
-                    asset: asset.to_owned(),
-                    extra: obj.get("extra").cloned(),
-                });
-            }
+            return Ok(AssetAmount {
+                amount: amount
+                    .as_str()
+                    .map_or_else(|| amount.to_string(), String::from),
+                asset: asset.to_owned(),
+                extra: obj.get("extra").cloned(),
+            });
         }
 
         // Money string (e.g., "1.50" or "$1.50")
@@ -150,22 +149,21 @@ impl SchemeServer for ExactEvmServer {
         };
 
         // Default asset if empty
-        if requirements.asset.is_empty() {
-            if let Some(default_asset) = config.assets.first() {
-                requirements.asset = format!("{:?}", default_asset.address);
-            }
+        if requirements.asset.is_empty()
+            && let Some(default_asset) = config.assets.first()
+        {
+            requirements.asset = format!("{:?}", default_asset.address);
         }
 
         // Find asset info for EIP-712 domain params
         let asset_info = Self::find_asset(config, &requirements.asset);
 
         // Convert decimal amount to smallest unit if needed
-        if requirements.amount.contains('.') {
-            if let Some(info) = asset_info {
-                if let Ok(atomic) = parse_decimal_to_atomic(&requirements.amount, info.decimals) {
-                    requirements.amount = atomic;
-                }
-            }
+        if requirements.amount.contains('.')
+            && let Some(info) = asset_info
+            && let Ok(atomic) = parse_decimal_to_atomic(&requirements.amount, info.decimals)
+        {
+            requirements.amount = atomic;
         }
 
         // Add EIP-712 domain params to extra

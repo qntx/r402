@@ -17,6 +17,7 @@ r402-facilitator = { version = "0.2", path = "r402-facilitator" }
 r402-http = { version = "0.2", path = "r402-http" }
 r402-svm = { version = "0.2", path = "r402-svm" }
 
+async-trait = "0.1"
 alloy-contract = "1.4"
 alloy-network = "1.4"
 alloy-primitives = { version = "1.4", features = ["k256"] }
@@ -28,6 +29,8 @@ alloy-signer-local = "1.4"
 alloy-sol-types = { version = "1.4", features = ["json"] }
 alloy-transport = { version = "1.4", features = ["throttle"] }
 alloy-transport-http = "1.4"
+dashmap = "6"
+futures = "0.3"
 axum = "0.8"
 getrandom = "0.4"
 axum-core = "0.5"

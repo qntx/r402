@@ -12,3 +12,5 @@
 pub mod chain;
 pub mod exact;
 pub mod networks;
+#[cfg(feature = "facilitator")]
+pub mod provider;

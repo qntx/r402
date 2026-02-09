@@ -2,7 +2,7 @@
 //!
 //! Implements [`SchemeFacilitator`] for the `exact` scheme. Verifies and
 //! settles EIP-3009 `transferWithAuthorization` payments on EVM networks
-//! using an alloy [`Provider`].
+//! using an [`EvmSettlementProvider`].
 //!
 //! Corresponds to Python SDK's `mechanisms/evm/exact/facilitator.py`.
 
@@ -20,11 +20,12 @@ use crate::exact::types::{
     transferWithAuthorizationVRSCall,
 };
 use crate::networks::known_networks;
+use crate::provider::{EvmSettlementProvider, MetaTransaction};
 
 /// Configuration options for the EVM exact scheme facilitator.
 ///
 /// Corresponds to Python SDK's `ExactEvmSchemeConfig` in `exact/facilitator.py`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ExactEvmConfig {
     /// Whether to deploy ERC-4337 smart wallets via ERC-6492 factory calls
     /// during settlement. When `false`, payments from undeployed smart wallets
@@ -34,28 +35,23 @@ pub struct ExactEvmConfig {
     pub deploy_erc4337_with_eip6492: bool,
 }
 
-impl Default for ExactEvmConfig {
-    fn default() -> Self {
-        Self {
-            deploy_erc4337_with_eip6492: false,
-        }
-    }
-}
-
 /// EVM facilitator implementation for the "exact" payment scheme.
 ///
 /// Verifies EIP-3009 authorization signatures and settles payments by
-/// calling `transferWithAuthorization` on-chain via an alloy [`Provider`].
+/// calling `transferWithAuthorization` on-chain via an
+/// [`EvmSettlementProvider`].
 ///
 /// # Type Parameters
 ///
-/// - `P`: Provider type (e.g., `RootProvider`). Must implement
-///   `Provider` for the default Ethereum network.
+/// - `P`: Settlement provider type (e.g., [`Eip155ChainProvider`]).
+///   Must implement [`EvmSettlementProvider`] for nonce management,
+///   signer rotation, and error recovery.
 ///
 /// Corresponds to Python SDK's `ExactEvmScheme` in `exact/facilitator.py`.
+///
+/// [`Eip155ChainProvider`]: crate::provider::Eip155ChainProvider
 pub struct ExactEvmFacilitator<P> {
     provider: P,
-    signer_address: Address,
     config: ExactEvmConfig,
     #[allow(dead_code)]
     networks: Vec<NetworkConfig>,
@@ -63,41 +59,37 @@ pub struct ExactEvmFacilitator<P> {
 
 impl<P> ExactEvmFacilitator<P>
 where
-    P: Provider + Send + Sync + 'static,
+    P: EvmSettlementProvider,
 {
-    /// Creates a new facilitator with the given provider and signer address.
+    /// Creates a new facilitator with the given settlement provider.
     ///
-    /// The `signer_address` is the facilitator's wallet that will submit
-    /// settlement transactions. Uses default configuration.
-    pub fn new(provider: P, signer_address: Address) -> Self {
+    /// Signer addresses are obtained from the provider. Uses default
+    /// configuration.
+    pub fn new(provider: P) -> Self {
         Self {
             provider,
-            signer_address,
             config: ExactEvmConfig::default(),
             networks: known_networks(),
         }
     }
 
     /// Creates a facilitator with custom configuration.
-    pub fn with_config(provider: P, signer_address: Address, config: ExactEvmConfig) -> Self {
+    pub fn with_config(provider: P, config: ExactEvmConfig) -> Self {
         Self {
             provider,
-            signer_address,
             config,
             networks: known_networks(),
         }
     }
 
     /// Creates a facilitator with custom network configurations and config.
-    pub fn with_networks(
+    pub const fn with_networks(
         provider: P,
-        signer_address: Address,
         config: ExactEvmConfig,
         networks: Vec<NetworkConfig>,
     ) -> Self {
         Self {
             provider,
-            signer_address,
             config,
             networks,
         }
@@ -160,15 +152,12 @@ where
         };
 
         // Resolve chain ID from CAIP-2 network identifier
-        let chain_id = match parse_caip2(&requirements.network) {
-            Some(id) => id,
-            None => {
-                return VerifyResponse::invalid_with_payer(
-                    "invalid_network",
-                    format!("Cannot parse CAIP-2 network: {}", requirements.network),
-                    &payer_str,
-                );
-            }
+        let Some(chain_id) = parse_caip2(&requirements.network) else {
+            return VerifyResponse::invalid_with_payer(
+                "invalid_network",
+                format!("Cannot parse CAIP-2 network: {}", requirements.network),
+                &payer_str,
+            );
         };
 
         if !evm_payload
@@ -262,9 +251,10 @@ where
         };
 
         // On-chain nonce check (best effort)
-        if let Ok(true) = self
+        if self
             .check_nonce_used(payer, nonce_bytes, asset_address)
             .await
+            == Ok(true)
         {
             return VerifyResponse::invalid_with_payer(
                 "nonce_already_used",
@@ -274,14 +264,14 @@ where
         }
 
         // On-chain balance check (best effort)
-        if let Ok(balance) = self.get_balance(payer, asset_address).await {
-            if balance < U256::from(auth_amount) {
-                return VerifyResponse::invalid_with_payer(
-                    "insufficient_balance",
-                    "Payer balance is less than authorization value",
-                    &payer_str,
-                );
-            }
+        if let Ok(balance) = self.get_balance(payer, asset_address).await
+            && balance < U256::from(auth_amount)
+        {
+            return VerifyResponse::invalid_with_payer(
+                "insufficient_balance",
+                "Payer balance is less than authorization value",
+                &payer_str,
+            );
         }
 
         // Verify EIP-712 signature (EOA ecrecover / EIP-1271 / ERC-6492)
@@ -396,30 +386,22 @@ where
                     );
                 }
                 // Smart wallet not deployed — attempt factory deployment
-                let deploy_tx = alloy_rpc_types_eth::TransactionRequest::default()
-                    .from(self.signer_address)
-                    .to(sig_data.factory)
-                    .input(sig_data.factory_calldata.clone().into());
+                let deploy_meta = MetaTransaction {
+                    to: sig_data.factory,
+                    calldata: Bytes::from(sig_data.factory_calldata.clone()),
+                    confirmations: 1,
+                };
 
-                match self.provider.send_transaction(deploy_tx).await {
-                    Ok(pending) => match pending.get_receipt().await {
-                        Ok(receipt) => {
-                            if !receipt.status() {
-                                return SettleResponse::error(
-                                    "smart_wallet_deployment_failed",
-                                    "Factory call reverted",
-                                    &network,
-                                );
-                            }
-                        }
-                        Err(e) => {
+                match self.provider.send_transaction(deploy_meta).await {
+                    Ok(receipt) => {
+                        if !receipt.status() {
                             return SettleResponse::error(
                                 "smart_wallet_deployment_failed",
-                                e.to_string(),
+                                "Factory call reverted",
                                 &network,
                             );
                         }
-                    },
+                    }
                     Err(e) => {
                         return SettleResponse::error(
                             "smart_wallet_deployment_failed",
@@ -467,27 +449,23 @@ where
             call.abi_encode()
         };
 
-        // Submit settlement transaction
-        let tx = alloy_rpc_types_eth::TransactionRequest::default()
-            .from(self.signer_address)
-            .to(asset_address)
-            .input(calldata.into());
+        // Submit settlement transaction via provider (handles nonce, gas, signing)
+        let settle_meta = MetaTransaction {
+            to: asset_address,
+            calldata: Bytes::from(calldata),
+            confirmations: 1,
+        };
 
-        match self.provider.send_transaction(tx).await {
-            Ok(pending) => match pending.get_receipt().await {
-                Ok(receipt) => {
-                    let tx_hash = format!("{:?}", receipt.transaction_hash);
-                    if receipt.status() {
-                        SettleResponse::success(&tx_hash, &network, &payer_str)
-                    } else {
-                        SettleResponse::error("transaction_failed", "On-chain revert", &network)
-                    }
+        match self.provider.send_transaction(settle_meta).await {
+            Ok(receipt) => {
+                let tx_hash = format!("{:?}", receipt.transaction_hash);
+                if receipt.status() {
+                    SettleResponse::success(&tx_hash, &network, &payer_str)
+                } else {
+                    SettleResponse::error("transaction_failed", "On-chain revert", &network)
                 }
-                Err(e) => {
-                    SettleResponse::error("transaction_receipt_failed", e.to_string(), &network)
-                }
-            },
-            Err(e) => SettleResponse::error("transaction_send_failed", e.to_string(), &network),
+            }
+            Err(e) => SettleResponse::error("settlement_failed", e.to_string(), &network),
         }
     }
 
@@ -508,7 +486,12 @@ where
             .to(token)
             .input(calldata.into());
 
-        let result: Bytes = self.provider.call(tx).await.map_err(|e| e.to_string())?;
+        let result: Bytes = self
+            .provider
+            .read_provider()
+            .call(tx)
+            .await
+            .map_err(|e| e.to_string())?;
 
         Ok(result.len() >= 32 && result[31] != 0)
     }
@@ -522,7 +505,12 @@ where
             .to(token)
             .input(calldata.into());
 
-        let result: Bytes = self.provider.call(tx).await.map_err(|e| e.to_string())?;
+        let result: Bytes = self
+            .provider
+            .read_provider()
+            .call(tx)
+            .await
+            .map_err(|e| e.to_string())?;
 
         if result.len() >= 32 {
             Ok(U256::from_be_slice(&result[..32]))
@@ -536,6 +524,7 @@ where
     /// Returns an empty `Bytes` if the address has no code (EOA).
     async fn get_code(&self, address: Address) -> Result<Bytes, String> {
         self.provider
+            .read_provider()
             .get_code_at(address)
             .await
             .map_err(|e| e.to_string())
@@ -555,10 +544,9 @@ where
     ) -> Result<bool, String> {
         let (r, s, parity) = decode_ecdsa_signature(signature)?;
         let sig = alloy_primitives::Signature::new(r, s, parity);
-        match sig.recover_address_from_prehash(hash) {
-            Ok(recovered) => Ok(recovered == expected),
-            Err(_) => Ok(false),
-        }
+        Ok(sig
+            .recover_address_from_prehash(hash)
+            .is_ok_and(|recovered| recovered == expected))
     }
 
     /// Verifies an EIP-1271 smart contract wallet signature.
@@ -582,7 +570,12 @@ where
             .to(wallet)
             .input(calldata.into());
 
-        let result: Bytes = self.provider.call(tx).await.map_err(|e| e.to_string())?;
+        let result: Bytes = self
+            .provider
+            .read_provider()
+            .call(tx)
+            .await
+            .map_err(|e| e.to_string())?;
 
         Ok(result.len() >= 4 && result[..4] == EIP1271_MAGIC_VALUE)
     }
@@ -690,7 +683,6 @@ where
 impl<P> std::fmt::Debug for ExactEvmFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExactEvmFacilitator")
-            .field("signer_address", &self.signer_address)
             .field("networks_count", &self.networks.len())
             .finish_non_exhaustive()
     }
@@ -698,13 +690,13 @@ impl<P> std::fmt::Debug for ExactEvmFacilitator<P> {
 
 impl<P> SchemeFacilitator for ExactEvmFacilitator<P>
 where
-    P: Provider + Send + Sync + 'static,
+    P: EvmSettlementProvider,
 {
     fn scheme(&self) -> &str {
         SCHEME_EXACT
     }
 
-    fn caip_family(&self) -> &str {
+    fn caip_family(&self) -> &'static str {
         "eip155:*"
     }
 
@@ -713,7 +705,11 @@ where
     }
 
     fn get_signers(&self, _network: &str) -> Vec<String> {
-        vec![format!("{:?}", self.signer_address)]
+        self.provider
+            .signer_addresses()
+            .iter()
+            .map(|a| format!("{a:?}"))
+            .collect()
     }
 
     fn verify<'a>(
@@ -814,9 +810,10 @@ struct Erc6492SignatureData {
 /// If the signature does not end with the magic suffix, it is returned
 /// as-is in `inner_signature`.
 fn parse_erc6492_signature(signature: &[u8]) -> Erc6492SignatureData {
+    type Erc6492Tuple = (sol_data::Address, sol_data::Bytes, sol_data::Bytes);
+
     if signature.len() > 32 && signature[signature.len() - 32..] == ERC6492_MAGIC_SUFFIX {
         let payload = &signature[..signature.len() - 32];
-        type Erc6492Tuple = (sol_data::Address, sol_data::Bytes, sol_data::Bytes);
         if let Ok((factory, factory_calldata, inner_sig)) =
             <Erc6492Tuple as SolType>::abi_decode(payload)
         {

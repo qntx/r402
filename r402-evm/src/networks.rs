@@ -31,7 +31,7 @@ pub const ETHEREUM_MAINNET: ChainId = 1;
 pub const CELO_MAINNET: ChainId = 42220;
 
 /// Celo Sepolia (testnet) chain ID.
-pub const CELO_SEPOLIA: ChainId = 11142220;
+pub const CELO_SEPOLIA: ChainId = 11_142_220;
 
 /// `MegaETH` Mainnet (Frontier) chain ID.
 pub const MEGAETH_MAINNET: ChainId = 4326;
@@ -73,7 +73,7 @@ pub const USDC_CELO: Address = address!("cebA9300f2b948710d2653dD7B07f33A8B32118
 pub const USDC_CELO_SEPOLIA: Address = address!("01C5C0122039549AD1493B8220cABEdD739BC44E");
 
 /// USDM contract address on `MegaETH` Mainnet (Frontier).
-/// MegaETH uses USDM (MegaUSD) instead of Circle USDC.
+/// `MegaETH` uses USDM (`MegaUSD`) instead of Circle USDC.
 pub const USDM_MEGAETH: Address = address!("FAfDdbb3FC7688494971a79cc65DCa3EF82079E7");
 
 /// USDC contract address on Monad Mainnet (Circle native).

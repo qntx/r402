@@ -61,7 +61,19 @@ pub struct ChainConfig {
 
     /// Private key for the facilitator signer (hex, with or without `0x` prefix).
     /// Supports `$VAR` / `${VAR}` for environment variable expansion.
+    ///
+    /// For backward compatibility, this field is used when `signer_private_keys`
+    /// is empty. Prefer `signer_private_keys` for multi-signer setups.
+    #[serde(default)]
     pub signer_private_key: String,
+
+    /// Multiple signer private keys for round-robin transaction submission.
+    /// Each key is a hex string (with or without `0x` prefix) and supports
+    /// `$VAR` / `${VAR}` environment variable expansion.
+    ///
+    /// When populated, `signer_private_key` is ignored.
+    #[serde(default)]
+    pub signer_private_keys: Vec<String>,
 
     /// Per-chain HTTP request timeout in seconds (default: 30).
     #[serde(default = "default_timeout")]
@@ -71,9 +83,41 @@ pub struct ChainConfig {
     /// `eth_chainId` (default: `true`).
     #[serde(default = "default_true")]
     pub health_check: bool,
+
+    /// Whether the chain supports EIP-1559 gas pricing (default: `true`).
+    #[serde(default = "default_true")]
+    pub eip1559: bool,
+
+    /// Whether the chain uses flashblocks for immediate finality (default: `false`).
+    #[serde(default)]
+    pub flashblocks: bool,
+
+    /// Seconds to wait for a transaction receipt after submission (default: 30).
+    #[serde(default = "default_timeout")]
+    pub receipt_timeout_secs: u64,
 }
 
-fn default_timeout() -> u64 {
+impl ChainConfig {
+    /// Returns the effective list of signer private keys.
+    ///
+    /// If `signer_private_keys` is non-empty, returns that list.
+    /// Otherwise falls back to the single `signer_private_key`.
+    #[must_use]
+    pub fn effective_signer_keys(&self) -> Vec<&str> {
+        if !self.signer_private_keys.is_empty() {
+            self.signer_private_keys
+                .iter()
+                .map(String::as_str)
+                .collect()
+        } else if !self.signer_private_key.is_empty() {
+            vec![self.signer_private_key.as_str()]
+        } else {
+            vec![]
+        }
+    }
+}
+
+const fn default_timeout() -> u64 {
     30
 }
 
@@ -81,11 +125,11 @@ const fn default_true() -> bool {
     true
 }
 
-fn default_host() -> IpAddr {
-    IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0))
+const fn default_host() -> IpAddr {
+    IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
 }
 
-fn default_port() -> u16 {
+const fn default_port() -> u16 {
     4021
 }
 
@@ -124,15 +168,15 @@ impl FacilitatorConfig {
         let mut config: Self = toml::from_str(&expanded)?;
 
         // Allow HOST / PORT env overrides
-        if let Ok(host) = std::env::var("HOST") {
-            if let Ok(addr) = host.parse() {
-                config.host = addr;
-            }
+        if let Ok(host) = std::env::var("HOST")
+            && let Ok(addr) = host.parse()
+        {
+            config.host = addr;
         }
-        if let Ok(port) = std::env::var("PORT") {
-            if let Ok(p) = port.parse() {
-                config.port = p;
-            }
+        if let Ok(port) = std::env::var("PORT")
+            && let Ok(p) = port.parse()
+        {
+            config.port = p;
         }
 
         Ok(config)
