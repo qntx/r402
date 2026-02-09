@@ -7,9 +7,7 @@
 
 use base64::prelude::*;
 use r402::proto::helpers::{PaymentPayloadEnum, PaymentRequiredEnum};
-use r402::{
-    PaymentPayload, PaymentPayloadV1, PaymentRequired, PaymentRequiredV1, SettleResponse,
-};
+use r402::{PaymentPayload, PaymentPayloadV1, PaymentRequired, PaymentRequiredV1, SettleResponse};
 
 use crate::error::HttpError;
 

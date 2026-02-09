@@ -28,7 +28,11 @@ use crate::scheme::{AssetAmount, BoxFuture, SchemeError, SchemeServer};
 /// Resource servers delegate verify/settle to a remote facilitator via this
 /// trait. Implementations typically make HTTP calls to a facilitator service.
 ///
-/// Corresponds to Python SDK's `FacilitatorClient` protocol in `server_base.py`.
+/// All methods are async (returning [`BoxFuture`]) because the primary
+/// implementation (`HttpFacilitatorClient`) performs network I/O.
+///
+/// Corresponds to Python SDK's `FacilitatorClient` protocol in
+/// `facilitator_client_base.py`.
 pub trait FacilitatorClient: Send + Sync {
     /// Verifies a V2 payment asynchronously.
     fn verify<'a>(
@@ -44,8 +48,11 @@ pub trait FacilitatorClient: Send + Sync {
         requirements: &'a PaymentRequirements,
     ) -> BoxFuture<'a, Result<SettleResponse, SchemeError>>;
 
-    /// Returns the supported payment kinds (sync — used during initialization).
-    fn get_supported(&self) -> Result<SupportedResponse, SchemeError>;
+    /// Returns the supported payment kinds asynchronously.
+    ///
+    /// Called during [`X402ResourceServer::initialize`] to discover which
+    /// (scheme, network) pairs the facilitator can handle.
+    fn get_supported(&self) -> BoxFuture<'_, Result<SupportedResponse, SchemeError>>;
 }
 
 /// Async hook called before verification. Return `Some(AbortResult)` to abort.
@@ -245,9 +252,9 @@ impl X402ResourceServer {
     /// # Errors
     ///
     /// Returns an error if any facilitator client fails to respond.
-    pub fn initialize(&mut self) -> Result<(), SchemeError> {
+    pub async fn initialize(&mut self) -> Result<(), SchemeError> {
         for (idx, client) in self.facilitator_clients.iter().enumerate() {
-            let supported = client.get_supported()?;
+            let supported = client.get_supported().await?;
 
             for kind in &supported.kinds {
                 let network = &kind.network;
