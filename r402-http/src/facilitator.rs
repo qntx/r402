@@ -10,7 +10,10 @@
 //! Corresponds to Python SDK's `http/facilitator_client_base.py` +
 //! `http/facilitator_client.py`.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use tokio::sync::RwLock;
 
 use r402::proto::{
     PaymentPayload, PaymentRequirements, SettleResponse, SupportedResponse, VerifyResponse,
@@ -143,6 +146,11 @@ pub struct FacilitatorConfig {
     /// Optional human-readable identifier for this facilitator
     /// (defaults to URL).
     pub identifier: Option<String>,
+
+    /// TTL for the `get_supported` response cache.
+    ///
+    /// Set to `Duration::ZERO` to disable caching (default: 5 minutes).
+    pub supported_cache_ttl: Duration,
 }
 
 impl Default for FacilitatorConfig {
@@ -153,6 +161,7 @@ impl Default for FacilitatorConfig {
             auth_provider: None,
             http_client: None,
             identifier: None,
+            supported_cache_ttl: Duration::from_secs(300),
         }
     }
 }
@@ -192,6 +201,15 @@ impl FacilitatorConfig {
     #[must_use]
     pub fn with_identifier(mut self, id: impl Into<String>) -> Self {
         self.identifier = Some(id.into());
+        self
+    }
+
+    /// Sets the TTL for `get_supported` response caching.
+    ///
+    /// Use `Duration::ZERO` to disable caching entirely.
+    #[must_use]
+    pub fn with_supported_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.supported_cache_ttl = ttl;
         self
     }
 }
@@ -234,11 +252,21 @@ struct FacilitatorRequestBody {
 ///
 /// Corresponds to Python SDK's `HTTPFacilitatorClient` in
 /// `facilitator_client.py`.
+///
+/// Cached `get_supported` response with expiry timestamp.
+struct CachedSupported {
+    response: SupportedResponse,
+    expires_at: Instant,
+}
+
+/// Async HTTP-based facilitator client with built-in `get_supported` caching.
 pub struct HttpFacilitatorClient {
     url: String,
     identifier: String,
     auth_provider: Option<Box<dyn AuthProvider>>,
     client: reqwest::Client,
+    cache_ttl: Duration,
+    supported_cache: Arc<RwLock<Option<CachedSupported>>>,
 }
 
 impl HttpFacilitatorClient {
@@ -260,6 +288,8 @@ impl HttpFacilitatorClient {
             identifier,
             auth_provider: config.auth_provider,
             client,
+            cache_ttl: config.supported_cache_ttl,
+            supported_cache: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -483,6 +513,17 @@ impl FacilitatorClient for HttpFacilitatorClient {
 
     fn get_supported(&self) -> BoxFuture<'_, Result<SupportedResponse, SchemeError>> {
         Box::pin(async move {
+            // Check cache first
+            if self.cache_ttl > Duration::ZERO {
+                let guard = self.supported_cache.read().await;
+                if let Some(cached) = guard.as_ref() {
+                    if Instant::now() < cached.expires_at {
+                        return Ok(cached.response.clone());
+                    }
+                }
+            }
+
+            // Cache miss or expired — fetch from facilitator
             let response = self
                 .client
                 .get(format!("{}/supported", self.url))
@@ -502,6 +543,15 @@ impl FacilitatorClient for HttpFacilitatorClient {
             let result: SupportedResponse = response.json().await.map_err(|e| -> SchemeError {
                 format!("Facilitator get_supported response parse error: {e}").into()
             })?;
+
+            // Populate cache
+            if self.cache_ttl > Duration::ZERO {
+                let mut guard = self.supported_cache.write().await;
+                *guard = Some(CachedSupported {
+                    response: result.clone(),
+                    expires_at: Instant::now() + self.cache_ttl,
+                });
+            }
 
             Ok(result)
         })
