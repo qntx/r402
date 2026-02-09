@@ -3007,6 +3007,7 @@ version = "0.2.1"
 dependencies = [
  "alloy-network",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-signer-local",
  "alloy-transport-http",
  "axum",

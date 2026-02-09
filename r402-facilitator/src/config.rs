@@ -51,12 +51,34 @@ pub struct FacilitatorConfig {
 /// Per-chain configuration for an EVM network.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChainConfig {
-    /// HTTP RPC endpoint URL.
+    /// Primary HTTP RPC endpoint URL.
     pub rpc_url: String,
+
+    /// Fallback RPC endpoint URLs tried in order when the primary fails
+    /// the startup health check.
+    #[serde(default)]
+    pub fallback_rpc_urls: Vec<String>,
 
     /// Private key for the facilitator signer (hex, with or without `0x` prefix).
     /// Supports `$VAR` / `${VAR}` for environment variable expansion.
     pub signer_private_key: String,
+
+    /// Per-chain HTTP request timeout in seconds (default: 30).
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: u64,
+
+    /// Whether to verify chain connectivity at startup by calling
+    /// `eth_chainId` (default: `true`).
+    #[serde(default = "default_true")]
+    pub health_check: bool,
+}
+
+fn default_timeout() -> u64 {
+    30
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 fn default_host() -> IpAddr {

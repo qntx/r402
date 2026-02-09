@@ -22,11 +22,14 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use alloy_network::EthereumWallet;
-use alloy_provider::ProviderBuilder;
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_client::RpcClient;
 use alloy_signer_local::PrivateKeySigner;
-use alloy_transport_http::reqwest::Url;
+use alloy_transport_http::Http;
+use alloy_transport_http::reqwest::{Client as ReqwestClient, Url};
 use axum::http::Method;
 use axum::{Json, Router};
 use r402::facilitator::X402Facilitator;
@@ -36,7 +39,7 @@ use r402_evm::networks::known_networks;
 use tower_http::cors;
 use tracing_subscriber::EnvFilter;
 
-use r402_facilitator::config::FacilitatorConfig;
+use r402_facilitator::config::{ChainConfig, FacilitatorConfig};
 use r402_facilitator::handlers::{FacilitatorState, facilitator_router};
 
 #[tokio::main]
@@ -97,14 +100,16 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .parse()
             .map_err(|e| format!("Invalid signer key for {network_id}: {e}"))?;
         let signer_address = signer.address();
-
         let wallet = EthereumWallet::from(signer);
-        let rpc_url: Url = chain_cfg
-            .rpc_url
-            .parse()
-            .map_err(|e| format!("Invalid RPC URL for {network_id}: {e}"))?;
 
-        let provider = ProviderBuilder::new().wallet(wallet).connect_http(rpc_url);
+        // Try primary URL, then fallbacks
+        let provider = match create_provider(network_id, chain_cfg, chain_id, &wallet).await {
+            Some(p) => p,
+            None => {
+                tracing::error!(network = %network_id, "All RPC endpoints failed — skipping chain");
+                continue;
+            }
+        };
 
         // Filter known network configs that match this chain ID
         let networks_for_chain: Vec<_> = known
@@ -174,6 +179,91 @@ async fn health() -> Json<serde_json::Value> {
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
     }))
+}
+
+/// Creates an EVM provider with per-chain timeout, fallback URLs, and
+/// optional startup health check (`eth_chainId`).
+///
+/// Tries the primary `rpc_url` first, then each `fallback_rpc_urls` in order.
+/// Returns `None` if all endpoints fail.
+async fn create_provider(
+    network_id: &str,
+    chain_cfg: &ChainConfig,
+    expected_chain_id: u64,
+    wallet: &EthereumWallet,
+) -> Option<impl Provider + use<>> {
+    let timeout = Duration::from_secs(chain_cfg.timeout_seconds);
+
+    let urls = std::iter::once(&chain_cfg.rpc_url).chain(chain_cfg.fallback_rpc_urls.iter());
+
+    for (i, url_str) in urls.enumerate() {
+        let label = if i == 0 { "primary" } else { "fallback" };
+
+        let rpc_url: Url = match url_str.parse() {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!(
+                    network = %network_id, url = %url_str, label,
+                    "Invalid RPC URL: {e}"
+                );
+                continue;
+            }
+        };
+
+        // Build provider with custom timeout
+        let http_client = match ReqwestClient::builder().timeout(timeout).build() {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(
+                    network = %network_id, label,
+                    "Failed to build HTTP client: {e}"
+                );
+                continue;
+            }
+        };
+        let transport = Http::with_client(http_client, rpc_url);
+        let rpc_client = RpcClient::new(transport, false);
+        let provider = ProviderBuilder::new()
+            .wallet(wallet.clone())
+            .connect_client(rpc_client);
+
+        // Startup health check
+        if chain_cfg.health_check {
+            match provider.get_chain_id().await {
+                Ok(id) if id == expected_chain_id => {
+                    tracing::info!(
+                        network = %network_id, url = %url_str, label,
+                        chain_id = id, "RPC health check passed"
+                    );
+                    return Some(provider);
+                }
+                Ok(id) => {
+                    tracing::warn!(
+                        network = %network_id, url = %url_str, label,
+                        expected = expected_chain_id, actual = id,
+                        "Chain ID mismatch"
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        network = %network_id, url = %url_str, label,
+                        "RPC health check failed: {e}"
+                    );
+                    continue;
+                }
+            }
+        }
+
+        // No health check — use this provider directly
+        tracing::info!(
+            network = %network_id, url = %url_str, label,
+            "Using RPC endpoint (health check disabled)"
+        );
+        return Some(provider);
+    }
+
+    None
 }
 
 /// Waits for Ctrl-C or SIGTERM (Unix) to initiate graceful shutdown.
