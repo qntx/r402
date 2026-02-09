@@ -105,6 +105,99 @@ const fn default_selector(_version: u32, _reqs: &[RequirementsView]) -> usize {
     0
 }
 
+/// Fluent builder for [`X402Client`].
+///
+/// Provides an ownership-taking API for chained construction:
+///
+/// ```ignore
+/// let client = X402Client::builder()
+///     .register("eip155:*".into(), Box::new(evm_scheme))
+///     .policy(prefer_network("eip155:8453".into()))
+///     .build();
+/// ```
+pub struct X402ClientBuilder {
+    inner: X402Client,
+}
+
+impl Default for X402ClientBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl X402ClientBuilder {
+    /// Creates a new builder with default settings.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inner: X402Client::new(),
+        }
+    }
+
+    /// Registers a V2 scheme client for a network (ownership-taking).
+    #[must_use]
+    pub fn register(mut self, network: Network, client: Box<dyn SchemeClient>) -> Self {
+        self.inner.register(network, client);
+        self
+    }
+
+    /// Registers a V1 scheme client for a network (ownership-taking).
+    #[must_use]
+    pub fn register_v1(mut self, network: Network, client: Box<dyn SchemeClientV1>) -> Self {
+        self.inner.register_v1(network, client);
+        self
+    }
+
+    /// Adds a requirement filter policy (ownership-taking).
+    #[must_use]
+    pub fn policy(mut self, policy: PaymentPolicy) -> Self {
+        self.inner.register_policy(policy);
+        self
+    }
+
+    /// Sets the requirement selector (ownership-taking).
+    #[must_use]
+    pub fn selector(mut self, selector: PaymentRequirementsSelector) -> Self {
+        self.inner.selector = selector;
+        self
+    }
+
+    /// Registers a before-payment-creation hook (ownership-taking).
+    #[must_use]
+    pub fn on_before_payment_creation(mut self, hook: BeforePaymentCreationHook) -> Self {
+        self.inner.on_before_payment_creation(hook);
+        self
+    }
+
+    /// Registers an after-payment-creation hook (ownership-taking).
+    #[must_use]
+    pub fn on_after_payment_creation(mut self, hook: AfterPaymentCreationHook) -> Self {
+        self.inner.on_after_payment_creation(hook);
+        self
+    }
+
+    /// Registers a failure hook (ownership-taking).
+    #[must_use]
+    pub fn on_payment_creation_failure(mut self, hook: OnPaymentCreationFailureHook) -> Self {
+        self.inner.on_payment_creation_failure(hook);
+        self
+    }
+
+    /// Consumes the builder and returns the configured [`X402Client`].
+    #[must_use]
+    pub fn build(self) -> X402Client {
+        self.inner
+    }
+}
+
+impl std::fmt::Debug for X402ClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("X402ClientBuilder")
+            .field("inner", &self.inner)
+            .finish()
+    }
+}
+
 /// Async-first x402 client with scheme registration, policies, hooks,
 /// and payment creation.
 ///
@@ -145,6 +238,18 @@ impl Default for X402Client {
 }
 
 impl X402Client {
+    /// Returns a fluent [`X402ClientBuilder`] for chained construction.
+    ///
+    /// ```ignore
+    /// let client = X402Client::builder()
+    ///     .register("eip155:*".into(), Box::new(evm_scheme))
+    ///     .build();
+    /// ```
+    #[must_use]
+    pub fn builder() -> X402ClientBuilder {
+        X402ClientBuilder::new()
+    }
+
     /// Creates a new client with default selector.
     #[must_use]
     pub fn new() -> Self {

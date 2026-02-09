@@ -55,6 +55,38 @@ impl X402HttpClient {
         Self { client }
     }
 
+    /// Creates a new middleware from an owned [`X402Client`].
+    ///
+    /// Convenience wrapper that wraps the client in an [`Arc`] internally.
+    #[must_use]
+    pub fn from_client(client: X402Client) -> Self {
+        Self {
+            client: Arc::new(client),
+        }
+    }
+
+    /// Builds a [`reqwest_middleware::ClientWithMiddleware`] with x402 payment
+    /// handling from an owned [`X402Client`].
+    ///
+    /// This is the simplest way to get a payment-capable HTTP client:
+    ///
+    /// ```ignore
+    /// use r402::client::X402Client;
+    /// use r402_http::client::X402HttpClient;
+    ///
+    /// let http_client = X402HttpClient::build_reqwest(
+    ///     X402Client::builder()
+    ///         .register("eip155:*".into(), Box::new(evm_scheme))
+    ///         .build()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn build_reqwest(client: X402Client) -> reqwest_middleware::ClientWithMiddleware {
+        reqwest_middleware::ClientBuilder::new(reqwest::Client::new())
+            .with(Self::from_client(client))
+            .build()
+    }
+
     /// Extracts payment-required info from a 402 response.
     ///
     /// Checks V2 header first, then falls back to V1 body.
