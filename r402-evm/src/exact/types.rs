@@ -64,7 +64,8 @@ pub struct ExactRequirementsExtra {
 }
 
 sol! {
-    /// ERC-3009 `transferWithAuthorization` function.
+    /// ERC-3009 `transferWithAuthorization` function (bytes overload).
+    /// Used for smart wallet signatures (EIP-1271).
     #[derive(Debug, PartialEq, Eq)]
     function transferWithAuthorization(
         address from,
@@ -74,6 +75,22 @@ sol! {
         uint256 validBefore,
         bytes32 nonce,
         bytes memory signature
+    ) external;
+
+    /// ERC-3009 `transferWithAuthorization` function (v,r,s overload).
+    /// Used for EOA signatures (65 bytes decomposed into v, r, s).
+    #[derive(Debug, PartialEq, Eq)]
+    #[sol(rename = "transferWithAuthorization")]
+    function transferWithAuthorizationVRS(
+        address from,
+        address to,
+        uint256 value,
+        uint256 validAfter,
+        uint256 validBefore,
+        bytes32 nonce,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
     ) external;
 
     /// ERC-3009 `authorizationState` view function.

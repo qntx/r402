@@ -30,8 +30,17 @@ pub const ETHEREUM_MAINNET: ChainId = 1;
 /// Celo Mainnet chain ID.
 pub const CELO_MAINNET: ChainId = 42220;
 
-/// `MegaETH` Testnet chain ID.
-pub const MEGAETH_TESTNET: ChainId = 6342;
+/// `MegaETH` Mainnet (Frontier) chain ID.
+pub const MEGAETH_MAINNET: ChainId = 4326;
+
+/// `MegaETH` Testnet v2 chain ID.
+pub const MEGAETH_TESTNET: ChainId = 6343;
+
+/// Monad Mainnet chain ID.
+pub const MONAD_MAINNET: ChainId = 143;
+
+/// Monad Testnet chain ID.
+pub const MONAD_TESTNET: ChainId = 10143;
 
 /// USDC contract address on Base Mainnet.
 pub const USDC_BASE: Address = address!("833589fCD6eDb6E08f4c7C32D4f71b54bdA02913");
@@ -57,8 +66,15 @@ pub const USDC_AVALANCHE_FUJI: Address = address!("5425890298aed601595a70AB815c9
 /// USDC contract address on Celo.
 pub const USDC_CELO: Address = address!("cebA9300f2b948710d2653dD7B07f33A8B32118C");
 
-/// USDC contract address on `MegaETH` Testnet.
-pub const USDC_MEGAETH: Address = address!("2F24De1820e846B6C14EB8ED4dDfc4fdF7cc5149");
+/// USDM contract address on `MegaETH` Mainnet (Frontier).
+/// MegaETH uses USDM (MegaUSD) instead of Circle USDC.
+pub const USDM_MEGAETH: Address = address!("FAfDdbb3FC7688494971a79cc65DCa3EF82079E7");
+
+/// USDC contract address on Monad Mainnet (Circle native).
+pub const USDC_MONAD: Address = address!("754704Bc059F8C67012fEd69BC8A327a5aafb603");
+
+/// USDC contract address on Monad Testnet (Circle native).
+pub const USDC_MONAD_TESTNET: Address = address!("534b2f3A21130d7a60830c2Df862319e593943A3");
 
 /// Default EIP-712 domain name for USDC.
 pub const DEFAULT_USDC_NAME: &str = "USD Coin";
@@ -146,10 +162,29 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             )],
         },
         NetworkConfig {
-            network: format!("eip155:{MEGAETH_TESTNET}"),
-            chain_id: MEGAETH_TESTNET,
+            network: format!("eip155:{MEGAETH_MAINNET}"),
+            chain_id: MEGAETH_MAINNET,
+            assets: vec![AssetInfo {
+                address: USDM_MEGAETH,
+                decimals: 18,
+                name: "MegaUSD".to_owned(),
+                version: "1".to_owned(),
+            }],
+        },
+        NetworkConfig {
+            network: format!("eip155:{MONAD_MAINNET}"),
+            chain_id: MONAD_MAINNET,
             assets: vec![usdc_asset(
-                USDC_MEGAETH,
+                USDC_MONAD,
+                DEFAULT_USDC_NAME,
+                DEFAULT_USDC_VERSION,
+            )],
+        },
+        NetworkConfig {
+            network: format!("eip155:{MONAD_TESTNET}"),
+            chain_id: MONAD_TESTNET,
+            assets: vec![usdc_asset(
+                USDC_MONAD_TESTNET,
                 DEFAULT_USDC_NAME,
                 DEFAULT_USDC_VERSION,
             )],

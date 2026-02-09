@@ -185,9 +185,10 @@ impl X402ResourceServer {
     #[must_use]
     pub fn has_registered_scheme(&self, network: &str, scheme: &str) -> bool {
         if let Some(schemes) = self.schemes.get(network)
-            && schemes.contains_key(scheme) {
-                return true;
-            }
+            && schemes.contains_key(scheme)
+        {
+            return true;
+        }
         let prefix = network.split(':').next().unwrap_or("");
         let wildcard = format!("{prefix}:*");
         self.schemes

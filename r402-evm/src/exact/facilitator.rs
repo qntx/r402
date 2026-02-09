@@ -17,8 +17,30 @@ use crate::chain::{NetworkConfig, parse_caip2};
 use crate::exact::types::{
     ExactPayload, ExactRequirementsExtra, SCHEME_EXACT, TransferWithAuthorization,
     authorizationStateCall, balanceOfCall, isValidSignatureCall, transferWithAuthorizationCall,
+    transferWithAuthorizationVRSCall,
 };
 use crate::networks::known_networks;
+
+/// Configuration options for the EVM exact scheme facilitator.
+///
+/// Corresponds to Python SDK's `ExactEvmSchemeConfig` in `exact/facilitator.py`.
+#[derive(Debug, Clone, Copy)]
+pub struct ExactEvmConfig {
+    /// Whether to deploy ERC-4337 smart wallets via ERC-6492 factory calls
+    /// during settlement. When `false`, payments from undeployed smart wallets
+    /// will be rejected at settlement time.
+    ///
+    /// Default: `false`.
+    pub deploy_erc4337_with_eip6492: bool,
+}
+
+impl Default for ExactEvmConfig {
+    fn default() -> Self {
+        Self {
+            deploy_erc4337_with_eip6492: false,
+        }
+    }
+}
 
 /// EVM facilitator implementation for the "exact" payment scheme.
 ///
@@ -34,6 +56,7 @@ use crate::networks::known_networks;
 pub struct ExactEvmFacilitator<P> {
     provider: P,
     signer_address: Address,
+    config: ExactEvmConfig,
     #[allow(dead_code)]
     networks: Vec<NetworkConfig>,
 }
@@ -45,24 +68,37 @@ where
     /// Creates a new facilitator with the given provider and signer address.
     ///
     /// The `signer_address` is the facilitator's wallet that will submit
-    /// settlement transactions.
+    /// settlement transactions. Uses default configuration.
     pub fn new(provider: P, signer_address: Address) -> Self {
         Self {
             provider,
             signer_address,
+            config: ExactEvmConfig::default(),
             networks: known_networks(),
         }
     }
 
-    /// Creates a facilitator with custom network configurations.
+    /// Creates a facilitator with custom configuration.
+    pub fn with_config(provider: P, signer_address: Address, config: ExactEvmConfig) -> Self {
+        Self {
+            provider,
+            signer_address,
+            config,
+            networks: known_networks(),
+        }
+    }
+
+    /// Creates a facilitator with custom network configurations and config.
     pub fn with_networks(
         provider: P,
         signer_address: Address,
+        config: ExactEvmConfig,
         networks: Vec<NetworkConfig>,
     ) -> Self {
         Self {
             provider,
             signer_address,
+            config,
             networks,
         }
     }
@@ -352,6 +388,13 @@ where
         if has_deployment_info(&sig_data) {
             let code = self.get_code(from).await.unwrap_or_default();
             if code.is_empty() {
+                if !self.config.deploy_erc4337_with_eip6492 {
+                    return SettleResponse::error(
+                        "undeployed_smart_wallet",
+                        "Smart wallet deployment is disabled by configuration",
+                        &network,
+                    );
+                }
                 // Smart wallet not deployed — attempt factory deployment
                 let deploy_tx = alloy_rpc_types_eth::TransactionRequest::default()
                     .from(self.signer_address)
@@ -390,19 +433,39 @@ where
 
         // Use inner signature (stripped of ERC-6492 wrapper) for settlement
         let inner_sig = &sig_data.inner_signature;
+        let is_ecdsa = inner_sig.len() == 65;
 
-        // Build transferWithAuthorization calldata (always use bytes overload
-        // for compatibility with both EOA and smart wallet signatures)
-        let call = transferWithAuthorizationCall {
-            from,
-            to,
-            value,
-            validAfter: valid_after,
-            validBefore: valid_before,
-            nonce: nonce_bytes.into(),
-            signature: Bytes::from(inner_sig.clone()),
+        // Build transferWithAuthorization calldata.
+        // EOA (65-byte): use v,r,s overload for maximum compatibility.
+        // Smart wallet (non-65-byte): use bytes overload.
+        let calldata = if is_ecdsa {
+            let r = B256::from_slice(&inner_sig[..32]);
+            let s = B256::from_slice(&inner_sig[32..64]);
+            let v = inner_sig[64];
+            let call = transferWithAuthorizationVRSCall {
+                from,
+                to,
+                value,
+                validAfter: valid_after,
+                validBefore: valid_before,
+                nonce: nonce_bytes.into(),
+                v,
+                r,
+                s,
+            };
+            call.abi_encode()
+        } else {
+            let call = transferWithAuthorizationCall {
+                from,
+                to,
+                value,
+                validAfter: valid_after,
+                validBefore: valid_before,
+                nonce: nonce_bytes.into(),
+                signature: Bytes::from(inner_sig.clone()),
+            };
+            call.abi_encode()
         };
-        let calldata = call.abi_encode();
 
         // Submit settlement transaction
         let tx = alloy_rpc_types_eth::TransactionRequest::default()
