@@ -8,7 +8,9 @@
 //!
 //! - [`handlers`] — Axum route handlers and router builder
 //! - [`error`] — Facilitator service error types
+//! - [`config`] — Server configuration with environment variable expansion
 
+pub mod config;
 pub mod error;
 pub mod handlers;
 
