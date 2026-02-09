@@ -433,15 +433,15 @@ where
 
         // Use inner signature (stripped of ERC-6492 wrapper) for settlement
         let inner_sig = &sig_data.inner_signature;
-        let is_ecdsa = inner_sig.len() == 65;
 
         // Build transferWithAuthorization calldata.
-        // EOA (65-byte): use v,r,s overload for maximum compatibility.
-        // Smart wallet (non-65-byte): use bytes overload.
-        let calldata = if is_ecdsa {
-            let r = B256::from_slice(&inner_sig[..32]);
-            let s = B256::from_slice(&inner_sig[32..64]);
-            let v = inner_sig[64];
+        // EOA (65-byte or 64-byte ERC-2098): decode to v,r,s and use the
+        // VRS overload for maximum on-chain compatibility.
+        // Smart wallet (other lengths): use bytes overload.
+        let calldata = if let Ok((r_val, s_val, parity)) = decode_ecdsa_signature(inner_sig) {
+            let r = B256::from(r_val.to_be_bytes::<32>());
+            let s = B256::from(s_val.to_be_bytes::<32>());
+            let v = if parity { 28u8 } else { 27u8 };
             let call = transferWithAuthorizationVRSCall {
                 from,
                 to,
@@ -543,7 +543,9 @@ where
 
     /// Verifies an ECDSA signature by recovering the signer address.
     ///
-    /// Handles Ethereum v-value adjustment (27/28 → 0/1 parity).
+    /// Supports both standard 65-byte `(r, s, v)` and ERC-2098 compact
+    /// 64-byte `(r, yParityAndS)` formats. Handles Ethereum v-value
+    /// adjustment (27/28 → 0/1 parity).
     ///
     /// Corresponds to Python SDK's `verify_eoa_signature` in `verify.py`.
     fn verify_eoa_signature(
@@ -551,16 +553,7 @@ where
         signature: &[u8],
         expected: Address,
     ) -> Result<bool, String> {
-        if signature.len() != 65 {
-            return Err(format!(
-                "Invalid EOA signature length: expected 65, got {}",
-                signature.len()
-            ));
-        }
-        let r = U256::from_be_slice(&signature[..32]);
-        let s = U256::from_be_slice(&signature[32..64]);
-        let v = signature[64];
-        let parity = if v >= 27 { v - 27 } else { v } != 0;
+        let (r, s, parity) = decode_ecdsa_signature(signature)?;
         let sig = alloy_primitives::Signature::new(r, s, parity);
         match sig.recover_address_from_prehash(hash) {
             Ok(recovered) => Ok(recovered == expected),
@@ -676,8 +669,9 @@ where
                 // deployment happens during settle.
                 return Ok((true, sig_data));
             }
-            // No factory info — try EOA verification as fallback
-            if sig_data.inner_signature.len() == 65 {
+            // No factory info — try EOA verification as fallback (65-byte or 64-byte ERC-2098)
+            let len = sig_data.inner_signature.len();
+            if len == 65 || len == 64 {
                 let valid = Self::verify_eoa_signature(&hash, &sig_data.inner_signature, payer)?;
                 return Ok((valid, sig_data));
             }
@@ -736,6 +730,38 @@ where
         requirements: &'a PaymentRequirements,
     ) -> BoxFuture<'a, SettleResponse> {
         Box::pin(self.settle_inner(payload, requirements))
+    }
+}
+
+/// Decodes an ECDSA signature into `(r, s, parity)` components.
+///
+/// Supports two formats:
+/// - **65-byte standard**: `r (32) || s (32) || v (1)` where v ∈ {0,1,27,28}
+/// - **64-byte ERC-2098 compact**: `r (32) || yParityAndS (32)` where
+///   `yParity` is encoded in the highest bit of `s`
+///
+/// Returns an error for any other length.
+fn decode_ecdsa_signature(sig: &[u8]) -> Result<(U256, U256, bool), String> {
+    match sig.len() {
+        65 => {
+            let r = U256::from_be_slice(&sig[..32]);
+            let s = U256::from_be_slice(&sig[32..64]);
+            let v = sig[64];
+            let parity = if v >= 27 { v - 27 } else { v } != 0;
+            Ok((r, s, parity))
+        }
+        64 => {
+            let r = U256::from_be_slice(&sig[..32]);
+            let y_parity = sig[32] >> 7;
+            let mut s_bytes = [0u8; 32];
+            s_bytes.copy_from_slice(&sig[32..64]);
+            s_bytes[0] &= 0x7f; // clear the highest bit
+            let s = U256::from_be_bytes(s_bytes);
+            Ok((r, s, y_parity != 0))
+        }
+        other => Err(format!(
+            "Invalid ECDSA signature length: expected 64 or 65, got {other}"
+        )),
     }
 }
 
@@ -808,10 +834,12 @@ fn parse_erc6492_signature(signature: &[u8]) -> Erc6492SignatureData {
     }
 }
 
-/// Returns `true` if the signature is a plain 65-byte ECDSA signature
-/// from an EOA (no ERC-6492 factory).
+/// Returns `true` if the signature is a plain ECDSA signature from an EOA
+/// (no ERC-6492 factory). Accepts both 65-byte standard and 64-byte
+/// ERC-2098 compact formats.
 fn is_eoa_signature(sig_data: &Erc6492SignatureData) -> bool {
-    sig_data.inner_signature.len() == 65 && sig_data.factory == Address::ZERO
+    let len = sig_data.inner_signature.len();
+    (len == 65 || len == 64) && sig_data.factory == Address::ZERO
 }
 
 /// Returns `true` if the signature contains smart wallet deployment info.
