@@ -1,5 +1,5 @@
 [workspace]
-members = ["r402", "r402-facilitator", "r402-evm", "r402-http", "r402-proto", "r402-svm"]
+members = ["r402", "r402-facilitator", "r402-evm", "r402-http", "r402-svm"]
 default-members = ["r402"]
 resolver = "3"
 
@@ -11,6 +11,11 @@ repository = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
+r402 = { version = "0.1", path = "r402" }
+r402-evm = { version = "0.1", path = "r402-evm" }
+r402-facilitator = { version = "0.1", path = "r402-facilitator" }
+r402-http = { version = "0.1", path = "r402-http" }
+
 alloy-contract = "1.4"
 alloy-network = "1.4"
 alloy-primitives = "1.4"
@@ -26,11 +31,6 @@ axum = "0.8"
 axum-core = "0.5"
 base64 = "0.22"
 http = "1"
-r402 = { version = "0.1", path = "r402" }
-r402-evm = { version = "0.1", path = "r402-evm" }
-r402-facilitator = { version = "0.1", path = "r402-facilitator" }
-r402-http = { version = "0.1", path = "r402-http" }
-r402-proto = { version = "0.1", path = "r402-proto" }
 reqwest = { version = "0.13", features = ["json"] }
 reqwest-middleware = "0.5"
 rust_decimal = "1"

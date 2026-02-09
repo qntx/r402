@@ -1,6 +1,6 @@
 //! Error types for the HTTP transport layer.
 
-use r402_proto::ProtocolError;
+use r402::ProtocolError;
 
 /// Errors that can occur during HTTP header encoding/decoding.
 #[derive(Debug, thiserror::Error)]

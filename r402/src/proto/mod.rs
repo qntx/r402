@@ -1,9 +1,7 @@
 //! Wire format types for the x402 payment protocol.
 //!
-//! This crate defines the serialization-level data structures used by the
-//! x402 protocol, covering both V1 (legacy) and V2 (current) formats.
-//! It has minimal dependencies (only `serde` and `serde_json`) and is
-//! intended to be the shared "lingua franca" across the entire r402 stack.
+//! Defines the serialization-level data structures used by the x402 protocol,
+//! covering both V1 (legacy) and V2 (current) formats.
 //!
 //! # Modules
 //!

@@ -23,7 +23,6 @@ tracing = ["dep:tracing"]
 axum = { workspace = true }
 http = { workspace = true }
 r402 = { workspace = true }
-r402-proto = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

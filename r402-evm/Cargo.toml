@@ -38,7 +38,6 @@ alloy-signer-local = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true }
 alloy-transport = { workspace = true, optional = true }
 r402 = { workspace = true }
-r402-proto = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

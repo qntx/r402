@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Network;
+use super::Network;
 
 /// V1 payment requirements (legacy).
 ///
@@ -167,7 +167,7 @@ pub struct SettleRequestV1 {
 #[serde(rename_all = "camelCase")]
 pub struct SupportedResponseV1 {
     /// List of supported payment kinds.
-    pub kinds: Vec<crate::SupportedKind>,
+    pub kinds: Vec<super::SupportedKind>,
 }
 
 const fn default_v1() -> u32 {

@@ -5,9 +5,9 @@
 
 use serde_json::Value;
 
-use crate::v1::{PaymentPayloadV1, PaymentRequiredV1, PaymentRequirementsV1};
-use crate::v2::{PaymentPayload, PaymentRequired, PaymentRequirements};
-use crate::{Network, ProtocolError};
+use super::v1::{PaymentPayloadV1, PaymentRequiredV1, PaymentRequirementsV1};
+use super::v2::{PaymentPayload, PaymentRequired, PaymentRequirements};
+use super::{Network, ProtocolError};
 
 /// Extracts the `x402Version` field from JSON data.
 ///

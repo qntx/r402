@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::Network;
+use super::Network;
 
 /// Describes the resource being accessed.
 ///

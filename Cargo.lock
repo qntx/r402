@@ -2862,7 +2862,6 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 name = "r402"
 version = "0.1.0"
 dependencies = [
- "r402-proto",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2883,7 +2882,6 @@ dependencies = [
  "alloy-sol-types",
  "alloy-transport",
  "r402",
- "r402-proto",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2897,7 +2895,6 @@ dependencies = [
  "axum",
  "http",
  "r402",
- "r402-proto",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -2914,7 +2911,6 @@ dependencies = [
  "base64",
  "http",
  "r402",
- "r402-proto",
  "reqwest 0.13.2",
  "reqwest-middleware",
  "serde",
@@ -2924,15 +2920,6 @@ dependencies = [
  "tower",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "r402-proto"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]

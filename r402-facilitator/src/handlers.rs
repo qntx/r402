@@ -7,13 +7,13 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
-use r402::facilitator::X402FacilitatorBase;
-use r402_proto::{SettleResponse, SupportedResponse, VerifyResponse};
+use r402::facilitator::X402Facilitator;
+use r402::{SettleResponse, SupportedResponse, VerifyResponse};
 
 use crate::error::FacilitatorError;
 
 /// Shared application state for the facilitator service.
-pub type FacilitatorState = Arc<X402FacilitatorBase>;
+pub type FacilitatorState = Arc<X402Facilitator>;
 
 /// `GET /supported` — Returns the list of supported payment kinds.
 pub async fn get_supported(State(fac): State<FacilitatorState>) -> Json<SupportedResponse> {
@@ -27,9 +27,12 @@ pub async fn get_supported(State(fac): State<FacilitatorState>) -> Json<Supporte
 /// Returns 404 if no scheme handler is registered, or 400 on bad input.
 pub async fn post_verify(
     State(fac): State<FacilitatorState>,
-    Json(body): Json<r402_proto::v2::VerifyRequest>,
+    Json(body): Json<r402::proto::v2::VerifyRequest>,
 ) -> Result<Json<VerifyResponse>, FacilitatorError> {
-    let result = fac.verify_v2(&body.payment_payload, &body.payment_requirements)?;
+    let result = fac
+        .verify(&body.payment_payload, &body.payment_requirements)
+        .await
+        .map_err(FacilitatorError::scheme)?;
     Ok(Json(result))
 }
 
@@ -40,9 +43,12 @@ pub async fn post_verify(
 /// Returns 404 if no scheme handler is registered, or 400 on bad input.
 pub async fn post_settle(
     State(fac): State<FacilitatorState>,
-    Json(body): Json<r402_proto::v2::SettleRequest>,
+    Json(body): Json<r402::proto::v2::SettleRequest>,
 ) -> Result<Json<SettleResponse>, FacilitatorError> {
-    let result = fac.settle_v2(&body.payment_payload, &body.payment_requirements)?;
+    let result = fac
+        .settle(&body.payment_payload, &body.payment_requirements)
+        .await
+        .map_err(FacilitatorError::scheme)?;
     Ok(Json(result))
 }
 

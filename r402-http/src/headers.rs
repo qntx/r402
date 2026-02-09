@@ -6,8 +6,8 @@
 //! Corresponds to Python SDK's `http/x402_http_client_base.py`.
 
 use base64::prelude::*;
-use r402_proto::helpers::{PaymentPayloadEnum, PaymentRequiredEnum};
-use r402_proto::{
+use r402::proto::helpers::{PaymentPayloadEnum, PaymentRequiredEnum};
+use r402::{
     PaymentPayload, PaymentPayloadV1, PaymentRequired, PaymentRequiredV1, SettleResponse,
 };
 
@@ -46,7 +46,7 @@ pub fn encode_x_payment(payload: &PaymentPayloadV1) -> Result<String, HttpError>
 pub fn decode_payment_payload(header_value: &str) -> Result<PaymentPayloadEnum, HttpError> {
     let bytes = BASE64_STANDARD.decode(header_value.trim())?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    r402_proto::helpers::parse_payment_payload(&value).map_err(HttpError::Protocol)
+    r402::proto::helpers::parse_payment_payload(&value).map_err(HttpError::Protocol)
 }
 
 /// Encodes a [`PaymentRequired`] (V2) as a Base64 string for the
@@ -79,7 +79,7 @@ pub fn encode_payment_required_v1(required: &PaymentRequiredV1) -> Result<String
 pub fn decode_payment_required(header_value: &str) -> Result<PaymentRequiredEnum, HttpError> {
     let bytes = BASE64_STANDARD.decode(header_value.trim())?;
     let value: serde_json::Value = serde_json::from_slice(&bytes)?;
-    r402_proto::helpers::parse_payment_required(&value).map_err(HttpError::Protocol)
+    r402::proto::helpers::parse_payment_required(&value).map_err(HttpError::Protocol)
 }
 
 /// Encodes a [`SettleResponse`] as a Base64 string for the

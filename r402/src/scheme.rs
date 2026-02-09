@@ -3,13 +3,26 @@
 //! Defines the traits that payment scheme implementations must satisfy to
 //! integrate with the x402 client, resource server, and facilitator roles.
 //!
+//! All I/O-bound methods are **async-first**. We use [`BoxFuture`] return
+//! types so that traits remain dyn-compatible (required for dynamic scheme
+//! registration). No sync variants are provided.
+//!
 //! Corresponds to Python SDK's `interfaces.py`.
 
-use r402_proto::{
+use std::future::Future;
+use std::pin::Pin;
+
+use crate::proto::{
     PaymentPayload, PaymentPayloadV1, PaymentRequirements, PaymentRequirementsV1, SettleResponse,
     SupportedKind, VerifyResponse,
 };
 use serde_json::Value;
+
+/// Boxed, `Send` future — the standard dyn-compatible async return type.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// Boxed error type used across scheme trait boundaries.
+pub type SchemeError = Box<dyn std::error::Error + Send + Sync>;
 
 /// V2 client-side payment mechanism.
 ///
@@ -24,13 +37,11 @@ pub trait SchemeClient: Send + Sync {
 
     /// Creates the scheme-specific inner payload.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if payload creation fails (e.g., signing error).
-    fn create_payment_payload(
-        &self,
-        requirements: &PaymentRequirements,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
+    /// Async because it may involve RPC calls or hardware wallet interactions.
+    fn create_payment_payload<'a>(
+        &'a self,
+        requirements: &'a PaymentRequirements,
+    ) -> BoxFuture<'a, Result<Value, SchemeError>>;
 }
 
 /// V1 (legacy) client-side payment mechanism.
@@ -43,14 +54,10 @@ pub trait SchemeClientV1: Send + Sync {
     fn scheme(&self) -> &str;
 
     /// Creates the scheme-specific inner payload for V1.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if payload creation fails.
-    fn create_payment_payload(
-        &self,
-        requirements: &PaymentRequirementsV1,
-    ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>>;
+    fn create_payment_payload<'a>(
+        &'a self,
+        requirements: &'a PaymentRequirementsV1,
+    ) -> BoxFuture<'a, Result<Value, SchemeError>>;
 }
 
 /// V2 server-side payment mechanism.
@@ -58,6 +65,8 @@ pub trait SchemeClientV1: Send + Sync {
 /// Implementations handle price parsing and requirement enhancement for a
 /// specific scheme. Does **not** verify/settle — that is delegated to the
 /// facilitator client.
+///
+/// These methods are sync because they perform pure computation (no I/O).
 ///
 /// Corresponds to Python SDK's `SchemeNetworkServer`.
 pub trait SchemeServer: Send + Sync {
@@ -72,11 +81,7 @@ pub trait SchemeServer: Send + Sync {
     ///
     /// Returns an error if the price format is invalid or the network is
     /// unsupported.
-    fn parse_price(
-        &self,
-        price: &Value,
-        network: &str,
-    ) -> Result<AssetAmount, Box<dyn std::error::Error + Send + Sync>>;
+    fn parse_price(&self, price: &Value, network: &str) -> Result<AssetAmount, SchemeError>;
 
     /// Adds scheme-specific fields to payment requirements.
     ///
@@ -96,6 +101,8 @@ pub trait SchemeServer: Send + Sync {
 /// Returns response objects with `is_valid=false` / `success=false` on
 /// failure, rather than raising exceptions.
 ///
+/// `verify` and `settle` are async because they involve on-chain RPC calls.
+///
 /// Corresponds to Python SDK's `SchemeNetworkFacilitator`.
 pub trait SchemeFacilitator: Send + Sync {
     /// Payment scheme identifier (e.g., `"exact"`).
@@ -110,19 +117,19 @@ pub trait SchemeFacilitator: Send + Sync {
     /// Returns signer addresses for a given network.
     fn get_signers(&self, network: &str) -> Vec<String>;
 
-    /// Verifies a payment.
-    fn verify(
-        &self,
-        payload: &PaymentPayload,
-        requirements: &PaymentRequirements,
-    ) -> VerifyResponse;
+    /// Verifies a payment asynchronously.
+    fn verify<'a>(
+        &'a self,
+        payload: &'a PaymentPayload,
+        requirements: &'a PaymentRequirements,
+    ) -> BoxFuture<'a, VerifyResponse>;
 
-    /// Settles a payment on-chain.
-    fn settle(
-        &self,
-        payload: &PaymentPayload,
-        requirements: &PaymentRequirements,
-    ) -> SettleResponse;
+    /// Settles a payment on-chain asynchronously.
+    fn settle<'a>(
+        &'a self,
+        payload: &'a PaymentPayload,
+        requirements: &'a PaymentRequirements,
+    ) -> BoxFuture<'a, SettleResponse>;
 }
 
 /// V1 (legacy) facilitator-side payment mechanism.
@@ -141,19 +148,19 @@ pub trait SchemeFacilitatorV1: Send + Sync {
     /// Returns signer addresses for a given network.
     fn get_signers(&self, network: &str) -> Vec<String>;
 
-    /// Verifies a V1 payment.
-    fn verify(
-        &self,
-        payload: &PaymentPayloadV1,
-        requirements: &PaymentRequirementsV1,
-    ) -> VerifyResponse;
+    /// Verifies a V1 payment asynchronously.
+    fn verify<'a>(
+        &'a self,
+        payload: &'a PaymentPayloadV1,
+        requirements: &'a PaymentRequirementsV1,
+    ) -> BoxFuture<'a, VerifyResponse>;
 
-    /// Settles a V1 payment on-chain.
-    fn settle(
-        &self,
-        payload: &PaymentPayloadV1,
-        requirements: &PaymentRequirementsV1,
-    ) -> SettleResponse;
+    /// Settles a V1 payment on-chain asynchronously.
+    fn settle<'a>(
+        &'a self,
+        payload: &'a PaymentPayloadV1,
+        requirements: &'a PaymentRequirementsV1,
+    ) -> BoxFuture<'a, SettleResponse>;
 }
 
 /// Amount in smallest unit with asset identifier.

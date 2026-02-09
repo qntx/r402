@@ -1,19 +1,49 @@
 //! x402 facilitator base logic.
 //!
-//! Contains shared logic for facilitator implementations, including scheme
-//! registration, routing, and supported-kinds aggregation.
+//! Contains shared logic for the async-first x402 facilitator, including scheme
+//! registration, routing, hook execution, and supported-kinds aggregation.
 //!
-//! Corresponds to Python SDK's `facilitator_base.py`.
+//! Corresponds to Python SDK's `facilitator_base.py` + `facilitator.py`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use crate::error::SchemeNotFoundError;
-use crate::scheme::{SchemeFacilitator, SchemeFacilitatorV1};
-use r402_proto::helpers::matches_network_pattern;
-use r402_proto::{
+use crate::proto::helpers::matches_network_pattern;
+use crate::proto::{
     Network, PaymentPayload, PaymentPayloadV1, PaymentRequirements, PaymentRequirementsV1,
     SettleResponse, SupportedKind, SupportedResponse, VerifyResponse,
 };
+
+use crate::error::{PaymentAbortedError, SchemeNotFoundError};
+use crate::hooks::{
+    AbortResult, PayloadView, RecoveredSettleResult, RecoveredVerifyResult, RequirementsView,
+    SettleContext, SettleFailureContext, SettleResultContext, VerifyContext, VerifyFailureContext,
+    VerifyResultContext,
+};
+use crate::scheme::{BoxFuture, SchemeError, SchemeFacilitator, SchemeFacilitatorV1};
+
+/// Async hook called before verification. Return `Some(AbortResult)` to abort.
+pub type BeforeVerifyHook =
+    Box<dyn Fn(&VerifyContext) -> BoxFuture<'_, Option<AbortResult>> + Send + Sync>;
+
+/// Async hook called after successful verification.
+pub type AfterVerifyHook = Box<dyn Fn(&VerifyResultContext) -> BoxFuture<'_, ()> + Send + Sync>;
+
+/// Async hook called on verification failure. Return recovery result to override.
+pub type OnVerifyFailureHook = Box<
+    dyn Fn(&VerifyFailureContext) -> BoxFuture<'_, Option<RecoveredVerifyResult>> + Send + Sync,
+>;
+
+/// Async hook called before settlement. Return `Some(AbortResult)` to abort.
+pub type BeforeSettleHook =
+    Box<dyn Fn(&SettleContext) -> BoxFuture<'_, Option<AbortResult>> + Send + Sync>;
+
+/// Async hook called after successful settlement.
+pub type AfterSettleHook = Box<dyn Fn(&SettleResultContext) -> BoxFuture<'_, ()> + Send + Sync>;
+
+/// Async hook called on settlement failure. Return recovery result to override.
+pub type OnSettleFailureHook = Box<
+    dyn Fn(&SettleFailureContext) -> BoxFuture<'_, Option<RecoveredSettleResult>> + Send + Sync,
+>;
 
 /// Internal storage for a registered scheme facilitator.
 struct SchemeData<T: ?Sized> {
@@ -38,39 +68,52 @@ fn derive_pattern(networks: &HashSet<Network>) -> Network {
     }
 }
 
-/// Base x402 facilitator with shared registration, routing, and supported logic.
+/// Async-first x402 facilitator with scheme registration, routing, hooks,
+/// and supported-kinds aggregation.
 ///
-/// Corresponds to Python SDK's `x402FacilitatorBase`.
-pub struct X402FacilitatorBase {
+/// Corresponds to Python SDK's `x402Facilitator`.
+pub struct X402Facilitator {
     schemes_v2: Vec<SchemeData<dyn SchemeFacilitator>>,
     schemes_v1: Vec<SchemeData<dyn SchemeFacilitatorV1>>,
     extensions: Vec<String>,
+    before_verify_hooks: Vec<BeforeVerifyHook>,
+    after_verify_hooks: Vec<AfterVerifyHook>,
+    on_verify_failure_hooks: Vec<OnVerifyFailureHook>,
+    before_settle_hooks: Vec<BeforeSettleHook>,
+    after_settle_hooks: Vec<AfterSettleHook>,
+    on_settle_failure_hooks: Vec<OnSettleFailureHook>,
 }
 
-impl std::fmt::Debug for X402FacilitatorBase {
+impl std::fmt::Debug for X402Facilitator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("X402FacilitatorBase")
+        f.debug_struct("X402Facilitator")
             .field("schemes_v2_count", &self.schemes_v2.len())
             .field("schemes_v1_count", &self.schemes_v1.len())
             .field("extensions", &self.extensions)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
-impl Default for X402FacilitatorBase {
+impl Default for X402Facilitator {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl X402FacilitatorBase {
-    /// Creates a new facilitator base.
+impl X402Facilitator {
+    /// Creates a new facilitator.
     #[must_use]
     pub fn new() -> Self {
         Self {
             schemes_v2: Vec::new(),
             schemes_v1: Vec::new(),
             extensions: Vec::new(),
+            before_verify_hooks: Vec::new(),
+            after_verify_hooks: Vec::new(),
+            on_verify_failure_hooks: Vec::new(),
+            before_settle_hooks: Vec::new(),
+            after_settle_hooks: Vec::new(),
+            on_settle_failure_hooks: Vec::new(),
         }
     }
 
@@ -120,14 +163,48 @@ impl X402FacilitatorBase {
         &self.extensions
     }
 
+    /// Registers a before-verify hook.
+    pub fn on_before_verify(&mut self, hook: BeforeVerifyHook) -> &mut Self {
+        self.before_verify_hooks.push(hook);
+        self
+    }
+
+    /// Registers an after-verify hook.
+    pub fn on_after_verify(&mut self, hook: AfterVerifyHook) -> &mut Self {
+        self.after_verify_hooks.push(hook);
+        self
+    }
+
+    /// Registers a verify-failure hook.
+    pub fn on_verify_failure(&mut self, hook: OnVerifyFailureHook) -> &mut Self {
+        self.on_verify_failure_hooks.push(hook);
+        self
+    }
+
+    /// Registers a before-settle hook.
+    pub fn on_before_settle(&mut self, hook: BeforeSettleHook) -> &mut Self {
+        self.before_settle_hooks.push(hook);
+        self
+    }
+
+    /// Registers an after-settle hook.
+    pub fn on_after_settle(&mut self, hook: AfterSettleHook) -> &mut Self {
+        self.after_settle_hooks.push(hook);
+        self
+    }
+
+    /// Registers a settle-failure hook.
+    pub fn on_settle_failure(&mut self, hook: OnSettleFailureHook) -> &mut Self {
+        self.on_settle_failure_hooks.push(hook);
+        self
+    }
+
     /// Aggregates supported payment kinds and signers from all registered
     /// scheme facilitators.
-    ///
-    /// Corresponds to Python SDK's `get_supported`.
     #[must_use]
     pub fn get_supported(&self) -> SupportedResponse {
         let mut kinds = Vec::new();
-        let mut signers = std::collections::HashMap::<String, Vec<String>>::new();
+        let mut signers = HashMap::<String, Vec<String>>::new();
 
         for data in &self.schemes_v2 {
             let fac = &data.facilitator;
@@ -174,6 +251,294 @@ impl X402FacilitatorBase {
         SupportedResponse::new(kinds, self.extensions.clone(), signers)
     }
 
+    /// Verifies a V2 payment with full hook lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no facilitator is registered or a hook aborts.
+    pub async fn verify(
+        &self,
+        payload: &PaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<VerifyResponse, SchemeError> {
+        let ctx = VerifyContext {
+            payment_payload: PayloadView::V2(Box::new(payload.clone())),
+            requirements: RequirementsView::V2(requirements.clone()),
+            payload_bytes: None,
+            requirements_bytes: None,
+        };
+
+        for hook in &self.before_verify_hooks {
+            if let Some(abort) = hook(&ctx).await {
+                return Err(Box::new(PaymentAbortedError::new(abort.reason)));
+            }
+        }
+
+        let result = self.do_verify_v2(payload, requirements).await;
+
+        match result {
+            Ok(ref response) if response.is_valid => {
+                let result_ctx = VerifyResultContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    result: response.clone(),
+                };
+                for hook in &self.after_verify_hooks {
+                    hook(&result_ctx).await;
+                }
+                result
+            }
+            Ok(ref response) => {
+                let failure_ctx = VerifyFailureContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: response.invalid_reason.clone().unwrap_or_default(),
+                };
+                for hook in &self.on_verify_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                result
+            }
+            Err(e) => {
+                let failure_ctx = VerifyFailureContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: e.to_string(),
+                };
+                for hook in &self.on_verify_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Settles a V2 payment with full hook lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no facilitator is registered or a hook aborts.
+    pub async fn settle(
+        &self,
+        payload: &PaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<SettleResponse, SchemeError> {
+        let ctx = SettleContext {
+            payment_payload: PayloadView::V2(Box::new(payload.clone())),
+            requirements: RequirementsView::V2(requirements.clone()),
+            payload_bytes: None,
+            requirements_bytes: None,
+        };
+
+        for hook in &self.before_settle_hooks {
+            if let Some(abort) = hook(&ctx).await {
+                return Err(Box::new(PaymentAbortedError::new(abort.reason)));
+            }
+        }
+
+        let result = self.do_settle_v2(payload, requirements).await;
+
+        match result {
+            Ok(ref response) if response.success => {
+                let result_ctx = SettleResultContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    result: response.clone(),
+                };
+                for hook in &self.after_settle_hooks {
+                    hook(&result_ctx).await;
+                }
+                result
+            }
+            Ok(ref response) => {
+                let failure_ctx = SettleFailureContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: response.error_reason.clone().unwrap_or_default(),
+                };
+                for hook in &self.on_settle_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                result
+            }
+            Err(e) => {
+                let failure_ctx = SettleFailureContext {
+                    payment_payload: PayloadView::V2(Box::new(payload.clone())),
+                    requirements: RequirementsView::V2(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: e.to_string(),
+                };
+                for hook in &self.on_settle_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Verifies a V1 payment with full hook lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no facilitator is registered or a hook aborts.
+    pub async fn verify_v1(
+        &self,
+        payload: &PaymentPayloadV1,
+        requirements: &PaymentRequirementsV1,
+    ) -> Result<VerifyResponse, SchemeError> {
+        let ctx = VerifyContext {
+            payment_payload: PayloadView::V1(payload.clone()),
+            requirements: RequirementsView::V1(requirements.clone()),
+            payload_bytes: None,
+            requirements_bytes: None,
+        };
+
+        for hook in &self.before_verify_hooks {
+            if let Some(abort) = hook(&ctx).await {
+                return Err(Box::new(PaymentAbortedError::new(abort.reason)));
+            }
+        }
+
+        let result = self.do_verify_v1(payload, requirements).await;
+
+        match result {
+            Ok(ref response) if response.is_valid => {
+                let result_ctx = VerifyResultContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    result: response.clone(),
+                };
+                for hook in &self.after_verify_hooks {
+                    hook(&result_ctx).await;
+                }
+                result
+            }
+            Ok(ref response) => {
+                let failure_ctx = VerifyFailureContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: response.invalid_reason.clone().unwrap_or_default(),
+                };
+                for hook in &self.on_verify_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                result
+            }
+            Err(e) => {
+                let failure_ctx = VerifyFailureContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: e.to_string(),
+                };
+                for hook in &self.on_verify_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Settles a V1 payment with full hook lifecycle.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no facilitator is registered or a hook aborts.
+    pub async fn settle_v1(
+        &self,
+        payload: &PaymentPayloadV1,
+        requirements: &PaymentRequirementsV1,
+    ) -> Result<SettleResponse, SchemeError> {
+        let ctx = SettleContext {
+            payment_payload: PayloadView::V1(payload.clone()),
+            requirements: RequirementsView::V1(requirements.clone()),
+            payload_bytes: None,
+            requirements_bytes: None,
+        };
+
+        for hook in &self.before_settle_hooks {
+            if let Some(abort) = hook(&ctx).await {
+                return Err(Box::new(PaymentAbortedError::new(abort.reason)));
+            }
+        }
+
+        let result = self.do_settle_v1(payload, requirements).await;
+
+        match result {
+            Ok(ref response) if response.success => {
+                let result_ctx = SettleResultContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    result: response.clone(),
+                };
+                for hook in &self.after_settle_hooks {
+                    hook(&result_ctx).await;
+                }
+                result
+            }
+            Ok(ref response) => {
+                let failure_ctx = SettleFailureContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: response.error_reason.clone().unwrap_or_default(),
+                };
+                for hook in &self.on_settle_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                result
+            }
+            Err(e) => {
+                let failure_ctx = SettleFailureContext {
+                    payment_payload: PayloadView::V1(payload.clone()),
+                    requirements: RequirementsView::V1(requirements.clone()),
+                    payload_bytes: None,
+                    requirements_bytes: None,
+                    error: e.to_string(),
+                };
+                for hook in &self.on_settle_failure_hooks {
+                    if let Some(recovered) = hook(&failure_ctx).await {
+                        return Ok(recovered.result);
+                    }
+                }
+                Err(e)
+            }
+        }
+    }
+
     /// Finds the V2 facilitator for a given scheme and network.
     fn find_facilitator(&self, scheme: &str, network: &str) -> Option<&dyn SchemeFacilitator> {
         for data in &self.schemes_v2 {
@@ -206,76 +571,59 @@ impl X402FacilitatorBase {
         None
     }
 
-    /// Verifies a V2 payment.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SchemeNotFoundError`] if no facilitator is registered for the
-    /// payload's scheme and network.
-    pub fn verify_v2(
-        &self,
-        payload: &PaymentPayload,
-        requirements: &PaymentRequirements,
-    ) -> Result<VerifyResponse, SchemeNotFoundError> {
-        let scheme = payload.scheme();
-        let network = payload.network();
-        let fac = self
-            .find_facilitator(scheme, network)
-            .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
-        Ok(fac.verify(payload, requirements))
-    }
-
-    /// Verifies a V1 payment.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SchemeNotFoundError`] if no facilitator is registered.
-    pub fn verify_v1(
+    /// Inner V1 verify (no hooks).
+    async fn do_verify_v1(
         &self,
         payload: &PaymentPayloadV1,
         requirements: &PaymentRequirementsV1,
-    ) -> Result<VerifyResponse, SchemeNotFoundError> {
+    ) -> Result<VerifyResponse, SchemeError> {
         let scheme = payload.scheme();
         let network = payload.network();
         let fac = self
             .find_facilitator_v1(scheme, network)
             .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
-        Ok(fac.verify(payload, requirements))
+        Ok(fac.verify(payload, requirements).await)
     }
 
-    /// Settles a V2 payment.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SchemeNotFoundError`] if no facilitator is registered.
-    pub fn settle_v2(
-        &self,
-        payload: &PaymentPayload,
-        requirements: &PaymentRequirements,
-    ) -> Result<SettleResponse, SchemeNotFoundError> {
-        let scheme = payload.scheme();
-        let network = payload.network();
-        let fac = self
-            .find_facilitator(scheme, network)
-            .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
-        Ok(fac.settle(payload, requirements))
-    }
-
-    /// Settles a V1 payment.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SchemeNotFoundError`] if no facilitator is registered.
-    pub fn settle_v1(
+    /// Inner V1 settle (no hooks).
+    async fn do_settle_v1(
         &self,
         payload: &PaymentPayloadV1,
         requirements: &PaymentRequirementsV1,
-    ) -> Result<SettleResponse, SchemeNotFoundError> {
+    ) -> Result<SettleResponse, SchemeError> {
         let scheme = payload.scheme();
         let network = payload.network();
         let fac = self
             .find_facilitator_v1(scheme, network)
             .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
-        Ok(fac.settle(payload, requirements))
+        Ok(fac.settle(payload, requirements).await)
+    }
+
+    /// Inner V2 verify (no hooks).
+    async fn do_verify_v2(
+        &self,
+        payload: &PaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<VerifyResponse, SchemeError> {
+        let scheme = payload.scheme();
+        let network = payload.network();
+        let fac = self
+            .find_facilitator(scheme, network)
+            .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
+        Ok(fac.verify(payload, requirements).await)
+    }
+
+    /// Inner V2 settle (no hooks).
+    async fn do_settle_v2(
+        &self,
+        payload: &PaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<SettleResponse, SchemeError> {
+        let scheme = payload.scheme();
+        let network = payload.network();
+        let fac = self
+            .find_facilitator(scheme, network)
+            .ok_or_else(|| SchemeNotFoundError::new(scheme, network))?;
+        Ok(fac.settle(payload, requirements).await)
     }
 }

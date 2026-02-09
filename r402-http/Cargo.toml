@@ -28,7 +28,6 @@ axum-core = { workspace = true, optional = true }
 base64 = { workspace = true }
 http = { workspace = true }
 r402 = { workspace = true }
-r402-proto = { workspace = true }
 reqwest = { workspace = true, optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 serde = { workspace = true }
