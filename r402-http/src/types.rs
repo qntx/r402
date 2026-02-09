@@ -170,6 +170,33 @@ pub struct PaywallConfig {
     pub testnet: bool,
 }
 
+/// A validation error for a route configuration.
+///
+/// Returned by [`super::server::PaymentGateLayer::validate_routes`] when a
+/// payment option references an unregistered scheme or unsupported
+/// facilitator combination.
+///
+/// Corresponds to Python SDK's `RouteValidationError` in `http/types.py`.
+#[derive(Debug, Clone)]
+pub struct RouteValidationError {
+    /// The route pattern (e.g., `"GET /weather"`).
+    pub route_pattern: String,
+    /// Scheme identifier (e.g., `"exact"`).
+    pub scheme: String,
+    /// CAIP-2 network identifier.
+    pub network: String,
+    /// Reason code (`"missing_scheme"` or `"missing_facilitator"`).
+    pub reason: String,
+    /// Human-readable error message.
+    pub message: String,
+}
+
+impl std::fmt::Display for RouteValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
 /// A compiled route entry mapping a method + path pattern to its config.
 #[derive(Debug, Clone)]
 pub(crate) struct CompiledRoute {

@@ -22,7 +22,9 @@ use tower::{Layer, Service};
 
 use crate::constants::{PAYMENT_REQUIRED_HEADER, PAYMENT_SIGNATURE_HEADER};
 use crate::headers::{decode_payment_payload, encode_payment_required, encode_payment_response};
-use crate::types::{CompiledRoute, PaywallConfig, RouteConfig, parse_route_pattern};
+use crate::types::{
+    CompiledRoute, PaywallConfig, RouteConfig, RouteValidationError, parse_route_pattern,
+};
 
 /// Route configuration map: pattern → [`RouteConfig`].
 ///
@@ -137,6 +139,62 @@ impl PaymentGateLayer {
                 paywall_config: Some(paywall_config),
             }),
         }
+    }
+}
+
+impl PaymentGateLayer {
+    /// Validates all route configurations against the server's registered
+    /// schemes and facilitator support.
+    ///
+    /// Should be called after [`X402ResourceServer::initialize`] to catch
+    /// misconfigurations early (at startup) rather than at request time.
+    ///
+    /// Returns an empty `Vec` if all routes are valid.
+    ///
+    /// Corresponds to Python SDK's `_validate_route_configuration` in
+    /// `x402_http_server_base.py`.
+    #[must_use]
+    pub fn validate_routes(&self) -> Vec<RouteValidationError> {
+        let server = &self.shared.server;
+        let mut errors = Vec::new();
+
+        for route in &self.shared.compiled_routes {
+            let pattern = format!("{} {}", route.method, route.path_pattern);
+
+            for option in &route.config.accepts {
+                if !server.has_registered_scheme(&option.network, &option.scheme) {
+                    errors.push(RouteValidationError {
+                        route_pattern: pattern.clone(),
+                        scheme: option.scheme.clone(),
+                        network: option.network.clone(),
+                        reason: "missing_scheme".to_owned(),
+                        message: format!(
+                            "Route \"{pattern}\": No scheme for \"{}\" on \"{}\"",
+                            option.scheme, option.network,
+                        ),
+                    });
+                    continue;
+                }
+
+                if server
+                    .get_supported_kind(2, &option.network, &option.scheme)
+                    .is_none()
+                {
+                    errors.push(RouteValidationError {
+                        route_pattern: pattern.clone(),
+                        scheme: option.scheme.clone(),
+                        network: option.network.clone(),
+                        reason: "missing_facilitator".to_owned(),
+                        message: format!(
+                            "Route \"{pattern}\": Facilitator doesn't support \"{}\" on \"{}\"",
+                            option.scheme, option.network,
+                        ),
+                    });
+                }
+            }
+        }
+
+        errors
     }
 }
 
