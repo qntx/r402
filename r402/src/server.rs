@@ -79,6 +79,29 @@ pub type OnSettleFailureHook = Box<
     dyn Fn(&SettleFailureContext) -> BoxFuture<'_, Option<RecoveredSettleResult>> + Send + Sync,
 >;
 
+/// Extension interface for enriching payment declarations with
+/// transport-specific data (e.g., HTTP request context).
+///
+/// Corresponds to Python SDK's `ResourceServerExtension` in
+/// `schemas/extensions.py`.
+pub trait ResourceServerExtension: Send + Sync {
+    /// Unique extension key (e.g., `"bazaar"`).
+    fn key(&self) -> &str;
+
+    /// Enriches an extension declaration with transport-specific data.
+    ///
+    /// Called by the HTTP server middleware before building the 402 response.
+    ///
+    /// - `declaration` — the extension declaration from the route config.
+    /// - `transport_context` — opaque transport context (e.g., serialized
+    ///   HTTP request metadata).
+    fn enrich_declaration(
+        &self,
+        declaration: serde_json::Value,
+        transport_context: &serde_json::Value,
+    ) -> serde_json::Value;
+}
+
 /// Async-first x402 resource server with scheme registration, facilitator
 /// client initialization, requirement building, and verify/settle delegation.
 ///
@@ -88,6 +111,7 @@ pub struct X402ResourceServer {
     schemes: HashMap<Network, HashMap<String, Box<dyn SchemeServer>>>,
     facilitator_map: HashMap<Network, HashMap<String, usize>>,
     supported_responses: HashMap<Network, HashMap<String, SupportedResponse>>,
+    extensions: HashMap<String, Box<dyn ResourceServerExtension>>,
     before_verify_hooks: Vec<BeforeVerifyHook>,
     after_verify_hooks: Vec<AfterVerifyHook>,
     on_verify_failure_hooks: Vec<OnVerifyFailureHook>,
@@ -122,6 +146,7 @@ impl X402ResourceServer {
             schemes: HashMap::new(),
             facilitator_map: HashMap::new(),
             supported_responses: HashMap::new(),
+            extensions: HashMap::new(),
             before_verify_hooks: Vec::new(),
             after_verify_hooks: Vec::new(),
             on_verify_failure_hooks: Vec::new(),
@@ -242,6 +267,45 @@ impl X402ResourceServer {
     pub fn on_settle_failure(&mut self, hook: OnSettleFailureHook) -> &mut Self {
         self.on_settle_failure_hooks.push(hook);
         self
+    }
+
+    /// Registers a [`ResourceServerExtension`].
+    ///
+    /// Extensions enrich payment declarations with transport-specific data
+    /// (e.g., bazaar metadata from an HTTP request).
+    pub fn register_extension(&mut self, ext: Box<dyn ResourceServerExtension>) -> &mut Self {
+        self.extensions.insert(ext.key().to_owned(), ext);
+        self
+    }
+
+    /// Enriches extension declarations using registered extensions.
+    ///
+    /// For each key in `declarations` that has a matching registered
+    /// extension, calls [`ResourceServerExtension::enrich_declaration`]
+    /// with the given `transport_context`.
+    ///
+    /// Returns the enriched extensions object.
+    #[must_use]
+    pub fn enrich_extensions(
+        &self,
+        declarations: &serde_json::Value,
+        transport_context: &serde_json::Value,
+    ) -> serde_json::Value {
+        let Some(obj) = declarations.as_object() else {
+            return declarations.clone();
+        };
+
+        let mut result = obj.clone();
+        for (key, value) in obj {
+            if let Some(ext) = self.extensions.get(key) {
+                result.insert(
+                    key.clone(),
+                    ext.enrich_declaration(value.clone(), transport_context),
+                );
+            }
+        }
+
+        serde_json::Value::Object(result)
     }
 
     /// Initializes the server by fetching supported kinds from all
