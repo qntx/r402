@@ -1,0 +1,39 @@
+# Build artifacts
+target/
+debug/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# CI / GitHub
+.github/
+
+# Environment and secrets
+.env
+.env.*
+gateway.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (avoid recursive COPY)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Rust toolchain (the Dockerfile base image already provides the correct version)
+rust-toolchain.toml
+
+# Docs / misc
+*.md
+LICENSE*

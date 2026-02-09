@@ -1,0 +1,26 @@
+cognitive-complexity-threshold = 25
+excessive-nesting-threshold = 5
+too-many-lines-threshold = 150
+too-many-arguments-threshold = 8
+type-complexity-threshold = 300
+struct-field-name-threshold = 5
+
+single-char-binding-names-threshold = 4
+doc-valid-idents = ["GitHub", "API", "HTTP", "JSON", "UUID", "Ethereum", "EVM"]
+
+disallowed-methods = [
+    { path = "std::env::set_var", reason = "Library code should avoid modifying environment variables" },
+    { path = "std::env::remove_var", reason = "Library code should avoid modifying environment variables" },
+    { path = "std::mem::transmute", reason = "Extremely dangerous operation" },
+]
+
+pass-by-value-size-limit = 256
+enum-variant-size-threshold = 200
+
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+allow-unwrap-in-tests = true
+
+avoid-breaking-exported-api = true
+
+literal-representation-threshold = 4
