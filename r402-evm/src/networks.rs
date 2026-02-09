@@ -30,6 +30,9 @@ pub const ETHEREUM_MAINNET: ChainId = 1;
 /// Celo Mainnet chain ID.
 pub const CELO_MAINNET: ChainId = 42220;
 
+/// Celo Sepolia (testnet) chain ID.
+pub const CELO_SEPOLIA: ChainId = 11142220;
+
 /// `MegaETH` Mainnet (Frontier) chain ID.
 pub const MEGAETH_MAINNET: ChainId = 4326;
 
@@ -54,8 +57,8 @@ pub const USDC_ETHEREUM: Address = address!("A0b86991c6218b36c1d19D4a2e9Eb0cE360
 /// USDC contract address on Polygon Mainnet.
 pub const USDC_POLYGON: Address = address!("3c499c542cEF5E3811e1192ce70d8cC03d5c3359");
 
-/// USDC contract address on Polygon Amoy.
-pub const USDC_POLYGON_AMOY: Address = address!("41E94Eb71Ef8C9fAE0235d1e472b21E21B5a4dbF");
+/// USDC contract address on Polygon Amoy (Circle native).
+pub const USDC_POLYGON_AMOY: Address = address!("41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582");
 
 /// USDC contract address on Avalanche C-Chain.
 pub const USDC_AVALANCHE: Address = address!("B97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E");
@@ -65,6 +68,9 @@ pub const USDC_AVALANCHE_FUJI: Address = address!("5425890298aed601595a70AB815c9
 
 /// USDC contract address on Celo.
 pub const USDC_CELO: Address = address!("cebA9300f2b948710d2653dD7B07f33A8B32118C");
+
+/// USDC contract address on Celo Sepolia (Circle native).
+pub const USDC_CELO_SEPOLIA: Address = address!("01C5C0122039549AD1493B8220cABEdD739BC44E");
 
 /// USDM contract address on `MegaETH` Mainnet (Frontier).
 /// MegaETH uses USDM (MegaUSD) instead of Circle USDC.
@@ -103,7 +109,8 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             chain_id: BASE_SEPOLIA,
             assets: vec![usdc_asset(
                 USDC_BASE_SEPOLIA,
-                DEFAULT_USDC_NAME,
+                // Base Sepolia USDC contract returns "USDC" from name(), not "USD Coin".
+                "USDC",
                 DEFAULT_USDC_VERSION,
             )],
         },
@@ -130,7 +137,8 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             chain_id: POLYGON_AMOY,
             assets: vec![usdc_asset(
                 USDC_POLYGON_AMOY,
-                DEFAULT_USDC_NAME,
+                // Polygon Amoy uses newer FiatTokenV2_2 with name() = "USDC".
+                "USDC",
                 DEFAULT_USDC_VERSION,
             )],
         },
@@ -157,7 +165,18 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             chain_id: CELO_MAINNET,
             assets: vec![usdc_asset(
                 USDC_CELO,
-                DEFAULT_USDC_NAME,
+                // Celo USDC contract name() = "USDC" (confirmed on-chain).
+                "USDC",
+                DEFAULT_USDC_VERSION,
+            )],
+        },
+        NetworkConfig {
+            network: format!("eip155:{CELO_SEPOLIA}"),
+            chain_id: CELO_SEPOLIA,
+            assets: vec![usdc_asset(
+                USDC_CELO_SEPOLIA,
+                // Celo Sepolia uses Circle native USDC, name() = "USDC".
+                "USDC",
                 DEFAULT_USDC_VERSION,
             )],
         },
@@ -176,7 +195,8 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             chain_id: MONAD_MAINNET,
             assets: vec![usdc_asset(
                 USDC_MONAD,
-                DEFAULT_USDC_NAME,
+                // Monad uses Circle native USDC (FiatTokenV2_2), name() = "USDC".
+                "USDC",
                 DEFAULT_USDC_VERSION,
             )],
         },
@@ -185,7 +205,8 @@ pub fn known_networks() -> Vec<NetworkConfig> {
             chain_id: MONAD_TESTNET,
             assets: vec![usdc_asset(
                 USDC_MONAD_TESTNET,
-                DEFAULT_USDC_NAME,
+                // Monad testnet uses Circle native USDC, name() = "USDC".
+                "USDC",
                 DEFAULT_USDC_VERSION,
             )],
         },
