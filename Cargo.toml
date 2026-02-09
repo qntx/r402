@@ -4,17 +4,18 @@ default-members = ["r402"]
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
-r402 = { version = "0.1", path = "r402" }
-r402-evm = { version = "0.1", path = "r402-evm" }
-r402-facilitator = { version = "0.1", path = "r402-facilitator" }
-r402-http = { version = "0.1", path = "r402-http" }
+r402 = { version = "0.2", path = "r402" }
+r402-evm = { version = "0.2", path = "r402-evm" }
+r402-facilitator = { version = "0.2", path = "r402-facilitator" }
+r402-http = { version = "0.2", path = "r402-http" }
+r402-svm = { version = "0.2", path = "r402-svm" }
 
 alloy-contract = "1.4"
 alloy-network = "1.4"
