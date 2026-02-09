@@ -184,11 +184,10 @@ impl X402ResourceServer {
     /// Checks if a scheme is registered for a network (with wildcard matching).
     #[must_use]
     pub fn has_registered_scheme(&self, network: &str, scheme: &str) -> bool {
-        if let Some(schemes) = self.schemes.get(network) {
-            if schemes.contains_key(scheme) {
+        if let Some(schemes) = self.schemes.get(network)
+            && schemes.contains_key(scheme) {
                 return true;
             }
-        }
         let prefix = network.split(':').next().unwrap_or("");
         let wildcard = format!("{prefix}:*");
         self.schemes
@@ -404,7 +403,7 @@ impl X402ResourceServer {
 
     /// Creates a 402 Payment Required response from a list of requirements.
     #[must_use]
-    pub fn create_payment_required(
+    pub const fn create_payment_required(
         &self,
         requirements: Vec<PaymentRequirements>,
         resource: Option<ResourceInfo>,
