@@ -1,14 +1,15 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Local x402 Facilitator server.
+//!
+//! Provides a local facilitator service implementation for the x402 payment
+//! protocol, with Axum route handlers for verify, settle, and supported
+//! endpoints.
+//!
+//! # Modules
+//!
+//! - [`handlers`] — Axum route handlers and router builder
+//! - [`error`] — Facilitator service error types
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod error;
+pub mod handlers;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use handlers::{FacilitatorState, facilitator_router};

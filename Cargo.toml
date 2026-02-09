@@ -1,5 +1,5 @@
 [workspace]
-members = ["r402", "r402-facilitator"]
+members = ["r402", "r402-facilitator", "r402-evm", "r402-http", "r402-proto", "r402-svm"]
 default-members = ["r402"]
 resolver = "3"
 
@@ -11,7 +11,37 @@ repository = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
-
+alloy-contract = "1.4"
+alloy-network = "1.4"
+alloy-primitives = "1.4"
+alloy-provider = "1.4"
+alloy-rpc-client = "1.4"
+alloy-rpc-types-eth = "1.4"
+alloy-signer = "1.4"
+alloy-signer-local = "1.4"
+alloy-sol-types = { version = "1.4", features = ["json"] }
+alloy-transport = { version = "1.4", features = ["throttle"] }
+alloy-transport-http = "1.4"
+axum = "0.8"
+axum-core = "0.5"
+base64 = "0.22"
+http = "1"
+r402 = { version = "0.1", path = "r402" }
+r402-evm = { version = "0.1", path = "r402-evm" }
+r402-facilitator = { version = "0.1", path = "r402-facilitator" }
+r402-http = { version = "0.1", path = "r402-http" }
+r402-proto = { version = "0.1", path = "r402-proto" }
+reqwest = { version = "0.13", features = ["json"] }
+reqwest-middleware = "0.5"
+rust_decimal = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "signal"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+tracing = "0.1"
+url = { version = "2", features = ["serde"] }
 
 [profile.release]
 codegen-units = 1

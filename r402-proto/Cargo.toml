@@ -1,30 +1,27 @@
 [package]
-name = "r402"
+name = "r402-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description.workspace = true
+description = "Wire format types for the x402 payment protocol."
 categories = [
     "cryptography::cryptocurrencies",
     "finance",
     "network-programming",
 ]
-keywords = ["blockchain", "payments", "x402", "stablecoin", "http-402"]
+keywords = ["blockchain", "payments", "x402", "protocol", "types"]
 
 [package.metadata.docs.rs]
 all-features = true
 
-[features]
-default = []
-tracing = ["dep:tracing"]
-
 [dependencies]
-r402-proto = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true
