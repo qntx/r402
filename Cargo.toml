@@ -28,6 +28,7 @@ alloy-sol-types = { version = "1.4", features = ["json"] }
 alloy-transport = { version = "1.4", features = ["throttle"] }
 alloy-transport-http = "1.4"
 axum = "0.8"
+getrandom = "0.3"
 axum-core = "0.5"
 base64 = "0.22"
 http = "1"

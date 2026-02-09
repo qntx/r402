@@ -17,7 +17,7 @@ all-features = true
 
 [features]
 default = []
-client = ["dep:alloy-signer", "dep:alloy-signer-local"]
+client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:getrandom"]
 facilitator = [
     "dep:alloy-provider",
     "dep:alloy-network",
@@ -37,6 +37,7 @@ alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true }
 alloy-transport = { workspace = true, optional = true }
+getrandom = { workspace = true, optional = true }
 r402 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
