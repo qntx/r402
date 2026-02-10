@@ -27,7 +27,7 @@ alloy-rpc-types-eth = "1.4"
 alloy-signer = "1.4"
 alloy-signer-local = "1.4"
 alloy-sol-types = { version = "1.4", features = ["json"] }
-alloy-transport = { version = "1.4", features = ["throttle"] }
+alloy-transport = { version = "1.6", features = ["throttle"] }
 alloy-transport-http = "1.4"
 dashmap = "6"
 futures = "0.3"
