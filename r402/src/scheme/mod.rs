@@ -1,0 +1,339 @@
+//! Payment scheme implementations for x402.
+//!
+//! This module provides the extensible scheme system that allows different
+//! payment methods to be plugged into the x402 protocol. Each scheme defines
+//! how payments are authorized, verified, and settled.
+//!
+//! # Architecture
+//!
+//! The scheme system has three main components:
+//!
+//! 1. **Blueprints** ([`SchemeBlueprints`]) - Factories that create scheme handlers
+//! 2. **Handlers** ([`X402SchemeFacilitator`]) - Process verify/settle requests
+//! 3. **Registry** ([`SchemeRegistry`]) - Maps chain+scheme combinations to handlers
+//!
+//! # Available Schemes
+//!
+//! Scheme implementations are provided by chain-specific crates:
+//!
+//! - **EVM chains** (`x402-chain-eip155`): `v1-eip155-exact`, `v2-eip155-exact`
+//! - **Solana** (`x402-chain-solana`): `v1-solana-exact`, `v2-solana-exact`
+//! - **Aptos** (`x402-chain-aptos`): `v2-aptos-exact`
+//!
+//! # Implementing a Custom Scheme
+//!
+//! To implement a custom scheme:
+//!
+//! 1. Implement [`X402SchemeId`] to identify your scheme
+//! 2. Implement [`X402SchemeFacilitatorBuilder`] to create handlers
+//! 3. Implement [`X402SchemeFacilitator`] for the actual verification/settlement logic
+//! 4. Register your scheme with [`SchemeBlueprints::register`]
+//!
+//! See the `docs/how-to-write-a-scheme.md` guide in the repository for details.
+
+pub mod client;
+
+use crate::chain::{ChainId, ChainIdPattern, ChainProviderOps, ChainRegistry};
+use crate::proto;
+use crate::proto::{AsPaymentProblem, ErrorReason, PaymentProblem, PaymentVerificationError};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt::{Debug, Display, Formatter};
+use std::marker::PhantomData;
+
+/// Trait for scheme handlers that process payment verification and settlement.
+///
+/// Implementations of this trait handle the core payment processing logic:
+/// verifying that payments are valid and settling them on-chain.
+#[async_trait::async_trait]
+pub trait X402SchemeFacilitator: Send + Sync {
+    /// Verifies a payment authorization without settling it.
+    ///
+    /// This checks that the payment is properly signed, matches the requirements,
+    /// and the payer has sufficient funds.
+    async fn verify(
+        &self,
+        request: &proto::VerifyRequest,
+    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError>;
+
+    /// Settles a verified payment on-chain.
+    ///
+    /// This submits the payment transaction to the blockchain and waits
+    /// for confirmation.
+    async fn settle(
+        &self,
+        request: &proto::SettleRequest,
+    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError>;
+
+    /// Returns the payment methods supported by this handler.
+    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError>;
+}
+
+/// Marker trait for types that are both identifiable and buildable.
+///
+/// This combines [`X402SchemeId`] and [`X402SchemeFacilitatorBuilder`] for
+/// use in the blueprint registry.
+pub trait X402SchemeBlueprint<P>:
+    X402SchemeId + for<'a> X402SchemeFacilitatorBuilder<&'a P>
+{
+}
+impl<T, P> X402SchemeBlueprint<P> for T where
+    T: X402SchemeId + for<'a> X402SchemeFacilitatorBuilder<&'a P>
+{
+}
+
+/// Trait for identifying a payment scheme.
+///
+/// Each scheme has a unique identifier composed of the protocol version,
+/// chain namespace, and scheme name.
+pub trait X402SchemeId {
+    /// Returns the x402 protocol version (1 or 2).
+    fn x402_version(&self) -> u8 {
+        2
+    }
+    /// Returns the chain namespace (e.g., "eip155", "solana").
+    fn namespace(&self) -> &str;
+    /// Returns the scheme name (e.g., "exact").
+    fn scheme(&self) -> &str;
+    /// Returns the full scheme identifier (e.g., "v2-eip155-exact").
+    fn id(&self) -> String {
+        format!(
+            "v{}-{}-{}",
+            self.x402_version(),
+            self.namespace(),
+            self.scheme(),
+        )
+    }
+}
+
+/// Trait for building scheme handlers from chain providers.
+///
+/// The type parameter `P` represents the chain provider type.
+/// Implementations use [`FromChainProvider`] trait to get the specific provider they need.
+pub trait X402SchemeFacilitatorBuilder<P> {
+    /// Creates a new scheme handler for the given chain provider.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The chain provider to use for on-chain operations
+    /// * `config` - Optional scheme-specific configuration
+    /// # Errors
+    ///
+    /// Returns an error if the handler cannot be built from the provider.
+    fn build(
+        &self,
+        provider: P,
+        config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>>;
+}
+
+/// Errors that can occur during scheme operations.
+#[derive(Debug, thiserror::Error)]
+pub enum X402SchemeFacilitatorError {
+    /// Payment verification failed.
+    #[error(transparent)]
+    PaymentVerification(#[from] PaymentVerificationError),
+    /// On-chain operation failed.
+    #[error("Onchain error: {0}")]
+    OnchainFailure(String),
+}
+
+impl AsPaymentProblem for X402SchemeFacilitatorError {
+    fn as_payment_problem(&self) -> PaymentProblem {
+        match self {
+            Self::PaymentVerification(e) => e.as_payment_problem(),
+            Self::OnchainFailure(e) => PaymentProblem::new(ErrorReason::UnexpectedError, e.clone()),
+        }
+    }
+}
+
+/// Registry of scheme blueprints (factories).
+///
+/// Blueprints are used to create scheme handlers for specific chain providers.
+/// Register blueprints at startup, then use them to build handlers.
+///
+/// # Type Parameters
+///
+/// - `P` - The chain provider type that blueprints can extract from using [`FromChainProvider`]
+#[derive(Default)]
+pub struct SchemeBlueprints<P>(
+    HashMap<String, Box<dyn X402SchemeBlueprint<P>>>,
+    PhantomData<P>,
+);
+
+impl<P> Debug for SchemeBlueprints<P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let slugs: Vec<String> = self.0.keys().cloned().collect();
+        f.debug_tuple("SchemeBlueprints").field(&slugs).finish()
+    }
+}
+
+impl<P> SchemeBlueprints<P> {
+    /// Creates an empty blueprint registry.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(HashMap::new(), PhantomData)
+    }
+
+    /// Registers a blueprint and returns self for chaining.
+    #[must_use]
+    pub fn and_register<B: X402SchemeBlueprint<P> + 'static>(mut self, blueprint: B) -> Self {
+        self.register(blueprint);
+        self
+    }
+
+    /// Registers a scheme blueprint.
+    pub fn register<B: X402SchemeBlueprint<P> + 'static>(&mut self, blueprint: B) {
+        self.0.insert(blueprint.id(), Box::new(blueprint));
+    }
+
+    /// Gets a blueprint by its ID.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&dyn X402SchemeBlueprint<P>> {
+        self.0.get(id).map(|v| &**v)
+    }
+}
+
+/// Unique identifier for a scheme handler instance.
+///
+/// Combines the chain ID, protocol version, and scheme name to uniquely
+/// identify a handler that can process payments for a specific combination.
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub struct SchemeHandlerSlug {
+    /// The chain this handler operates on.
+    pub chain_id: ChainId,
+    /// The x402 protocol version.
+    pub x402_version: u8,
+    /// The scheme name (e.g., "exact").
+    pub name: String,
+}
+
+impl SchemeHandlerSlug {
+    /// Creates a new scheme handler slug.
+    #[must_use]
+    pub const fn new(chain_id: ChainId, x402_version: u8, name: String) -> Self {
+        Self {
+            chain_id,
+            x402_version,
+            name,
+        }
+    }
+}
+
+impl Display for SchemeHandlerSlug {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}:{}:v{}:{}",
+            self.chain_id.namespace, self.chain_id.reference, self.x402_version, self.name
+        )
+    }
+}
+
+/// Registry of active scheme handlers.
+///
+/// Maps chain+scheme combinations to their handlers. Built from blueprints
+/// and chain providers based on configuration.
+#[derive(Default)]
+pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn X402SchemeFacilitator>>);
+
+impl Debug for SchemeRegistry {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let slugs: Vec<String> = self.0.keys().map(ToString::to_string).collect();
+        f.debug_tuple("SchemeRegistry").field(&slugs).finish()
+    }
+}
+
+impl SchemeRegistry {
+    /// Builds a scheme registry from blueprints and configuration.
+    ///
+    /// For each enabled scheme in the config, this finds the matching blueprint
+    /// and chain provider, then builds a handler.
+    #[must_use]
+    #[allow(clippy::cognitive_complexity)]
+    pub fn build<P: ChainProviderOps>(
+        chains: &ChainRegistry<P>,
+        blueprints: &SchemeBlueprints<P>,
+        config: &[SchemeConfig],
+    ) -> Self {
+        let mut handlers = HashMap::with_capacity(config.len());
+        for config in config {
+            if !config.enabled {
+                #[cfg(feature = "telemetry")]
+                tracing::info!(
+                    "Skipping disabled scheme {} for chains {}",
+                    config.id,
+                    config.chains
+                );
+                continue;
+            }
+            let Some(blueprint) = blueprints.get(&config.id) else {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!("No scheme registered: {}", config.id);
+                continue;
+            };
+            let chain_providers = chains.by_chain_id_pattern(&config.chains);
+            if chain_providers.is_empty() {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!("No chain provider found for {}", config.chains);
+                continue;
+            }
+
+            for chain_provider in chain_providers {
+                let chain_id = chain_provider.chain_id();
+                let handler = match blueprint.build(chain_provider, config.config.clone()) {
+                    Ok(handler) => handler,
+                    Err(err) => {
+                        #[cfg(feature = "telemetry")]
+                        tracing::error!("Error building scheme handler for {}: {}", config.id, err);
+                        continue;
+                    }
+                };
+                let slug = SchemeHandlerSlug::new(
+                    chain_id.clone(),
+                    blueprint.x402_version(),
+                    blueprint.scheme().to_string(),
+                );
+                #[cfg(feature = "telemetry")]
+                tracing::info!(chain_id = %chain_id, scheme = %blueprint.scheme(), id=blueprint.id(), "Registered scheme handler");
+                handlers.insert(slug, handler);
+            }
+        }
+        Self(handlers)
+    }
+
+    /// Gets a handler by its slug.
+    #[must_use]
+    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn X402SchemeFacilitator> {
+        let handler = &**self.0.get(slug)?;
+        Some(handler)
+    }
+
+    /// Returns an iterator over all registered handlers.
+    pub fn values(&self) -> impl Iterator<Item = &dyn X402SchemeFacilitator> {
+        self.0.values().map(|v| &**v)
+    }
+}
+
+/// Configuration for a specific scheme.
+///
+/// Each scheme entry specifies which scheme to use and which chains it applies to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SchemeConfig {
+    /// Whether this scheme is enabled (defaults to true).
+    #[serde(default = "scheme_config_defaults::default_enabled")]
+    pub enabled: bool,
+    /// The scheme id (e.g., "v1-eip155-exact").
+    pub id: String,
+    /// The chain pattern this scheme applies to (e.g., "eip155:84532", "eip155:*", "eip155:{1,8453}").
+    pub chains: ChainIdPattern,
+    /// Scheme-specific configuration (optional).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config: Option<serde_json::Value>,
+}
+
+mod scheme_config_defaults {
+    pub const fn default_enabled() -> bool {
+        true
+    }
+}

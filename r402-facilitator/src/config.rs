@@ -1,238 +1,181 @@
-//! Facilitator server configuration.
+//! Chain-specific configuration types for the x402 facilitator server.
 //!
-//! Loads configuration from a TOML file with support for environment variable
-//! expansion in string values. Variables use `$VAR` or `${VAR}` syntax.
+//! This module provides chain-specific configuration types that extend the base
+//! [`r402::config::Config`] with support for multiple blockchain families
+//! (EVM, Solana, Aptos).
 //!
-//! # Example Configuration
+//! The core configuration loading logic, environment variable resolution, and CLI
+//! argument parsing are provided by [`r402::config`]. This module adds:
 //!
-//! ```toml
-//! host = "0.0.0.0"
-//! port = 4021
-//! deploy_erc4337_with_eip6492 = false
+//! - [`ChainConfig`] - Enum representing chain-specific configuration variants
+//! - [`ChainsConfig`] - Collection of chain configurations with custom serialization
+//! - [`Config`] - Type alias combining base config with chain-specific types
 //!
-//! [chains."eip155:8453"]
-//! rpc_url = "https://mainnet.base.org"
-//! signer_private_key = "$SIGNER_KEY_BASE"
+//! # Configuration File Format
+//!
+//! See [`r402::config`] for the full configuration file format. The `chains`
+//! section uses CAIP-2 chain identifiers as keys:
+//!
+//! ```json
+//! {
+//!   "chains": {
+//!     "eip155:84532": {
+//!       "rpc_url": "https://sepolia.base.org",
+//!       "signer_private_key": "0x..."
+//!     },
+//!     "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp": {
+//!       "rpc_url": "https://api.devnet.solana.com",
+//!       "signer_private_key": "base58..."
+//!     }
+//!   }
+//! }
 //! ```
-//!
-//! # Environment Variables
-//!
-//! - `CONFIG` — Path to configuration file (default: `config.toml`)
-//! - `HOST` — Override server bind address
-//! - `PORT` — Override server port
-//! - Chain-specific signer keys referenced by `$VAR` in the config file
 
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::path::Path;
-
+use r402::chain::ChainId;
 use serde::{Deserialize, Serialize};
+use std::ops::Deref;
 
-/// Top-level facilitator configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FacilitatorConfig {
-    /// Server bind address (default: `0.0.0.0`).
-    #[serde(default = "default_host")]
-    pub host: IpAddr,
+#[cfg(feature = "chain-eip155")]
+use r402_evm::chain as eip155;
+#[cfg(feature = "chain-eip155")]
+use r402_evm::chain::config::{Eip155ChainConfig, Eip155ChainConfigInner};
+#[cfg(feature = "chain-solana")]
+use r402_svm::chain as solana;
+#[cfg(feature = "chain-solana")]
+use r402_svm::chain::config::{SolanaChainConfig, SolanaChainConfigInner};
 
-    /// Server port (default: `4021`).
-    #[serde(default = "default_port")]
-    pub port: u16,
-
-    /// EVM chain configurations keyed by CAIP-2 network identifier.
-    #[serde(default)]
-    pub chains: HashMap<String, ChainConfig>,
-
-    /// Whether to deploy ERC-4337 smart wallets via ERC-6492 factory calls.
-    #[serde(default)]
-    pub deploy_erc4337_with_eip6492: bool,
-}
-
-/// Per-chain configuration for an EVM network.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChainConfig {
-    /// Primary HTTP RPC endpoint URL.
-    pub rpc_url: String,
-
-    /// Fallback RPC endpoint URLs tried in order when the primary fails
-    /// the startup health check.
-    #[serde(default)]
-    pub fallback_rpc_urls: Vec<String>,
-
-    /// Private key for the facilitator signer (hex, with or without `0x` prefix).
-    /// Supports `$VAR` / `${VAR}` for environment variable expansion.
-    ///
-    /// For backward compatibility, this field is used when `signer_private_keys`
-    /// is empty. Prefer `signer_private_keys` for multi-signer setups.
-    #[serde(default)]
-    pub signer_private_key: String,
-
-    /// Multiple signer private keys for round-robin transaction submission.
-    /// Each key is a hex string (with or without `0x` prefix) and supports
-    /// `$VAR` / `${VAR}` environment variable expansion.
-    ///
-    /// When populated, `signer_private_key` is ignored.
-    #[serde(default)]
-    pub signer_private_keys: Vec<String>,
-
-    /// Per-chain HTTP request timeout in seconds (default: 30).
-    #[serde(default = "default_timeout")]
-    pub timeout_seconds: u64,
-
-    /// Whether to verify chain connectivity at startup by calling
-    /// `eth_chainId` (default: `true`).
-    #[serde(default = "default_true")]
-    pub health_check: bool,
-
-    /// Whether the chain supports EIP-1559 gas pricing (default: `true`).
-    #[serde(default = "default_true")]
-    pub eip1559: bool,
-
-    /// Whether the chain uses flashblocks for immediate finality (default: `false`).
-    #[serde(default)]
-    pub flashblocks: bool,
-
-    /// Seconds to wait for a transaction receipt after submission (default: 30).
-    #[serde(default = "default_timeout")]
-    pub receipt_timeout_secs: u64,
-}
-
-impl ChainConfig {
-    /// Returns the effective list of signer private keys.
-    ///
-    /// If `signer_private_keys` is non-empty, returns that list.
-    /// Otherwise falls back to the single `signer_private_key`.
-    #[must_use]
-    pub fn effective_signer_keys(&self) -> Vec<&str> {
-        if !self.signer_private_keys.is_empty() {
-            self.signer_private_keys
-                .iter()
-                .map(String::as_str)
-                .collect()
-        } else if !self.signer_private_key.is_empty() {
-            vec![self.signer_private_key.as_str()]
-        } else {
-            vec![]
-        }
-    }
-}
-
-const fn default_timeout() -> u64 {
-    30
-}
-
-const fn default_true() -> bool {
-    true
-}
-
-const fn default_host() -> IpAddr {
-    IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
-}
-
-const fn default_port() -> u16 {
-    4021
-}
-
-impl FacilitatorConfig {
-    /// Loads configuration from the path given by the `CONFIG` environment
-    /// variable, falling back to `config.toml` in the current directory.
-    ///
-    /// After loading, all string values with `$VAR` / `${VAR}` references
-    /// are expanded from the process environment. `HOST` and `PORT` env vars
-    /// override the file values.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read or parsed.
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        let path = std::env::var("CONFIG").unwrap_or_else(|_| "config.toml".to_owned());
-        Self::load_from(&path)
-    }
-
-    /// Loads configuration from a specific file path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be read or parsed.
-    pub fn load_from(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let content = if Path::new(path).exists() {
-            std::fs::read_to_string(path)?
-        } else {
-            // If no config file exists, use empty TOML and rely on defaults
-            String::new()
-        };
-
-        // Expand environment variables in the raw TOML string
-        let expanded = expand_env_vars(&content);
-
-        let mut config: Self = toml::from_str(&expanded)?;
-
-        // Allow HOST / PORT env overrides
-        if let Ok(host) = std::env::var("HOST")
-            && let Ok(addr) = host.parse()
-        {
-            config.host = addr;
-        }
-        if let Ok(port) = std::env::var("PORT")
-            && let Ok(p) = port.parse()
-        {
-            config.port = p;
-        }
-
-        Ok(config)
-    }
-}
-
-/// Expands `$VAR` and `${VAR}` patterns in a string from environment variables.
+/// Server configuration.
 ///
-/// Unresolved variables are left as-is.
-fn expand_env_vars(input: &str) -> String {
-    let mut result = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
+/// Fields use serde defaults that fall back to environment variables,
+/// then to hardcoded defaults.
+pub type Config = r402::config::Config<ChainsConfig>;
 
-    while let Some(ch) = chars.next() {
-        if ch == '$' {
-            let braced = chars.peek() == Some(&'{');
-            if braced {
-                chars.next(); // consume '{'
-            }
+/// Configuration for a specific chain.
+///
+/// This enum represents chain-specific configuration that varies by chain family
+/// (EVM vs Solana). The chain family is determined by the CAIP-2 prefix of the
+/// chain identifier key (e.g., "eip155:" for EVM, "solana:" for Solana).
+#[derive(Debug, Clone)]
+pub enum ChainConfig {
+    /// EVM chain configuration (for chains with "eip155:" prefix).
+    #[cfg(feature = "chain-eip155")]
+    Eip155(Box<Eip155ChainConfig>),
+    /// Solana chain configuration (for chains with "solana:" prefix).
+    #[cfg(feature = "chain-solana")]
+    Solana(Box<SolanaChainConfig>),
+}
 
-            let mut var_name = String::new();
-            while let Some(&c) = chars.peek() {
-                if braced {
-                    if c == '}' {
-                        chars.next();
-                        break;
-                    }
-                } else if !c.is_ascii_alphanumeric() && c != '_' {
-                    break;
-                }
-                var_name.push(c);
-                chars.next();
-            }
+/// Configuration for chains.
+///
+/// This is a wrapper around `Vec<ChainConfig>` that provides custom serialization
+/// as a map where keys are CAIP-2 chain identifiers.
+#[derive(Debug, Clone, Default)]
+pub struct ChainsConfig(pub Vec<ChainConfig>);
 
-            if var_name.is_empty() {
-                result.push('$');
-                if braced {
-                    result.push('{');
-                }
-            } else if let Ok(val) = std::env::var(&var_name) {
-                result.push_str(&val);
-            } else {
-                // Leave unresolved variable as-is
-                result.push('$');
-                if braced {
-                    result.push('{');
-                }
-                result.push_str(&var_name);
-                if braced {
-                    result.push('}');
-                }
-            }
-        } else {
-            result.push(ch);
-        }
+impl Deref for ChainsConfig {
+    type Target = Vec<ChainConfig>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
+}
 
-    result
+impl Serialize for ChainsConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+
+        let chains = &self.0;
+        #[allow(unused_mut)] // For when no chain features enabled
+        let mut map = serializer.serialize_map(Some(chains.len()))?;
+        for chain_config in chains {
+            match chain_config {
+                #[cfg(feature = "chain-eip155")]
+                ChainConfig::Eip155(config) => {
+                    let chain_id = config.chain_id();
+                    let inner = &config.inner;
+                    map.serialize_entry(&chain_id, inner)?;
+                }
+                #[cfg(feature = "chain-solana")]
+                ChainConfig::Solana(config) => {
+                    let chain_id = config.chain_id();
+                    let inner = &config.inner;
+                    map.serialize_entry(&chain_id, inner)?;
+                }
+                #[allow(unreachable_patterns)] // For when no chain features enabled
+                _ => unreachable!("ChainConfig variant not enabled in this build"),
+            }
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ChainsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{MapAccess, Visitor};
+        use std::fmt;
+
+        struct ChainsVisitor;
+
+        impl<'de> Visitor<'de> for ChainsVisitor {
+            type Value = ChainsConfig;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a map of chain identifiers to chain configurations")
+            }
+
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                #[allow(unused_mut)] // For when no chain features enabled
+                let mut chains = Vec::with_capacity(access.size_hint().unwrap_or(0));
+
+                while let Some(chain_id) = access.next_key::<ChainId>()? {
+                    let namespace = chain_id.namespace();
+                    #[allow(unused_variables)] // For when no chain features enabled
+                    let config = match namespace {
+                        #[cfg(feature = "chain-eip155")]
+                        eip155::EIP155_NAMESPACE => {
+                            let inner: Eip155ChainConfigInner = access.next_value()?;
+                            let config = Eip155ChainConfig {
+                                chain_reference: chain_id
+                                    .try_into()
+                                    .map_err(|e| serde::de::Error::custom(format!("{e}")))?,
+                                inner,
+                            };
+                            ChainConfig::Eip155(Box::new(config))
+                        }
+                        #[cfg(feature = "chain-solana")]
+                        solana::SOLANA_NAMESPACE => {
+                            let inner: SolanaChainConfigInner = access.next_value()?;
+                            let config = SolanaChainConfig {
+                                chain_reference: chain_id
+                                    .try_into()
+                                    .map_err(|e| serde::de::Error::custom(format!("{e}")))?,
+                                inner,
+                            };
+                            ChainConfig::Solana(Box::new(config))
+                        }
+                        _ => {
+                            return Err(serde::de::Error::custom(format!(
+                                "Unexpected namespace: {namespace}"
+                            )));
+                        }
+                    };
+                    #[allow(unreachable_code)] // For when no chain features enabled
+                    chains.push(config);
+                }
+
+                Ok(ChainsConfig(chains))
+            }
+        }
+
+        deserializer.deserialize_map(ChainsVisitor)
+    }
 }

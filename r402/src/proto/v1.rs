@@ -1,175 +1,537 @@
-//! V1 legacy payment types for the x402 protocol.
+//! Protocol version 1 (V1) types for x402.
 //!
-//! These types correspond to the original (V1) protocol version using
-//! network name strings and a flat payload structure.
+//! This module defines the wire format types for the original x402 protocol version.
+//! V1 uses network names (e.g., "base-sepolia") instead of CAIP-2 chain IDs.
+//!
+//! # Key Types
+//!
+//! - [`X402Version1`] - Version marker that serializes as `1`
+//! - [`PaymentPayload`] - Signed payment authorization from the buyer
+//! - [`PaymentRequirements`] - Payment terms set by the seller
+//! - [`PaymentRequired`] - HTTP 402 response body
+//! - [`VerifyRequest`] / [`VerifyResponse`] - Verification messages
+//! - [`SettleResponse`] - Settlement result
+//! - [`PriceTag`] - Builder for creating payment requirements
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::fmt::Display;
+use std::str::FromStr;
+use std::sync::Arc;
 
-use super::Network;
+use crate::proto;
+use crate::proto::SupportedResponse;
 
-/// V1 payment requirements (legacy).
+/// Version marker for x402 protocol version 1.
 ///
-/// Uses `maxAmountRequired` instead of V2's `amount`, and includes resource
-/// information inline rather than in a separate `ResourceInfo` struct.
+/// This type serializes as the integer `1` and is used to identify V1 protocol
+/// messages in the wire format.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct X402Version1;
+
+impl X402Version1 {
+    /// The numeric value representing protocol version 1.
+    pub const VALUE: u8 = 1;
+}
+
+impl PartialEq<u8> for X402Version1 {
+    fn eq(&self, other: &u8) -> bool {
+        *other == Self::VALUE
+    }
+}
+
+impl From<X402Version1> for u8 {
+    fn from(_: X402Version1) -> Self {
+        X402Version1::VALUE
+    }
+}
+
+impl Serialize for X402Version1 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(Self::VALUE)
+    }
+}
+
+impl<'de> Deserialize<'de> for X402Version1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let num = u8::deserialize(deserializer)?;
+        if num == Self::VALUE {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected version {}, got {}",
+                Self::VALUE,
+                num
+            )))
+        }
+    }
+}
+
+impl Display for X402Version1 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Self::VALUE)
+    }
+}
+
+/// Response from a payment settlement request.
 ///
-/// Corresponds to Python SDK's `PaymentRequirementsV1` in `schemas/v1.py`.
+/// Indicates whether the payment was successfully settled on-chain.
+#[derive(Debug)]
+pub enum SettleResponse {
+    /// Settlement succeeded.
+    Success {
+        /// The address that paid.
+        payer: String,
+        /// The transaction hash.
+        transaction: String,
+        /// The network where settlement occurred.
+        network: String,
+    },
+    /// Settlement failed.
+    Error {
+        /// The reason for failure.
+        reason: String,
+        /// The network where settlement was attempted.
+        network: String,
+    },
+}
+
+impl From<SettleResponse> for proto::SettleResponse {
+    fn from(val: SettleResponse) -> Self {
+        Self(serde_json::to_value(val).expect("SettleResponse serialization failed"))
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct SettleResponseWire {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction: Option<String>,
+    pub network: String,
+}
+
+impl Serialize for SettleResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wire = match self {
+            Self::Success {
+                payer,
+                transaction,
+                network,
+            } => SettleResponseWire {
+                success: true,
+                error_reason: None,
+                payer: Some(payer.clone()),
+                transaction: Some(transaction.clone()),
+                network: network.clone(),
+            },
+            Self::Error { reason, network } => SettleResponseWire {
+                success: false,
+                error_reason: Some(reason.clone()),
+                payer: None,
+                transaction: None,
+                network: network.clone(),
+            },
+        };
+        wire.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SettleResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = SettleResponseWire::deserialize(deserializer)?;
+        if wire.success {
+            let payer = wire
+                .payer
+                .ok_or_else(|| serde::de::Error::missing_field("payer"))?;
+            let transaction = wire
+                .transaction
+                .ok_or_else(|| serde::de::Error::missing_field("transaction"))?;
+            Ok(Self::Success {
+                payer,
+                transaction,
+                network: wire.network,
+            })
+        } else {
+            let reason = wire
+                .error_reason
+                .ok_or_else(|| serde::de::Error::missing_field("error_reason"))?;
+            Ok(Self::Error {
+                reason,
+                network: wire.network,
+            })
+        }
+    }
+}
+
+/// Result returned by a facilitator after verifying a [`PaymentPayload`] against the provided [`PaymentRequirements`].
 ///
-/// # JSON Format
-///
-/// ```json
-/// {
-///   "scheme": "exact",
-///   "network": "base-sepolia",
-///   "maxAmountRequired": "1000000",
-///   "resource": "/api/data",
-///   "payTo": "0x...",
-///   "maxTimeoutSeconds": 300,
-///   "asset": "0x..."
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// This response indicates whether the payment authorization is valid and identifies the payer. If invalid,
+/// it includes a reason describing why verification failed (e.g., wrong network, an invalid scheme, insufficient funds).
+#[derive(Debug)]
+pub enum VerifyResponse {
+    /// The payload matches the requirements and passes all checks.
+    Valid {
+        /// The address of the payer.
+        payer: String,
+    },
+    /// The payload was well-formed but failed verification.
+    Invalid {
+        /// The reason verification failed.
+        reason: String,
+        /// The payer address, if identifiable.
+        payer: Option<String>,
+    },
+}
+
+impl From<VerifyResponse> for proto::VerifyResponse {
+    fn from(val: VerifyResponse) -> Self {
+        Self(serde_json::to_value(val).expect("VerifyResponse serialization failed"))
+    }
+}
+
+impl TryFrom<proto::VerifyResponse> for VerifyResponse {
+    type Error = serde_json::Error;
+    fn try_from(value: proto::VerifyResponse) -> Result<Self, Self::Error> {
+        let json = value.0;
+        serde_json::from_value(json)
+    }
+}
+
+impl VerifyResponse {
+    /// Constructs a successful verification response with the given `payer` address.
+    ///
+    /// Indicates that the provided payment payload has been validated against the payment requirements.
+    #[must_use]
+    pub const fn valid(payer: String) -> Self {
+        Self::Valid { payer }
+    }
+
+    /// Constructs a failed verification response with the given `payer` address and error `reason`.
+    ///
+    /// Indicates that the payment was recognized but rejected due to reasons such as
+    /// insufficient funds, invalid network, or scheme mismatch.
+    #[allow(dead_code)]
+    #[must_use]
+    pub const fn invalid(payer: Option<String>, reason: String) -> Self {
+        Self::Invalid { reason, payer }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PaymentRequirementsV1 {
-    /// Payment scheme identifier (e.g., "exact").
-    pub scheme: String,
+struct VerifyResponseWire {
+    is_valid: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payer: Option<String>,
+    #[serde(default)]
+    invalid_reason: Option<String>,
+}
 
-    /// Network identifier (legacy format, e.g., "base-sepolia").
-    pub network: Network,
+impl Serialize for VerifyResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let wire = match self {
+            Self::Valid { payer } => VerifyResponseWire {
+                is_valid: true,
+                payer: Some(payer.clone()),
+                invalid_reason: None,
+            },
+            Self::Invalid { reason, payer } => VerifyResponseWire {
+                is_valid: false,
+                payer: payer.clone(),
+                invalid_reason: Some(reason.clone()),
+            },
+        };
+        wire.serialize(serializer)
+    }
+}
 
-    /// Maximum amount in smallest unit.
-    pub max_amount_required: String,
+impl<'de> Deserialize<'de> for VerifyResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = VerifyResponseWire::deserialize(deserializer)?;
+        if wire.is_valid {
+            let payer = wire
+                .payer
+                .ok_or_else(|| serde::de::Error::missing_field("payer"))?;
+            Ok(Self::Valid { payer })
+        } else {
+            let reason = wire
+                .invalid_reason
+                .ok_or_else(|| serde::de::Error::missing_field("invalid_reason"))?;
+            let payer = wire.payer;
+            Ok(Self::Invalid { reason, payer })
+        }
+    }
+}
 
-    /// Resource URL.
+/// Request to verify a V1 payment.
+///
+/// Contains the payment payload and requirements for verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyRequest<TPayload, TRequirements> {
+    /// Protocol version (always 1).
+    pub x402_version: X402Version1,
+    /// The signed payment authorization.
+    pub payment_payload: TPayload,
+    /// The payment requirements to verify against.
+    pub payment_requirements: TRequirements,
+}
+
+impl<TPayload, TRequirements> VerifyRequest<TPayload, TRequirements>
+where
+    Self: DeserializeOwned,
+{
+    /// Deserializes a V1 verify request from a protocol-level request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
+    pub fn from_proto(
+        request: proto::VerifyRequest,
+    ) -> Result<Self, proto::PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
+    }
+}
+
+impl<TPayload, TRequirements> TryInto<proto::VerifyRequest>
+    for VerifyRequest<TPayload, TRequirements>
+where
+    TPayload: Serialize,
+    TRequirements: Serialize,
+{
+    type Error = serde_json::Error;
+    fn try_into(self) -> Result<proto::VerifyRequest, Self::Error> {
+        let json = serde_json::to_value(self)?;
+        Ok(proto::VerifyRequest(json))
+    }
+}
+
+/// A signed payment authorization from the buyer.
+///
+/// This contains the cryptographic proof that the buyer has authorized
+/// a payment, along with metadata about the payment scheme and network.
+///
+/// # Type Parameters
+///
+/// - `TScheme` - The scheme identifier type (default: `String`)
+/// - `TPayload` - The scheme-specific payload type (default: raw JSON)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentPayload<TScheme = String, TPayload = Box<serde_json::value::RawValue>> {
+    /// Protocol version (always 1).
+    pub x402_version: X402Version1,
+    /// The payment scheme (e.g., "exact").
+    pub scheme: TScheme,
+    /// The network name (e.g., "base-sepolia").
+    pub network: String,
+    /// The scheme-specific signed payload.
+    pub payload: TPayload,
+}
+
+/// Payment requirements set by the seller.
+///
+/// Defines the terms under which a payment will be accepted, including
+/// the amount, recipient, asset, and timing constraints.
+///
+/// # Type Parameters
+///
+/// - `TScheme` - The scheme identifier type (default: `String`)
+/// - `TAmount` - The amount type (default: `String`)
+/// - `TAddress` - The address type (default: `String`)
+/// - `TExtra` - Scheme-specific extra data type (default: `serde_json::Value`)
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentRequirements<
+    TScheme = String,
+    TAmount = String,
+    TAddress = String,
+    TExtra = serde_json::Value,
+> {
+    /// The payment scheme (e.g., "exact").
+    pub scheme: TScheme,
+    /// The network name (e.g., "base-sepolia").
+    pub network: String,
+    /// The maximum amount required for payment.
+    pub max_amount_required: TAmount,
+    /// The resource URL being paid for.
     pub resource: String,
-
-    /// Optional resource description.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Optional MIME type.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-
-    /// Recipient address.
-    pub pay_to: String,
-
+    /// Human-readable description of the resource.
+    pub description: String,
+    /// MIME type of the resource.
+    pub mime_type: String,
+    /// Optional JSON schema for the resource output.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
+    /// The recipient address for payment.
+    pub pay_to: TAddress,
     /// Maximum time in seconds for payment validity.
     pub max_timeout_seconds: u64,
-
-    /// Asset address/identifier.
-    pub asset: String,
-
-    /// Optional output schema.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_schema: Option<Value>,
-
-    /// Additional scheme-specific data.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra: Option<Value>,
+    /// The token asset address.
+    pub asset: TAddress,
+    /// Scheme-specific extra data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<TExtra>,
 }
 
-impl PaymentRequirementsV1 {
-    /// Returns the payment amount (V1 uses `maxAmountRequired`).
+impl PaymentRequirements {
+    /// Converts the payment requirements to a concrete type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the type conversions fail.
+    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
-    pub fn amount(&self) -> &str {
-        &self.max_amount_required
-    }
-
-    /// Returns the extra metadata.
-    #[must_use]
-    pub const fn extra(&self) -> Option<&Value> {
-        self.extra.as_ref()
+    pub fn as_concrete<
+        TScheme: FromStr,
+        TAmount: FromStr,
+        TAddress: FromStr,
+        TExtra: DeserializeOwned,
+    >(
+        &self,
+    ) -> Option<PaymentRequirements<TScheme, TAmount, TAddress, TExtra>> {
+        let scheme = self.scheme.parse::<TScheme>().ok()?;
+        let max_amount_required = self.max_amount_required.parse::<TAmount>().ok()?;
+        let pay_to = self.pay_to.parse::<TAddress>().ok()?;
+        let asset = self.asset.parse::<TAddress>().ok()?;
+        let extra = self
+            .extra
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        Some(PaymentRequirements {
+            scheme,
+            network: self.network.clone(),
+            max_amount_required,
+            resource: self.resource.clone(),
+            description: self.description.clone(),
+            mime_type: self.mime_type.clone(),
+            output_schema: self.output_schema.clone(),
+            pay_to,
+            max_timeout_seconds: self.max_timeout_seconds,
+            asset,
+            extra,
+        })
     }
 }
 
-/// V1 402 response (legacy).
+/// HTTP 402 Payment Required response body for V1.
 ///
-/// Corresponds to Python SDK's `PaymentRequiredV1` in `schemas/v1.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// This is returned when a resource requires payment. It contains
+/// the list of acceptable payment methods.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PaymentRequiredV1 {
-    /// Protocol version (always 1 for V1).
-    #[serde(default = "default_v1")]
-    pub x402_version: u32,
-
-    /// Optional error message.
+pub struct PaymentRequired {
+    /// Protocol version (always 1).
+    pub x402_version: X402Version1,
+    /// List of acceptable payment methods.
+    #[serde(default)]
+    pub accepts: Vec<PaymentRequirements>,
+    /// Optional error message if the request was malformed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-
-    /// List of accepted payment requirements.
-    pub accepts: Vec<PaymentRequirementsV1>,
 }
 
-/// V1 payment payload (legacy).
+/// Builder for creating payment requirements.
 ///
-/// In V1, `scheme` and `network` are at the top level rather than nested
-/// inside an `accepted` field.
+/// A `PriceTag` is a convenient way to specify payment terms that can
+/// be converted into [`PaymentRequirements`] for inclusion in a 402 response.
 ///
-/// Corresponds to Python SDK's `PaymentPayloadV1` in `schemas/v1.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentPayloadV1 {
-    /// Protocol version (always 1 for V1).
-    #[serde(default = "default_v1")]
-    pub x402_version: u32,
-
-    /// Payment scheme identifier (at top level in V1).
+/// # Example
+///
+/// ```rust
+/// use r402::proto::v1::PriceTag;
+///
+/// let price = PriceTag {
+///     scheme: "exact".to_string(),
+///     pay_to: "0x1234...".to_string(),
+///     asset: "0xUSDC...".to_string(),
+///     network: "base".to_string(),
+///     amount: "1000000".to_string(), // 1 USDC
+///     max_timeout_seconds: 300,
+///     extra: None,
+///     enricher: None,
+/// };
+/// ```
+#[derive(Clone)]
+#[allow(dead_code)] // Public for consumption by downstream crates.
+pub struct PriceTag {
+    /// The payment scheme (e.g., "exact").
     pub scheme: String,
-
-    /// Network identifier (at top level in V1).
-    pub network: Network,
-
-    /// Scheme-specific payload data.
-    pub payload: Value,
+    /// The recipient address.
+    pub pay_to: String,
+    /// The token asset address.
+    pub asset: String,
+    /// The network name.
+    pub network: String,
+    /// The payment amount in token units.
+    pub amount: String,
+    /// Maximum time in seconds for payment validity.
+    pub max_timeout_seconds: u64,
+    /// Scheme-specific extra data.
+    pub extra: Option<serde_json::Value>,
+    /// Optional enrichment function for adding facilitator-specific data.
+    #[doc(hidden)]
+    pub enricher: Option<Enricher>,
 }
 
-impl PaymentPayloadV1 {
-    /// Returns the payment scheme.
-    #[must_use]
-    pub fn scheme(&self) -> &str {
-        &self.scheme
+impl fmt::Debug for PriceTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PriceTag")
+            .field("scheme", &self.scheme)
+            .field("pay_to", &self.pay_to)
+            .field("asset", &self.asset)
+            .field("network", &self.network)
+            .field("amount", &self.amount)
+            .field("max_timeout_seconds", &self.max_timeout_seconds)
+            .field("extra", &self.extra)
+            .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))
+            .finish()
     }
-
-    /// Returns the network.
-    #[must_use]
-    pub fn network(&self) -> &str {
-        &self.network
-    }
 }
 
-/// V1 request to verify a payment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyRequestV1 {
-    /// The payment payload to verify.
-    pub payment_payload: PaymentPayloadV1,
-
-    /// The requirements to verify against.
-    pub payment_requirements: PaymentRequirementsV1,
-}
-
-/// V1 request to settle a payment.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SettleRequestV1 {
-    /// The payment payload to settle.
-    pub payment_payload: PaymentPayloadV1,
-
-    /// The requirements for settlement.
-    pub payment_requirements: PaymentRequirementsV1,
-}
-
-/// V1 supported response (legacy — no extensions or signers).
+/// Enrichment function type for price tags.
 ///
-/// Corresponds to Python SDK's `SupportedResponseV1` in `schemas/v1.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SupportedResponseV1 {
-    /// List of supported payment kinds.
-    pub kinds: Vec<super::SupportedKind>,
-}
+/// Enrichers are called with the facilitator's capabilities to add
+/// facilitator-specific data to price tags (e.g., fee payer addresses).
+pub type Enricher = Arc<dyn Fn(&mut PriceTag, &SupportedResponse) + Send + Sync>;
 
-const fn default_v1() -> u32 {
-    1
+impl PriceTag {
+    /// Applies the enrichment function if one is set.
+    ///
+    /// This is called automatically when building payment requirements
+    /// to add facilitator-specific data.
+    #[allow(dead_code)]
+    pub fn enrich(&mut self, capabilities: &SupportedResponse) {
+        if let Some(enricher) = self.enricher.clone() {
+            enricher(self, capabilities);
+        }
+    }
+
+    /// Sets the maximum timeout for this price tag.
+    #[allow(dead_code)]
+    #[must_use]
+    pub const fn with_timeout(mut self, seconds: u64) -> Self {
+        self.max_timeout_seconds = seconds;
+        self
+    }
 }

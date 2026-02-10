@@ -27,7 +27,9 @@ test:
 .PHONY: clippy
 clippy:
 	cargo +nightly clippy --fix \
+		--workspace \
 		--all-targets \
+		--all-features \
 		--allow-dirty \
 		--allow-staged \
 		-- -D warnings

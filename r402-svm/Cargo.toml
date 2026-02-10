@@ -4,9 +4,78 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description.workspace = true
+description = "Solana chain support for the x402 payment protocol."
+
+[package.metadata.docs.rs]
+all-features = true
+
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core", "r402/telemetry"]
+client = [
+    "dep:alloy-primitives",
+    "dep:bincode",
+    "dep:solana-account",
+    "dep:solana-client",
+    "dep:solana-commitment-config",
+    "dep:solana-compute-budget-interface",
+    "dep:solana-message",
+    "dep:solana-signature",
+    "dep:solana-signer",
+    "dep:solana-transaction",
+    "dep:spl-token",
+    "dep:spl-token-2022",
+]
+server = []
+facilitator = [
+    "dep:bincode",
+    "dep:bs58",
+    "dep:futures-util",
+    "dep:solana-account",
+    "dep:solana-client",
+    "dep:solana-commitment-config",
+    "dep:solana-compute-budget-interface",
+    "dep:solana-keypair",
+    "dep:solana-message",
+    "dep:solana-signature",
+    "dep:solana-signer",
+    "dep:solana-transaction",
+    "dep:spl-token",
+    "dep:spl-token-2022",
+    "dep:url",
+]
+full = ["telemetry", "client", "server", "facilitator"]
 
 [dependencies]
+async-trait = { workspace = true }
+r402 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solana-pubkey = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+alloy-primitives = { workspace = true, optional = true }
+bincode = { workspace = true, optional = true }
+bs58 = { workspace = true, optional = true }
+futures-util = { workspace = true, optional = true }
+solana-account = { workspace = true, optional = true }
+solana-client = { workspace = true, optional = true }
+solana-commitment-config = { workspace = true, optional = true }
+solana-compute-budget-interface = { workspace = true, optional = true }
+solana-keypair = { workspace = true, optional = true }
+solana-message = { workspace = true, optional = true }
+solana-signature = { workspace = true, optional = true }
+solana-signer = { workspace = true, optional = true }
+solana-transaction = { workspace = true, optional = true }
+spl-token = { workspace = true, optional = true }
+spl-token-2022 = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+solana-keypair = { workspace = true }
 
 [lints]
 workspace = true

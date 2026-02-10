@@ -1,17 +1,28 @@
-//! Local x402 Facilitator server.
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
+//! x402 Facilitator Server
 //!
-//! Provides a local facilitator service implementation for the x402 payment
-//! protocol, with Axum route handlers for verify, settle, and supported
-//! endpoints.
+//! A production-ready HTTP server implementing the [x402](https://www.x402.org) payment protocol.
+//!
+//! This crate provides a complete, runnable facilitator that supports multiple blockchain
+//! networks (EVM/EIP-155 and Solana) and can verify and settle payments on-chain.
 //!
 //! # Modules
 //!
-//! - [`handlers`] — Axum route handlers and router builder
-//! - [`error`] — Facilitator service error types
-//! - [`config`] — Server configuration with environment variable expansion
+//! - [`chain`] — Blockchain provider abstractions
+//! - [`config`] — Configuration types and loading
+//! - [`handlers`] — HTTP endpoint handlers for verify, settle, supported
+//! - [`run`] — Main server initialization and runtime
+//! - [`schemes`] — Scheme builder implementations for supported payment schemes
+//! - [`util`] — Utilities for graceful shutdown and telemetry
 
+pub mod chain;
 pub mod config;
-pub mod error;
 pub mod handlers;
+pub mod local;
+pub mod run;
+pub mod schemes;
+pub mod util;
 
-pub use handlers::{FacilitatorState, facilitator_router};
+pub use local::FacilitatorLocal;
+pub use run::run;

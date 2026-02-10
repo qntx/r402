@@ -4,55 +4,59 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "EVM chain support for the x402 payment protocol."
-categories = [
-    "cryptography::cryptocurrencies",
-    "finance",
-    "network-programming",
-]
-keywords = ["blockchain", "payments", "x402", "evm", "eip-3009"]
+description = "EIP-155 (EVM) chain support for the x402 payment protocol."
 
 [package.metadata.docs.rs]
 all-features = true
 
 [features]
 default = []
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:getrandom"]
+telemetry = ["dep:tracing", "dep:tracing-core", "r402/telemetry"]
+client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:async-trait", "dep:rand"]
+server = []
 facilitator = [
-    "dep:alloy-provider",
-    "dep:alloy-network",
-    "dep:alloy-transport",
     "dep:alloy-contract",
+    "dep:alloy-network",
+    "dep:alloy-provider",
     "dep:alloy-rpc-client",
     "dep:alloy-rpc-types-eth",
+    "dep:alloy-signer",
+    "dep:alloy-signer-local",
+    "dep:alloy-transport",
+    "dep:alloy-transport-http",
     "dep:async-trait",
     "dep:dashmap",
-    "dep:futures",
     "dep:tokio",
+    "dep:tower",
+    "dep:url",
 ]
-tracing = ["dep:tracing"]
+full = ["telemetry", "client", "server", "facilitator"]
 
 [dependencies]
-async-trait = { workspace = true, optional = true }
-alloy-contract = { workspace = true, optional = true }
-alloy-network = { workspace = true, optional = true }
 alloy-primitives = { workspace = true }
-alloy-provider = { workspace = true, optional = true }
-alloy-rpc-client = { workspace = true, optional = true }
-alloy-rpc-types-eth = { workspace = true, optional = true }
-dashmap = { workspace = true, optional = true }
-futures = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-alloy-signer = { workspace = true, optional = true }
-alloy-signer-local = { workspace = true, optional = true }
 alloy-sol-types = { workspace = true }
-alloy-transport = { workspace = true, optional = true }
-getrandom = { workspace = true, optional = true }
 r402 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+
+alloy-contract = { workspace = true, optional = true }
+alloy-network = { workspace = true, optional = true }
+alloy-provider = { workspace = true, optional = true }
+alloy-rpc-client = { workspace = true, optional = true }
+alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+alloy-transport = { workspace = true, optional = true }
+alloy-transport-http = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+dashmap = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 
 [lints]
 workspace = true

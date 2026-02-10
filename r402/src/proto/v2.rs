@@ -1,220 +1,332 @@
-//! V2 payment types for the x402 protocol.
+//! Protocol version 2 (V2) types for x402.
 //!
-//! These types correspond to the current (V2) protocol version using CAIP-2
-//! network identifiers and structured payment requirements.
+//! This module defines the wire format types for the enhanced x402 protocol version.
+//! V2 uses CAIP-2 chain IDs (e.g., "eip155:8453") instead of network names, and
+//! includes richer resource metadata.
+//!
+//! # Key Differences from V1
+//!
+//! - Uses CAIP-2 chain IDs instead of network names
+//! - Includes [`ResourceInfo`] with URL, description, and MIME type
+//! - Simplified [`PaymentRequirements`] structure
+//! - Payment payload includes accepted requirements for verification
+//!
+//! # Key Types
+//!
+//! - [`X402Version2`] - Version marker that serializes as `2`
+//! - [`PaymentPayload`] - Signed payment with accepted requirements
+//! - [`PaymentRequirements`] - Payment terms set by the seller
+//! - [`PaymentRequired`] - HTTP 402 response body
+//! - [`ResourceInfo`] - Metadata about the paid resource
+//! - [`PriceTag`] - Builder for creating payment requirements
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use crate::chain::ChainId;
+use crate::proto;
+use crate::proto::SupportedResponse;
+use crate::proto::v1;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt;
+use std::fmt::{Display, Formatter};
+use std::str::FromStr;
+use std::sync::Arc;
 
-use super::Network;
-
-/// Describes the resource being accessed.
+/// Version marker for x402 protocol version 2.
 ///
-/// Corresponds to Python SDK's `ResourceInfo` in `schemas/payments.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResourceInfo {
-    /// The URL of the resource.
-    pub url: String,
+/// This type serializes as the integer `2` and is used to identify V2 protocol
+/// messages in the wire format.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct X402Version2;
 
-    /// Optional human-readable description.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Optional MIME type of the resource.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
+impl X402Version2 {
+    /// The numeric value representing protocol version 2.
+    pub const VALUE: u8 = 2;
 }
 
-/// V2 payment requirements structure.
-///
-/// Defines what a resource server requires for payment, including scheme,
-/// network, asset, amount, recipient, and timeout.
-///
-/// Corresponds to Python SDK's `PaymentRequirements` in `schemas/payments.py`.
-///
-/// # JSON Format
-///
-/// ```json
-/// {
-///   "scheme": "exact",
-///   "network": "eip155:8453",
-///   "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-///   "amount": "1000000",
-///   "payTo": "0x...",
-///   "maxTimeoutSeconds": 300,
-///   "extra": {}
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentRequirements {
-    /// Payment scheme identifier (e.g., "exact").
-    pub scheme: String,
-
-    /// CAIP-2 network identifier (e.g., "eip155:8453").
-    pub network: Network,
-
-    /// Asset address/identifier (e.g., USDC contract address).
-    pub asset: String,
-
-    /// Amount in smallest unit (e.g., "1000000" for 1 USDC).
-    pub amount: String,
-
-    /// Recipient address.
-    pub pay_to: String,
-
-    /// Maximum time in seconds for payment validity.
-    pub max_timeout_seconds: u64,
-
-    /// Additional scheme-specific data (e.g., EIP-712 domain params).
-    #[serde(default = "default_empty_object")]
-    pub extra: Value,
-}
-
-impl PaymentRequirements {
-    /// Returns the payment amount.
-    #[must_use]
-    pub fn amount(&self) -> &str {
-        &self.amount
+impl PartialEq<u8> for X402Version2 {
+    fn eq(&self, other: &u8) -> bool {
+        *other == Self::VALUE
     }
+}
 
-    /// Returns the extra metadata, or `None` if it is null.
-    #[must_use]
-    pub fn extra(&self) -> Option<&Value> {
-        if self.extra.is_null() {
-            None
+impl From<X402Version2> for u8 {
+    fn from(_: X402Version2) -> Self {
+        X402Version2::VALUE
+    }
+}
+
+impl Serialize for X402Version2 {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(Self::VALUE)
+    }
+}
+
+impl<'de> Deserialize<'de> for X402Version2 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let num = u8::deserialize(deserializer)?;
+        if num == Self::VALUE {
+            Ok(Self)
         } else {
-            Some(&self.extra)
+            Err(serde::de::Error::custom(format!(
+                "expected version {}, got {}",
+                Self::VALUE,
+                num
+            )))
         }
     }
 }
 
-/// V2 402 response structure.
+impl Display for X402Version2 {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", Self::VALUE)
+    }
+}
+
+/// Response from a V2 payment verification request.
 ///
-/// Sent by the resource server when payment is required. Contains the list of
-/// accepted payment options and optional resource information.
+/// V2 uses the same response format as V1.
+pub type VerifyResponse = v1::VerifyResponse;
+
+/// Response from a V2 payment settlement request.
 ///
-/// Corresponds to Python SDK's `PaymentRequired` in `schemas/payments.py`.
+/// V2 uses the same response format as V1.
+pub type SettleResponse = v1::SettleResponse;
+
+/// Metadata about the resource being paid for.
 ///
-/// # JSON Format
+/// This provides human-readable information about what the buyer is paying for.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceInfo {
+    /// Human-readable description of the resource.
+    pub description: String,
+    /// MIME type of the resource content.
+    pub mime_type: String,
+    /// URL of the resource.
+    pub url: String,
+}
+
+/// Request to verify a V2 payment.
 ///
-/// ```json
-/// {
-///   "x402Version": 2,
-///   "error": null,
-///   "resource": { "url": "/api/data", "description": "Market data" },
-///   "accepts": [{ "scheme": "exact", "network": "eip155:8453", ... }],
-///   "extensions": null
-/// }
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Contains the payment payload and requirements for verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyRequest<TPayload, TRequirements> {
+    /// Protocol version (always 2).
+    pub x402_version: X402Version2,
+    /// The signed payment authorization.
+    pub payment_payload: TPayload,
+    /// The payment requirements to verify against.
+    pub payment_requirements: TRequirements,
+}
+
+impl<TPayload, TRequirements> VerifyRequest<TPayload, TRequirements>
+where
+    Self: DeserializeOwned,
+{
+    /// Deserializes a V2 verify request from a protocol-level request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
+    pub fn from_proto(
+        request: proto::VerifyRequest,
+    ) -> Result<Self, proto::PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
+    }
+}
+
+/// A signed payment authorization from the buyer (V2 format).
+///
+/// In V2, the payment payload includes the accepted requirements, allowing
+/// the facilitator to verify that the buyer agreed to specific terms.
+///
+/// # Type Parameters
+///
+/// - `TAccepted` - The accepted requirements type
+/// - `TPayload` - The scheme-specific payload type
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentPayload<TAccepted, TPayload> {
+    /// The payment requirements the buyer accepted.
+    pub accepted: TAccepted,
+    /// The scheme-specific signed payload.
+    pub payload: TPayload,
+    /// Information about the resource being paid for.
+    pub resource: Option<ResourceInfo>,
+    /// Protocol version (always 2).
+    pub x402_version: X402Version2,
+}
+
+/// Payment requirements set by the seller (V2 format).
+///
+/// Defines the terms under which a payment will be accepted. V2 uses
+/// CAIP-2 chain IDs and has a simplified structure compared to V1.
+///
+/// # Type Parameters
+///
+/// - `TScheme` - The scheme identifier type (default: `String`)
+/// - `TAmount` - The amount type (default: `String`)
+/// - `TAddress` - The address type (default: `String`)
+/// - `TExtra` - Scheme-specific extra data type (default: `serde_json::Value`)
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentRequirements<
+    TScheme = String,
+    TAmount = String,
+    TAddress = String,
+    TExtra = serde_json::Value,
+> {
+    /// The payment scheme (e.g., "exact").
+    pub scheme: TScheme,
+    /// The CAIP-2 chain ID (e.g., "eip155:8453").
+    pub network: ChainId,
+    /// The payment amount in token units.
+    pub amount: TAmount,
+    /// The recipient address for payment.
+    pub pay_to: TAddress,
+    /// Maximum time in seconds for payment validity.
+    pub max_timeout_seconds: u64,
+    /// The token asset address.
+    pub asset: TAddress,
+    /// Scheme-specific extra data.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<TExtra>,
+}
+
+impl PaymentRequirements {
+    /// Converts the payment requirements to a concrete type.
+    #[allow(dead_code)] // Public for consumption by downstream crates.
+    #[must_use]
+    pub fn as_concrete<
+        TScheme: FromStr,
+        TAmount: FromStr,
+        TAddress: FromStr,
+        TExtra: DeserializeOwned,
+    >(
+        &self,
+    ) -> Option<PaymentRequirements<TScheme, TAmount, TAddress, TExtra>> {
+        let scheme = self.scheme.parse::<TScheme>().ok()?;
+        let amount = self.amount.parse::<TAmount>().ok()?;
+        let pay_to = self.pay_to.parse::<TAddress>().ok()?;
+        let asset = self.asset.parse::<TAddress>().ok()?;
+        let extra = self
+            .extra
+            .as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        Some(PaymentRequirements {
+            scheme,
+            network: self.network.clone(),
+            amount,
+            pay_to,
+            max_timeout_seconds: self.max_timeout_seconds,
+            asset,
+            extra,
+        })
+    }
+}
+
+/// HTTP 402 Payment Required response body for V2.
+///
+/// This is returned when a resource requires payment. It contains
+/// the list of acceptable payment methods and resource metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequired {
-    /// Protocol version (always 2 for V2).
-    #[serde(default = "default_v2")]
-    pub x402_version: u32,
-
-    /// Optional error message.
+    /// Protocol version (always 2).
+    pub x402_version: X402Version2,
+    /// Optional error message if the request was malformed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-
-    /// Optional resource information.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<ResourceInfo>,
-
-    /// List of accepted payment requirements.
+    /// Information about the resource being paid for.
+    pub resource: ResourceInfo,
+    /// List of acceptable payment methods.
+    #[serde(default)]
     pub accepts: Vec<PaymentRequirements>,
-
-    /// Optional extension data (e.g., bazaar).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<Value>,
 }
 
-/// V2 payment payload structure.
+/// Builder for creating V2 payment requirements.
 ///
-/// Sent by the client to fulfill a payment requirement. Contains the
-/// scheme-specific payload and the accepted requirements.
+/// A `PriceTag` wraps [`PaymentRequirements`] and provides enrichment
+/// capabilities for adding facilitator-specific data.
 ///
-/// Corresponds to Python SDK's `PaymentPayload` in `schemas/payments.py`.
+/// # Example
 ///
-/// # JSON Format
+/// ```rust
+/// use r402::proto::v2::{PriceTag, PaymentRequirements};
+/// use r402::chain::ChainId;
 ///
-/// ```json
-/// {
-///   "x402Version": 2,
-///   "payload": { "authorization": {...}, "signature": "0x..." },
-///   "accepted": { "scheme": "exact", "network": "eip155:8453", ... },
-///   "resource": null,
-///   "extensions": null
-/// }
+/// let requirements = PaymentRequirements {
+///     scheme: "exact".to_string(),
+///     network: "eip155:8453".parse().unwrap(),
+///     amount: "1000000".to_string(),
+///     pay_to: "0x1234...".to_string(),
+///     asset: "0xUSDC...".to_string(),
+///     max_timeout_seconds: 300,
+///     extra: None,
+/// };
+///
+/// let price = PriceTag {
+///     requirements,
+///     enricher: None,
+/// };
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaymentPayload {
-    /// Protocol version (always 2 for V2).
-    #[serde(default = "default_v2")]
-    pub x402_version: u32,
-
-    /// Scheme-specific payload data.
-    pub payload: Value,
-
-    /// The payment requirements being fulfilled.
-    pub accepted: PaymentRequirements,
-
-    /// Optional resource information.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub resource: Option<ResourceInfo>,
-
-    /// Optional extension data.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<Value>,
+#[derive(Clone)]
+#[allow(dead_code)] // Public for consumption by downstream crates.
+pub struct PriceTag {
+    /// The payment requirements.
+    pub requirements: PaymentRequirements,
+    /// Optional enrichment function for adding facilitator-specific data.
+    #[doc(hidden)]
+    pub enricher: Option<Enricher>,
 }
 
-impl PaymentPayload {
-    /// Returns the payment scheme from accepted requirements.
-    #[must_use]
-    pub fn scheme(&self) -> &str {
-        &self.accepted.scheme
-    }
-
-    /// Returns the network from accepted requirements.
-    #[must_use]
-    pub fn network(&self) -> &str {
-        &self.accepted.network
+impl fmt::Debug for PriceTag {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PriceTag")
+            .field("requirements", &self.requirements)
+            .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))
+            .finish()
     }
 }
 
-/// Request to verify a payment.
+/// Enrichment function type for V2 price tags.
 ///
-/// Corresponds to Python SDK's `VerifyRequest` in `schemas/responses.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyRequest {
-    /// The payment payload to verify.
-    pub payment_payload: PaymentPayload,
+/// Enrichers are called with the facilitator's capabilities to add
+/// facilitator-specific data to price tags (e.g., fee payer addresses).
+pub type Enricher = Arc<dyn Fn(&mut PriceTag, &SupportedResponse) + Send + Sync>;
 
-    /// The requirements to verify against.
-    pub payment_requirements: PaymentRequirements,
+impl PriceTag {
+    /// Applies the enrichment function if one is set.
+    ///
+    /// This is called automatically when building payment requirements
+    /// to add facilitator-specific data.
+    #[allow(dead_code)]
+    pub fn enrich(&mut self, capabilities: &SupportedResponse) {
+        if let Some(enricher) = self.enricher.clone() {
+            enricher(self, capabilities);
+        }
+    }
+
+    /// Sets the maximum timeout for this price tag.
+    #[allow(dead_code)]
+    #[must_use]
+    pub const fn with_timeout(mut self, seconds: u64) -> Self {
+        self.requirements.max_timeout_seconds = seconds;
+        self
+    }
 }
 
-/// Request to settle a payment.
+/// Compares a [`PriceTag`] with [`PaymentRequirements`].
 ///
-/// Corresponds to Python SDK's `SettleRequest` in `schemas/responses.py`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SettleRequest {
-    /// The payment payload to settle.
-    pub payment_payload: PaymentPayload,
-
-    /// The requirements for settlement.
-    pub payment_requirements: PaymentRequirements,
-}
-
-const fn default_v2() -> u32 {
-    2
-}
-
-fn default_empty_object() -> Value {
-    Value::Object(serde_json::Map::new())
+/// This allows checking if a price tag matches specific requirements.
+impl PartialEq<PaymentRequirements> for PriceTag {
+    fn eq(&self, b: &PaymentRequirements) -> bool {
+        let a = &self.requirements;
+        a == b
+    }
 }

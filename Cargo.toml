@@ -4,20 +4,56 @@ default-members = ["r402"]
 resolver = "3"
 
 [workspace.package]
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
-r402 = { version = "0.2", path = "r402" }
-r402-evm = { version = "0.2", path = "r402-evm" }
-r402-facilitator = { version = "0.2", path = "r402-facilitator" }
-r402-http = { version = "0.2", path = "r402-http" }
-r402-svm = { version = "0.2", path = "r402-svm" }
+# Internal crates
+r402 = { version = "0.3", path = "r402" }
+r402-evm = { version = "0.3", path = "r402-evm" }
+r402-facilitator = { version = "0.3", path = "r402-facilitator" }
+r402-http = { version = "0.3", path = "r402-http" }
+r402-svm = { version = "0.3", path = "r402-svm" }
 
+# Core
 async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+serde_with = "3"
+thiserror = "2"
+
+# Runtime
+futures-util = "0.3"
+tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+
+# Web
+axum = "0.8"
+axum-core = "0.5"
+http = "1.4"
+reqwest = { version = "0.13", features = ["json"] }
+reqwest-middleware = "0.5"
+rustls = { version = "0.23", features = ["ring"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors"] }
+url = { version = "2", features = ["serde"] }
+
+# Utility
+base64 = "0.22"
+bincode = "1.3"
+bs58 = "0.5"
+clap = { version = "4.5", features = ["derive", "env"] }
+dashmap = "6"
+dotenvy = "0.15"
+rand = "0.10"
+regex = "1"
+rust_decimal = "1"
+wiremock = "0.6"
+
+# Alloy (EVM)
 alloy-contract = "1.4"
 alloy-network = "1.4"
 alloy-primitives = { version = "1.4", features = ["k256"] }
@@ -29,26 +65,31 @@ alloy-signer-local = "1.4"
 alloy-sol-types = { version = "1.4", features = ["json"] }
 alloy-transport = { version = "1.4", features = ["throttle"] }
 alloy-transport-http = "1.4"
-dashmap = "6"
-futures = "0.3"
-axum = "0.8"
-getrandom = "0.4"
-axum-core = "0.5"
-base64 = "0.22"
-http = "1"
-reqwest = { version = "0.13", features = ["json"] }
-reqwest-middleware = "0.5"
-rust_decimal = "1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
-thiserror = "2"
-tokio = { version = "1", features = ["sync", "rt-multi-thread", "signal"] }
-toml = "0.9"
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors"] }
+
+# Solana (SVM)
+solana-account = "3"
+solana-client = "3"
+solana-commitment-config = "3"
+solana-compute-budget-interface = "3"
+solana-keypair = "3"
+solana-message = "3"
+solana-pubkey = "4"
+solana-signature = "3"
+solana-signer = "3"
+solana-transaction = "3"
+spl-token = { version = "9", features = ["no-entrypoint"] }
+spl-token-2022 = { version = "10", features = ["no-entrypoint"] }
+
+# Telemetry
+opentelemetry = "0.31"
+opentelemetry_sdk = "0.31"
+opentelemetry-otlp = { version = "0.31", features = ["metrics", "grpc-tonic"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
+opentelemetry-stdout = { version = "0.31", features = ["trace", "metrics"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-url = { version = "2", features = ["serde"] }
+tracing-core = "0.1"
+tracing-opentelemetry = "0.32"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [profile.release]
 codegen-units = 1
