@@ -19,7 +19,7 @@ r402-svm = { version = "0.2", path = "r402-svm" }
 
 async-trait = "0.1"
 alloy-contract = "1.4"
-alloy-network = "1.4"
+alloy-network = "1.6"
 alloy-primitives = { version = "1.4", features = ["k256"] }
 alloy-provider = "1.4"
 alloy-rpc-client = "1.4"
