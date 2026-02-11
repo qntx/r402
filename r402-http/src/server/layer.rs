@@ -38,7 +38,6 @@ use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
-use r402::hooks::FacilitatorHooks;
 use r402::proto::v2;
 
 use super::facilitator_client::FacilitatorClient;
@@ -53,7 +52,6 @@ pub struct X402Middleware<F> {
     facilitator: F,
     base_url: Option<Url>,
     settle_before_execution: bool,
-    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
 impl<F: Clone> Clone for X402Middleware<F> {
@@ -62,7 +60,6 @@ impl<F: Clone> Clone for X402Middleware<F> {
             facilitator: self.facilitator.clone(),
             base_url: self.base_url.clone(),
             settle_before_execution: self.settle_before_execution,
-            hooks: Arc::clone(&self.hooks),
         }
     }
 }
@@ -73,7 +70,6 @@ impl<F: std::fmt::Debug> std::fmt::Debug for X402Middleware<F> {
             .field("facilitator", &self.facilitator)
             .field("base_url", &self.base_url)
             .field("settle_before_execution", &self.settle_before_execution)
-            .field("hooks", &format!("[{} hooks]", self.hooks.len()))
             .finish()
     }
 }
@@ -98,7 +94,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             facilitator: Arc::new(facilitator),
             base_url: None,
             settle_before_execution: false,
-            hooks: Arc::from([]),
         }
     }
 
@@ -113,7 +108,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             facilitator: Arc::new(facilitator),
             base_url: None,
             settle_before_execution: false,
-            hooks: Arc::from([]),
         })
     }
 
@@ -135,7 +129,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             facilitator,
             base_url: self.base_url.clone(),
             settle_before_execution: self.settle_before_execution,
-            hooks: Arc::clone(&self.hooks),
         }
     }
 }
@@ -193,21 +186,6 @@ where
         this.settle_before_execution = false;
         this
     }
-
-    /// Adds a lifecycle hook for the payment gate.
-    ///
-    /// Hooks allow intercepting verify and settle operations for logging,
-    /// custom validation, or error recovery. Multiple hooks are executed
-    /// in registration order.
-    #[must_use]
-    pub fn with_hook(&self, hook: impl FacilitatorHooks + 'static) -> Self {
-        let mut this = self.clone();
-        let mut hooks = (*this.hooks).to_vec();
-        let hook: Arc<dyn FacilitatorHooks> = Arc::new(hook);
-        hooks.push(hook);
-        this.hooks = Arc::from(hooks);
-        this
-    }
 }
 
 impl<TFacilitator> X402Middleware<TFacilitator>
@@ -229,7 +207,6 @@ where
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceInfoBuilder::default()),
             settle_before_execution: self.settle_before_execution,
-            hooks: Arc::clone(&self.hooks),
         }
     }
 
@@ -252,7 +229,6 @@ where
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceInfoBuilder::default()),
             settle_before_execution: self.settle_before_execution,
-            hooks: Arc::clone(&self.hooks),
         }
     }
 }
@@ -269,7 +245,6 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     base_url: Option<Arc<Url>>,
     price_source: TSource,
     resource: Arc<ResourceInfoBuilder>,
-    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
 impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
@@ -339,7 +314,6 @@ where
             base_url: self.base_url.clone(),
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
-            hooks: Arc::clone(&self.hooks),
             inner: BoxCloneSyncService::new(inner),
         }
     }
@@ -362,8 +336,6 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     price_source: TSource,
     /// Resource information
     resource: Arc<ResourceInfoBuilder>,
-    /// Lifecycle hooks
-    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
@@ -390,7 +362,6 @@ where
         let resource_builder = Arc::clone(&self.resource);
         let settle_before_execution = self.settle_before_execution;
         let mut inner = self.inner.clone();
-        let hooks = Arc::clone(&self.hooks);
 
         Box::pin(async move {
             // Resolve price tags from the source
@@ -411,7 +382,6 @@ where
                     settle_before_execution,
                     accepts: Arc::new(accepts),
                     resource,
-                    hooks,
                 };
                 gate.enrich_accepts().await;
                 gate

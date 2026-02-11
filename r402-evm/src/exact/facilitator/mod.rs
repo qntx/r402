@@ -31,7 +31,7 @@ pub use verify::{
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
-use r402::chain::ChainProviderOps;
+use r402::chain::ChainProvider;
 use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::UnixTimestamp;
@@ -95,7 +95,7 @@ pub struct Permit2Payment {
 
 impl<P> SchemeHandlerBuilder<P> for V1Eip155Exact
 where
-    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync + 'static,
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
 {
     fn build(
@@ -109,7 +109,7 @@ where
 
 impl<P> SchemeHandlerBuilder<P> for V2Eip155Exact
 where
-    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync + 'static,
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
 {
     fn build(
@@ -145,7 +145,7 @@ impl<P> V1Eip155ExactFacilitator<P> {
 
 impl<P> Facilitator for V1Eip155ExactFacilitator<P>
 where
-    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
@@ -279,7 +279,7 @@ impl<P> V2Eip155ExactFacilitator<P> {
 
 impl<P> Facilitator for V2Eip155ExactFacilitator<P>
 where
-    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {

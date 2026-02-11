@@ -6,7 +6,7 @@
 //!
 //! [`SchemeRegistry`] holds the active handler instances keyed by chain+scheme.
 
-use crate::chain::{ChainId, ChainProviderOps};
+use crate::chain::{ChainId, ChainProvider};
 use crate::facilitator::Facilitator;
 
 use std::collections::HashMap;
@@ -121,7 +121,7 @@ impl SchemeRegistry {
     /// # Errors
     ///
     /// Returns an error if the handler cannot be built from the provider.
-    pub fn register<P: ChainProviderOps>(
+    pub fn register<P: ChainProvider>(
         &mut self,
         blueprint: &dyn SchemeBlueprint<P>,
         provider: &P,
@@ -165,7 +165,7 @@ impl SchemeRegistry {
     /// # Errors
     ///
     /// Returns an error if the handler cannot be built from the provider.
-    pub fn register_for_namespace<P: ChainProviderOps>(
+    pub fn register_for_namespace<P: ChainProvider>(
         &mut self,
         blueprint: &dyn SchemeBlueprint<P>,
         provider: &P,

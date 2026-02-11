@@ -3,7 +3,7 @@
 //! Contains compute budget checks, instruction validation, transfer verification,
 //! and the settlement function.
 
-use r402::chain::ChainProviderOps;
+use r402::chain::ChainProvider;
 use r402::proto::Base64Bytes;
 use r402::proto::PaymentVerificationError;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
@@ -178,7 +178,7 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
-pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
+pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProvider>(
     provider: &P,
     request: &types::v1::VerifyRequest,
     config: &SolanaExactFacilitatorConfig,
@@ -220,7 +220,7 @@ pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
-pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
+pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProvider>(
     provider: &P,
     request: &types::v2::VerifyRequest,
     config: &SolanaExactFacilitatorConfig,

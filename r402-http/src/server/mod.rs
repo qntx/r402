@@ -39,6 +39,3 @@ pub mod price_source;
 pub use error::{PaygateError, VerificationError};
 pub use layer::{X402LayerBuilder, X402Middleware};
 pub use price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
-
-// Re-export hook types from r402 core for convenience.
-pub use r402::hooks::{FacilitatorHooks, SettleContext, VerifyContext};

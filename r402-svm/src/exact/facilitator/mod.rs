@@ -14,7 +14,7 @@ pub use verify::{
     verify_transaction, verify_transfer_instruction, verify_v1_transfer, verify_v2_transfer,
 };
 
-use r402::chain::ChainProviderOps;
+use r402::chain::ChainProvider;
 use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::{v1, v2};
@@ -29,7 +29,7 @@ use crate::exact::{ExactScheme, SupportedPaymentKindExtra, V1SolanaExact, V2Sola
 
 impl<P> SchemeHandlerBuilder<P> for V1SolanaExact
 where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
+    P: SolanaChainProviderLike + ChainProvider + Send + Sync + 'static,
 {
     fn build(
         &self,
@@ -46,7 +46,7 @@ where
 
 impl<P> SchemeHandlerBuilder<P> for V2SolanaExact
 where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
+    P: SolanaChainProviderLike + ChainProvider + Send + Sync + 'static,
 {
     fn build(
         &self,
@@ -84,7 +84,7 @@ impl<P> V1SolanaExactFacilitator<P> {
 
 impl<P> Facilitator for V1SolanaExactFacilitator<P>
 where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
+    P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
     fn verify(
         &self,
@@ -179,7 +179,7 @@ impl<P> V2SolanaExactFacilitator<P> {
 
 impl<P> Facilitator for V2SolanaExactFacilitator<P>
 where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
+    P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
     fn verify(
         &self,

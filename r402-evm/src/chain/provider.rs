@@ -11,7 +11,7 @@ use alloy_rpc_types_eth::{BlockId, TransactionReceipt, TransactionRequest};
 use alloy_transport::TransportError;
 use alloy_transport::layers::{FallbackLayer, ThrottleLayer};
 use alloy_transport_http::Http;
-use r402::chain::{ChainId, ChainProviderOps};
+use r402::chain::{ChainId, ChainProvider};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -215,7 +215,7 @@ pub struct MetaTransaction {
     pub confirmations: u64,
 }
 
-impl ChainProviderOps for Eip155ChainProvider {
+impl ChainProvider for Eip155ChainProvider {
     fn signer_addresses(&self) -> Vec<String> {
         self.inner
             .signer_addresses()

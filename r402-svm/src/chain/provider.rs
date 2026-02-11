@@ -1,4 +1,4 @@
-use r402::chain::{ChainId, ChainProviderOps};
+use r402::chain::{ChainId, ChainProvider};
 use r402::facilitator::FacilitatorError;
 use r402::proto::PaymentVerificationError;
 use solana_account::Account;
@@ -194,7 +194,7 @@ impl SolanaChainProvider {
     }
 }
 
-impl ChainProviderOps for SolanaChainProvider {
+impl ChainProvider for SolanaChainProvider {
     fn signer_addresses(&self) -> Vec<String> {
         vec![self.fee_payer().to_string()]
     }

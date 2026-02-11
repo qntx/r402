@@ -6,7 +6,7 @@
 //! - [`ChainId`] - A CAIP-2 compliant chain identifier (e.g., `eip155:8453` for Base)
 //! - [`ChainIdPattern`] - Pattern matching for chain IDs (exact, wildcard, or set)
 //! - [`ChainRegistry`] - Registry of configured chain providers
-//! - [`ChainProviderOps`] - Common operations on chain providers
+//! - [`ChainProvider`] - Common operations on chain providers
 //! - [`DeployedTokenAmount`] - Token amount paired with deployment info
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
@@ -301,7 +301,7 @@ impl From<ChainId> for ChainIdPattern {
 ///
 /// This trait provides a unified interface for querying chain provider metadata
 /// regardless of the underlying blockchain type.
-pub trait ChainProviderOps {
+pub trait ChainProvider {
     /// Returns the addresses of all configured signers for this chain.
     ///
     /// For EVM chains, these are Ethereum addresses (0x-prefixed hex).
@@ -312,7 +312,7 @@ pub trait ChainProviderOps {
     fn chain_id(&self) -> ChainId;
 }
 
-impl<T: ChainProviderOps> ChainProviderOps for Arc<T> {
+impl<T: ChainProvider> ChainProvider for Arc<T> {
     fn signer_addresses(&self) -> Vec<String> {
         (**self).signer_addresses()
     }
