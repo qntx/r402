@@ -56,10 +56,7 @@ impl<S> ReqwestWithPayments<Self, S> for Client {
 }
 
 impl<S> ReqwestWithPayments<Self, S> for ClientBuilder {
-    fn with_payments(
-        self,
-        x402_client: X402Client<S>,
-    ) -> ReqwestWithPaymentsBuilder<Self, S> {
+    fn with_payments(self, x402_client: X402Client<S>) -> ReqwestWithPaymentsBuilder<Self, S> {
         ReqwestWithPaymentsBuilder {
             inner: self,
             x402_client,

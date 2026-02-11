@@ -20,8 +20,7 @@
 //! The crate is organized into several modules:
 //!
 //! - [`chain`] - Core EVM chain types, providers, and configuration
-//! - [`v1_eip155_exact`] - V1 protocol implementation with network names
-//! - [`v2_eip155_exact`] - V2 protocol implementation with CAIP-2 chain IDs
+//! - [`exact`] - EIP-155 "exact" payment scheme (V1 + V2)
 //!
 //! # Feature Flags
 //!
@@ -78,16 +77,12 @@
 //! ```
 
 pub mod chain;
-pub mod v1_eip155_exact;
-pub mod v2_eip155_exact;
+pub mod exact;
 
 mod networks;
 pub use networks::*;
 
-pub use v1_eip155_exact::V1Eip155Exact;
-pub use v2_eip155_exact::V2Eip155Exact;
+pub use exact::{V1Eip155Exact, V2Eip155Exact};
 
 #[cfg(feature = "client")]
-pub use v1_eip155_exact::client::V1Eip155ExactClient;
-#[cfg(feature = "client")]
-pub use v2_eip155_exact::client::V2Eip155ExactClient;
+pub use exact::client::{V1Eip155ExactClient, V2Eip155ExactClient};

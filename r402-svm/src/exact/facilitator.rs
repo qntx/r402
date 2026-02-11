@@ -1,6 +1,12 @@
+//! Facilitator-side payment verification and settlement for Solana exact scheme.
+//!
+//! This module implements the facilitator logic for verifying and settling SPL Token
+//! payments on Solana. It handles both V1 (network names) and V2 (CAIP-2 chain IDs)
+//! protocol versions through shared core logic.
+
 use r402::chain::{ChainId, ChainProviderOps};
 use r402::proto;
-use r402::proto::{PaymentVerificationError, v1};
+use r402::proto::{PaymentVerificationError, v1, v2};
 use r402::scheme::{
     X402SchemeFacilitator, X402SchemeFacilitatorBuilder, X402SchemeFacilitatorError,
 };
@@ -18,13 +24,102 @@ use std::collections::HashMap;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use crate::V1SolanaExact;
 use crate::chain::Address;
 use crate::chain::provider::{SolanaChainProviderError, SolanaChainProviderLike};
-use crate::v1_solana_exact::types;
-use crate::v1_solana_exact::types::{
-    ATA_PROGRAM_PUBKEY, PHANTOM_LIGHTHOUSE_PROGRAM, SolanaExactError, TransactionInt,
+use crate::exact::types::{self, SolanaExactError, TransactionInt};
+use crate::exact::{
+    ATA_PROGRAM_PUBKEY, ExactScheme, PHANTOM_LIGHTHOUSE_PROGRAM, SupportedPaymentKindExtra,
+    V1SolanaExact, V2SolanaExact,
 };
+
+/// Configuration for Solana Exact Facilitator (shared by V1 and V2).
+///
+/// Controls transaction verification behavior, including support for
+/// additional instructions from third-party wallets like Phantom.
+///
+/// By default, the Phantom Lighthouse program is allowed to support
+/// Phantom wallet users on mainnet.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SolanaExactFacilitatorConfig {
+    /// Allow additional instructions beyond the required ones.
+    /// Default: true (to support Phantom Lighthouse)
+    #[serde(default = "default_allow_additional_instructions")]
+    pub allow_additional_instructions: bool,
+
+    /// Maximum number of instructions allowed in a transaction.
+    /// Default: 10
+    #[serde(default = "default_max_instruction_count")]
+    pub max_instruction_count: usize,
+
+    /// Explicitly allowed program IDs for additional instructions.
+    /// Only checked if `allow_additional_instructions` is true.
+    ///
+    /// Default: [Phantom Lighthouse program]
+    ///
+    /// SECURITY: If this list is empty and `allow_additional_instructions` is true,
+    /// ALL additional instructions will be rejected. You must explicitly whitelist
+    /// the programs you want to allow.
+    #[serde(default = "default_allowed_program_ids")]
+    pub allowed_program_ids: Vec<Address>,
+
+    /// Blocked program IDs (always rejected, takes precedence over allowed).
+    #[serde(default)]
+    pub blocked_program_ids: Vec<Address>,
+
+    /// SECURITY: Require fee payer is NOT present in any instruction's accounts.
+    /// Default: true - strongly recommended to keep this enabled
+    #[serde(default = "default_require_fee_payer_not_in_instructions")]
+    pub require_fee_payer_not_in_instructions: bool,
+}
+
+const fn default_allow_additional_instructions() -> bool {
+    true
+}
+
+const fn default_max_instruction_count() -> usize {
+    10
+}
+
+fn default_allowed_program_ids() -> Vec<Address> {
+    vec![Address::new(*PHANTOM_LIGHTHOUSE_PROGRAM)]
+}
+
+const fn default_require_fee_payer_not_in_instructions() -> bool {
+    true
+}
+
+impl Default for SolanaExactFacilitatorConfig {
+    fn default() -> Self {
+        Self {
+            allow_additional_instructions: default_allow_additional_instructions(),
+            max_instruction_count: default_max_instruction_count(),
+            allowed_program_ids: default_allowed_program_ids(),
+            blocked_program_ids: Vec::new(),
+            require_fee_payer_not_in_instructions: default_require_fee_payer_not_in_instructions(),
+        }
+    }
+}
+
+impl SolanaExactFacilitatorConfig {
+    /// Check if a program ID is in the blocked list.
+    #[must_use]
+    pub fn is_blocked(&self, program_id: &Pubkey) -> bool {
+        self.blocked_program_ids
+            .iter()
+            .any(|addr| addr.pubkey() == program_id)
+    }
+
+    /// Check if a program ID is in the allowed list.
+    ///
+    /// SECURITY: If the allowed list is empty, NO programs are allowed.
+    #[must_use]
+    pub fn is_allowed(&self, program_id: &Pubkey) -> bool {
+        self.allowed_program_ids
+            .iter()
+            .any(|addr| addr.pubkey() == program_id)
+    }
+}
 
 impl<P> X402SchemeFacilitatorBuilder<P> for V1SolanaExact
 where
@@ -36,18 +131,34 @@ where
         config: Option<serde_json::Value>,
     ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
         let config = config
-            .map(serde_json::from_value::<V1SolanaExactFacilitatorConfig>)
+            .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
             .transpose()?
             .unwrap_or_default();
-
         Ok(Box::new(V1SolanaExactFacilitator::new(provider, config)))
+    }
+}
+
+impl<P> X402SchemeFacilitatorBuilder<P> for V2SolanaExact
+where
+    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
+{
+    fn build(
+        &self,
+        provider: P,
+        config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+        let config = config
+            .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
+            .transpose()?
+            .unwrap_or_default();
+        Ok(Box::new(V2SolanaExactFacilitator::new(provider, config)))
     }
 }
 
 /// Facilitator for V1 Solana exact scheme payments.
 pub struct V1SolanaExactFacilitator<P> {
     provider: P,
-    config: V1SolanaExactFacilitatorConfig,
+    config: SolanaExactFacilitatorConfig,
 }
 
 impl<P> std::fmt::Debug for V1SolanaExactFacilitator<P> {
@@ -60,7 +171,7 @@ impl<P> std::fmt::Debug for V1SolanaExactFacilitator<P> {
 
 impl<P> V1SolanaExactFacilitator<P> {
     /// Creates a new V1 Solana exact facilitator.
-    pub const fn new(provider: P, config: V1SolanaExactFacilitatorConfig) -> Self {
+    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
         Self { provider, config }
     }
 }
@@ -70,31 +181,21 @@ impl<P> X402SchemeFacilitator for V1SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
 {
-    /// Verifies a payment request against on-chain state.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`X402SchemeFacilitatorError`] if verification fails.
     async fn verify(
         &self,
         request: &proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::VerifyRequest::from_proto(request.clone())?;
-        let verification = verify_transfer(&self.provider, &request, &self.config).await?;
+        let request = types::v1::VerifyRequest::from_proto(request.clone())?;
+        let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
         Ok(v1::VerifyResponse::valid(verification.payer.to_string()).into())
     }
 
-    /// Settles a verified payment by signing and sending the transaction.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`X402SchemeFacilitatorError`] if settling fails.
     async fn settle(
         &self,
         request: &proto::SettleRequest,
     ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::SettleRequest::from_proto(request.clone())?;
-        let verification = verify_transfer(&self.provider, &request, &self.config).await?;
+        let request = types::v1::SettleRequest::from_proto(request.clone())?;
+        let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
         let payer = verification.payer.to_string();
         let tx_sig = settle_transaction(&self.provider, verification).await?;
         Ok(v1::SettleResponse::Success {
@@ -105,27 +206,98 @@ where
         .into())
     }
 
-    /// Returns supported payment kinds and signers.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`X402SchemeFacilitatorError`] if retrieval fails.
     async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
         let chain_id = self.provider.chain_id();
         let kinds: Vec<proto::SupportedPaymentKind> = {
             let mut kinds = Vec::with_capacity(1);
             let fee_payer = self.provider.fee_payer();
-            let extra = serde_json::to_value(types::SupportedPaymentKindExtra { fee_payer }).ok();
+            let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
             let network = chain_id.as_network_name();
             if let Some(network) = network {
                 kinds.push(proto::SupportedPaymentKind {
                     x402_version: v1::X402Version1.into(),
-                    scheme: types::ExactScheme.to_string(),
+                    scheme: ExactScheme.to_string(),
                     network: network.to_string(),
                     extra,
                 });
             }
             kinds
+        };
+        let signers = {
+            let mut signers = HashMap::with_capacity(1);
+            signers.insert(chain_id, self.provider.signer_addresses());
+            signers
+        };
+        Ok(proto::SupportedResponse {
+            kinds,
+            extensions: Vec::new(),
+            signers,
+        })
+    }
+}
+
+/// Facilitator for V2 Solana exact scheme payments.
+pub struct V2SolanaExactFacilitator<P> {
+    provider: P,
+    config: SolanaExactFacilitatorConfig,
+}
+
+impl<P> std::fmt::Debug for V2SolanaExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2SolanaExactFacilitator")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P> V2SolanaExactFacilitator<P> {
+    /// Creates a new V2 Solana exact facilitator.
+    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
+        Self { provider, config }
+    }
+}
+
+#[async_trait::async_trait]
+impl<P> X402SchemeFacilitator for V2SolanaExactFacilitator<P>
+where
+    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
+{
+    async fn verify(
+        &self,
+        request: &proto::VerifyRequest,
+    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
+        let request = types::v2::VerifyRequest::from_proto(request.clone())?;
+        let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+        Ok(v2::VerifyResponse::valid(verification.payer.to_string()).into())
+    }
+
+    async fn settle(
+        &self,
+        request: &proto::SettleRequest,
+    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
+        let request = types::v2::SettleRequest::from_proto(request.clone())?;
+        let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+        let payer = verification.payer.to_string();
+        let tx_sig = settle_transaction(&self.provider, verification).await?;
+        Ok(v2::SettleResponse::Success {
+            payer,
+            transaction: tx_sig.to_string(),
+            network: self.provider.chain_id().to_string(),
+        }
+        .into())
+    }
+
+    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
+        let chain_id = self.provider.chain_id();
+        let kinds: Vec<proto::SupportedPaymentKind> = {
+            let fee_payer = self.provider.fee_payer();
+            let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
+            vec![proto::SupportedPaymentKind {
+                x402_version: v2::X402Version2.into(),
+                scheme: ExactScheme.to_string(),
+                network: chain_id.to_string(),
+                extra,
+            }]
         };
         let signers = {
             let mut signers = HashMap::with_capacity(1);
@@ -182,7 +354,6 @@ pub fn verify_compute_limit_instruction(
     let account = instruction.program_id(transaction.message.static_account_keys());
     let data = instruction.data.as_slice();
 
-    // Verify program ID, discriminator, and data length (1 byte discriminator + 4 bytes u32)
     if ComputeBudgetInstructionId.ne(account)
         || data.first().copied().unwrap_or(0) != 2
         || data.len() != 5
@@ -190,7 +361,6 @@ pub fn verify_compute_limit_instruction(
         return Err(SolanaExactError::InvalidComputeLimitInstruction);
     }
 
-    // Parse compute unit limit (u32 in little-endian)
     let mut buf = [0u8; 4];
     buf.copy_from_slice(&data[1..5]);
     let compute_units = u32::from_le_bytes(buf);
@@ -218,7 +388,6 @@ pub fn verify_compute_price_instruction(
     if compute_budget.ne(account) || data.first().copied().unwrap_or(0) != 3 || data.len() != 9 {
         return Err(SolanaExactError::InvalidComputePriceInstruction);
     }
-    // It is ComputeBudgetInstruction definitely by now!
     let mut buf = [0u8; 8];
     buf.copy_from_slice(&data[1..]);
     let microlamports = u64::from_le_bytes(buf);
@@ -230,55 +399,41 @@ pub fn verify_compute_price_instruction(
 
 /// Validates the instruction structure of the transaction.
 ///
-/// Required structure:
-/// - Index 0: `SetComputeUnitLimit` instruction
-/// - Index 1: `SetComputeUnitPrice` instruction
-/// - Index 2: `TransferChecked` instruction (Token or Token-2022)
-/// - Index 3+: Additional instructions (only if `allow_additional_instructions` is true)
-///
-/// NOTE: `CreateATA` is NOT supported. The destination ATA must exist before payment.
 /// # Errors
 ///
 /// Returns [`SolanaExactError`] if instruction validation fails.
 pub fn validate_instructions(
     transaction: &VersionedTransaction,
-    config: &V1SolanaExactFacilitatorConfig,
+    config: &SolanaExactFacilitatorConfig,
 ) -> Result<(), SolanaExactError> {
     let instructions = transaction.message.instructions();
 
-    // Minimum: ComputeLimit + ComputePrice + TransferChecked
     if instructions.len() < 3 {
         return Err(SolanaExactError::TooFewInstructions);
     }
 
-    // Check maximum instruction count
     if instructions.len() > config.max_instruction_count {
         return Err(SolanaExactError::InstructionCountExceedsMax(
             config.max_instruction_count,
         ));
     }
 
-    // Verify instruction at index 2 is a token transfer (NOT CreateATA)
     let ix2_program = get_program_id(transaction, 2);
     if ix2_program == Some(ATA_PROGRAM_PUBKEY) {
         return Err(SolanaExactError::CreateATANotSupported);
     }
 
-    // Validate additional instructions (if any beyond the required 3)
     if instructions.len() > 3 {
         if !config.allow_additional_instructions {
             return Err(SolanaExactError::AdditionalInstructionsNotAllowed);
         }
 
-        // Validate each additional instruction (starting at index 3)
         for i in 3..instructions.len() {
             if let Some(program_id) = get_program_id(transaction, i) {
-                // Check blocked list first (takes precedence)
                 if config.is_blocked(&program_id) {
                     return Err(SolanaExactError::BlockedProgram(program_id));
                 }
 
-                // Check allowed list - must be explicitly whitelisted
                 if !config.is_allowed(&program_id) {
                     return Err(SolanaExactError::ProgramNotAllowed(program_id));
                 }
@@ -295,21 +450,31 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
     Some(*instruction.program_id(account_keys))
 }
 
-/// Verifies a transfer request against on-chain state.
+/// Required fields for validating a transfer.
+#[derive(Debug)]
+pub struct TransferRequirement<'a> {
+    /// Expected asset (mint) address.
+    pub asset: &'a Address,
+    /// Expected recipient address.
+    pub pay_to: &'a Address,
+    /// Expected transfer amount in base units.
+    pub amount: u64,
+}
+
+/// Verifies a V1 transfer request against on-chain state.
 ///
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
 #[allow(clippy::future_not_send)]
-pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
+pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
     provider: &P,
-    request: &types::VerifyRequest,
-    config: &V1SolanaExactFacilitatorConfig,
+    request: &types::v1::VerifyRequest,
+    config: &SolanaExactFacilitatorConfig,
 ) -> Result<VerifyTransferResult, PaymentVerificationError> {
     let payload = &request.payment_payload;
     let requirements = &request.payment_requirements;
 
-    // Assert valid payment START
     let chain_id = provider.chain_id();
     let payload_chain_id = ChainId::from_network_name(&payload.network)
         .ok_or(PaymentVerificationError::UnsupportedChain)?;
@@ -327,14 +492,52 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
         asset: &requirements.asset,
         amount: requirements.max_amount_required.inner(),
     };
-    let result = verify_transaction(
+    verify_transaction(
         provider,
         transaction_b64_string,
         &transfer_requirement,
         config,
     )
-    .await?;
-    Ok(result)
+    .await
+}
+
+/// Verifies a V2 transfer request against on-chain state.
+///
+/// # Errors
+///
+/// Returns [`PaymentVerificationError`] if the transfer is invalid.
+#[allow(clippy::future_not_send)]
+pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
+    provider: &P,
+    request: &types::v2::VerifyRequest,
+    config: &SolanaExactFacilitatorConfig,
+) -> Result<VerifyTransferResult, PaymentVerificationError> {
+    let payload = &request.payment_payload;
+    let requirements = &request.payment_requirements;
+
+    let accepted = &payload.accepted;
+    if accepted != requirements {
+        return Err(PaymentVerificationError::AcceptedRequirementsMismatch);
+    }
+
+    let chain_id = provider.chain_id();
+    let payload_chain_id = &accepted.network;
+    if payload_chain_id != &chain_id {
+        return Err(PaymentVerificationError::UnsupportedChain);
+    }
+    let transaction_b64_string = payload.payload.transaction.clone();
+    let transfer_requirement = TransferRequirement {
+        pay_to: &requirements.pay_to,
+        asset: &requirements.asset,
+        amount: requirements.amount.inner(),
+    };
+    verify_transaction(
+        provider,
+        transaction_b64_string,
+        &transfer_requirement,
+        config,
+    )
+    .await
 }
 
 /// Verifies a base64-encoded transaction against requirements.
@@ -347,7 +550,7 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
     provider: &P,
     transaction_b64_string: String,
     transfer_requirement: &TransferRequirement<'_>,
-    config: &V1SolanaExactFacilitatorConfig,
+    config: &SolanaExactFacilitatorConfig,
 ) -> Result<VerifyTransferResult, PaymentVerificationError> {
     let bytes = Base64Bytes::from(transaction_b64_string.as_bytes())
         .decode()
@@ -355,7 +558,6 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
     let transaction = bincode::deserialize::<VersionedTransaction>(bytes.as_slice())
         .map_err(|e| SolanaExactError::TransactionDecoding(e.to_string()))?;
 
-    // Verify compute instructions
     let compute_units = verify_compute_limit_instruction(&transaction, 0)?;
     if compute_units > provider.max_compute_unit_limit() {
         return Err(SolanaExactError::MaxComputeUnitLimitExceeded.into());
@@ -364,14 +566,11 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
     tracing::debug!(compute_units = compute_units, "Verified compute unit limit");
     verify_compute_price_instruction(provider.max_compute_unit_price(), &transaction, 1)?;
 
-    // Flexible instruction validation (replaces old instruction count check)
     validate_instructions(&transaction, config)?;
 
-    // Transfer instruction is ALWAYS at index 2 (CreateATA no longer supported)
     let transfer_instruction =
         verify_transfer_instruction(provider, &transaction, 2, transfer_requirement).await?;
 
-    // Fee payer safety check (configurable but defaults to enabled)
     if config.require_fee_payer_not_in_instructions {
         let fee_payer_pubkey = provider.pubkey();
         for instruction in transaction.message.instructions() {
@@ -389,7 +588,6 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
         }
     }
 
-    // Sign and simulate transaction
     let tx = TransactionInt::new(transaction.clone()).sign(provider)?;
     let cfg = RpcSimulateTransactionConfig {
         sig_verify: false,
@@ -405,17 +603,6 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
         .await?;
     let payer: Address = transfer_instruction.authority.into();
     Ok(VerifyTransferResult { payer, transaction })
-}
-
-/// Required fields for validating a transfer.
-#[derive(Debug)]
-pub struct TransferRequirement<'a> {
-    /// Expected asset (mint) address.
-    pub asset: &'a Address,
-    /// Expected recipient address.
-    pub pay_to: &'a Address,
-    /// Expected transfer amount in base units.
-    pub amount: u64,
 }
 
 /// Verifies the SPL Token transfer instruction at the given index.
@@ -445,13 +632,9 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         else {
             return Err(SolanaExactError::InvalidTokenInstruction.into());
         };
-        // Source = 0
         let source = instruction.account(0)?;
-        // Mint = 1
         let mint = instruction.account(1)?;
-        // Destination = 2
         let destination = instruction.account(2)?;
-        // Authority = 3
         let authority = instruction.account(3)?;
         TransferCheckedInstruction {
             amount,
@@ -472,13 +655,9 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         else {
             return Err(SolanaExactError::InvalidTokenInstruction.into());
         };
-        // Source = 0
         let source = instruction.account(0)?;
-        // Mint = 1
         let mint = instruction.account(1)?;
-        // Destination = 2
         let destination = instruction.account(2)?;
-        // Authority = 3
         let authority = instruction.account(3)?;
         TransferCheckedInstruction {
             amount,
@@ -492,19 +671,16 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         return Err(SolanaExactError::InvalidTokenInstruction.into());
     };
 
-    // Verify that the fee payer is not transferring funds (not the authority)
     let fee_payer_pubkey = provider.pubkey();
     if transfer_checked_instruction.authority == fee_payer_pubkey {
         return Err(SolanaExactError::FeePayerTransferringFunds.into());
     }
 
-    // Verify that the mint matches the expected asset
     if Address::new(transfer_checked_instruction.mint) != *transfer_requirement.asset {
         return Err(PaymentVerificationError::AssetMismatch);
     }
 
     let token_program = transfer_checked_instruction.token_program;
-    // findAssociatedTokenPda
     let (ata, _) = Pubkey::find_program_address(
         &[
             transfer_requirement.pay_to.as_ref(),
@@ -523,7 +699,6 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     if is_sender_missing {
         return Err(SolanaExactError::MissingSenderAccount.into());
     }
-    // Destination ATA must exist (CreateATA no longer supported)
     let is_receiver_missing = accounts.get(1).cloned().is_none_or(|a| a.is_none());
     if is_receiver_missing {
         return Err(PaymentVerificationError::RecipientMismatch);
@@ -546,7 +721,6 @@ pub async fn settle_transaction<P: SolanaChainProviderLike>(
     verification: VerifyTransferResult,
 ) -> Result<Signature, SolanaChainProviderError> {
     let tx = TransactionInt::new(verification.transaction).sign(provider)?;
-    // Verify if fully signed
     if !tx.is_fully_signed() {
         #[cfg(feature = "telemetry")]
         tracing::event!(Level::WARN, status = "failed", "undersigned transaction");
@@ -558,97 +732,4 @@ pub async fn settle_transaction<P: SolanaChainProviderLike>(
         .send_and_confirm(provider, CommitmentConfig::confirmed())
         .await?;
     Ok(tx_sig)
-}
-
-/// Configuration for V1 Solana Exact Facilitator
-///
-/// Controls transaction verification behavior, including support for
-/// additional instructions from third-party wallets like Phantom.
-///
-/// By default, the Phantom Lighthouse program is allowed to support
-/// Phantom wallet users on mainnet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct V1SolanaExactFacilitatorConfig {
-    /// Allow additional instructions beyond the required ones
-    /// Default: true (to support Phantom Lighthouse)
-    #[serde(default = "default_allow_additional_instructions")]
-    pub allow_additional_instructions: bool,
-
-    /// Maximum number of instructions allowed in a transaction
-    /// Default: 10
-    #[serde(default = "default_max_instruction_count")]
-    pub max_instruction_count: usize,
-
-    /// Explicitly allowed program IDs for additional instructions.
-    /// Only checked if `allow_additional_instructions` is true.
-    /// Uses Solana Address type which deserializes from base58 strings.
-    ///
-    /// Default: [Phantom Lighthouse program]
-    ///
-    /// SECURITY: If this list is empty and `allow_additional_instructions` is true,
-    /// ALL additional instructions will be rejected. You must explicitly whitelist
-    /// the programs you want to allow.
-    #[serde(default = "default_allowed_program_ids")]
-    pub allowed_program_ids: Vec<Address>,
-
-    /// Blocked program IDs (always rejected, takes precedence over allowed).
-    /// Uses Solana Address type which deserializes from base58 strings.
-    #[serde(default)]
-    pub blocked_program_ids: Vec<Address>,
-
-    /// SECURITY: Require fee payer is NOT present in any instruction's accounts
-    /// Default: true - strongly recommended to keep this enabled
-    #[serde(default = "default_require_fee_payer_not_in_instructions")]
-    pub require_fee_payer_not_in_instructions: bool,
-}
-
-const fn default_allow_additional_instructions() -> bool {
-    true
-}
-
-const fn default_max_instruction_count() -> usize {
-    10
-}
-
-fn default_allowed_program_ids() -> Vec<Address> {
-    vec![Address::new(*PHANTOM_LIGHTHOUSE_PROGRAM)]
-}
-
-const fn default_require_fee_payer_not_in_instructions() -> bool {
-    true
-}
-
-impl Default for V1SolanaExactFacilitatorConfig {
-    fn default() -> Self {
-        Self {
-            allow_additional_instructions: default_allow_additional_instructions(),
-            max_instruction_count: default_max_instruction_count(),
-            allowed_program_ids: default_allowed_program_ids(),
-            blocked_program_ids: Vec::new(),
-            require_fee_payer_not_in_instructions: default_require_fee_payer_not_in_instructions(),
-        }
-    }
-}
-
-impl V1SolanaExactFacilitatorConfig {
-    /// Check if a program ID is in the blocked list
-    #[must_use]
-    pub fn is_blocked(&self, program_id: &Pubkey) -> bool {
-        self.blocked_program_ids
-            .iter()
-            .any(|addr| addr.pubkey() == program_id)
-    }
-
-    /// Check if a program ID is in the allowed list.
-    ///
-    /// SECURITY: If the allowed list is empty, NO programs are allowed.
-    /// This follows the principle of least privilege - you must explicitly
-    /// whitelist programs you want to accept.
-    #[must_use]
-    pub fn is_allowed(&self, program_id: &Pubkey) -> bool {
-        self.allowed_program_ids
-            .iter()
-            .any(|addr| addr.pubkey() == program_id)
-    }
 }

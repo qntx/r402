@@ -63,7 +63,7 @@ pub struct SupportedCache {
 
 impl SupportedCache {
     /// Creates a new cache with the given TTL.
-    #[must_use] 
+    #[must_use]
     pub fn new(ttl: Duration) -> Self {
         Self {
             ttl,

@@ -1,8 +1,10 @@
-//! Facilitator-side payment verification and settlement for V1 EIP-155 exact scheme.
+//! Facilitator-side payment verification and settlement for EIP-155 exact scheme.
 //!
 //! This module implements the facilitator logic for verifying and settling ERC-3009
-//! payments on EVM chains. It handles:
+//! payments on EVM chains. It handles both V1 (network names) and V2 (CAIP-2 chain IDs)
+//! protocol versions through shared core logic.
 //!
+//! Key capabilities:
 //! - Signature verification (EOA, EIP-1271, EIP-6492)
 //! - Balance and amount validation
 //! - EIP-712 domain construction
@@ -19,7 +21,7 @@ use alloy_sol_types::{Eip712Domain, SolCall, SolStruct, SolType, eip712_domain, 
 use alloy_transport::TransportError;
 use r402::chain::{ChainId, ChainProviderOps};
 use r402::proto;
-use r402::proto::{PaymentVerificationError, v1};
+use r402::proto::{PaymentVerificationError, v1, v2};
 use r402::scheme::{
     X402SchemeFacilitator, X402SchemeFacilitatorBuilder, X402SchemeFacilitatorError,
 };
@@ -31,15 +33,15 @@ use tracing::{Instrument, instrument};
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use crate::V1Eip155Exact;
 use crate::chain::{
     Eip155ChainReference, Eip155MetaTransactionProvider, MetaTransaction, MetaTransactionSendError,
 };
-use crate::v1_eip155_exact::{
-    ExactScheme, PaymentRequirementsExtra, TransferWithAuthorization, types,
+use crate::exact::types;
+use crate::exact::{
+    ExactScheme, PaymentRequirementsExtra, TransferWithAuthorization, V1Eip155Exact, V2Eip155Exact,
 };
 
-/// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains
+/// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
 pub const VALIDATOR_ADDRESS: Address = address!("0xdAcD51A54883eb67D95FAEb2BBfdC4a9a6BD2a3B");
 
@@ -57,15 +59,24 @@ where
     }
 }
 
+impl<P> X402SchemeFacilitatorBuilder<P> for V2Eip155Exact
+where
+    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync + 'static,
+    Eip155ExactError: From<P::Error>,
+{
+    fn build(
+        &self,
+        provider: P,
+        _config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+        Ok(Box::new(V2Eip155ExactFacilitator::new(provider)))
+    }
+}
+
 /// Facilitator for V1 EIP-155 exact scheme payments.
 ///
 /// This struct implements the [`X402SchemeFacilitator`] trait to provide payment
 /// verification and settlement services for ERC-3009 based payments on EVM chains.
-///
-/// # Type Parameters
-///
-/// - `P`: The provider type, which must implement [`Eip155MetaTransactionProvider`]
-///   and [`ChainProviderOps`]
 pub struct V1Eip155ExactFacilitator<P> {
     provider: P,
 }
@@ -95,10 +106,10 @@ where
         &self,
         request: &proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::VerifyRequest::from_proto(request.clone())?;
+        let request = types::v1::VerifyRequest::from_proto(request.clone())?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_payment(
+        let (contract, payment, eip712_domain) = assert_valid_v1_payment(
             self.provider.inner(),
             self.provider.chain(),
             payload,
@@ -116,10 +127,10 @@ where
         &self,
         request: &proto::SettleRequest,
     ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::SettleRequest::from_proto(request.clone())?;
+        let request = types::v1::SettleRequest::from_proto(request.clone())?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_payment(
+        let (contract, payment, eip712_domain) = assert_valid_v1_payment(
             self.provider.inner(),
             self.provider.chain(),
             payload,
@@ -151,6 +162,102 @@ where
             }
             kinds
         };
+        let signers = {
+            let mut signers = HashMap::with_capacity(1);
+            signers.insert(chain_id, self.provider.signer_addresses());
+            signers
+        };
+        Ok(proto::SupportedResponse {
+            kinds,
+            extensions: Vec::new(),
+            signers,
+        })
+    }
+}
+
+/// Facilitator for V2 EIP-155 exact scheme payments.
+///
+/// This struct implements the [`X402SchemeFacilitator`] trait to provide payment
+/// verification and settlement services for ERC-3009 based payments on EVM chains
+/// using the V2 protocol.
+pub struct V2Eip155ExactFacilitator<P> {
+    provider: P,
+}
+
+impl<P> std::fmt::Debug for V2Eip155ExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2Eip155ExactFacilitator")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P> V2Eip155ExactFacilitator<P> {
+    /// Creates a new V2 EIP-155 exact scheme facilitator with the given provider.
+    pub const fn new(provider: P) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait::async_trait]
+impl<P> X402SchemeFacilitator for V2Eip155ExactFacilitator<P>
+where
+    P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
+    P::Inner: Provider,
+    Eip155ExactError: From<P::Error>,
+{
+    async fn verify(
+        &self,
+        request: &proto::VerifyRequest,
+    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
+        let request = types::v2::VerifyRequest::from_proto(request.clone())?;
+        let payload = &request.payment_payload;
+        let requirements = &request.payment_requirements;
+        let (contract, payment, eip712_domain) = assert_valid_v2_payment(
+            self.provider.inner(),
+            self.provider.chain(),
+            payload,
+            requirements,
+        )
+        .await?;
+
+        let payer =
+            verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
+        Ok(v2::VerifyResponse::valid(payer.to_string()).into())
+    }
+
+    async fn settle(
+        &self,
+        request: &proto::SettleRequest,
+    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
+        let request = types::v2::SettleRequest::from_proto(request.clone())?;
+        let payload = &request.payment_payload;
+        let requirements = &request.payment_requirements;
+        let (contract, payment, eip712_domain) = assert_valid_v2_payment(
+            self.provider.inner(),
+            self.provider.chain(),
+            payload,
+            requirements,
+        )
+        .await?;
+
+        let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+
+        Ok(v2::SettleResponse::Success {
+            payer: payment.from.to_string(),
+            transaction: tx_hash.to_string(),
+            network: payload.accepted.network.to_string(),
+        }
+        .into())
+    }
+
+    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
+        let chain_id = self.provider.chain_id();
+        let kinds = vec![proto::SupportedPaymentKind {
+            x402_version: v2::X402Version2.into(),
+            scheme: ExactScheme.to_string(),
+            network: chain_id.clone().into(),
+            extra: None,
+        }];
         let signers = {
             let mut signers = HashMap::with_capacity(1);
             signers.insert(chain_id, self.provider.signer_addresses());
@@ -201,18 +308,13 @@ sol! {
     "abi/Validator6492.json"
 }
 
-/// Runs all preconditions needed for a successful payment:
-/// - Valid scheme, network, and receiver.
-/// - Valid time window (validAfter/validBefore).
-/// - Correct EIP-712 domain construction.
-/// - Sufficient on-chain balance.
-/// - Sufficient value in payload.
+/// Runs all V1 preconditions needed for a successful payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-async fn assert_valid_payment<'a, P: Provider>(
+async fn assert_valid_v1_payment<'a, P: Provider>(
     provider: &'a P,
     chain: &Eip155ChainReference,
-    payload: &types::PaymentPayload,
-    requirements: &types::PaymentRequirements,
+    payload: &types::v1::PaymentPayload,
+    requirements: &types::v1::PaymentRequirements,
 ) -> Result<
     (
         IEIP3009::IEIP3009Instance<&'a P>,
@@ -261,13 +363,61 @@ async fn assert_valid_payment<'a, P: Provider>(
     Ok((contract, payment, domain))
 }
 
+/// Runs all V2 preconditions needed for a successful payment.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
+async fn assert_valid_v2_payment<P: Provider>(
+    provider: P,
+    chain: &Eip155ChainReference,
+    payload: &types::v2::PaymentPayload,
+    requirements: &types::v2::PaymentRequirements,
+) -> Result<(IEIP3009::IEIP3009Instance<P>, ExactEvmPayment, Eip712Domain), Eip155ExactError> {
+    let accepted = &payload.accepted;
+    if accepted != requirements {
+        return Err(PaymentVerificationError::AcceptedRequirementsMismatch.into());
+    }
+    let payload_inner = &payload.payload;
+
+    let chain_id: ChainId = chain.into();
+    let payload_chain_id = &accepted.network;
+    if payload_chain_id != &chain_id {
+        return Err(PaymentVerificationError::ChainIdMismatch.into());
+    }
+    let authorization = &payload_inner.authorization;
+    if authorization.to != accepted.pay_to {
+        return Err(PaymentVerificationError::RecipientMismatch.into());
+    }
+    let valid_after = authorization.valid_after;
+    let valid_before = authorization.valid_before;
+    assert_time(valid_after, valid_before)?;
+    let asset_address = accepted.asset;
+    let contract = IEIP3009::new(asset_address.into(), provider);
+
+    let domain = assert_domain(chain, &contract, &asset_address.into(), &accepted.extra).await?;
+
+    let amount_required = accepted.amount;
+    assert_enough_balance(&contract, &authorization.from, amount_required.into()).await?;
+    assert_enough_value(&authorization.value.into(), &amount_required.into())?;
+
+    let payment = ExactEvmPayment {
+        from: authorization.from,
+        to: authorization.to,
+        value: authorization.value.into(),
+        valid_after: authorization.valid_after,
+        valid_before: authorization.valid_before,
+        nonce: authorization.nonce,
+        signature: payload_inner.signature.clone(),
+    };
+
+    Ok((contract, payment, domain))
+}
+
 /// Validates that the current time is within the `validAfter` and `validBefore` bounds.
 ///
 /// Adds a 6-second grace buffer when checking expiration to account for latency.
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if the payment is expired or not yet valid.
+/// Returns [`PaymentVerificationError::Expired`] or [`PaymentVerificationError::Early`].
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub fn assert_time(
     valid_after: UnixTimestamp,
@@ -287,7 +437,7 @@ pub fn assert_time(
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if domain metadata cannot be fetched.
+/// Returns [`Eip155ExactError`] if on-chain name/version queries fail.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
     network = %chain.as_chain_id(),
     asset = %asset_address
@@ -343,8 +493,6 @@ pub async fn assert_domain<P: Provider>(
 
 /// Checks if the payer has enough on-chain token balance to meet the `maxAmountRequired`.
 ///
-/// Performs an `ERC20.balanceOf()` call using the token contract instance.
-///
 /// # Errors
 ///
 /// Returns [`Eip155ExactError`] if the balance query fails or funds are insufficient.
@@ -381,11 +529,9 @@ pub async fn assert_enough_balance<P: Provider>(
 
 /// Verifies that the declared `value` in the payload is sufficient for the required amount.
 ///
-/// This is a static check (not on-chain) that compares two numbers.
-///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if the sent amount is less than required.
+/// Returns [`PaymentVerificationError::InvalidPaymentAmount`] if value is too low.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
     sent = %sent,
     max_amount_required = %max_amount_required
@@ -415,22 +561,6 @@ struct SignedMessage {
 impl SignedMessage {
     /// Construct a [`SignedMessage`] from an [`ExactEvmPayment`] and its
     /// corresponding [`Eip712Domain`].
-    ///
-    /// This helper ties together:
-    /// - The **payment intent** (an ERC-3009 `TransferWithAuthorization` struct),
-    /// - The **EIP-712 domain** used for signing,
-    /// - And the raw signature bytes attached to the payment.
-    ///
-    /// Steps performed:
-    /// 1. Build an in-memory [`TransferWithAuthorization`] struct from the
-    ///    `ExactEvmPayment` fields (`from`, `to`, `value`, validity window, `nonce`).
-    /// 2. Compute the **EIP-712 struct hash** for that transfer under the given
-    ///    `domain`. This becomes the `hash` field of the signed message.
-    /// 3. Parse the raw signature bytes into a [`StructuredSignature`], which
-    ///    distinguishes between:
-    ///    - EIP-1271 (plain signature), and
-    ///    - EIP-6492 (counterfactual signature wrapper).
-    /// 4. Assemble all parts into a [`SignedMessage`] and return it.
     pub fn extract(
         payment: &ExactEvmPayment,
         domain: &Eip712Domain,
@@ -461,22 +591,15 @@ impl SignedMessage {
 /// A structured representation of an Ethereum signature.
 ///
 /// This enum normalizes two supported cases:
-///
 /// - **EIP-6492 wrapped signatures**: used for counterfactual contract wallets.
-///   They include deployment metadata (factory + calldata) plus the inner
-///   signature that the wallet contract will validate after deployment.
 /// - **EIP-1271 signatures**: plain contract (or EOA-style) signatures.
 #[derive(Debug, Clone)]
 enum StructuredSignature {
     /// An EIP-6492 wrapped signature.
     EIP6492 {
-        /// Factory contract that can deploy the wallet deterministically
         factory: Address,
-        /// Calldata to invoke on the factory (often a CREATE2 deployment).
         factory_calldata: Bytes,
-        /// Inner signature for the wallet itself, probably EIP-1271.
         inner: Bytes,
-        /// Full original bytes including the 6492 wrapper and magic bytes suffix.
         original: Bytes,
     },
     /// Normalized EOA signature.
@@ -487,16 +610,11 @@ enum StructuredSignature {
 }
 
 /// The fixed 32-byte magic suffix defined by [EIP-6492](https://eips.ethereum.org/EIPS/eip-6492).
-///
-/// Any signature ending with this constant is treated as a 6492-wrapped
-/// signature; the preceding bytes are ABI-decoded as `(address factory, bytes factoryCalldata, bytes innerSig)`.
 const EIP6492_MAGIC_SUFFIX: [u8; 32] =
     hex!("6492649264926492649264926492649264926492649264926492649264926492");
 
 sol! {
     /// Solidity-compatible struct for decoding the prefix of an EIP-6492 signature.
-    ///
-    /// Matches the tuple `(address factory, bytes factoryCalldata, bytes innerSig)`.
     #[derive(Debug)]
     struct Sig6492 {
         address factory;
@@ -531,7 +649,6 @@ impl StructuredSignature {
                 original: bytes,
             }
         } else {
-            // Let's see if it is a EOA signature
             let eoa_signature = if bytes.len() == 65 {
                 Signature::from_raw(&bytes)
                     .ok()
@@ -563,13 +680,6 @@ impl StructuredSignature {
 impl TryFrom<Bytes> for StructuredSignature {
     type Error = StructuredSignatureFormatError;
 
-    /// Parse raw signature bytes into a `StructuredSignature`.
-    ///
-    /// Rules:
-    /// - If the last 32 bytes equal [`EIP6492_MAGIC_SUFFIX`], the prefix is
-    ///   decoded as a [`Sig6492`] struct and returned as
-    ///   [`StructuredSignature::EIP6492`].
-    /// - Otherwise, the bytes are returned as [`StructuredSignature::EIP1271`].
     fn try_from(bytes: Bytes) -> Result<Self, Self::Error> {
         let is_eip6492 = bytes.len() >= 32 && bytes[bytes.len() - 32..] == EIP6492_MAGIC_SUFFIX;
         let signature = if is_eip6492 {
@@ -603,12 +713,6 @@ impl<P> std::fmt::Debug for TransferWithAuthorization0Call<P> {
 
 impl<'a, P: Provider> TransferWithAuthorization0Call<&'a P> {
     /// Constructs a full `transferWithAuthorization` call for a verified payment payload.
-    ///
-    /// This function prepares the transaction builder with gas pricing adapted to the network's
-    /// capabilities (EIP-1559 or legacy) and packages it together with signature metadata
-    /// into a [`TransferWithAuthorization0Call`] structure.
-    ///
-    /// This function does not perform any validation — it assumes inputs are already checked.
     pub fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
         payment: &ExactEvmPayment,
@@ -658,12 +762,6 @@ impl<P> std::fmt::Debug for TransferWithAuthorization1Call<P> {
 impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
     /// Constructs a full `transferWithAuthorization` call for a verified payment payload
     /// using split signature components (v, r, s).
-    ///
-    /// This function prepares the transaction builder with gas pricing adapted to the network's
-    /// capabilities (EIP-1559 or legacy) and packages it together with signature metadata
-    /// into a [`TransferWithAuthorization1Call`] structure.
-    ///
-    /// This function does not perform any validation — it assumes inputs are already checked.
     pub fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
         payment: &ExactEvmPayment,
@@ -704,9 +802,6 @@ impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
 }
 
 /// A prepared call to `transferWithAuthorization` (ERC-3009) including all derived fields.
-///
-/// This struct wraps the assembled call builder, making it reusable across verification
-/// (`.call()`) and settlement (`.send()`) flows, along with context useful for tracing/logging.
 #[allow(missing_debug_implementations)]
 pub struct TransferWithAuthorizationCall<P, TCall, TSignature> {
     /// The prepared call builder that can be `.call()`ed or `.send()`ed.
@@ -730,10 +825,6 @@ pub struct TransferWithAuthorizationCall<P, TCall, TSignature> {
 }
 
 /// Check whether contract code is present at `address`.
-///
-/// Uses `eth_getCode` against this provider. This is useful after a counterfactual
-/// deployment to confirm visibility on the sending RPC before submitting a
-/// follow-up transaction.
 async fn is_contract_deployed<P: Provider>(
     provider: &P,
     address: &Address,
@@ -755,7 +846,7 @@ async fn is_contract_deployed<P: Provider>(
 ///
 /// # Errors
 ///
-/// Returns [`Eip155ExactError`] if signature verification or transfer simulation fails.
+/// Returns [`Eip155ExactError`] if signature verification or simulation fails.
 pub async fn verify_payment<P: Provider>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P>,
@@ -773,14 +864,11 @@ pub async fn verify_payment<P: Provider>(
             inner,
             original,
         } => {
-            // Prepare the call to validate EIP-6492 signature
             let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, &provider);
             let is_valid_signature_call =
                 validator6492.isValidSigWithSideEffects(payer, hash, original);
-            // Prepare the call to simulate transfer the funds
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, inner);
             let transfer_call = transfer_call.0;
-            // Execute both calls in a single transaction simulation to accommodate for possible smart wallet creation
             let aggregate3 = provider
                 .multicall()
                 .add(is_valid_signature_call)
@@ -814,7 +902,6 @@ pub async fn verify_payment<P: Provider>(
                 .map_err(|e| PaymentVerificationError::TransactionSimulation(e.to_string()))?;
         }
         StructuredSignature::EIP1271(signature) => {
-            // It is EIP-1271 signature, which we can pass to the transfer simulation
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
@@ -836,7 +923,6 @@ pub async fn verify_payment<P: Provider>(
             transfer_call_fut.await?;
         }
         StructuredSignature::EOA(signature) => {
-            // It is EOA signature, which we can pass to the transfer simulation of (r,s,v)-based transferWithAuthorization function
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
@@ -871,7 +957,7 @@ pub async fn verify_payment<P: Provider>(
 /// # Panics
 ///
 /// Panics if the authorization deadline timestamp overflows `i64`.
-#[allow(clippy::future_not_send, clippy::cognitive_complexity)] // P may not be Sync by design
+#[allow(clippy::future_not_send, clippy::cognitive_complexity)]
 pub async fn settle_payment<P, E>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P::Inner>,
@@ -895,7 +981,6 @@ where
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, inner);
             let transfer_call = transfer_call.0;
             if is_contract_deployed {
-                // transferWithAuthorization with inner signature
                 let tx_fut = Eip155MetaTransactionProvider::send_transaction(
                     provider,
                     MetaTransaction {
@@ -923,7 +1008,6 @@ where
                 let receipt = tx_fut.await?;
                 receipt
             } else {
-                // deploy the smart wallet, and transferWithAuthorization with inner signature
                 let deployment_call = IMulticall3::Call3 {
                     allowFailure: true,
                     target: factory,
@@ -969,7 +1053,6 @@ where
             let transfer_call =
                 TransferWithAuthorization0Call::new(contract, payment, eip1271_signature);
             let transfer_call = transfer_call.0;
-            // transferWithAuthorization with eip1271 signature
             let tx_fut = Eip155MetaTransactionProvider::send_transaction(
                 provider,
                 MetaTransaction {
@@ -1000,7 +1083,6 @@ where
         StructuredSignature::EOA(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
-            // transferWithAuthorization with EOA signature
             let tx_fut = Eip155MetaTransactionProvider::send_transaction(
                 provider,
                 MetaTransaction {
@@ -1035,7 +1117,7 @@ where
         tracing::event!(Level::INFO,
             status = "ok",
             tx = %receipt.transaction_hash,
-            "transferWithAuthorization_0 succeeded"
+            "transferWithAuthorization succeeded"
         );
         Ok(receipt.transaction_hash)
     } else {
@@ -1044,7 +1126,7 @@ where
             Level::WARN,
             status = "failed",
             tx = %receipt.transaction_hash,
-            "transferWithAuthorization_0 failed"
+            "transferWithAuthorization failed"
         );
         Err(Eip155ExactError::TransactionReverted(
             receipt.transaction_hash,

@@ -283,7 +283,8 @@ impl SchemeRegistry {
                 let chain_id = chain_provider.chain_id();
                 let handler = match blueprint.build(chain_provider, config.config.clone()) {
                     Ok(handler) => handler,
-                    Err(_err) => {
+                    #[allow(unused_variables)]
+                    Err(err) => {
                         #[cfg(feature = "telemetry")]
                         tracing::error!("Error building scheme handler for {}: {}", config.id, err);
                         continue;

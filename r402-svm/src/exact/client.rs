@@ -1,7 +1,8 @@
-//! Client-side payment signing for the V1 Solana "exact" scheme.
+//! Client-side payment signing for the Solana "exact" scheme.
 //!
-//! This module provides [`V1SolanaExactClient`] for building and signing
-//! SPL Token transfer transactions on Solana.
+//! This module provides [`V1SolanaExactClient`] and [`V2SolanaExactClient`] for
+//! building and signing SPL Token transfer transactions on Solana.
+//! Both share the core transaction building logic via [`build_signed_transfer_transaction`].
 //!
 //! # Features
 //!
@@ -12,14 +13,15 @@
 //!
 //! # Usage
 //!
-//! ```rust
-//! use r402_svm::v1_solana_exact::client::V1SolanaExactClient;
+//! ```ignore
+//! use r402_svm::exact::client::{V1SolanaExactClient, V2SolanaExactClient};
 //! use solana_client::nonblocking::rpc_client::RpcClient;
 //! use solana_keypair::Keypair;
 //!
 //! let keypair = Keypair::new();
 //! let rpc = RpcClient::new("https://api.mainnet-beta.solana.com".to_string());
-//! let client = V1SolanaExactClient::new(keypair, rpc);
+//! let v1_client = V1SolanaExactClient::new(keypair.insecure_clone(), rpc.clone());
+//! let v2_client = V2SolanaExactClient::new(keypair, rpc);
 //! ```
 
 use alloy_primitives::U256;
@@ -27,6 +29,9 @@ use async_trait::async_trait;
 use r402::chain::ChainId;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
+use r402::proto::v2::{ResourceInfo, X402Version2};
+use r402::scheme::X402SchemeId;
+use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::util::Base64Bytes;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -39,15 +44,13 @@ use solana_transaction::Instruction;
 use solana_transaction::versioned::VersionedTransaction;
 use spl_token::solana_program::program_pack::Pack;
 
-use r402::scheme::X402SchemeId;
-use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
-
 use crate::chain::Address;
 use crate::chain::rpc::RpcClientLike;
-use crate::v1_solana_exact::types::{
-    ExactScheme, ExactSolanaPayload, PaymentPayload, PaymentRequirements,
+use crate::exact::types;
+use crate::exact::{
+    ATA_PROGRAM_PUBKEY, ExactScheme, ExactSolanaPayload, TransactionInt, V1SolanaExact,
+    V2SolanaExact,
 };
-use crate::v1_solana_exact::{ATA_PROGRAM_PUBKEY, TransactionInt, V1SolanaExact};
 
 /// Mint information for SPL tokens.
 #[derive(Debug, Clone, Copy)]
@@ -383,7 +386,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: PaymentRequirements = v.as_concrete()?;
+                let requirements: types::v1::PaymentRequirements = v.as_concrete()?;
                 let chain_id = ChainId::from_network_name(&requirements.network)?;
                 if chain_id.namespace != "solana" {
                     return None;
@@ -395,7 +398,7 @@ where
                     scheme: self.scheme().to_string(),
                     x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
-                    signer: Box::new(PayloadSigner {
+                    signer: Box::new(V1PayloadSigner {
                         signer: self.signer.clone(),
                         rpc_client: self.rpc_client.clone(),
                         requirements,
@@ -407,17 +410,16 @@ where
     }
 }
 
-#[allow(dead_code, missing_debug_implementations)] // Public for consumption by downstream crates.
-/// Signs Solana payment payloads for the V1 exact scheme.
-pub struct PayloadSigner<S, R> {
+#[allow(dead_code, missing_debug_implementations)]
+struct V1PayloadSigner<S, R> {
     signer: S,
     rpc_client: R,
-    requirements: PaymentRequirements,
+    requirements: types::v1::PaymentRequirements,
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
+#[allow(dead_code)]
 #[async_trait]
-impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for PayloadSigner<S, R> {
+impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1PayloadSigner<S, R> {
     async fn sign_payment(&self) -> Result<String, X402Error> {
         let fee_payer = self
             .requirements
@@ -438,10 +440,134 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for Paylo
         )
         .await?;
 
-        let payload = PaymentPayload {
+        let payload = types::v1::PaymentPayload {
             x402_version: X402Version1,
             scheme: ExactScheme,
             network: self.requirements.network.clone(),
+            payload: ExactSolanaPayload {
+                transaction: tx_b64,
+            },
+        };
+        let json = serde_json::to_vec(&payload)?;
+        let b64 = Base64Bytes::encode(&json);
+
+        Ok(b64.to_string())
+    }
+}
+
+/// V2 Solana exact scheme client for building and signing payment transactions.
+#[derive(Clone)]
+#[allow(dead_code)] // Public for consumption by downstream crates.
+pub struct V2SolanaExactClient<S, R> {
+    signer: S,
+    rpc_client: R,
+}
+
+impl<S, R> std::fmt::Debug for V2SolanaExactClient<S, R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("V2SolanaExactClient")
+            .finish_non_exhaustive()
+    }
+}
+
+#[allow(dead_code)] // Public for consumption by downstream crates.
+impl<S, R> V2SolanaExactClient<S, R> {
+    /// Creates a new V2 Solana exact client.
+    pub const fn new(signer: S, rpc_client: R) -> Self {
+        Self { signer, rpc_client }
+    }
+}
+
+impl<S, R> X402SchemeId for V2SolanaExactClient<S, R> {
+    fn x402_version(&self) -> u8 {
+        V2SolanaExact.x402_version()
+    }
+
+    fn namespace(&self) -> &str {
+        V2SolanaExact.namespace()
+    }
+
+    fn scheme(&self) -> &str {
+        V2SolanaExact.scheme()
+    }
+}
+
+impl<S, R> X402SchemeClient for V2SolanaExactClient<S, R>
+where
+    S: Signer + Send + Sync + Clone + 'static,
+    R: RpcClientLike + Send + Sync + Clone + 'static,
+{
+    fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
+        let payment_required = match payment_required {
+            PaymentRequired::V2(payment_required) => payment_required,
+            PaymentRequired::V1(_) => {
+                return vec![];
+            }
+        };
+        payment_required
+            .accepts
+            .iter()
+            .filter_map(|v| {
+                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let chain_id = requirements.network.clone();
+                if chain_id.namespace != "solana" {
+                    return None;
+                }
+                let candidate = PaymentCandidate {
+                    chain_id,
+                    asset: requirements.asset.to_string(),
+                    amount: U256::from(requirements.amount.inner()),
+                    scheme: self.scheme().to_string(),
+                    x402_version: self.x402_version(),
+                    pay_to: requirements.pay_to.to_string(),
+                    signer: Box::new(V2PayloadSigner {
+                        signer: self.signer.clone(),
+                        rpc_client: self.rpc_client.clone(),
+                        requirements,
+                        resource: payment_required.resource.clone(),
+                    }),
+                };
+                Some(candidate)
+            })
+            .collect::<Vec<_>>()
+    }
+}
+
+#[allow(dead_code)]
+struct V2PayloadSigner<S, R> {
+    signer: S,
+    rpc_client: R,
+    requirements: types::v2::PaymentRequirements,
+    resource: ResourceInfo,
+}
+
+#[allow(dead_code)]
+#[async_trait]
+impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
+    async fn sign_payment(&self) -> Result<String, X402Error> {
+        let fee_payer = self
+            .requirements
+            .extra
+            .as_ref()
+            .map(|extra| extra.fee_payer)
+            .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
+        let fee_payer_pubkey: Pubkey = fee_payer.into();
+
+        let amount = self.requirements.amount.inner();
+        let tx_b64 = build_signed_transfer_transaction(
+            &self.signer,
+            &self.rpc_client,
+            &fee_payer_pubkey,
+            &self.requirements.pay_to,
+            &self.requirements.asset,
+            amount,
+        )
+        .await?;
+
+        let payload = types::v2::PaymentPayload {
+            x402_version: X402Version2,
+            accepted: self.requirements.clone(),
+            resource: Some(self.resource.clone()),
             payload: ExactSolanaPayload {
                 transaction: tx_b64,
             },

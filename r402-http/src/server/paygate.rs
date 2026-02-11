@@ -633,8 +633,8 @@ where
 /// Returns an error response if conversion fails.
 #[allow(clippy::needless_pass_by_value)] // settlement is consumed by serialization
 fn settlement_to_header(settlement: proto::SettleResponse) -> Result<HeaderValue, PaygateError> {
-    let json = serde_json::to_vec(&settlement)
-        .map_err(|err| PaygateError::Settlement(err.to_string()))?;
+    let json =
+        serde_json::to_vec(&settlement).map_err(|err| PaygateError::Settlement(err.to_string()))?;
     let payment_header = Base64Bytes::encode(json);
     HeaderValue::from_bytes(payment_header.as_ref())
         .map_err(|err| PaygateError::Settlement(err.to_string()))
@@ -692,7 +692,7 @@ pub struct StaticPriceTags<TPriceTag> {
 
 impl<TPriceTag> StaticPriceTags<TPriceTag> {
     /// Creates a new static price tag source from a vector of price tags.
-    #[must_use] 
+    #[must_use]
     pub fn new(tags: Vec<TPriceTag>) -> Self {
         Self {
             tags: Arc::new(tags),
@@ -700,7 +700,7 @@ impl<TPriceTag> StaticPriceTags<TPriceTag> {
     }
 
     /// Returns a reference to the stored price tags.
-    #[must_use] 
+    #[must_use]
     pub fn tags(&self) -> &[TPriceTag] {
         &self.tags
     }

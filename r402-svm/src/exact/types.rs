@@ -1,11 +1,11 @@
-//! Type definitions for the V1 Solana "exact" payment scheme.
+//! Type definitions for the Solana "exact" payment scheme.
 //!
-//! This module defines the wire format types for SPL Token based payments
-//! on Solana using the V1 x402 protocol.
+//! This module defines shared wire format types for SPL Token based payments
+//! on Solana, along with version-specific type aliases in the [`v1`] and
+//! [`v2`] sub-modules.
 
+use r402::lit_str;
 use r402::proto::PaymentVerificationError;
-use r402::proto::util::U64String;
-use r402::{lit_str, proto};
 use serde::{Deserialize, Serialize};
 use solana_pubkey::{Pubkey, pubkey};
 use std::sync::LazyLock;
@@ -37,13 +37,6 @@ pub static PHANTOM_LIGHTHOUSE_PROGRAM: LazyLock<Pubkey> = LazyLock::new(|| {
         .expect("Invalid Lighthouse program ID")
 });
 
-/// V1 Solana exact verify request type.
-pub type VerifyRequest = proto::v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
-/// V1 Solana exact settle request type (same as verify).
-pub type SettleRequest = VerifyRequest;
-/// V1 Solana exact payment payload type.
-pub type PaymentPayload = proto::v1::PaymentPayload<ExactScheme, ExactSolanaPayload>;
-
 /// Solana exact payment payload containing a serialized transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,10 +44,6 @@ pub struct ExactSolanaPayload {
     /// Base64-encoded serialized Solana transaction.
     pub transaction: String,
 }
-
-/// V1 Solana exact payment requirements type.
-pub type PaymentRequirements =
-    proto::v1::PaymentRequirements<ExactScheme, U64String, Address, SupportedPaymentKindExtra>;
 
 /// Extra fields for Solana payment kind support info.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,10 +75,6 @@ pub struct TransactionInt {
 #[cfg(any(feature = "client", feature = "facilitator"))]
 impl TransactionInt {
     /// Creates a new transaction wrapper.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SolanaExactError`] if the transaction is invalid.
     #[must_use]
     pub const fn new(transaction: VersionedTransaction) -> Self {
         Self { inner: transaction }
@@ -124,10 +109,6 @@ impl TransactionInt {
     }
 
     /// Checks if the transaction is fully signed.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SolanaExactError`] if the transaction is not fully signed.
     #[must_use]
     pub fn is_fully_signed(&self) -> bool {
         let num_required = self.inner.message.header().num_required_signatures;
@@ -170,11 +151,9 @@ impl TransactionInt {
             .try_sign_message(msg_bytes.as_slice())
             .map_err(|e| TransactionSignError(format!("{e}")))?;
 
-        // Required signatures are the first N account keys
         let num_required = tx.message.header().num_required_signatures as usize;
         let static_keys = tx.message.static_account_keys();
 
-        // Find signer's position
         let pos = static_keys[..num_required]
             .iter()
             .position(|k| *k == signer.pubkey())
@@ -182,7 +161,6 @@ impl TransactionInt {
                 TransactionSignError("Signer not found in required signers".to_string())
             })?;
 
-        // Ensure signature vector is large enough, then place the signature
         if tx.signatures.len() < num_required {
             tx.signatures.resize(num_required, Signature::default());
         }
@@ -377,3 +355,52 @@ impl From<SolanaExactError> for PaymentVerificationError {
 #[derive(Debug, thiserror::Error)]
 #[error("Can not sign transaction: {0}")]
 pub struct TransactionSignError(pub String);
+
+/// V1-specific wire format type aliases for Solana exact scheme.
+///
+/// V1 uses network names (e.g., "solana-mainnet") for chain identification.
+pub mod v1 {
+    use r402::proto::util::U64String;
+    use r402::proto::v1 as proto_v1;
+
+    use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
+    use crate::chain::Address;
+
+    /// Type alias for V1 verify requests using the exact Solana payment scheme.
+    pub type VerifyRequest = proto_v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
+
+    /// Type alias for V1 settle requests (same structure as verify requests).
+    pub type SettleRequest = VerifyRequest;
+
+    /// Type alias for V1 payment payloads with Solana-specific data.
+    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactSolanaPayload>;
+
+    /// Type alias for V1 payment requirements with Solana-specific types.
+    pub type PaymentRequirements =
+        proto_v1::PaymentRequirements<ExactScheme, U64String, Address, SupportedPaymentKindExtra>;
+}
+
+/// V2-specific wire format type aliases for Solana exact scheme.
+///
+/// V2 uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
+/// for chain identification and embeds requirements directly in the payload.
+pub mod v2 {
+    use r402::proto::util::U64String;
+    use r402::proto::v2 as proto_v2;
+
+    use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
+    use crate::chain::Address;
+
+    /// Type alias for V2 verify requests using the exact Solana payment scheme.
+    pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
+
+    /// Type alias for V2 settle requests (same structure as verify requests).
+    pub type SettleRequest = VerifyRequest;
+
+    /// Type alias for V2 payment payloads with embedded requirements and Solana-specific data.
+    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactSolanaPayload>;
+
+    /// Type alias for V2 payment requirements with Solana-specific types.
+    pub type PaymentRequirements =
+        proto_v2::PaymentRequirements<ExactScheme, U64String, Address, SupportedPaymentKindExtra>;
+}

@@ -61,7 +61,7 @@ impl X402Client<FirstMatch> {
     ///
     /// The default client uses [`FirstMatch`] payment selection, which selects
     /// the first matching payment scheme.
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -217,7 +217,7 @@ impl ClientSchemes {
     }
 
     /// Finds all payment candidates that can handle the given payment requirements.
-    #[must_use] 
+    #[must_use]
     pub fn candidates(&self, payment_required: &proto::PaymentRequired) -> Vec<PaymentCandidate> {
         let mut candidates = vec![];
         for client in &self.0 {

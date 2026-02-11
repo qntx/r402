@@ -96,7 +96,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
     /// # Panics
     ///
     /// Panics if the facilitator URL is invalid.
-    #[must_use] 
+    #[must_use]
     pub fn new(url: &str) -> Self {
         let facilitator = FacilitatorClient::try_from(url).expect("Invalid facilitator URL");
         Self {
@@ -121,7 +121,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
     }
 
     /// Returns the configured facilitator URL.
-    #[must_use] 
+    #[must_use]
     pub fn facilitator_url(&self) -> &Url {
         self.facilitator.base_url()
     }
@@ -130,7 +130,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
     ///
     /// Default is 10 minutes. Use [`FacilitatorClient::without_supported_cache()`]
     /// to disable caching entirely.
-    #[must_use] 
+    #[must_use]
     pub fn with_supported_cache_ttl(&self, ttl: Duration) -> Self {
         let facilitator = Arc::new(self.facilitator.with_supported_cache_ttl(ttl));
         Self {

@@ -1,11 +1,11 @@
-//! Type definitions for the V1 EIP-155 "exact" payment scheme.
+//! Type definitions for the EIP-155 "exact" payment scheme.
 //!
-//! This module defines the wire format types for ERC-3009 based payments
-//! on EVM chains using the V1 x402 protocol.
+//! This module defines shared wire format types for ERC-3009 based payments
+//! on EVM chains, along with version-specific type aliases in the [`v1`] and
+//! [`v2`] sub-modules.
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, Bytes};
 use r402::lit_str;
-use r402::proto::v1;
 use r402::timestamp::UnixTimestamp;
 use serde::{Deserialize, Serialize};
 
@@ -15,15 +15,6 @@ use alloy_sol_types::sol;
 use crate::chain::TokenAmount;
 
 lit_str!(ExactScheme, "exact");
-
-/// Type alias for V1 verify requests using the exact EVM payment scheme.
-pub type VerifyRequest = v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
-
-/// Type alias for V1 settle requests (same structure as verify requests).
-pub type SettleRequest = VerifyRequest;
-
-/// Type alias for V1 payment payloads with EVM-specific data.
-pub type PaymentPayload = v1::PaymentPayload<ExactScheme, ExactEvmPayload>;
 
 /// Full payload required to authorize an ERC-3009 transfer.
 ///
@@ -72,10 +63,6 @@ pub struct ExactEvmPayloadAuthorization {
     pub nonce: B256,
 }
 
-/// Type alias for V1 payment requirements with EVM-specific types.
-pub type PaymentRequirements =
-    v1::PaymentRequirements<ExactScheme, U256, Address, PaymentRequirementsExtra>;
-
 /// Extra EIP-712 domain parameters for token contracts.
 ///
 /// Some token contracts require specific `name` and `version` values in their
@@ -113,3 +100,54 @@ sol!(
         bytes32 nonce;
     }
 );
+
+/// V1-specific wire format type aliases for EIP-155 exact scheme.
+///
+/// V1 uses network names (e.g., "base-sepolia") for chain identification.
+pub mod v1 {
+    use alloy_primitives::{Address, U256};
+    use r402::proto::v1 as proto_v1;
+
+    use super::{ExactEvmPayload, ExactScheme, PaymentRequirementsExtra};
+
+    /// Type alias for V1 verify requests using the exact EVM payment scheme.
+    pub type VerifyRequest = proto_v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
+
+    /// Type alias for V1 settle requests (same structure as verify requests).
+    pub type SettleRequest = VerifyRequest;
+
+    /// Type alias for V1 payment payloads with EVM-specific data.
+    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactEvmPayload>;
+
+    /// Type alias for V1 payment requirements with EVM-specific types.
+    pub type PaymentRequirements =
+        proto_v1::PaymentRequirements<ExactScheme, U256, Address, PaymentRequirementsExtra>;
+}
+
+/// V2-specific wire format type aliases for EIP-155 exact scheme.
+///
+/// V2 uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
+/// and embeds requirements directly in the payload.
+pub mod v2 {
+    use r402::proto::v2 as proto_v2;
+
+    use super::{ExactEvmPayload, ExactScheme, PaymentRequirementsExtra};
+    use crate::chain::{ChecksummedAddress, TokenAmount};
+
+    /// Type alias for V2 verify requests using the exact EVM payment scheme.
+    pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
+
+    /// Type alias for V2 settle requests (same structure as verify requests).
+    pub type SettleRequest = VerifyRequest;
+
+    /// Type alias for V2 payment payloads with embedded requirements and EVM-specific data.
+    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactEvmPayload>;
+
+    /// Type alias for V2 payment requirements with EVM-specific types.
+    pub type PaymentRequirements = proto_v2::PaymentRequirements<
+        ExactScheme,
+        TokenAmount,
+        ChecksummedAddress,
+        PaymentRequirementsExtra,
+    >;
+}

@@ -20,8 +20,7 @@
 //! The crate is organized into several modules:
 //!
 //! - [`chain`] - Core Solana chain types, providers, and configuration
-//! - [`v1_solana_exact`] - V1 protocol implementation with network names
-//! - [`v2_solana_exact`] - V2 protocol implementation with CAIP-2 chain IDs
+//! - [`exact`] - Solana "exact" payment scheme (V1 + V2)
 //!
 //! # Feature Flags
 //!
@@ -78,16 +77,12 @@
 //! ```
 
 pub mod chain;
-pub mod v1_solana_exact;
-pub mod v2_solana_exact;
+pub mod exact;
 
 mod networks;
 pub use networks::*;
 
-pub use v1_solana_exact::V1SolanaExact;
-pub use v2_solana_exact::V2SolanaExact;
+pub use exact::{V1SolanaExact, V2SolanaExact};
 
 #[cfg(feature = "client")]
-pub use v1_solana_exact::client::V1SolanaExactClient;
-#[cfg(feature = "client")]
-pub use v2_solana_exact::client::V2SolanaExactClient;
+pub use exact::client::{V1SolanaExactClient, V2SolanaExactClient};
