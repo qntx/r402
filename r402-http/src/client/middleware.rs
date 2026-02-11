@@ -14,9 +14,9 @@ use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 use std::sync::Arc;
 
-use super::hooks::{
-    ClientHooks, PaymentCreatedContext, PaymentCreationContext, PaymentCreationFailureContext,
-};
+use r402::hooks::{FailureRecovery, HookDecision};
+
+use super::hooks::{ClientHooks, PaymentCreationContext};
 
 #[cfg(feature = "telemetry")]
 use tracing::{debug, info, instrument, trace};
@@ -31,7 +31,7 @@ pub struct X402Client<TSelector> {
     schemes: ClientSchemes,
     selector: TSelector,
     policies: Vec<Arc<dyn PaymentPolicy>>,
-    hooks: Arc<ClientHooks>,
+    hooks: Arc<[Arc<dyn ClientHooks>]>,
 }
 
 impl X402Client<FirstMatch> {
@@ -51,7 +51,7 @@ impl Default for X402Client<FirstMatch> {
             schemes: ClientSchemes::default(),
             selector: FirstMatch,
             policies: Vec::new(),
-            hooks: Arc::new(ClientHooks::default()),
+            hooks: Arc::from([]),
         }
     }
 }
@@ -102,13 +102,16 @@ impl<TSelector> X402Client<TSelector> {
         self
     }
 
-    /// Sets the lifecycle hooks for payment creation.
+    /// Adds a lifecycle hook for payment creation.
     ///
     /// Hooks allow intercepting the payment creation pipeline for logging,
-    /// custom validation, or error recovery.
+    /// custom validation, or error recovery. Multiple hooks are executed
+    /// in registration order.
     #[must_use]
-    pub fn with_hooks(mut self, hooks: ClientHooks) -> Self {
-        self.hooks = Arc::new(hooks);
+    pub fn with_hook(mut self, hook: impl ClientHooks + 'static) -> Self {
+        let mut hooks = (*self.hooks).to_vec();
+        hooks.push(Arc::new(hook));
+        self.hooks = Arc::from(hooks);
         self
     }
 }
@@ -153,12 +156,12 @@ where
             payment_required: payment_required.clone(),
         };
 
-        // Execute before-payment-creation hooks
-        for hook in &self.hooks.before_payment_creation {
-            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
-                && result.abort
+        // Phase 1: Before hooks — first abort wins
+        for hook in self.hooks.iter() {
+            if let HookDecision::Abort { reason, .. } =
+                hook.before_payment_creation(&hook_ctx).await
             {
-                return Err(X402Error::ParseError(result.reason));
+                return Err(X402Error::ParseError(reason));
             }
         }
 
@@ -166,27 +169,20 @@ where
 
         match creation_result {
             Ok(headers) => {
-                // Execute after-payment-creation hooks (errors logged, not propagated)
-                let result_ctx = PaymentCreatedContext {
-                    ctx: hook_ctx,
-                    headers: headers.clone(),
-                };
-                for hook in &self.hooks.after_payment_creation {
-                    let _ = hook(result_ctx.clone()).await;
+                // Phase 3a: After hooks (fire-and-forget)
+                for hook in self.hooks.iter() {
+                    hook.after_payment_creation(&hook_ctx, &headers).await;
                 }
                 Ok(headers)
             }
             Err(err) => {
-                // Execute on-payment-creation-failure hooks (may recover)
-                let failure_ctx = PaymentCreationFailureContext {
-                    ctx: hook_ctx,
-                    error: err.to_string(),
-                };
-                for hook in &self.hooks.on_payment_creation_failure {
-                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
-                        && result.recovered
+                // Phase 3b: Failure hooks — first recovery wins
+                let err_msg = err.to_string();
+                for hook in self.hooks.iter() {
+                    if let FailureRecovery::Recovered(headers) =
+                        hook.on_payment_creation_failure(&hook_ctx, &err_msg).await
                     {
-                        return Ok(result.headers);
+                        return Ok(headers);
                     }
                 }
                 Err(err)
