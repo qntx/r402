@@ -398,7 +398,7 @@ impl FacilitatorClient {
     /// timeout application, and telemetry integration.
     ///
     /// `context` is a human-readable identifier used in tracing and error messages (e.g. `"POST /verify"`).
-    #[allow(clippy::future_not_send, clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value)]
     async fn post_json<T, R>(
         &self,
         url: &Url,
@@ -406,7 +406,7 @@ impl FacilitatorClient {
         payload: &T,
     ) -> Result<R, FacilitatorClientError>
     where
-        T: serde::Serialize + ?Sized,
+        T: serde::Serialize + Sync + ?Sized,
         R: serde::de::DeserializeOwned,
     {
         let mut req = self.client.post(url.clone()).json(payload);
@@ -448,7 +448,6 @@ impl FacilitatorClient {
     /// timeout application, and telemetry integration.
     ///
     /// `context` is a human-readable identifier used in tracing and error messages (e.g. `"GET /supported"`).
-    #[allow(clippy::future_not_send)]
     async fn get_json<R>(
         &self,
         url: &Url,

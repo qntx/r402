@@ -111,7 +111,6 @@ where
         feature = "telemetry",
         instrument(name = "x402.reqwest.make_payment_headers", skip_all, err)
     )]
-    #[allow(clippy::future_not_send)]
     pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, X402Error> {
         let payment_required = parse_payment_required(res)
             .await

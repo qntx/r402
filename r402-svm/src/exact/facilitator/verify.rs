@@ -178,7 +178,6 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
-#[allow(clippy::future_not_send)]
 pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
     provider: &P,
     request: &types::v1::VerifyRequest,
@@ -218,7 +217,6 @@ pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
-#[allow(clippy::future_not_send)]
 pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
     provider: &P,
     request: &types::v2::VerifyRequest,
@@ -257,7 +255,6 @@ pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if verification fails.
-#[allow(clippy::future_not_send)]
 pub async fn verify_transaction<P: SolanaChainProviderLike>(
     provider: &P,
     transaction_b64_string: String,
@@ -322,7 +319,6 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer instruction is invalid.
-#[allow(clippy::future_not_send)]
 pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: &VersionedTransaction,
@@ -405,7 +401,6 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
 /// # Errors
 ///
 /// Returns [`SolanaChainProviderError`] if settling fails.
-#[allow(clippy::future_not_send)]
 pub async fn settle_transaction<P: SolanaChainProviderLike>(
     provider: &P,
     verification: VerifyTransferResult,

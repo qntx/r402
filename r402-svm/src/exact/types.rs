@@ -174,7 +174,7 @@ impl TransactionInt {
     ///
     /// Returns [`SolanaChainProviderError`] if sending or confirmation fails.
     #[cfg(feature = "facilitator")]
-    #[allow(clippy::needless_pass_by_value, clippy::future_not_send)]
+    #[allow(clippy::needless_pass_by_value)]
     pub async fn send_and_confirm<P: SolanaChainProviderLike>(
         &self,
         provider: &P,

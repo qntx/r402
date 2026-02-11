@@ -208,7 +208,7 @@ impl ChainProviderOps for SolanaChainProvider {
 ///
 /// This trait abstracts the core operations needed for x402 payment processing
 /// on Solana, including transaction simulation, signing, and confirmation.
-pub trait SolanaChainProviderLike {
+pub trait SolanaChainProviderLike: Sync {
     /// Simulates a transaction with the given configuration.
     fn simulate_transaction_with_config(
         &self,
@@ -385,7 +385,7 @@ impl SolanaChainProviderLike for SolanaChainProvider {
     }
 }
 
-impl<T: SolanaChainProviderLike> SolanaChainProviderLike for Arc<T> {
+impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
     fn simulate_transaction_with_config(
         &self,
         tx: &VersionedTransaction,

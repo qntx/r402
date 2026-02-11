@@ -75,7 +75,7 @@ impl Mint {
 /// # Errors
 ///
 /// Returns [`X402Error`] if the mint account cannot be fetched or parsed.
-pub async fn fetch_mint<R: RpcClientLike + Sync>(
+pub async fn fetch_mint<R: RpcClientLike>(
     mint_address: &Address,
     rpc_client: &R,
 ) -> Result<Mint, X402Error> {
@@ -140,7 +140,7 @@ pub fn build_message_to_simulate(
 /// # Errors
 ///
 /// Returns [`X402Error`] if simulation fails.
-pub async fn estimate_compute_units<S: RpcClientLike + Sync>(
+pub async fn estimate_compute_units<S: RpcClientLike>(
     rpc_client: &S,
     message: &MessageV0,
 ) -> Result<u32, X402Error> {
@@ -174,7 +174,7 @@ pub async fn estimate_compute_units<S: RpcClientLike + Sync>(
 /// # Errors
 ///
 /// Returns [`X402Error`] if fee retrieval fails.
-pub async fn get_priority_fee_micro_lamports<S: RpcClientLike + Sync>(
+pub async fn get_priority_fee_micro_lamports<S: RpcClientLike>(
     rpc_client: &S,
     writeable_accounts: &[Pubkey],
 ) -> Result<u64, X402Error> {
@@ -219,7 +219,7 @@ pub fn update_or_append_set_compute_unit_limit(ixs: &mut Vec<Instruction>, units
 /// # Errors
 ///
 /// Returns [`X402Error`] if transaction building or signing fails.
-pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLike + Sync>(
+pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLike>(
     signer: &S,
     rpc_client: &R,
     fee_payer: &Pubkey,

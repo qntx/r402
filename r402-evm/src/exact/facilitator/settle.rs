@@ -184,7 +184,7 @@ async fn is_contract_deployed<P: Provider>(
 /// # Panics
 ///
 /// Panics if the authorization deadline timestamp overflows `i64`.
-#[allow(clippy::future_not_send, clippy::cognitive_complexity)]
+#[allow(clippy::cognitive_complexity)]
 pub async fn settle_payment<P, E>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P::Inner>,
@@ -192,7 +192,7 @@ pub async fn settle_payment<P, E>(
     eip712_domain: &Eip712Domain,
 ) -> Result<TxHash, Eip155ExactError>
 where
-    P: Eip155MetaTransactionProvider<Error = E>,
+    P: Eip155MetaTransactionProvider<Error = E> + Sync,
     Eip155ExactError: From<E>,
 {
     let signed_message = SignedMessage::extract(payment, eip712_domain)?;

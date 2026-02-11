@@ -395,7 +395,7 @@ impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {
 impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator>
 where
     TPriceTag: PaygateProtocol,
-    TFacilitator: Facilitator,
+    TFacilitator: Facilitator + Sync,
 {
     /// Handles an incoming request, processing payment if required.
     ///
@@ -405,7 +405,6 @@ where
     /// # Errors
     ///
     /// This method is infallible (`Infallible` error type).
-    #[allow(clippy::future_not_send)]
     #[cfg_attr(
         feature = "telemetry",
         instrument(name = "x402.handle_request", skip_all)
@@ -461,7 +460,6 @@ where
     /// # Errors
     ///
     /// Returns [`PaygateError`] if payment processing fails.
-    #[allow(clippy::future_not_send)]
     pub async fn handle_request_fallible<
         ReqBody,
         ResBody,
@@ -538,7 +536,6 @@ where
     /// # Errors
     ///
     /// Returns [`VerificationError`] if verification fails.
-    #[allow(clippy::future_not_send)]
     pub async fn verify_payment(
         &self,
         verify_request: proto::VerifyRequest,
@@ -556,7 +553,6 @@ where
     /// # Errors
     ///
     /// Returns [`PaygateError`] if settlement fails.
-    #[allow(clippy::future_not_send)]
     pub async fn settle_payment(
         &self,
         settle_request: proto::SettleRequest,

@@ -16,7 +16,7 @@ use solana_transaction::versioned::VersionedTransaction;
 ///
 /// This trait abstracts the most commonly used RPC methods for x402 payment
 /// processing, making it easier to test and mock RPC interactions.
-pub trait RpcClientLike {
+pub trait RpcClientLike: Sync {
     /// Fetches account data for the given public key.
     fn get_account(
         &self,
@@ -40,7 +40,7 @@ pub trait RpcClientLike {
     fn get_latest_blockhash(&self) -> impl Future<Output = Result<Hash, ClientError>> + Send;
 }
 
-impl<Container: AsRef<RpcClient>> RpcClientLike for Container {
+impl<Container: AsRef<RpcClient> + Sync> RpcClientLike for Container {
     fn get_account(
         &self,
         pubkey: &Pubkey,
