@@ -161,3 +161,76 @@ impl PaymentSelector for MaxAmount {
             .find(|c| c.amount.parse::<u128>().is_ok_and(|a| a <= self.0))
     }
 }
+
+/// Trait for filtering or transforming payment candidates before selection.
+///
+/// Policies are applied in sequence, forming a pipeline that progressively
+/// narrows the set of acceptable payment options. This mirrors the official
+/// x402 Go SDK's `PaymentPolicy` function type.
+///
+/// Unlike [`PaymentSelector`] which picks one candidate, policies operate on
+/// the full candidate list and return a (potentially smaller) list.
+pub trait PaymentPolicy: Send + Sync {
+    /// Filters the candidates, returning only those that pass this policy.
+    fn apply<'a>(&self, candidates: Vec<&'a PaymentCandidate>) -> Vec<&'a PaymentCandidate>;
+}
+
+/// Policy that restricts payments to specific networks.
+///
+/// Only candidates whose chain ID matches one of the allowed patterns are kept.
+#[derive(Debug)]
+pub struct NetworkPolicy(Vec<ChainIdPattern>);
+
+impl NetworkPolicy {
+    /// Creates a policy that only allows payments on the specified networks.
+    pub fn new<P: Into<Vec<ChainIdPattern>>>(patterns: P) -> Self {
+        Self(patterns.into())
+    }
+}
+
+impl PaymentPolicy for NetworkPolicy {
+    fn apply<'a>(&self, candidates: Vec<&'a PaymentCandidate>) -> Vec<&'a PaymentCandidate> {
+        candidates
+            .into_iter()
+            .filter(|c| self.0.iter().any(|p| p.matches(&c.chain_id)))
+            .collect()
+    }
+}
+
+/// Policy that restricts payments to specific scheme names.
+///
+/// Only candidates whose scheme matches one of the allowed names are kept.
+#[derive(Debug)]
+pub struct SchemePolicy(Vec<String>);
+
+impl SchemePolicy {
+    /// Creates a policy that only allows the specified payment schemes.
+    pub fn new<S: Into<String>, I: IntoIterator<Item = S>>(schemes: I) -> Self {
+        Self(schemes.into_iter().map(Into::into).collect())
+    }
+}
+
+impl PaymentPolicy for SchemePolicy {
+    fn apply<'a>(&self, candidates: Vec<&'a PaymentCandidate>) -> Vec<&'a PaymentCandidate> {
+        candidates
+            .into_iter()
+            .filter(|c| self.0.iter().any(|s| s == &c.scheme))
+            .collect()
+    }
+}
+
+/// Policy that restricts payments to a maximum amount.
+///
+/// Only candidates whose amount (parsed as `u128`) is at most the specified
+/// limit are kept. Candidates with unparseable amounts are excluded.
+#[derive(Debug, Clone, Copy)]
+pub struct MaxAmountPolicy(pub u128);
+
+impl PaymentPolicy for MaxAmountPolicy {
+    fn apply<'a>(&self, candidates: Vec<&'a PaymentCandidate>) -> Vec<&'a PaymentCandidate> {
+        candidates
+            .into_iter()
+            .filter(|c| c.amount.parse::<u128>().is_ok_and(|a| a <= self.0))
+            .collect()
+    }
+}

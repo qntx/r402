@@ -36,6 +36,18 @@ pub trait X402SchemeId {
     fn namespace(&self) -> &str;
     /// Returns the scheme name (e.g., "exact").
     fn scheme(&self) -> &str;
+    /// Returns the CAIP-2 family pattern this scheme supports.
+    ///
+    /// Used to group signers by blockchain family in the supported response.
+    /// The default implementation derives the pattern from [`Self::namespace`].
+    ///
+    /// # Examples
+    ///
+    /// - EVM schemes return `"eip155:*"`
+    /// - Solana schemes return `"solana:*"`
+    fn caip_family(&self) -> String {
+        format!("{}:*", self.namespace())
+    }
     /// Returns the full scheme identifier (e.g., "v2-eip155-exact").
     fn id(&self) -> String {
         format!(

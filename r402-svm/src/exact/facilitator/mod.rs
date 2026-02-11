@@ -17,7 +17,7 @@ pub use verify::{
 use r402::chain::ChainProviderOps;
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError};
+use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError, X402SchemeId};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -140,7 +140,10 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
+                signers.insert(
+                    V1SolanaExact.caip_family(),
+                    self.provider.signer_addresses(),
+                );
                 signers
             };
             Ok(proto::SupportedResponse {
@@ -227,7 +230,10 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
+                signers.insert(
+                    V2SolanaExact.caip_family(),
+                    self.provider.signer_addresses(),
+                );
                 signers
             };
             Ok(proto::SupportedResponse {

@@ -33,7 +33,7 @@ use alloy_provider::Provider;
 use r402::chain::ChainProviderOps;
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError};
+use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError, X402SchemeId};
 use r402::timestamp::UnixTimestamp;
 use std::collections::HashMap;
 use std::future::Future;
@@ -196,7 +196,10 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
+                signers.insert(
+                    V1Eip155Exact.caip_family(),
+                    self.provider.signer_addresses(),
+                );
                 signers
             };
             Ok(proto::SupportedResponse {
@@ -299,12 +302,15 @@ where
             let kinds = vec![proto::SupportedPaymentKind {
                 x402_version: v2::X402Version2.into(),
                 scheme: ExactScheme.to_string(),
-                network: chain_id.clone().into(),
+                network: chain_id.into(),
                 extra: None,
             }];
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
+                signers.insert(
+                    V2Eip155Exact.caip_family(),
+                    self.provider.signer_addresses(),
+                );
                 signers
             };
             Ok(proto::SupportedResponse {
