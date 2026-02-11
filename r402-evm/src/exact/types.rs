@@ -1,10 +1,11 @@
 //! Type definitions for the EIP-155 "exact" payment scheme.
 //!
-//! This module defines shared wire format types for ERC-3009 based payments
-//! on EVM chains, along with version-specific type aliases in the [`v1`] and
-//! [`v2`] sub-modules.
+//! This module defines shared wire format types for EVM exact payments,
+//! supporting both EIP-3009 (`transferWithAuthorization`) and Permit2
+//! transfer methods. Version-specific type aliases live in the [`v1`]
+//! and [`v2`] sub-modules.
 
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{Address, B256, Bytes, address};
 use r402::lit_str;
 use r402::timestamp::UnixTimestamp;
 use serde::{Deserialize, Serialize};
@@ -16,14 +17,81 @@ use crate::chain::TokenAmount;
 
 lit_str!(ExactScheme, "exact");
 
-/// Full payload required to authorize an ERC-3009 transfer.
+/// Canonical Uniswap Permit2 contract address (same on all EVM chains via CREATE2).
+pub const PERMIT2_ADDRESS: Address = address!("0x000000000022D473030F116dDEE9F6B43aC78BA3");
+
+/// x402 exact payment Permit2 proxy contract address.
+pub const X402_EXACT_PERMIT2_PROXY: Address =
+    address!("0x4020615294c913F045dc10f0a5cdEbd86c280001");
+
+/// x402 upto payment Permit2 proxy contract address.
+pub const X402_UPTO_PERMIT2_PROXY: Address = address!("0x4020633461b2895a48930Ff97eE8fCdE8E520002");
+
+/// Buffer seconds added to Permit2 deadline check to account for block propagation.
+pub const PERMIT2_DEADLINE_BUFFER: u64 = 6;
+
+/// Determines which on-chain mechanism is used for token transfers.
 ///
-/// This struct contains both the EIP-712 signature and the structured authorization
-/// data that was signed. Together, they provide everything needed to execute a
+/// - `Eip3009`: Uses `transferWithAuthorization` (USDC, etc.) — recommended for compatible tokens
+/// - `Permit2`: Uses Permit2 + `x402Permit2Proxy` — universal fallback for any ERC-20
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssetTransferMethod {
+    /// EIP-3009 `transferWithAuthorization`.
+    Eip3009,
+    /// Uniswap Permit2 via `x402Permit2Proxy`.
+    Permit2,
+}
+
+/// Unified exact payment payload — either EIP-3009 or Permit2.
+///
+/// Deserialization uses `#[serde(untagged)]`: the Permit2 variant is tried first
+/// because it contains the unique `permit2Authorization` field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ExactPayload {
+    /// Permit2-based payment (tried first during deserialization).
+    Permit2(Permit2Payload),
+    /// EIP-3009-based payment.
+    Eip3009(Eip3009Payload),
+}
+
+impl ExactPayload {
+    /// Returns the transfer method used by this payload.
+    #[must_use]
+    pub const fn transfer_method(&self) -> AssetTransferMethod {
+        match self {
+            Self::Eip3009(_) => AssetTransferMethod::Eip3009,
+            Self::Permit2(_) => AssetTransferMethod::Permit2,
+        }
+    }
+
+    /// Returns the sender (`from`) address for this payment.
+    #[must_use]
+    pub const fn from_address(&self) -> Address {
+        match self {
+            Self::Eip3009(p) => p.authorization.from,
+            Self::Permit2(p) => p.permit2_authorization.from,
+        }
+    }
+
+    /// Returns the raw signature bytes.
+    pub const fn signature(&self) -> &Bytes {
+        match self {
+            Self::Eip3009(p) => &p.signature,
+            Self::Permit2(p) => &p.signature,
+        }
+    }
+}
+
+/// EIP-3009 `transferWithAuthorization` payment payload.
+///
+/// Contains both the EIP-712 signature and the structured authorization
+/// data. Together, they provide everything needed to execute a
 /// `transferWithAuthorization` call on an ERC-3009 compliant token contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExactEvmPayload {
+pub struct Eip3009Payload {
     /// The cryptographic signature authorizing the transfer.
     ///
     /// This can be:
@@ -33,7 +101,66 @@ pub struct ExactEvmPayload {
     pub signature: Bytes,
 
     /// The structured authorization data that was signed.
-    pub authorization: ExactEvmPayloadAuthorization,
+    pub authorization: Eip3009Authorization,
+}
+
+/// Permit2 token permissions — which token and how much.
+///
+/// Part of the `PermitWitnessTransferFrom` message structure that gets signed.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Permit2TokenPermissions {
+    /// Token contract address.
+    pub token: Address,
+    /// Amount in smallest unit as decimal string (e.g., `"1000000"` for 1 USDC).
+    pub amount: TokenAmount,
+}
+
+/// Witness data verified on-chain by `x402Permit2Proxy`.
+///
+/// Included in the EIP-712 signature and checked by the proxy contract.
+/// Note: upper time bound is enforced by Permit2's `deadline` field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permit2Witness {
+    /// Destination address for funds.
+    pub to: Address,
+    /// Unix timestamp — payment invalid before this time.
+    pub valid_after: TokenAmount,
+    /// Extra data (typically `0x` for empty).
+    pub extra: Bytes,
+}
+
+/// Permit2 authorization parameters.
+///
+/// Maps to the `PermitWitnessTransferFrom` struct used by the Permit2 contract.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permit2Authorization {
+    /// Signer / owner address.
+    pub from: Address,
+    /// Token and amount permitted.
+    pub permitted: Permit2TokenPermissions,
+    /// Must be the `x402Permit2Proxy` address.
+    pub spender: Address,
+    /// Unique nonce (uint256 as decimal string).
+    pub nonce: TokenAmount,
+    /// Signature expires after this unix timestamp (uint256 as decimal string).
+    pub deadline: TokenAmount,
+    /// Witness data verified by `x402Permit2Proxy`.
+    pub witness: Permit2Witness,
+}
+
+/// Permit2 payment payload sent by clients.
+///
+/// Contains the EIP-712 signature over a `PermitWitnessTransferFrom`
+/// and the authorization parameters that were signed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permit2Payload {
+    /// EIP-712 signature (hex, 65 bytes for EOA).
+    pub signature: Bytes,
+    /// Authorization parameters that were signed.
+    pub permit2_authorization: Permit2Authorization,
 }
 
 /// EIP-712 structured data for ERC-3009 transfer authorization.
@@ -43,7 +170,7 @@ pub struct ExactEvmPayload {
 /// The struct is signed using EIP-712 typed data signing.
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExactEvmPayloadAuthorization {
+pub struct Eip3009Authorization {
     /// The address authorizing the transfer (token owner).
     pub from: Address,
 
@@ -63,20 +190,24 @@ pub struct ExactEvmPayloadAuthorization {
     pub nonce: B256,
 }
 
-/// Extra EIP-712 domain parameters for token contracts.
+/// Extra payment requirements data for the EVM exact scheme.
 ///
-/// Some token contracts require specific `name` and `version` values in their
-/// EIP-712 domain for signature verification. This struct allows servers to
-/// specify these values in the payment requirements, avoiding the need for
-/// the facilitator to query them from the contract.
+/// Contains optional EIP-712 domain parameters and the asset transfer method.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequirementsExtra {
-    /// The token name as used in the EIP-712 domain.
+    /// The token name as used in the EIP-712 domain (required for EIP-3009).
     pub name: String,
 
-    /// The token version as used in the EIP-712 domain.
+    /// The token version as used in the EIP-712 domain (required for EIP-3009).
     pub version: String,
+
+    /// Which on-chain transfer mechanism to use.
+    ///
+    /// - `Some(Eip3009)` or `None` → EIP-3009 `transferWithAuthorization`
+    /// - `Some(Permit2)` → Permit2 via `x402Permit2Proxy`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub asset_transfer_method: Option<AssetTransferMethod>,
 }
 
 #[cfg(any(feature = "facilitator", feature = "client"))]
@@ -101,6 +232,40 @@ sol!(
     }
 );
 
+#[cfg(any(feature = "facilitator", feature = "client"))]
+sol!(
+    /// EIP-712 struct for Permit2 token permissions.
+    #[derive(Serialize, Deserialize)]
+    struct TokenPermissions {
+        address token;
+        uint256 amount;
+    }
+
+    /// EIP-712 struct for x402 Permit2 witness data.
+    ///
+    /// Field order MUST match the on-chain Permit2 contract definition.
+    #[derive(Serialize, Deserialize)]
+    struct Witness {
+        address to;
+        uint256 validAfter;
+        bytes extra;
+    }
+
+    /// EIP-712 struct for Permit2 `PermitWitnessTransferFrom`.
+    ///
+    /// This is the primary type signed by the payer when using Permit2.
+    /// The domain uses `name = "Permit2"`, no version, and
+    /// `verifyingContract = PERMIT2_ADDRESS`.
+    #[derive(Serialize, Deserialize)]
+    struct PermitWitnessTransferFrom {
+        TokenPermissions permitted;
+        address spender;
+        uint256 nonce;
+        uint256 deadline;
+        Witness witness;
+    }
+);
+
 /// V1-specific wire format type aliases for EIP-155 exact scheme.
 ///
 /// V1 uses network names (e.g., "base-sepolia") for chain identification.
@@ -108,7 +273,7 @@ pub mod v1 {
     use alloy_primitives::{Address, U256};
     use r402::proto::v1 as proto_v1;
 
-    use super::{ExactEvmPayload, ExactScheme, PaymentRequirementsExtra};
+    use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
 
     /// Type alias for V1 verify requests using the exact EVM payment scheme.
     pub type VerifyRequest = proto_v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
@@ -117,7 +282,7 @@ pub mod v1 {
     pub type SettleRequest = VerifyRequest;
 
     /// Type alias for V1 payment payloads with EVM-specific data.
-    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactEvmPayload>;
+    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactPayload>;
 
     /// Type alias for V1 payment requirements with EVM-specific types.
     pub type PaymentRequirements =
@@ -131,7 +296,7 @@ pub mod v1 {
 pub mod v2 {
     use r402::proto::v2 as proto_v2;
 
-    use super::{ExactEvmPayload, ExactScheme, PaymentRequirementsExtra};
+    use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Type alias for V2 verify requests using the exact EVM payment scheme.
@@ -141,7 +306,7 @@ pub mod v2 {
     pub type SettleRequest = VerifyRequest;
 
     /// Type alias for V2 payment payloads with embedded requirements and EVM-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactEvmPayload>;
+    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactPayload>;
 
     /// Type alias for V2 payment requirements with EVM-specific types.
     pub type PaymentRequirements = proto_v2::PaymentRequirements<

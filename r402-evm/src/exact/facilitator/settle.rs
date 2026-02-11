@@ -13,11 +13,13 @@ use alloy_transport::TransportError;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use super::ExactEvmPayment;
-use super::contract::IEIP3009;
+use super::Eip3009Payment;
+use super::Permit2Payment;
+use super::contract::{IEIP3009, IX402Permit2Proxy};
 use super::error::Eip155ExactError;
 use super::signature::{SignedMessage, StructuredSignature};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+use crate::exact::X402_EXACT_PERMIT2_PROXY;
 
 /// Awaits a future, optionally instrumenting it with a tracing span.
 macro_rules! traced {
@@ -50,7 +52,7 @@ impl<'a, P: Provider> TransferWithAuthorization0Call<&'a P> {
     /// Constructs a full `transferWithAuthorization` call for a verified payment payload.
     pub fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
-        payment: &ExactEvmPayment,
+        payment: &Eip3009Payment,
         signature: Bytes,
     ) -> Self {
         let from = payment.from;
@@ -99,7 +101,7 @@ impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
     /// using split signature components (v, r, s).
     pub fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
-        payment: &ExactEvmPayment,
+        payment: &Eip3009Payment,
         signature: Signature,
     ) -> Self {
         let from = payment.from;
@@ -188,7 +190,7 @@ async fn is_contract_deployed<P: Provider>(
 pub async fn settle_payment<P, E>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P::Inner>,
-    payment: &ExactEvmPayment,
+    payment: &Eip3009Payment,
     eip712_domain: &Eip712Domain,
 ) -> Result<TxHash, Eip155ExactError>
 where
@@ -342,6 +344,82 @@ where
             status = "failed",
             tx = %receipt.transaction_hash,
             "transferWithAuthorization failed"
+        );
+        Err(Eip155ExactError::TransactionReverted(
+            receipt.transaction_hash,
+        ))
+    }
+}
+
+/// Settles a verified Permit2 payment by calling `x402ExactPermit2Proxy.settle()`.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if the on-chain settlement transaction fails.
+#[allow(clippy::cognitive_complexity)]
+pub async fn settle_permit2_payment<P, E>(
+    provider: &P,
+    payment: &Permit2Payment,
+) -> Result<TxHash, Eip155ExactError>
+where
+    P: Eip155MetaTransactionProvider<Error = E> + Sync,
+    Eip155ExactError: From<E>,
+{
+    let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider.inner());
+
+    let permit = IX402Permit2Proxy::Permit {
+        permitted: IX402Permit2Proxy::TokenPermissions {
+            token: payment.token,
+            amount: payment.amount,
+        },
+        nonce: payment.nonce,
+        deadline: payment.deadline,
+    };
+
+    let witness = IX402Permit2Proxy::Witness {
+        to: payment.to,
+        validAfter: payment.valid_after,
+        extra: payment.extra.clone(),
+    };
+
+    let settle_call = proxy.settle(permit, payment.from, witness, payment.signature.clone());
+    let calldata = settle_call.calldata().clone();
+
+    let tx_fut = Eip155MetaTransactionProvider::send_transaction(
+        provider,
+        MetaTransaction {
+            to: X402_EXACT_PERMIT2_PROXY,
+            calldata,
+            confirmations: 1,
+        },
+    );
+    let receipt = traced!(
+        tx_fut,
+        tracing::info_span!("settle_permit2",
+            from = %payment.from,
+            to = %payment.to,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )?;
+
+    let success = receipt.status();
+    if success {
+        #[cfg(feature = "telemetry")]
+        tracing::event!(Level::INFO,
+            status = "ok",
+            tx = %receipt.transaction_hash,
+            "Permit2 settle succeeded"
+        );
+        Ok(receipt.transaction_hash)
+    } else {
+        #[cfg(feature = "telemetry")]
+        tracing::event!(
+            Level::WARN,
+            status = "failed",
+            tx = %receipt.transaction_hash,
+            "Permit2 settle failed"
         );
         Err(Eip155ExactError::TransactionReverted(
             receipt.transaction_hash,

@@ -34,6 +34,10 @@ use tracing::Instrument;
 use tracing::instrument;
 
 use super::error::{PaygateError, VerificationError};
+use super::hooks::{
+    PaygateHooks, SettleContext, SettleFailureContext, SettleResultContext, VerifyContext,
+    VerifyFailureContext, VerifyResultContext,
+};
 
 /// Builder for resource information that can be used with both V1 and V2 protocols.
 #[derive(Debug, Clone)]
@@ -356,6 +360,8 @@ pub struct Paygate<TPriceTag, TFacilitator> {
     pub accepts: Arc<Vec<TPriceTag>>,
     /// Resource information for the protected endpoint
     pub resource: v2::ResourceInfo,
+    /// Lifecycle hooks for verify/settle operations
+    pub hooks: Arc<PaygateHooks>,
 }
 
 impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {
@@ -524,38 +530,120 @@ where
         }
     }
 
-    /// Verifies a payment with the facilitator.
+    /// Verifies a payment with the facilitator, executing lifecycle hooks.
     ///
     /// # Errors
     ///
-    /// Returns [`VerificationError`] if verification fails.
+    /// Returns [`VerificationError`] if verification fails or a before-hook aborts.
     pub async fn verify_payment(
         &self,
         verify_request: proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, VerificationError> {
-        let verify_response = self
+        let hook_ctx = VerifyContext {
+            request: verify_request.clone(),
+        };
+
+        // Execute before-verify hooks
+        for hook in &self.hooks.before_verify {
+            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
+                && result.abort
+            {
+                return Err(VerificationError::VerificationFailed(result.reason));
+            }
+        }
+
+        let verify_result = self
             .facilitator
             .verify(verify_request)
             .await
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-        Ok(verify_response)
+            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")));
+
+        match verify_result {
+            Ok(response) => {
+                // Execute after-verify hooks (errors logged, not propagated)
+                let result_ctx = VerifyResultContext {
+                    ctx: hook_ctx,
+                    result: response.clone(),
+                };
+                for hook in &self.hooks.after_verify {
+                    let _ = hook(result_ctx.clone()).await;
+                }
+                Ok(response)
+            }
+            Err(err) => {
+                // Execute on-verify-failure hooks (may recover)
+                let failure_ctx = VerifyFailureContext {
+                    ctx: hook_ctx,
+                    error: err.to_string(),
+                };
+                for hook in &self.hooks.on_verify_failure {
+                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
+                        && result.recovered
+                    {
+                        return Ok(result.result);
+                    }
+                }
+                Err(err)
+            }
+        }
     }
 
-    /// Settles a payment with the facilitator.
+    /// Settles a payment with the facilitator, executing lifecycle hooks.
     ///
     /// # Errors
     ///
-    /// Returns [`PaygateError`] if settlement fails.
+    /// Returns [`PaygateError`] if settlement fails or a before-hook aborts.
     pub async fn settle_payment(
         &self,
         settle_request: proto::SettleRequest,
     ) -> Result<proto::SettleResponse, PaygateError> {
-        let settle_response = self
+        let hook_ctx = SettleContext {
+            request: settle_request.clone(),
+        };
+
+        // Execute before-settle hooks
+        for hook in &self.hooks.before_settle {
+            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
+                && result.abort
+            {
+                return Err(PaygateError::Settlement(result.reason));
+            }
+        }
+
+        let settle_result = self
             .facilitator
             .settle(settle_request)
             .await
-            .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
-        Ok(settle_response)
+            .map_err(|e| PaygateError::Settlement(format!("{e}")));
+
+        match settle_result {
+            Ok(response) => {
+                // Execute after-settle hooks (errors logged, not propagated)
+                let result_ctx = SettleResultContext {
+                    ctx: hook_ctx,
+                    result: response.clone(),
+                };
+                for hook in &self.hooks.after_settle {
+                    let _ = hook(result_ctx.clone()).await;
+                }
+                Ok(response)
+            }
+            Err(err) => {
+                // Execute on-settle-failure hooks (may recover)
+                let failure_ctx = SettleFailureContext {
+                    ctx: hook_ctx,
+                    error: err.to_string(),
+                };
+                for hook in &self.hooks.on_settle_failure {
+                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
+                        && result.recovered
+                    {
+                        return Ok(result.result);
+                    }
+                }
+                Err(err)
+            }
+        }
     }
 }
 

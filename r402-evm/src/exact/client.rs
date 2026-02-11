@@ -22,10 +22,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::chain::Eip155ChainReference;
+use crate::chain::TokenAmount;
 use crate::exact::types;
+use crate::exact::types::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
-    ExactEvmPayload, ExactEvmPayloadAuthorization, ExactScheme, PaymentRequirementsExtra,
-    TransferWithAuthorization, V1Eip155Exact, V2Eip155Exact,
+    AssetTransferMethod, Eip3009Authorization, Eip3009Payload, ExactPayload, ExactScheme,
+    PERMIT2_ADDRESS, PaymentRequirementsExtra, Permit2Authorization, Permit2Payload,
+    Permit2TokenPermissions, Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization,
+    V1Eip155Exact, V2Eip155Exact, X402_EXACT_PERMIT2_PROXY,
 };
 
 /// A trait that abstracts signing operations, allowing both owned signers and Arc-wrapped signers.
@@ -93,7 +97,7 @@ pub struct Eip3009SigningParams {
 pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     signer: &S,
     params: &Eip3009SigningParams,
-) -> Result<ExactEvmPayload, X402Error> {
+) -> Result<Eip3009Payload, X402Error> {
     let (name, version) = params.extra.as_ref().map_or_else(
         || (String::new(), String::new()),
         |extra| (extra.name.clone(), extra.version.clone()),
@@ -114,7 +118,7 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     let nonce: [u8; 32] = rng().random();
     let nonce = FixedBytes(nonce);
 
-    let authorization = ExactEvmPayloadAuthorization {
+    let authorization = Eip3009Authorization {
         from: signer.address(),
         to: params.pay_to,
         value: params.amount.into(),
@@ -141,9 +145,94 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
         .await
         .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
 
-    Ok(ExactEvmPayload {
+    Ok(Eip3009Payload {
         signature: signature.as_bytes().into(),
         authorization,
+    })
+}
+
+/// Shared signing parameters for Permit2 authorization.
+#[derive(Debug, Clone, Copy)]
+pub struct Permit2SigningParams {
+    /// The EIP-155 chain ID (numeric)
+    pub chain_id: u64,
+    /// The token contract address
+    pub asset_address: Address,
+    /// The recipient address for the transfer
+    pub pay_to: Address,
+    /// The amount to transfer (in token units)
+    pub amount: U256,
+    /// Maximum timeout in seconds for the authorization validity window
+    pub max_timeout_seconds: u64,
+}
+
+/// Signs a Permit2 `PermitWitnessTransferFrom` using EIP-712.
+///
+/// Constructs the Permit2 EIP-712 domain (name = "Permit2", no version,
+/// verifying contract = canonical Permit2 address), builds the authorization
+/// with timing parameters, and signs the resulting hash.
+///
+/// # Errors
+///
+/// Returns [`X402Error`] if EIP-712 signing fails.
+pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
+    signer: &S,
+    params: &Permit2SigningParams,
+) -> Result<Permit2Payload, X402Error> {
+    let domain = eip712_domain! {
+        name: "Permit2",
+        chain_id: params.chain_id,
+        verifying_contract: PERMIT2_ADDRESS,
+    };
+
+    let now = UnixTimestamp::now();
+    let valid_after_secs = now.as_secs().saturating_sub(10 * 60);
+    let deadline_secs = now.as_secs() + params.max_timeout_seconds;
+
+    // Permit2 uses uint256 nonce (random 32 bytes interpreted as uint256)
+    let nonce_bytes: [u8; 32] = rng().random();
+    let nonce = U256::from_be_bytes(nonce_bytes);
+
+    let permit_witness = PermitWitnessTransferFrom {
+        permitted: SolTokenPermissions {
+            token: params.asset_address,
+            amount: params.amount,
+        },
+        spender: X402_EXACT_PERMIT2_PROXY,
+        nonce,
+        deadline: U256::from(deadline_secs),
+        witness: SolWitness {
+            to: params.pay_to,
+            validAfter: U256::from(valid_after_secs),
+            extra: alloy_primitives::Bytes::new(),
+        },
+    };
+
+    let eip712_hash = permit_witness.eip712_signing_hash(&domain);
+    let signature = signer
+        .sign_hash(&eip712_hash)
+        .await
+        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+
+    let authorization = Permit2Authorization {
+        from: signer.address(),
+        permitted: Permit2TokenPermissions {
+            token: params.asset_address,
+            amount: TokenAmount::from(params.amount),
+        },
+        spender: X402_EXACT_PERMIT2_PROXY,
+        nonce: TokenAmount::from(nonce),
+        deadline: TokenAmount::from(U256::from(deadline_secs)),
+        witness: Permit2Witness {
+            to: params.pay_to,
+            valid_after: TokenAmount::from(U256::from(valid_after_secs)),
+            extra: alloy_primitives::Bytes::new(),
+        },
+    };
+
+    Ok(Permit2Payload {
+        signature: signature.as_bytes().into(),
+        permit2_authorization: authorization,
     })
 }
 
@@ -238,7 +327,7 @@ where
                 x402_version: X402Version1,
                 scheme: ExactScheme,
                 network: self.requirements.network.clone(),
-                payload: evm_payload,
+                payload: ExactPayload::Eip3009(evm_payload),
             };
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
@@ -325,22 +414,41 @@ where
 {
     fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
         Box::pin(async move {
-            let params = Eip3009SigningParams {
-                chain_id: self.chain_reference.inner(),
-                asset_address: self.requirements.asset.0,
-                pay_to: self.requirements.pay_to.into(),
-                amount: self.requirements.amount.into(),
-                max_timeout_seconds: self.requirements.max_timeout_seconds,
-                extra: self.requirements.extra.clone(),
-            };
+            let use_permit2 = self
+                .requirements
+                .extra
+                .as_ref()
+                .and_then(|e| e.asset_transfer_method)
+                == Some(AssetTransferMethod::Permit2);
 
-            let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
+            let exact_payload = if use_permit2 {
+                let params = Permit2SigningParams {
+                    chain_id: self.chain_reference.inner(),
+                    asset_address: self.requirements.asset.0,
+                    pay_to: self.requirements.pay_to.into(),
+                    amount: self.requirements.amount.into(),
+                    max_timeout_seconds: self.requirements.max_timeout_seconds,
+                };
+                let permit2_payload = sign_permit2_authorization(&self.signer, &params).await?;
+                ExactPayload::Permit2(permit2_payload)
+            } else {
+                let params = Eip3009SigningParams {
+                    chain_id: self.chain_reference.inner(),
+                    asset_address: self.requirements.asset.0,
+                    pay_to: self.requirements.pay_to.into(),
+                    amount: self.requirements.amount.into(),
+                    max_timeout_seconds: self.requirements.max_timeout_seconds,
+                    extra: self.requirements.extra.clone(),
+                };
+                let eip3009_payload = sign_erc3009_authorization(&self.signer, &params).await?;
+                ExactPayload::Eip3009(eip3009_payload)
+            };
 
             let payload = types::v2::PaymentPayload {
                 x402_version: v2::X402Version2,
                 accepted: self.requirements.clone(),
                 resource: self.resource_info.clone(),
-                payload: evm_payload,
+                payload: exact_payload,
                 extensions: None,
             };
             let json = serde_json::to_vec(&payload)?;

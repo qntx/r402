@@ -2,6 +2,8 @@
 //!
 //! Contains the minimal ABI surface needed by the facilitator:
 //! - [`IEIP3009`] — ERC-3009 + ERC-20 subset for USDC-style tokens
+//! - [`IX402Permit2Proxy`] — x402 Permit2 proxy for settling Permit2 payments
+//! - [`IERC20`] — Minimal ERC-20 interface for allowance/balance checks
 //! - [`Validator6492`] — EIP-6492 universal signature validator
 //! - [`Sig6492`] — ABI-decodable prefix of an EIP-6492 wrapped signature
 
@@ -69,5 +71,53 @@ sol! {
         address factory;
         bytes   factoryCalldata;
         bytes   innerSig;
+    }
+}
+
+sol! {
+    /// x402 exact payment Permit2 proxy interface.
+    ///
+    /// Deployed at `0x4020615294c913F045dc10f0a5cdEbd86c280001`.
+    /// Settles Permit2-based payments by calling through the canonical Permit2 contract.
+    ///
+    /// Reference: x402 protocol specification
+    #[allow(missing_docs)]
+    #[derive(Debug)]
+    #[sol(rpc)]
+    interface IX402Permit2Proxy {
+        struct TokenPermissions {
+            address token;
+            uint256 amount;
+        }
+
+        struct Permit {
+            TokenPermissions permitted;
+            uint256 nonce;
+            uint256 deadline;
+        }
+
+        struct Witness {
+            address to;
+            uint256 validAfter;
+            bytes extra;
+        }
+
+        function settle(
+            Permit permit,
+            address owner,
+            Witness witness,
+            bytes signature
+        ) external;
+    }
+}
+
+sol! {
+    /// Minimal ERC-20 interface for allowance and balance checks.
+    #[allow(missing_docs)]
+    #[derive(Debug)]
+    #[sol(rpc)]
+    interface IERC20 {
+        function balanceOf(address account) external view returns (uint256);
+        function allowance(address owner, address spender) external view returns (uint256);
     }
 }

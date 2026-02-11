@@ -28,7 +28,9 @@
 //! See [`X402Client::with_selector`] for custom payment selection.
 
 mod builder;
+pub mod hooks;
 mod middleware;
 
 pub use builder::*;
+pub use hooks::ClientHooks;
 pub use middleware::*;

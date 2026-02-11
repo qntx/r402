@@ -623,7 +623,7 @@ impl PaymentProblem {
 /// A payment required response that can be either V1 or V2.
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PaymentRequired {
     /// Protocol version 1 variant.
     V1(v1::PaymentRequired),

@@ -37,9 +37,11 @@
 
 pub mod error;
 pub mod facilitator_client;
+pub mod hooks;
 pub mod layer;
 pub mod paygate;
 
 pub use error::{PaygateError, VerificationError};
+pub use hooks::PaygateHooks;
 pub use layer::{X402LayerBuilder, X402Middleware};
 pub use paygate::{DynamicPriceTags, PaygateProtocol, PriceTagSource, StaticPriceTags};

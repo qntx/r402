@@ -14,15 +14,23 @@ use r402::timestamp::UnixTimestamp;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
-use super::ExactEvmPayment;
+use alloy_sol_types::SolStruct;
+
+use super::Eip3009Payment;
+use super::Permit2Payment;
 use super::VALIDATOR_ADDRESS;
-use super::contract::{IEIP3009, Validator6492};
+use super::contract::{IEIP3009, IERC20, Validator6492};
 use super::error::Eip155ExactError;
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
 use super::signature::{SignedMessage, StructuredSignature};
 use crate::chain::Eip155ChainReference;
+use crate::exact::Eip3009Payload;
 use crate::exact::PaymentRequirementsExtra;
+use crate::exact::PermitWitnessTransferFrom;
 use crate::exact::types;
+use crate::exact::types::TokenPermissions as SolTokenPermissions;
+use crate::exact::types::Witness as SolWitness;
+use crate::exact::{PERMIT2_ADDRESS, PERMIT2_DEADLINE_BUFFER, X402_EXACT_PERMIT2_PROXY};
 
 /// Awaits a future, optionally instrumenting it with a tracing span.
 macro_rules! traced {
@@ -39,17 +47,18 @@ macro_rules! traced {
     }};
 }
 
-/// Runs all V1 preconditions needed for a successful payment.
+/// Runs all V1 preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) async fn assert_valid_v1_payment<'a, P: Provider>(
     provider: &'a P,
     chain: &Eip155ChainReference,
+    eip3009: &Eip3009Payload,
     payload: &types::v1::PaymentPayload,
     requirements: &types::v1::PaymentRequirements,
 ) -> Result<
     (
         IEIP3009::IEIP3009Instance<&'a P>,
-        ExactEvmPayment,
+        Eip3009Payment,
         Eip712Domain,
     ),
     Eip155ExactError,
@@ -65,7 +74,7 @@ pub(super) async fn assert_valid_v1_payment<'a, P: Provider>(
     if requirements_chain_id != chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch.into());
     }
-    let authorization = &payload.payload.authorization;
+    let authorization = &eip3009.authorization;
     if authorization.to != requirements.pay_to {
         return Err(PaymentVerificationError::RecipientMismatch.into());
     }
@@ -81,39 +90,39 @@ pub(super) async fn assert_valid_v1_payment<'a, P: Provider>(
     assert_enough_balance(&contract, &authorization.from, amount_required).await?;
     assert_enough_value(&authorization.value.into(), &amount_required)?;
 
-    let payment = ExactEvmPayment {
+    let payment = Eip3009Payment {
         from: authorization.from,
         to: authorization.to,
         value: authorization.value.into(),
         valid_after: authorization.valid_after,
         valid_before: authorization.valid_before,
         nonce: authorization.nonce,
-        signature: payload.payload.signature.clone(),
+        signature: eip3009.signature.clone(),
     };
 
     Ok((contract, payment, domain))
 }
 
-/// Runs all V2 preconditions needed for a successful payment.
+/// Runs all V2 preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) async fn assert_valid_v2_payment<P: Provider>(
     provider: P,
     chain: &Eip155ChainReference,
+    eip3009: &Eip3009Payload,
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
-) -> Result<(IEIP3009::IEIP3009Instance<P>, ExactEvmPayment, Eip712Domain), Eip155ExactError> {
+) -> Result<(IEIP3009::IEIP3009Instance<P>, Eip3009Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
     if accepted != requirements {
         return Err(PaymentVerificationError::AcceptedRequirementsMismatch.into());
     }
-    let payload_inner = &payload.payload;
 
     let chain_id: ChainId = chain.into();
     let payload_chain_id = &accepted.network;
     if payload_chain_id != &chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch.into());
     }
-    let authorization = &payload_inner.authorization;
+    let authorization = &eip3009.authorization;
     if authorization.to != accepted.pay_to {
         return Err(PaymentVerificationError::RecipientMismatch.into());
     }
@@ -129,14 +138,14 @@ pub(super) async fn assert_valid_v2_payment<P: Provider>(
     assert_enough_balance(&contract, &authorization.from, amount_required.into()).await?;
     assert_enough_value(&authorization.value.into(), &amount_required.into())?;
 
-    let payment = ExactEvmPayment {
+    let payment = Eip3009Payment {
         from: authorization.from,
         to: authorization.to,
         value: authorization.value.into(),
         valid_after: authorization.valid_after,
         valid_before: authorization.valid_before,
         nonce: authorization.nonce,
-        signature: payload_inner.signature.clone(),
+        signature: eip3009.signature.clone(),
     };
 
     Ok((contract, payment, domain))
@@ -272,7 +281,7 @@ pub fn assert_enough_value(
 pub async fn verify_payment<P: Provider>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P>,
-    payment: &ExactEvmPayment,
+    payment: &Eip3009Payment,
     eip712_domain: &Eip712Domain,
 ) -> Result<Address, Eip155ExactError> {
     let signed_message = SignedMessage::extract(payment, eip712_domain)?;
@@ -359,6 +368,168 @@ pub async fn verify_payment<P: Provider>(
                 )
             )?;
         }
+    }
+
+    Ok(payer)
+}
+
+/// Runs all V2 preconditions needed for a successful Permit2 payment.
+///
+/// Validates the Permit2 authorization parameters against the payment requirements,
+/// following the same checks as the official Go SDK's `VerifyPermit2`:
+/// spender, recipient, deadline, validAfter, amount, and token.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
+pub(super) async fn assert_valid_v2_permit2_payment<P: Provider>(
+    provider: P,
+    chain: &Eip155ChainReference,
+    permit2: &crate::exact::Permit2Payload,
+    payload: &types::v2::PaymentPayload,
+    requirements: &types::v2::PaymentRequirements,
+) -> Result<(IERC20::IERC20Instance<P>, Permit2Payment, Eip712Domain), Eip155ExactError> {
+    let accepted = &payload.accepted;
+    if accepted != requirements {
+        return Err(PaymentVerificationError::AcceptedRequirementsMismatch.into());
+    }
+
+    let chain_id: ChainId = chain.into();
+    if accepted.network != chain_id {
+        return Err(PaymentVerificationError::ChainIdMismatch.into());
+    }
+
+    let auth = &permit2.permit2_authorization;
+
+    // Verify spender is x402ExactPermit2Proxy
+    if auth.spender != X402_EXACT_PERMIT2_PROXY {
+        return Err(PaymentVerificationError::InvalidSignature(
+            "invalid Permit2 spender: must be x402ExactPermit2Proxy".into(),
+        )
+        .into());
+    }
+
+    // Verify witness.to matches payTo
+    if auth.witness.to != Address::from(accepted.pay_to) {
+        return Err(PaymentVerificationError::RecipientMismatch.into());
+    }
+
+    // Parse and verify deadline not expired (with buffer for block time)
+    let now = UnixTimestamp::now();
+    let deadline_u64: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
+    let deadline_threshold = now.as_secs() + PERMIT2_DEADLINE_BUFFER;
+    if deadline_u64 < deadline_threshold {
+        return Err(PaymentVerificationError::Expired.into());
+    }
+
+    // Parse and verify validAfter is not in the future
+    let valid_after_u64: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
+    if valid_after_u64 > now.as_secs() {
+        return Err(PaymentVerificationError::Early.into());
+    }
+
+    // Verify amount is sufficient
+    let auth_amount: U256 = auth.permitted.amount.into();
+    let required_amount: U256 = accepted.amount.into();
+    assert_enough_value(&auth_amount, &required_amount)?;
+
+    // Verify token matches
+    if auth.permitted.token != Address::from(accepted.asset) {
+        return Err(PaymentVerificationError::InvalidPaymentAmount.into());
+    }
+
+    let token_address: Address = accepted.asset.into();
+    let erc20 = IERC20::new(token_address, provider);
+
+    // Check Permit2 allowance (non-fatal if RPC fails, matching Go SDK behavior)
+    let allowance_result = erc20.allowance(auth.from, PERMIT2_ADDRESS).call().await;
+    if let Ok(allowance) = allowance_result
+        && allowance < required_amount
+    {
+        return Err(PaymentVerificationError::InsufficientFunds.into());
+    }
+
+    // Check balance
+    let balance_result = erc20.balanceOf(auth.from).call().await;
+    if let Ok(balance) = balance_result
+        && balance < required_amount
+    {
+        return Err(PaymentVerificationError::InsufficientFunds.into());
+    }
+
+    // Construct EIP-712 domain for Permit2 (name = "Permit2", no version)
+    let domain = eip712_domain! {
+        name: "Permit2",
+        chain_id: chain.inner(),
+        verifying_contract: PERMIT2_ADDRESS,
+    };
+
+    let payment = Permit2Payment {
+        from: auth.from,
+        to: auth.witness.to,
+        token: auth.permitted.token,
+        amount: auth_amount,
+        spender: auth.spender,
+        nonce: auth.nonce.into(),
+        deadline: auth.deadline.into(),
+        valid_after: auth.witness.valid_after.into(),
+        extra: auth.witness.extra.clone(),
+        signature: permit2.signature.clone(),
+    };
+
+    Ok((erc20, payment, domain))
+}
+
+/// Verifies a Permit2 payment by checking the EIP-712 signature.
+///
+/// Reconstructs the `PermitWitnessTransferFrom` typed data, computes the
+/// EIP-712 signing hash, and verifies the signature using the EIP-6492
+/// universal validator (supporting EOA, EIP-1271, and counterfactual wallets).
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if signature verification fails.
+pub async fn verify_permit2_payment<P: Provider>(
+    provider: &P,
+    payment: &Permit2Payment,
+    eip712_domain: &Eip712Domain,
+) -> Result<Address, Eip155ExactError> {
+    let permit_witness = PermitWitnessTransferFrom {
+        permitted: SolTokenPermissions {
+            token: payment.token,
+            amount: payment.amount,
+        },
+        spender: payment.spender,
+        nonce: payment.nonce,
+        deadline: payment.deadline,
+        witness: SolWitness {
+            to: payment.to,
+            validAfter: payment.valid_after,
+            extra: payment.extra.clone(),
+        },
+    };
+
+    let eip712_hash = permit_witness.eip712_signing_hash(eip712_domain);
+    let payer = payment.from;
+    let signature_bytes = payment.signature.clone();
+
+    // Use universal signature verification (EIP-6492 validator)
+    let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, provider);
+    let is_valid_call =
+        validator6492.isValidSigWithSideEffects(payer, eip712_hash, signature_bytes);
+    let is_valid_fut = is_valid_call.call().into_future();
+    let is_valid = traced!(
+        is_valid_fut,
+        tracing::info_span!("verify_permit2_signature",
+            from = %payer,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )
+    .map_err(|e| PaymentVerificationError::InvalidSignature(e.to_string()))?;
+
+    if !is_valid {
+        return Err(
+            PaymentVerificationError::InvalidSignature("invalid Permit2 signature".into()).into(),
+        );
     }
 
     Ok(payer)

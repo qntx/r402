@@ -6,7 +6,7 @@
 use alloy_primitives::{Address, B256, Bytes, Signature, hex};
 use alloy_sol_types::{SolStruct, SolType};
 
-use super::ExactEvmPayment;
+use super::Eip3009Payment;
 use super::contract::Sig6492;
 use crate::exact::TransferWithAuthorization;
 
@@ -26,10 +26,10 @@ pub(super) struct SignedMessage {
 }
 
 impl SignedMessage {
-    /// Construct a [`SignedMessage`] from an [`ExactEvmPayment`] and its
+    /// Construct a [`SignedMessage`] from an [`Eip3009Payment`] and its
     /// corresponding [`Eip712Domain`](alloy_sol_types::Eip712Domain).
     pub fn extract(
-        payment: &ExactEvmPayment,
+        payment: &Eip3009Payment,
         domain: &alloy_sol_types::Eip712Domain,
     ) -> Result<Self, StructuredSignatureFormatError> {
         let transfer_with_authorization = TransferWithAuthorization {

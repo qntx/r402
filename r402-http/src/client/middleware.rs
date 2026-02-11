@@ -12,6 +12,10 @@ use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 use std::sync::Arc;
 
+use super::hooks::{
+    ClientHooks, PaymentCreatedContext, PaymentCreationContext, PaymentCreationFailureContext,
+};
+
 #[cfg(feature = "telemetry")]
 use tracing::{debug, info, instrument, trace};
 
@@ -24,6 +28,7 @@ use tracing::{debug, info, instrument, trace};
 pub struct X402Client<TSelector> {
     schemes: ClientSchemes,
     selector: TSelector,
+    hooks: Arc<ClientHooks>,
 }
 
 impl X402Client<FirstMatch> {
@@ -42,6 +47,7 @@ impl Default for X402Client<FirstMatch> {
         Self {
             schemes: ClientSchemes::default(),
             selector: FirstMatch,
+            hooks: Arc::new(ClientHooks::default()),
         }
     }
 }
@@ -76,7 +82,18 @@ impl<TSelector> X402Client<TSelector> {
         X402Client {
             selector,
             schemes: self.schemes,
+            hooks: self.hooks,
         }
+    }
+
+    /// Sets the lifecycle hooks for payment creation.
+    ///
+    /// Hooks allow intercepting the payment creation pipeline for logging,
+    /// custom validation, or error recovery.
+    #[must_use]
+    pub fn with_hooks(mut self, hooks: ClientHooks) -> Self {
+        self.hooks = Arc::new(hooks);
+        self
     }
 }
 
@@ -115,7 +132,58 @@ where
         let payment_required = parse_payment_required(res)
             .await
             .ok_or_else(|| X402Error::ParseError("Invalid 402 response".to_string()))?;
-        let candidates = self.schemes.candidates(&payment_required);
+
+        let hook_ctx = PaymentCreationContext {
+            payment_required: payment_required.clone(),
+        };
+
+        // Execute before-payment-creation hooks
+        for hook in &self.hooks.before_payment_creation {
+            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
+                && result.abort
+            {
+                return Err(X402Error::ParseError(result.reason));
+            }
+        }
+
+        let creation_result = self.create_payment_headers_inner(&payment_required).await;
+
+        match creation_result {
+            Ok(headers) => {
+                // Execute after-payment-creation hooks (errors logged, not propagated)
+                let result_ctx = PaymentCreatedContext {
+                    ctx: hook_ctx,
+                    headers: headers.clone(),
+                };
+                for hook in &self.hooks.after_payment_creation {
+                    let _ = hook(result_ctx.clone()).await;
+                }
+                Ok(headers)
+            }
+            Err(err) => {
+                // Execute on-payment-creation-failure hooks (may recover)
+                let failure_ctx = PaymentCreationFailureContext {
+                    ctx: hook_ctx,
+                    error: err.to_string(),
+                };
+                for hook in &self.hooks.on_payment_creation_failure {
+                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
+                        && result.recovered
+                    {
+                        return Ok(result.headers);
+                    }
+                }
+                Err(err)
+            }
+        }
+    }
+
+    /// Internal helper that performs the actual payment header creation.
+    async fn create_payment_headers_inner(
+        &self,
+        payment_required: &proto::PaymentRequired,
+    ) -> Result<HeaderMap, X402Error> {
+        let candidates = self.schemes.candidates(payment_required);
 
         // Select the best candidate
         let selected = self
@@ -131,7 +199,7 @@ where
         );
 
         let signed_payload = selected.sign().await?;
-        let header_name = match &payment_required {
+        let header_name = match payment_required {
             proto::PaymentRequired::V1(_) => "X-Payment",
             proto::PaymentRequired::V2(_) => "Payment-Signature",
         };
