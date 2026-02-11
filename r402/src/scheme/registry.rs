@@ -1,6 +1,9 @@
-//! Scheme blueprint and handler registries.
+//! Scheme handler builder, blueprint trait, and handler registry.
 //!
-//! [`SchemeBlueprints`] stores factories that can create handlers, while
+//! [`SchemeHandlerBuilder`] defines how to construct a [`Facilitator`] from a
+//! chain provider.  [`SchemeBlueprint`] combines identity ([`SchemeId`]) with
+//! building capability so the registry can create handlers in a single call.
+//!
 //! [`SchemeRegistry`] holds the active handler instances keyed by chain+scheme.
 
 use crate::chain::{ChainId, ChainProviderOps};
@@ -9,61 +12,31 @@ use crate::facilitator::Facilitator;
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use std::marker::PhantomData;
 
 use super::SchemeId;
-use super::handler::SchemeHandlerBuilder;
+
+/// Trait for building facilitator instances from chain providers.
+///
+/// The type parameter `P` represents the chain provider type.
+pub trait SchemeHandlerBuilder<P> {
+    /// Creates a new facilitator for the given chain provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the facilitator cannot be built from the provider.
+    fn build(
+        &self,
+        provider: P,
+        config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>>;
+}
 
 /// Marker trait for types that are both identifiable and buildable.
 ///
-/// This combines [`SchemeId`] and [`SchemeHandlerBuilder`] for
-/// use in the blueprint registry.
+/// This combines [`SchemeId`] and [`SchemeHandlerBuilder`] so that the
+/// registry can identify *and* construct handlers in a single call.
 pub trait SchemeBlueprint<P>: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
 impl<T, P> SchemeBlueprint<P> for T where T: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
-
-/// Registry of scheme blueprints (factories).
-///
-/// Register blueprints at startup, then use them to build handlers
-/// via [`SchemeRegistry`].
-///
-/// # Type Parameters
-///
-/// - `P` - The chain provider type
-#[derive(Default)]
-pub struct SchemeBlueprints<P>(HashMap<String, Box<dyn SchemeBlueprint<P>>>, PhantomData<P>);
-
-impl<P> Debug for SchemeBlueprints<P> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let slugs: Vec<String> = self.0.keys().cloned().collect();
-        f.debug_tuple("SchemeBlueprints").field(&slugs).finish()
-    }
-}
-
-impl<P> SchemeBlueprints<P> {
-    /// Creates an empty blueprint registry.
-    #[must_use]
-    pub fn new() -> Self {
-        Self(HashMap::new(), PhantomData)
-    }
-
-    /// Registers a blueprint and returns self for chaining.
-    #[must_use]
-    pub fn and_register<B: SchemeBlueprint<P> + 'static>(mut self, blueprint: B) -> Self {
-        self.register(blueprint);
-        self
-    }
-
-    /// Registers a scheme blueprint.
-    pub fn register<B: SchemeBlueprint<P> + 'static>(&mut self, blueprint: B) {
-        self.0.insert(blueprint.id(), Box::new(blueprint));
-    }
-
-    /// Gets a blueprint by its ID.
-    #[must_use]
-    pub fn get(&self, id: &str) -> Option<&dyn SchemeBlueprint<P>> {
-        self.0.get(id).map(|v| &**v)
-    }
-}
 
 /// Unique identifier for a scheme handler instance.
 ///

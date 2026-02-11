@@ -7,7 +7,7 @@
 //! # Facilitator-Side
 //!
 //! - [`crate::Facilitator`] - Processes verify/settle requests
-//! - [`SchemeBlueprint`] / [`SchemeBlueprints`] - Factories that create handlers
+//! - [`SchemeBlueprint`] / [`SchemeHandlerBuilder`] - Factories that create handlers
 //! - [`SchemeRegistry`] - Maps chain+scheme combinations to handlers
 //!
 //! # Server-Side
@@ -26,12 +26,10 @@
 //! to add lifecycle hooks around verify/settle operations.
 
 mod client;
-mod handler;
 mod registry;
 mod server;
 
 pub use client::*;
-pub use handler::*;
 pub use registry::*;
 pub use server::*;
 
