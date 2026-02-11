@@ -33,6 +33,33 @@ pub use client::*;
 pub use registry::*;
 pub use server::*;
 
+/// Trait for identifying a payment scheme.
+///
+/// Each scheme has a unique identifier composed of the chain namespace
+/// and scheme name.
+pub trait SchemeId {
+    /// Returns the chain namespace (e.g., "eip155", "solana").
+    fn namespace(&self) -> &str;
+    /// Returns the scheme name (e.g., "exact").
+    fn scheme(&self) -> &str;
+    /// Returns the CAIP-2 family pattern this scheme supports.
+    ///
+    /// Used to group signers by blockchain family in the supported response.
+    /// The default implementation derives the pattern from [`Self::namespace`].
+    ///
+    /// # Examples
+    ///
+    /// - EVM schemes return `"eip155:*"`
+    /// - Solana schemes return `"solana:*"`
+    fn caip_family(&self) -> String {
+        format!("{}:*", self.namespace())
+    }
+    /// Returns the full scheme identifier (e.g., "eip155-exact").
+    fn id(&self) -> String {
+        format!("{}-{}", self.namespace(), self.scheme(),)
+    }
+}
+
 /// A unit struct representing the string literal `"exact"`.
 ///
 /// This is the canonical scheme name for exact-amount payment schemes
@@ -85,32 +112,5 @@ impl<'de> serde::Deserialize<'de> for ExactScheme {
                 Self::VALUE,
             )))
         }
-    }
-}
-
-/// Trait for identifying a payment scheme.
-///
-/// Each scheme has a unique identifier composed of the chain namespace
-/// and scheme name.
-pub trait SchemeId {
-    /// Returns the chain namespace (e.g., "eip155", "solana").
-    fn namespace(&self) -> &str;
-    /// Returns the scheme name (e.g., "exact").
-    fn scheme(&self) -> &str;
-    /// Returns the CAIP-2 family pattern this scheme supports.
-    ///
-    /// Used to group signers by blockchain family in the supported response.
-    /// The default implementation derives the pattern from [`Self::namespace`].
-    ///
-    /// # Examples
-    ///
-    /// - EVM schemes return `"eip155:*"`
-    /// - Solana schemes return `"solana:*"`
-    fn caip_family(&self) -> String {
-        format!("{}:*", self.namespace())
-    }
-    /// Returns the full scheme identifier (e.g., "eip155-exact").
-    fn id(&self) -> String {
-        format!("{}-{}", self.namespace(), self.scheme(),)
     }
 }

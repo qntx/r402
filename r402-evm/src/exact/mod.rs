@@ -26,6 +26,7 @@
 //!
 //! - **EIP-6492 signatures**: Detected by the 32-byte magic suffix and validated via
 //!   the universal EIP-6492 validator contract before settlement.
+
 use r402::scheme::SchemeId;
 
 #[cfg(feature = "server")]
