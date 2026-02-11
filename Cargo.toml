@@ -4,7 +4,7 @@ default-members = ["r402"]
 resolver = "3"
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
@@ -12,10 +12,10 @@ description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
 # Internal crates
-r402 = { version = "0.6", path = "r402" }
-r402-evm = { version = "0.6", path = "r402-evm" }
-r402-http = { version = "0.6", path = "r402-http" }
-r402-svm = { version = "0.6", path = "r402-svm" }
+r402 = { version = "0.7", path = "r402" }
+r402-evm = { version = "0.7", path = "r402-evm" }
+r402-http = { version = "0.7", path = "r402-http" }
+r402-svm = { version = "0.7", path = "r402-svm" }
 
 # Core
 async-trait = "0.1"
