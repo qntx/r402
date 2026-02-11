@@ -89,7 +89,6 @@ impl<'de> Deserialize<'de> for U64String {
     }
 }
 
-
 /// Describes a payment method supported by a facilitator.
 ///
 /// This type is returned in the [`SupportedResponse`] to indicate what

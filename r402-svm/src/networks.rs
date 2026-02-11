@@ -43,11 +43,15 @@ impl KnownNetworkSolana<Self> for ChainId {
 }
 
 impl KnownNetworkSolana<SolanaTokenDeployment> for USDC {
+    // Solana mainnet — native Circle USDC (SPL Token)
+    // Verify: https://solscan.io/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
     fn solana() -> SolanaTokenDeployment {
         let address = pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
         SolanaTokenDeployment::new(SolanaChainReference::solana(), address.into(), 6)
     }
 
+    // Solana devnet — native Circle USDC testnet (SPL Token)
+    // Verify: https://explorer.solana.com/address/4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU?cluster=devnet
     fn solana_devnet() -> SolanaTokenDeployment {
         let address = pubkey!("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
         SolanaTokenDeployment::new(SolanaChainReference::solana_devnet(), address.into(), 6)
