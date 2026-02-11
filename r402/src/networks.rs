@@ -128,26 +128,21 @@ impl Default for NetworkRegistry {
     }
 }
 
-/// Marker struct for USDC token deployment implementations.
+/// Marker struct for the USDC stablecoin.
 ///
-/// This struct is used as a type parameter for chain-specific traits (e.g., `KnownNetworkEip155`,
-/// `KnownNetworkSolana`) to provide per-network USDC token deployment information.
+/// Chain-specific crates provide per-network deployment data via data-driven
+/// lookup functions:
 ///
-/// # Usage
-///
-/// Chain-specific crates implement traits for this marker struct to provide USDC token
-/// deployments on different networks. For example:
-///
-/// - `r402-evm` implements `KnownNetworkEip155<Eip155TokenDeployment>` for `USDC`
-/// - `r402-svm` implements `KnownNetworkSolana<SolanaTokenDeployment>` for `USDC`
+/// - `r402-evm`: [`usdc_evm_deployment()`] / [`usdc_evm_deployments()`]
+/// - `r402-svm`: [`usdc_solana_deployment()`] / [`usdc_solana_deployments()`]
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct USDC;
 
-/// Marker struct for USDM (`MegaUSD`) token deployment implementations.
+/// Marker struct for the USDM (`MegaUSD`) stablecoin.
 ///
 /// `MegaETH` uses USDM as its default stablecoin instead of USDC.
-/// This marker enables chain-specific crates to provide USDM deployment data.
+/// See `r402-evm`: [`usdm_evm_deployment()`] / [`usdm_evm_deployments()`].
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct USDM;
