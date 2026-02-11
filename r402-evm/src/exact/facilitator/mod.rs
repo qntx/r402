@@ -36,7 +36,7 @@ use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::UnixTimestamp;
 use r402::proto::{v1, v2};
-use r402::scheme::{SchemeHandlerBuilder, SchemeId};
+use r402::scheme::{SchemeBuilder, SchemeId};
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -93,7 +93,7 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-impl<P> SchemeHandlerBuilder<P> for V1Eip155Exact
+impl<P> SchemeBuilder<P> for V1Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
@@ -107,7 +107,7 @@ where
     }
 }
 
-impl<P> SchemeHandlerBuilder<P> for V2Eip155Exact
+impl<P> SchemeBuilder<P> for V2Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,

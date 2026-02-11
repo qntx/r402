@@ -7,7 +7,7 @@
 //! # Facilitator-Side
 //!
 //! - [`crate::Facilitator`] - Processes verify/settle requests
-//! - [`SchemeBlueprint`] / [`SchemeHandlerBuilder`] - Factories that create handlers
+//! - [`SchemeBlueprint`] / [`SchemeBuilder`] - Factories that create handlers
 //! - [`SchemeRegistry`] - Maps chain+scheme combinations to handlers
 //!
 //! # Server-Side

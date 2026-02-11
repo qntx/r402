@@ -1,6 +1,6 @@
 //! Scheme handler builder, blueprint trait, and handler registry.
 //!
-//! [`SchemeHandlerBuilder`] defines how to construct a [`Facilitator`] from a
+//! [`SchemeBuilder`] defines how to construct a [`Facilitator`] from a
 //! chain provider.  [`SchemeBlueprint`] combines identity ([`SchemeId`]) with
 //! building capability so the registry can create handlers in a single call.
 //!
@@ -18,7 +18,7 @@ use super::SchemeId;
 /// Trait for building facilitator instances from chain providers.
 ///
 /// The type parameter `P` represents the chain provider type.
-pub trait SchemeHandlerBuilder<P> {
+pub trait SchemeBuilder<P> {
     /// Creates a new facilitator for the given chain provider.
     ///
     /// # Errors
@@ -33,17 +33,17 @@ pub trait SchemeHandlerBuilder<P> {
 
 /// Marker trait for types that are both identifiable and buildable.
 ///
-/// This combines [`SchemeId`] and [`SchemeHandlerBuilder`] so that the
+/// This combines [`SchemeId`] and [`SchemeBuilder`] so that the
 /// registry can identify *and* construct handlers in a single call.
-pub trait SchemeBlueprint<P>: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
-impl<T, P> SchemeBlueprint<P> for T where T: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
+pub trait SchemeBlueprint<P>: SchemeId + for<'a> SchemeBuilder<&'a P> {}
+impl<T, P> SchemeBlueprint<P> for T where T: SchemeId + for<'a> SchemeBuilder<&'a P> {}
 
 /// Unique identifier for a scheme handler instance.
 ///
 /// Combines the chain ID, protocol version, and scheme name to uniquely
 /// identify a handler that can process payments for a specific combination.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub struct SchemeHandlerSlug {
+pub struct SchemeSlug {
     /// The chain this handler operates on.
     pub chain_id: ChainId,
     /// The x402 protocol version.
@@ -52,7 +52,7 @@ pub struct SchemeHandlerSlug {
     pub name: String,
 }
 
-impl SchemeHandlerSlug {
+impl SchemeSlug {
     /// Creates a new scheme handler slug.
     #[must_use]
     pub const fn new(chain_id: ChainId, x402_version: u8, name: String) -> Self {
@@ -83,7 +83,7 @@ impl SchemeHandlerSlug {
     }
 }
 
-impl Display for SchemeHandlerSlug {
+impl Display for SchemeSlug {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
@@ -100,7 +100,7 @@ impl Display for SchemeHandlerSlug {
 ///
 /// Maps chain+scheme combinations to their handlers.
 #[derive(Default)]
-pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn Facilitator>>);
+pub struct SchemeRegistry(HashMap<SchemeSlug, Box<dyn Facilitator>>);
 
 impl Debug for SchemeRegistry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -129,7 +129,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chain_id = provider.chain_id();
         let handler = blueprint.build(provider, config)?;
-        let slug = SchemeHandlerSlug::new(
+        let slug = SchemeSlug::new(
             chain_id,
             blueprint.x402_version(),
             blueprint.scheme().to_string(),
@@ -147,7 +147,7 @@ impl SchemeRegistry {
     /// This allows registering a single handler for an entire namespace
     /// (e.g., `eip155:*`) that serves all chains within it.
     #[must_use]
-    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn Facilitator> {
+    pub fn by_slug(&self, slug: &SchemeSlug) -> Option<&dyn Facilitator> {
         self.0
             .get(slug)
             .or_else(|| {
@@ -173,7 +173,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let handler = blueprint.build(provider, config)?;
         let namespace = provider.chain_id().namespace().to_owned();
-        let slug = SchemeHandlerSlug::new(
+        let slug = SchemeSlug::new(
             ChainId::new(namespace, "*"),
             blueprint.x402_version(),
             blueprint.scheme().to_string(),

@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::chain::ChainId;
-use crate::scheme::SchemeHandlerSlug;
+use crate::scheme::SchemeSlug;
 
 mod encoding;
 mod error;
@@ -252,15 +252,15 @@ impl SettleRequest {
 
     /// Extracts the scheme handler slug from the request.
     ///
-    /// Delegates to the same logic as [`VerifyRequest::scheme_handler_slug`].
+    /// Delegates to the same logic as [`VerifyRequest::scheme_slug`].
     #[must_use]
-    pub fn scheme_handler_slug(
+    pub fn scheme_slug(
         &self,
         registry: &crate::networks::NetworkRegistry,
-    ) -> Option<SchemeHandlerSlug> {
+    ) -> Option<SchemeSlug> {
         // Reuse VerifyRequest's implementation via a temporary reference-based parse.
         let tmp = VerifyRequest(self.0.clone());
-        tmp.scheme_handler_slug(registry)
+        tmp.scheme_slug(registry)
     }
 }
 
@@ -299,17 +299,17 @@ impl VerifyRequest {
     ///
     /// Returns `None` if the request format is invalid or the scheme is unknown.
     #[must_use]
-    pub fn scheme_handler_slug(
+    pub fn scheme_slug(
         &self,
         registry: &crate::networks::NetworkRegistry,
-    ) -> Option<SchemeHandlerSlug> {
+    ) -> Option<SchemeSlug> {
         let x402_version: u8 = self.0.get("x402Version")?.as_u64()?.try_into().ok()?;
         match x402_version {
             v1::X402Version1::VALUE => {
                 let network_name = self.0.get("paymentPayload")?.get("network")?.as_str()?;
                 let chain_id = registry.chain_id_by_name(network_name)?;
                 let scheme = self.0.get("paymentPayload")?.get("scheme")?.as_str()?;
-                let slug = SchemeHandlerSlug::new(chain_id.clone(), 1, scheme.into());
+                let slug = SchemeSlug::new(chain_id.clone(), 1, scheme.into());
                 Some(slug)
             }
             v2::X402Version2::VALUE => {
@@ -326,7 +326,7 @@ impl VerifyRequest {
                     .get("accepted")?
                     .get("scheme")?
                     .as_str()?;
-                let slug = SchemeHandlerSlug::new(chain_id, 2, scheme.into());
+                let slug = SchemeSlug::new(chain_id, 2, scheme.into());
                 Some(slug)
             }
             _ => None,
