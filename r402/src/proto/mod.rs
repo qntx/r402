@@ -23,7 +23,7 @@
 //! All types serialize to JSON using camelCase field names. The protocol version
 //! is indicated by the `x402Version` field in payment payloads.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{VecSkipError, serde_as};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -31,9 +31,63 @@ use std::str::FromStr;
 use crate::chain::ChainId;
 use crate::scheme::SchemeHandlerSlug;
 
-pub mod util;
 pub mod v1;
 pub mod v2;
+
+/// A `u64` value that serializes as a string.
+///
+/// Some JSON parsers (particularly in `JavaScript`) cannot accurately represent
+/// large integers. This type serializes `u64` values as strings to preserve
+/// precision across all platforms.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct U64String(u64);
+
+impl U64String {
+    /// Returns the inner `u64` value.
+    #[must_use]
+    pub const fn inner(&self) -> u64 {
+        self.0
+    }
+}
+
+impl FromStr for U64String {
+    type Err = <u64 as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<u64>().map(Self)
+    }
+}
+
+impl From<u64> for U64String {
+    fn from(value: u64) -> Self {
+        Self(value)
+    }
+}
+
+impl From<U64String> for u64 {
+    fn from(value: U64String) -> Self {
+        value.0
+    }
+}
+
+impl Serialize for U64String {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for U64String {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<u64>().map(Self).map_err(serde::de::Error::custom)
+    }
+}
 
 /// Trait for types that have both V1 and V2 protocol variants.
 ///

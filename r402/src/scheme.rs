@@ -1,42 +1,28 @@
-//! Payment scheme implementations for x402.
+//! Payment scheme system for x402.
 //!
 //! This module provides the extensible scheme system that allows different
 //! payment methods to be plugged into the x402 protocol. Each scheme defines
 //! how payments are authorized, verified, and settled.
 //!
-//! # Architecture
+//! # Facilitator-Side
 //!
-//! The scheme system has three main components:
+//! - [`X402SchemeFacilitator`] - Processes verify/settle requests
+//! - [`X402SchemeBlueprint`] / [`SchemeBlueprints`] - Factories that create handlers
+//! - [`SchemeRegistry`] - Maps chain+scheme combinations to handlers
 //!
-//! 1. **Blueprints** ([`SchemeBlueprints`]) - Factories that create scheme handlers
-//! 2. **Handlers** ([`X402SchemeFacilitator`]) - Process verify/settle requests
-//! 3. **Registry** ([`SchemeRegistry`]) - Maps chain+scheme combinations to handlers
+//! # Client-Side
 //!
-//! # Available Schemes
-//!
-//! Scheme implementations are provided by chain-specific crates:
-//!
-//! - **EVM chains** (`r402-evm`): `v1-eip155-exact`, `v2-eip155-exact`
-//! - **Solana** (`r402-svm`): `v1-solana-exact`, `v2-solana-exact`
-//!
-//! # Implementing a Custom Scheme
-//!
-//! To implement a custom scheme:
-//!
-//! 1. Implement [`X402SchemeId`] to identify your scheme
-//! 2. Implement [`X402SchemeFacilitatorBuilder`] to create handlers
-//! 3. Implement [`X402SchemeFacilitator`] for the actual verification/settlement logic
-//! 4. Register your scheme with [`SchemeBlueprints::register`]
-//!
-//! See the repository documentation for details.
+//! - [`X402SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
+//! - [`PaymentSelector`] - Chooses the best candidate ([`FirstMatch`], [`PreferChain`], [`MaxAmount`])
 
-pub mod client;
+use alloy_primitives::U256;
 
-use crate::chain::{ChainId, ChainIdPattern, ChainProviderOps, ChainRegistry};
+use crate::chain::{ChainId, ChainIdPattern, ChainProviderOps};
 use crate::proto;
 use crate::proto::{AsPaymentProblem, ErrorReason, PaymentProblem, PaymentVerificationError};
-use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
+use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::marker::PhantomData;
@@ -129,14 +115,9 @@ pub trait X402SchemeId {
 /// Trait for building scheme handlers from chain providers.
 ///
 /// The type parameter `P` represents the chain provider type.
-/// Implementations use [`FromChainProvider`] trait to get the specific provider they need.
 pub trait X402SchemeFacilitatorBuilder<P> {
     /// Creates a new scheme handler for the given chain provider.
     ///
-    /// # Arguments
-    ///
-    /// * `provider` - The chain provider to use for on-chain operations
-    /// * `config` - Optional scheme-specific configuration
     /// # Errors
     ///
     /// Returns an error if the handler cannot be built from the provider.
@@ -169,12 +150,12 @@ impl AsPaymentProblem for X402SchemeFacilitatorError {
 
 /// Registry of scheme blueprints (factories).
 ///
-/// Blueprints are used to create scheme handlers for specific chain providers.
-/// Register blueprints at startup, then use them to build handlers.
+/// Register blueprints at startup, then use them to build handlers
+/// via [`SchemeRegistry`].
 ///
 /// # Type Parameters
 ///
-/// - `P` - The chain provider type that blueprints can extract from using [`FromChainProvider`]
+/// - `P` - The chain provider type
 #[derive(Default)]
 pub struct SchemeBlueprints<P>(
     HashMap<String, Box<dyn X402SchemeBlueprint<P>>>,
@@ -182,7 +163,7 @@ pub struct SchemeBlueprints<P>(
 );
 
 impl<P> Debug for SchemeBlueprints<P> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let slugs: Vec<String> = self.0.keys().cloned().collect();
         f.debug_tuple("SchemeBlueprints").field(&slugs).finish()
     }
@@ -241,7 +222,7 @@ impl SchemeHandlerSlug {
 }
 
 impl Display for SchemeHandlerSlug {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{}:{}:v{}:{}",
@@ -252,75 +233,44 @@ impl Display for SchemeHandlerSlug {
 
 /// Registry of active scheme handlers.
 ///
-/// Maps chain+scheme combinations to their handlers. Built from blueprints
-/// and chain providers based on configuration.
+/// Maps chain+scheme combinations to their handlers.
 #[derive(Default)]
 pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn X402SchemeFacilitator>>);
 
 impl Debug for SchemeRegistry {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let slugs: Vec<String> = self.0.keys().map(ToString::to_string).collect();
         f.debug_tuple("SchemeRegistry").field(&slugs).finish()
     }
 }
 
 impl SchemeRegistry {
-    /// Builds a scheme registry from blueprints and configuration.
-    ///
-    /// For each enabled scheme in the config, this finds the matching blueprint
-    /// and chain provider, then builds a handler.
+    /// Creates an empty scheme registry.
     #[must_use]
-    #[allow(clippy::cognitive_complexity)]
-    pub fn build<P: ChainProviderOps>(
-        chains: &ChainRegistry<P>,
-        blueprints: &SchemeBlueprints<P>,
-        config: &[SchemeConfig],
-    ) -> Self {
-        let mut handlers = HashMap::with_capacity(config.len());
-        for config in config {
-            if !config.enabled {
-                #[cfg(feature = "telemetry")]
-                tracing::info!(
-                    "Skipping disabled scheme {} for chains {}",
-                    config.id,
-                    config.chains
-                );
-                continue;
-            }
-            let Some(blueprint) = blueprints.get(&config.id) else {
-                #[cfg(feature = "telemetry")]
-                tracing::warn!("No scheme registered: {}", config.id);
-                continue;
-            };
-            let chain_providers = chains.by_chain_id_pattern(&config.chains);
-            if chain_providers.is_empty() {
-                #[cfg(feature = "telemetry")]
-                tracing::warn!("No chain provider found for {}", config.chains);
-                continue;
-            }
+    pub fn new() -> Self {
+        Self(HashMap::new())
+    }
 
-            for chain_provider in chain_providers {
-                let chain_id = chain_provider.chain_id();
-                let handler = match blueprint.build(chain_provider, config.config.clone()) {
-                    Ok(handler) => handler,
-                    #[allow(unused_variables)]
-                    Err(err) => {
-                        #[cfg(feature = "telemetry")]
-                        tracing::error!("Error building scheme handler for {}: {}", config.id, err);
-                        continue;
-                    }
-                };
-                let slug = SchemeHandlerSlug::new(
-                    chain_id.clone(),
-                    blueprint.x402_version(),
-                    blueprint.scheme().to_string(),
-                );
-                #[cfg(feature = "telemetry")]
-                tracing::info!(chain_id = %chain_id, scheme = %blueprint.scheme(), id=blueprint.id(), "Registered scheme handler");
-                handlers.insert(slug, handler);
-            }
-        }
-        Self(handlers)
+    /// Registers a handler for a given blueprint and chain provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the handler cannot be built from the provider.
+    pub fn register<P: ChainProviderOps>(
+        &mut self,
+        blueprint: &dyn X402SchemeBlueprint<P>,
+        provider: &P,
+        config: Option<serde_json::Value>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let chain_id = provider.chain_id();
+        let handler = blueprint.build(provider, config)?;
+        let slug = SchemeHandlerSlug::new(
+            chain_id,
+            blueprint.x402_version(),
+            blueprint.scheme().to_string(),
+        );
+        self.0.insert(slug, handler);
+        Ok(())
     }
 
     /// Gets a handler by its slug.
@@ -336,25 +286,152 @@ impl SchemeRegistry {
     }
 }
 
-/// Configuration for a specific scheme.
+/// A payment option that can be signed and submitted.
 ///
-/// Each scheme entry specifies which scheme to use and which chains it applies to.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchemeConfig {
-    /// Whether this scheme is enabled (defaults to true).
-    #[serde(default = "scheme_config_defaults::default_enabled")]
-    pub enabled: bool,
-    /// The scheme id (e.g., "v1-eip155-exact").
-    pub id: String,
-    /// The chain pattern this scheme applies to (e.g., "eip155:84532", "eip155:*", "eip155:{1,8453}").
-    pub chains: ChainIdPattern,
-    /// Scheme-specific configuration (optional).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub config: Option<serde_json::Value>,
+/// Payment candidates are generated by scheme clients when they find
+/// a matching payment requirement they can fulfill.
+pub struct PaymentCandidate {
+    /// The chain where payment will be made.
+    pub chain_id: ChainId,
+    /// The token asset address.
+    pub asset: String,
+    /// The payment amount in token units.
+    pub amount: U256,
+    /// The payment scheme name.
+    pub scheme: String,
+    /// The x402 protocol version.
+    pub x402_version: u8,
+    /// The recipient address.
+    pub pay_to: String,
+    /// The signer that can authorize this payment.
+    pub signer: Box<dyn PaymentCandidateSigner + Send + Sync>,
 }
 
-mod scheme_config_defaults {
-    pub const fn default_enabled() -> bool {
-        true
+impl Debug for PaymentCandidate {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PaymentCandidate")
+            .field("chain_id", &self.chain_id)
+            .field("asset", &self.asset)
+            .field("amount", &self.amount)
+            .field("scheme", &self.scheme)
+            .field("x402_version", &self.x402_version)
+            .field("pay_to", &self.pay_to)
+            .field("signer", &"<dyn PaymentCandidateSigner>")
+            .finish()
+    }
+}
+
+impl PaymentCandidate {
+    /// Signs this payment candidate, producing a payment payload.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`X402Error`] if signing fails.
+    pub async fn sign(&self) -> Result<String, X402Error> {
+        self.signer.sign_payment().await
+    }
+}
+
+/// Trait for scheme clients that can process payment requirements.
+///
+/// Implementations examine 402 responses and generate payment candidates
+/// for requirements they can fulfill.
+pub trait X402SchemeClient: X402SchemeId + Send + Sync {
+    /// Generates payment candidates for the given payment requirements.
+    fn accept(&self, payment_required: &proto::PaymentRequired) -> Vec<PaymentCandidate>;
+}
+
+/// Trait for signing payment authorizations.
+pub trait PaymentCandidateSigner {
+    /// Signs a payment authorization.
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>>;
+}
+
+/// Errors that can occur during client-side payment processing.
+#[derive(Debug, thiserror::Error)]
+pub enum X402Error {
+    /// No payment option matched the client's capabilities.
+    #[error("No matching payment option found")]
+    NoMatchingPaymentOption,
+
+    /// The HTTP request body cannot be cloned (e.g., streaming).
+    #[error("Request is not cloneable (streaming body?)")]
+    RequestNotCloneable,
+
+    /// Failed to parse the 402 response body.
+    #[error("Failed to parse 402 response: {0}")]
+    ParseError(String),
+
+    /// Failed to sign the payment authorization.
+    #[error("Failed to sign payment: {0}")]
+    SigningError(String),
+
+    /// JSON serialization/deserialization error.
+    #[error("JSON error: {0}")]
+    JsonError(#[from] serde_json::Error),
+}
+
+/// Trait for selecting the best payment candidate from available options.
+///
+/// Implement this trait to customize how payments are selected when
+/// multiple options are available.
+pub trait PaymentSelector: Send + Sync {
+    /// Selects a payment candidate from the available options.
+    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate>;
+}
+
+/// Selector that returns the first matching candidate.
+///
+/// This is the simplest selection strategy. The order of candidates
+/// is determined by the registration order of scheme clients.
+#[derive(Debug, Clone, Copy)]
+pub struct FirstMatch;
+
+impl PaymentSelector for FirstMatch {
+    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+        candidates.first()
+    }
+}
+
+/// Selector that prefers specific chains in priority order.
+///
+/// Patterns are tried in order; the first matching candidate is returned.
+/// If no patterns match, falls back to the first available candidate.
+#[derive(Debug)]
+pub struct PreferChain(Vec<ChainIdPattern>);
+
+impl PreferChain {
+    /// Creates a new chain preference selector.
+    pub fn new<P: Into<Vec<ChainIdPattern>>>(patterns: P) -> Self {
+        Self(patterns.into())
+    }
+
+    /// Adds additional chain patterns with lower priority.
+    #[must_use]
+    pub fn or_chain<P: Into<Vec<ChainIdPattern>>>(self, patterns: P) -> Self {
+        Self(self.0.into_iter().chain(patterns.into()).collect())
+    }
+}
+
+impl PaymentSelector for PreferChain {
+    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+        for pattern in &self.0 {
+            if let Some(candidate) = candidates.iter().find(|c| pattern.matches(&c.chain_id)) {
+                return Some(candidate);
+            }
+        }
+        candidates.first()
+    }
+}
+
+/// Selector that only accepts payments up to a maximum amount.
+///
+/// Useful for limiting spending or implementing budget controls.
+#[derive(Debug, Clone, Copy)]
+pub struct MaxAmount(pub U256);
+
+impl PaymentSelector for MaxAmount {
+    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+        candidates.iter().find(|c| c.amount <= self.0)
     }
 }

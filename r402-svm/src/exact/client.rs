@@ -18,7 +18,7 @@ use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
 use r402::proto::v2::{ResourceInfo, X402Version2};
 use r402::scheme::X402SchemeId;
-use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
+use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;

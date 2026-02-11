@@ -358,7 +358,7 @@ pub struct TransactionSignError(pub String);
 ///
 /// V1 uses network names (e.g., "solana-mainnet") for chain identification.
 pub mod v1 {
-    use r402::proto::util::U64String;
+    use r402::proto::U64String;
     use r402::proto::v1 as proto_v1;
 
     use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
@@ -383,7 +383,7 @@ pub mod v1 {
 /// V2 uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
 /// for chain identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402::proto::util::U64String;
+    use r402::proto::U64String;
     use r402::proto::v2 as proto_v2;
 
     use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};

@@ -13,7 +13,7 @@ use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::X402SchemeId;
-use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
+use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::timestamp::UnixTimestamp;
 use rand::RngExt;
 use rand::rng;
