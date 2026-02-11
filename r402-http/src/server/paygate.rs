@@ -21,7 +21,7 @@ use tower::Service;
 use tracing::{Instrument, instrument};
 use url::Url;
 
-use super::error::{PaygateError, VerificationError};
+use super::{PaygateError, VerificationError};
 
 /// Builder for resource information that can be used with both V1 and V2 protocols.
 #[derive(Debug, Clone)]
