@@ -13,13 +13,10 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-This repository is based on [x402-rs] and includes architectural improvements for internal use at qntx. For the upstream community implementation, see the [original project][x402-rs].
-
-[Architecture](ARCHITECTURE.md)
-| [x402 Protocol Spec](https://www.x402.org/)
-| [Upstream (x402-rs)][x402-rs]
+r402 is a comprehensive restructuring of [x402-rs], fully aligned with the [official Go SDK][go-sdk] feature set — adding Permit2 transfers, lifecycle hooks, and 44 built-in chain deployments. For the upstream community implementation, see [x402-rs].
 
 [x402-rs]: https://github.com/x402-rs/x402-rs
+[go-sdk]: https://github.com/coinbase/x402
 
 > [!WARNING]
 > This software has **not** been audited. See [Security](#security) before using in production.
@@ -32,6 +29,8 @@ This repository is based on [x402-rs] and includes architectural improvements fo
 | **[`r402-evm`](r402-evm/)** | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
 | **[`r402-svm`](r402-svm/)** | Solana (SVM) — SPL token transfers, program-derived addressing |
 | **[`r402-http`](r402-http/)** | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
+
+See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
 
 ## Quick Start
 
@@ -76,15 +75,17 @@ let res = client.get("https://api.example.com/paid").send().await?;
 
 ## Design
 
-r402 diverges from [x402-rs] in several architectural areas:
-
-- **Unified `Facilitator` trait** — dyn-compatible with a single `FacilitatorError` enum, enabling `Box<dyn Facilitator>` and heterogeneous composition (local handlers + remote clients + hook decorators in one registry)
-- **Zero `async_trait`** — all core traits use native RPITIT or manual `Pin<Box<dyn Future>>`, eliminating the proc-macro dependency entirely
-- **Lifecycle hooks** — `FacilitatorHooks` trait + `HookedFacilitator` decorator with before/after/failure callbacks for verify and settle, mirroring the [official Go SDK](https://github.com/coinbase/x402)
-- **V2-only server** — the payment gate implements only the V2 wire format (CAIP-2 chain IDs, `Payment-Signature` header); V1 compatibility is confined to the facilitator layer
-- **Settlement validation** — `SettleResponse::Error` is explicitly checked after every settlement; failed settlements return `500`, not `402`
-- **Decoupled networks** — chain definitions live in `r402-evm` / `r402-svm`, not in the core crate; the core exposes only `NetworkRegistry` abstractions
-- **Strict linting** — `clippy::pedantic` + `clippy::nursery` + `clippy::correctness` (deny) across all crates, zero warnings
+| | r402 | x402-rs |
+| --- | --- | --- |
+| Built-in chains | **44** (42 EVM + 2 Solana) | 18 (14 EVM + 2 Solana + 2 Aptos) |
+| Permit2 | **Dual path** — ERC-3009 + `x402Permit2Proxy` | ERC-3009 only |
+| Lifecycle hooks | **`FacilitatorHooks`** + **`ClientHooks`** | None |
+| `async_trait` | **Zero** — RPITIT / `Pin<Box<dyn Future>>` | Required |
+| Facilitator trait | **Unified** — dyn-compatible `Box<dyn Facilitator>` | Separate per-scheme |
+| Server wire format | **V2-only** (CAIP-2, `Payment-Signature` header) | V1 + V2 |
+| Settlement errors | **Explicit** — failed settle → `500` | Silent |
+| Network definitions | **Decoupled** — per-chain crate | Core crate |
+| Linting | **`pedantic` + `nursery` + `correctness`** (deny) | Default |
 
 ## Feature Flags
 
