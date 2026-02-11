@@ -63,15 +63,18 @@ pub(super) async fn assert_valid_v1_payment<'a, P: Provider>(
     ),
     Eip155ExactError,
 > {
+    let registry = crate::networks::evm_network_registry();
     let chain_id: ChainId = chain.into();
-    let payload_chain_id = ChainId::from_network_name(&payload.network)
+    let payload_chain_id = registry
+        .chain_id_by_name(&payload.network)
         .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if payload_chain_id != chain_id {
+    if *payload_chain_id != chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch.into());
     }
-    let requirements_chain_id = ChainId::from_network_name(&requirements.network)
+    let requirements_chain_id = registry
+        .chain_id_by_name(&requirements.network)
         .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if requirements_chain_id != chain_id {
+    if *requirements_chain_id != chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch.into());
     }
     let authorization = &eip3009.authorization;

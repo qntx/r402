@@ -23,8 +23,8 @@ impl V1SolanaExact {
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,
     ) -> v1::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let network = chain_id
-            .as_network_name()
+        let network = crate::networks::solana_network_registry()
+            .name_by_chain_id(&chain_id)
             .unwrap_or_else(|| panic!("Can not get network name for chain id {chain_id}"));
         v1::PriceTag {
             scheme: ExactScheme.to_string(),

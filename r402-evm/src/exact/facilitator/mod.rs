@@ -227,7 +227,7 @@ where
             let chain_id = self.provider.chain_id();
             let kinds = {
                 let mut kinds = Vec::with_capacity(1);
-                let network = chain_id.as_network_name();
+                let network = crate::networks::evm_network_registry().name_by_chain_id(&chain_id);
                 if let Some(network) = network {
                     kinds.push(proto::SupportedPaymentKind {
                         x402_version: v1::X402Version1.into(),

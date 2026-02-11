@@ -189,16 +189,22 @@ impl VerifyRequest {
     /// This determines which scheme handler should process this payment
     /// based on the protocol version, chain ID, and scheme name.
     ///
+    /// For V1 requests, a [`NetworkRegistry`](crate::networks::NetworkRegistry) is
+    /// required to resolve human-readable network names to CAIP-2 chain IDs.
+    ///
     /// Returns `None` if the request format is invalid or the scheme is unknown.
     #[must_use]
-    pub fn scheme_handler_slug(&self) -> Option<SchemeHandlerSlug> {
+    pub fn scheme_handler_slug(
+        &self,
+        registry: &crate::networks::NetworkRegistry,
+    ) -> Option<SchemeHandlerSlug> {
         let x402_version: u8 = self.0.get("x402Version")?.as_u64()?.try_into().ok()?;
         match x402_version {
             v1::X402Version1::VALUE => {
                 let network_name = self.0.get("paymentPayload")?.get("network")?.as_str()?;
-                let chain_id = ChainId::from_network_name(network_name)?;
+                let chain_id = registry.chain_id_by_name(network_name)?;
                 let scheme = self.0.get("paymentPayload")?.get("scheme")?.as_str()?;
-                let slug = SchemeHandlerSlug::new(chain_id, 1, scheme.into());
+                let slug = SchemeHandlerSlug::new(chain_id.clone(), 1, scheme.into());
                 Some(slug)
             }
             v2::X402Version2::VALUE => {

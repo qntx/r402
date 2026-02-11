@@ -3,7 +3,7 @@
 //! Contains compute budget checks, instruction validation, transfer verification,
 //! and the settlement function.
 
-use r402::chain::{ChainId, ChainProviderOps};
+use r402::chain::ChainProviderOps;
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentVerificationError;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
@@ -186,15 +186,18 @@ pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProviderOps>(
     let payload = &request.payment_payload;
     let requirements = &request.payment_requirements;
 
+    let registry = crate::networks::solana_network_registry();
     let chain_id = provider.chain_id();
-    let payload_chain_id = ChainId::from_network_name(&payload.network)
+    let payload_chain_id = registry
+        .chain_id_by_name(&payload.network)
         .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if payload_chain_id != chain_id {
+    if *payload_chain_id != chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch);
     }
-    let requirements_chain_id = ChainId::from_network_name(&requirements.network)
+    let requirements_chain_id = registry
+        .chain_id_by_name(&requirements.network)
         .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if requirements_chain_id != chain_id {
+    if *requirements_chain_id != chain_id {
         return Err(PaymentVerificationError::ChainIdMismatch);
     }
     let transaction_b64_string = payload.payload.transaction.clone();

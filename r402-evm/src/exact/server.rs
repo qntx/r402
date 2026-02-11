@@ -36,8 +36,8 @@ impl V1Eip155Exact {
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
     ) -> v1::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let network = chain_id
-            .as_network_name()
+        let network = crate::networks::evm_network_registry()
+            .name_by_chain_id(&chain_id)
             .unwrap_or_else(|| panic!("Can not get network name for chain id {chain_id}"));
         let extra = asset
             .token

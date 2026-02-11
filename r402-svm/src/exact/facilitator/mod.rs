@@ -127,7 +127,8 @@ where
                 let mut kinds = Vec::with_capacity(1);
                 let fee_payer = self.provider.fee_payer();
                 let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-                let network = chain_id.as_network_name();
+                let network =
+                    crate::networks::solana_network_registry().name_by_chain_id(&chain_id);
                 if let Some(network) = network {
                     kinds.push(proto::SupportedPaymentKind {
                         x402_version: v1::X402Version1.into(),

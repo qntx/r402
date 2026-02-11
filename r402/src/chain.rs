@@ -15,8 +15,6 @@ use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::networks;
-
 /// A CAIP-2 compliant blockchain identifier.
 ///
 /// Chain IDs uniquely identify blockchain networks across different ecosystems.
@@ -59,23 +57,6 @@ impl ChainId {
     #[must_use]
     pub fn into_parts(self) -> (String, String) {
         (self.namespace, self.reference)
-    }
-
-    /// Creates a chain ID from a well-known network name.
-    ///
-    /// This method looks up the network name in the registry of known networks
-    /// (see [`crate::networks`]) and returns the corresponding chain ID.
-    #[must_use]
-    pub fn from_network_name(network_name: &str) -> Option<Self> {
-        networks::chain_id_by_network_name(network_name).cloned()
-    }
-
-    /// Returns the well-known network name for this chain ID, if any.
-    ///
-    /// This is the reverse of [`ChainId::from_network_name`].
-    #[must_use]
-    pub fn as_network_name(&self) -> Option<&'static str> {
-        networks::network_name_by_chain_id(self)
     }
 }
 
@@ -412,8 +393,6 @@ pub struct DeployedTokenAmount<TAmount, TToken> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::networks::{chain_id_by_network_name, network_name_by_chain_id};
-
     #[test]
     fn test_chain_id_serialize_eip155() {
         let chain_id = ChainId::new("eip155", "1");
@@ -513,67 +492,5 @@ mod tests {
         let references: HashSet<String> = vec!["1"].into_iter().map(String::from).collect();
         let set = ChainIdPattern::set("eip155", references);
         assert_eq!(set.namespace(), "eip155");
-    }
-
-    #[test]
-    fn test_chain_id_from_network_name() {
-        let base = chain_id_by_network_name("base").unwrap();
-        assert_eq!(base.namespace(), "eip155");
-        assert_eq!(base.reference(), "8453");
-
-        let base_sepolia = chain_id_by_network_name("base-sepolia").unwrap();
-        assert_eq!(base_sepolia.namespace(), "eip155");
-        assert_eq!(base_sepolia.reference(), "84532");
-
-        let polygon = chain_id_by_network_name("polygon").unwrap();
-        assert_eq!(polygon.namespace(), "eip155");
-        assert_eq!(polygon.reference(), "137");
-
-        let celo = chain_id_by_network_name("celo").unwrap();
-        assert_eq!(celo.namespace(), "eip155");
-        assert_eq!(celo.reference(), "42220");
-
-        let solana = chain_id_by_network_name("solana").unwrap();
-        assert_eq!(solana.namespace(), "solana");
-        assert_eq!(solana.reference(), "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-
-        assert!(chain_id_by_network_name("unknown").is_none());
-    }
-
-    #[test]
-    fn test_network_name_by_chain_id() {
-        let chain_id = ChainId::new("eip155", "8453");
-        let network_name = network_name_by_chain_id(&chain_id).unwrap();
-        assert_eq!(network_name, "base");
-
-        let celo_chain_id = ChainId::new("eip155", "42220");
-        let network_name = network_name_by_chain_id(&celo_chain_id).unwrap();
-        assert_eq!(network_name, "celo");
-
-        let celo_sepolia_chain_id = ChainId::new("eip155", "11142220");
-        let network_name = network_name_by_chain_id(&celo_sepolia_chain_id).unwrap();
-        assert_eq!(network_name, "celo-sepolia");
-
-        let solana_chain_id = ChainId::new("solana", "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-        let network_name = network_name_by_chain_id(&solana_chain_id).unwrap();
-        assert_eq!(network_name, "solana");
-
-        let unknown_chain_id = ChainId::new("eip155", "999999");
-        assert!(network_name_by_chain_id(&unknown_chain_id).is_none());
-    }
-
-    #[test]
-    fn test_chain_id_as_network_name() {
-        let chain_id = ChainId::new("eip155", "8453");
-        assert_eq!(chain_id.as_network_name(), Some("base"));
-
-        let celo_chain_id = ChainId::new("eip155", "42220");
-        assert_eq!(celo_chain_id.as_network_name(), Some("celo"));
-
-        let solana_chain_id = ChainId::new("solana", "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-        assert_eq!(solana_chain_id.as_network_name(), Some("solana"));
-
-        let unknown_chain_id = ChainId::new("eip155", "999999");
-        assert!(unknown_chain_id.as_network_name().is_none());
     }
 }

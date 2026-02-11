@@ -11,7 +11,6 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
-use r402::chain::ChainId;
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
@@ -370,7 +369,9 @@ where
             .iter()
             .filter_map(|v| {
                 let requirements: types::v1::PaymentRequirements = v.as_concrete()?;
-                let chain_id = ChainId::from_network_name(&requirements.network)?;
+                let chain_id = crate::networks::solana_network_registry()
+                    .chain_id_by_name(&requirements.network)?
+                    .clone();
                 if chain_id.namespace() != "solana" {
                     return None;
                 }

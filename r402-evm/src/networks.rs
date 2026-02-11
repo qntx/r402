@@ -1,7 +1,241 @@
+use std::sync::LazyLock;
+
 use r402::chain::ChainId;
-use r402::networks::{USDC, USDM};
+use r402::networks::{NetworkInfo, NetworkRegistry, USDC, USDM};
 
 use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentEip712};
+
+/// Well-known EVM (EIP-155) networks with their V1 names and CAIP-2 identifiers.
+///
+/// This is the **single source of truth** for EVM network name ↔ chain ID mappings.
+/// Use [`evm_network_registry()`] for convenient lookups, or pass this slice to
+/// [`NetworkRegistry::from_networks()`] to build a combined cross-chain registry.
+///
+/// Source: <https://developers.circle.com/stablecoins/usdc-contract-addresses>
+pub static EVM_NETWORKS: &[NetworkInfo] = &[
+    NetworkInfo {
+        name: "ethereum",
+        namespace: "eip155",
+        reference: "1",
+    },
+    NetworkInfo {
+        name: "ethereum-sepolia",
+        namespace: "eip155",
+        reference: "11155111",
+    },
+    NetworkInfo {
+        name: "base",
+        namespace: "eip155",
+        reference: "8453",
+    },
+    NetworkInfo {
+        name: "base-sepolia",
+        namespace: "eip155",
+        reference: "84532",
+    },
+    NetworkInfo {
+        name: "arbitrum",
+        namespace: "eip155",
+        reference: "42161",
+    },
+    NetworkInfo {
+        name: "arbitrum-sepolia",
+        namespace: "eip155",
+        reference: "421614",
+    },
+    NetworkInfo {
+        name: "optimism",
+        namespace: "eip155",
+        reference: "10",
+    },
+    NetworkInfo {
+        name: "optimism-sepolia",
+        namespace: "eip155",
+        reference: "11155420",
+    },
+    NetworkInfo {
+        name: "polygon",
+        namespace: "eip155",
+        reference: "137",
+    },
+    NetworkInfo {
+        name: "polygon-amoy",
+        namespace: "eip155",
+        reference: "80002",
+    },
+    NetworkInfo {
+        name: "avalanche",
+        namespace: "eip155",
+        reference: "43114",
+    },
+    NetworkInfo {
+        name: "avalanche-fuji",
+        namespace: "eip155",
+        reference: "43113",
+    },
+    NetworkInfo {
+        name: "celo",
+        namespace: "eip155",
+        reference: "42220",
+    },
+    NetworkInfo {
+        name: "celo-sepolia",
+        namespace: "eip155",
+        reference: "11142220",
+    },
+    NetworkInfo {
+        name: "sei",
+        namespace: "eip155",
+        reference: "1329",
+    },
+    NetworkInfo {
+        name: "sei-testnet",
+        namespace: "eip155",
+        reference: "1328",
+    },
+    NetworkInfo {
+        name: "sonic",
+        namespace: "eip155",
+        reference: "146",
+    },
+    NetworkInfo {
+        name: "sonic-blaze",
+        namespace: "eip155",
+        reference: "57054",
+    },
+    NetworkInfo {
+        name: "unichain",
+        namespace: "eip155",
+        reference: "130",
+    },
+    NetworkInfo {
+        name: "unichain-sepolia",
+        namespace: "eip155",
+        reference: "1301",
+    },
+    NetworkInfo {
+        name: "world-chain",
+        namespace: "eip155",
+        reference: "480",
+    },
+    NetworkInfo {
+        name: "world-chain-sepolia",
+        namespace: "eip155",
+        reference: "4801",
+    },
+    NetworkInfo {
+        name: "zksync",
+        namespace: "eip155",
+        reference: "324",
+    },
+    NetworkInfo {
+        name: "zksync-sepolia",
+        namespace: "eip155",
+        reference: "300",
+    },
+    NetworkInfo {
+        name: "linea",
+        namespace: "eip155",
+        reference: "59144",
+    },
+    NetworkInfo {
+        name: "linea-sepolia",
+        namespace: "eip155",
+        reference: "59141",
+    },
+    NetworkInfo {
+        name: "ink",
+        namespace: "eip155",
+        reference: "57073",
+    },
+    NetworkInfo {
+        name: "ink-sepolia",
+        namespace: "eip155",
+        reference: "763373",
+    },
+    NetworkInfo {
+        name: "hyperevm",
+        namespace: "eip155",
+        reference: "999",
+    },
+    NetworkInfo {
+        name: "hyperevm-testnet",
+        namespace: "eip155",
+        reference: "998",
+    },
+    NetworkInfo {
+        name: "monad",
+        namespace: "eip155",
+        reference: "143",
+    },
+    NetworkInfo {
+        name: "monad-testnet",
+        namespace: "eip155",
+        reference: "10143",
+    },
+    NetworkInfo {
+        name: "plume",
+        namespace: "eip155",
+        reference: "98866",
+    },
+    NetworkInfo {
+        name: "plume-testnet",
+        namespace: "eip155",
+        reference: "98867",
+    },
+    NetworkInfo {
+        name: "codex",
+        namespace: "eip155",
+        reference: "81224",
+    },
+    NetworkInfo {
+        name: "codex-testnet",
+        namespace: "eip155",
+        reference: "812242",
+    },
+    NetworkInfo {
+        name: "xdc",
+        namespace: "eip155",
+        reference: "50",
+    },
+    NetworkInfo {
+        name: "xdc-apothem",
+        namespace: "eip155",
+        reference: "51",
+    },
+    NetworkInfo {
+        name: "xrpl-evm",
+        namespace: "eip155",
+        reference: "1440000",
+    },
+    NetworkInfo {
+        name: "peaq",
+        namespace: "eip155",
+        reference: "3338",
+    },
+    NetworkInfo {
+        name: "iotex",
+        namespace: "eip155",
+        reference: "4689",
+    },
+    NetworkInfo {
+        name: "megaeth",
+        namespace: "eip155",
+        reference: "4326",
+    },
+];
+
+static EVM_REGISTRY: LazyLock<NetworkRegistry> =
+    LazyLock::new(|| NetworkRegistry::from_networks(EVM_NETWORKS));
+
+/// Returns a lazily-initialized [`NetworkRegistry`] containing all known EVM networks.
+///
+/// This is a convenience accessor for V1 code paths within the `r402-evm` crate.
+/// For cross-chain registries, build your own [`NetworkRegistry`] from [`EVM_NETWORKS`].
+#[must_use]
+pub fn evm_network_registry() -> &'static NetworkRegistry {
+    &EVM_REGISTRY
+}
 
 /// Trait providing convenient methods to get instances for well-known EVM networks (eip155 namespace).
 ///

@@ -7,7 +7,6 @@
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
-use r402::chain::ChainId;
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
@@ -279,7 +278,9 @@ where
             .iter()
             .filter_map(|v| {
                 let requirements: types::v1::PaymentRequirements = v.as_concrete()?;
-                let chain_id = ChainId::from_network_name(&requirements.network)?;
+                let chain_id = crate::networks::evm_network_registry()
+                    .chain_id_by_name(&requirements.network)?
+                    .clone();
                 let chain_reference = Eip155ChainReference::try_from(chain_id.clone()).ok()?;
                 let candidate = PaymentCandidate {
                     chain_id,
