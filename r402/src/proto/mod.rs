@@ -17,7 +17,7 @@
 //! All types serialize to JSON using camelCase field names. The protocol version
 //! is indicated by the `x402Version` field in payment payloads.
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_with::{VecSkipError, serde_as};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -103,8 +103,9 @@ pub type Extensions = HashMap<String, serde_json::Value>;
 /// Some JSON parsers (particularly in `JavaScript`) cannot accurately represent
 /// large integers. This type serializes `u64` values as strings to preserve
 /// precision across all platforms.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct U64String(u64);
+#[serde_as]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct U64String(#[serde_as(as = "serde_with::DisplayFromStr")] u64);
 
 impl U64String {
     /// Returns the inner `u64` value.
@@ -131,25 +132,6 @@ impl From<u64> for U64String {
 impl From<U64String> for u64 {
     fn from(value: U64String) -> Self {
         value.0
-    }
-}
-
-impl Serialize for U64String {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(&self.0.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for U64String {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse::<u64>().map(Self).map_err(serde::de::Error::custom)
     }
 }
 
@@ -246,8 +228,7 @@ impl SettleRequest {
     /// Delegates to the same logic as [`VerifyRequest::scheme_slug`].
     #[must_use]
     pub fn scheme_slug(&self) -> Option<SchemeSlug> {
-        let tmp = VerifyRequest(self.0.clone());
-        tmp.scheme_slug()
+        scheme_slug_from_json(&self.0)
     }
 }
 
@@ -284,26 +265,23 @@ impl VerifyRequest {
     /// Returns `None` if the request format is invalid or the scheme is unknown.
     #[must_use]
     pub fn scheme_slug(&self) -> Option<SchemeSlug> {
-        let x402_version: u8 = self.0.get("x402Version")?.as_u64()?.try_into().ok()?;
-        if x402_version != v2::X402Version2::VALUE {
-            return None;
-        }
-        let chain_id_string = self
-            .0
-            .get("paymentPayload")?
-            .get("accepted")?
-            .get("network")?
-            .as_str()?;
-        let chain_id = ChainId::from_str(chain_id_string).ok()?;
-        let scheme = self
-            .0
-            .get("paymentPayload")?
-            .get("accepted")?
-            .get("scheme")?
-            .as_str()?;
-        let slug = SchemeSlug::new(chain_id, scheme.into());
-        Some(slug)
+        scheme_slug_from_json(&self.0)
     }
+}
+
+/// Extracts a [`SchemeSlug`] from a raw verify/settle JSON value.
+///
+/// Navigates `x402Version`, `paymentPayload.accepted.network`, and
+/// `paymentPayload.accepted.scheme` without cloning the JSON tree.
+fn scheme_slug_from_json(json: &serde_json::Value) -> Option<SchemeSlug> {
+    let x402_version: u8 = json.get("x402Version")?.as_u64()?.try_into().ok()?;
+    if x402_version != v2::X402Version2::VALUE {
+        return None;
+    }
+    let accepted = json.get("paymentPayload")?.get("accepted")?;
+    let chain_id = ChainId::from_str(accepted.get("network")?.as_str()?).ok()?;
+    let scheme = accepted.get("scheme")?.as_str()?;
+    Some(SchemeSlug::new(chain_id, scheme.into()))
 }
 
 /// Result returned by a facilitator after verifying a payment payload
