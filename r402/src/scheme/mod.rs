@@ -10,6 +10,11 @@
 //! - [`SchemeBlueprint`] / [`SchemeBlueprints`] - Factories that create handlers
 //! - [`SchemeRegistry`] - Maps chain+scheme combinations to handlers
 //!
+//! # Server-Side
+//!
+//! - [`SchemeServer`] - Converts prices into [`v2::PaymentRequirements`](crate::proto::v2::PaymentRequirements)
+//! - [`AssetAmount`] - Resolved token amount
+//!
 //! # Client-Side
 //!
 //! - [`X402SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
@@ -19,11 +24,13 @@ mod client;
 mod handler;
 pub mod hooks;
 mod registry;
+mod server;
 
 pub use client::*;
 pub use handler::*;
 pub use hooks::{HookedSchemeHandler, SchemeHandlerHooks};
 pub use registry::*;
+pub use server::*;
 
 /// Trait for identifying a payment scheme.
 ///

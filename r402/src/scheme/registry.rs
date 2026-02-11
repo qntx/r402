@@ -88,6 +88,25 @@ impl SchemeHandlerSlug {
             name,
         }
     }
+
+    /// Returns a wildcard version of this slug that matches any chain
+    /// within the same namespace.
+    ///
+    /// For example, `eip155:8453:v2:exact` becomes `eip155:*:v2:exact`.
+    #[must_use]
+    pub fn as_wildcard(&self) -> Self {
+        Self {
+            chain_id: ChainId::new(self.chain_id.namespace(), "*"),
+            x402_version: self.x402_version,
+            name: self.name.clone(),
+        }
+    }
+
+    /// Returns `true` if this slug uses a wildcard reference (`*`).
+    #[must_use]
+    pub fn is_wildcard(&self) -> bool {
+        self.chain_id.reference() == "*"
+    }
 }
 
 impl Display for SchemeHandlerSlug {
@@ -146,10 +165,47 @@ impl SchemeRegistry {
     }
 
     /// Gets a handler by its slug.
+    ///
+    /// Performs a two-phase lookup:
+    /// 1. Exact match on the full slug (namespace:reference:version:scheme)
+    /// 2. Wildcard fallback on the namespace (namespace:*:version:scheme)
+    ///
+    /// This allows registering a single handler for an entire namespace
+    /// (e.g., `eip155:*`) that serves all chains within it.
     #[must_use]
     pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn SchemeHandler> {
-        let handler = &**self.0.get(slug)?;
-        Some(handler)
+        self.0
+            .get(slug)
+            .or_else(|| {
+                let wildcard = slug.as_wildcard();
+                self.0.get(&wildcard)
+            })
+            .map(|h| &**h)
+    }
+
+    /// Registers a handler for an entire namespace (wildcard).
+    ///
+    /// The handler will match any chain within the blueprint's namespace
+    /// when no exact chain match is found.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the handler cannot be built from the provider.
+    pub fn register_for_namespace<P: ChainProviderOps>(
+        &mut self,
+        blueprint: &dyn SchemeBlueprint<P>,
+        provider: &P,
+        config: Option<serde_json::Value>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let handler = blueprint.build(provider, config)?;
+        let namespace = provider.chain_id().namespace().to_owned();
+        let slug = SchemeHandlerSlug::new(
+            ChainId::new(namespace, "*"),
+            blueprint.x402_version(),
+            blueprint.scheme().to_string(),
+        );
+        self.0.insert(slug, handler);
+        Ok(())
     }
 
     /// Returns an iterator over all registered handlers.
