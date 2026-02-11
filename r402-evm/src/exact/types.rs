@@ -2,8 +2,7 @@
 //!
 //! This module defines shared wire format types for EVM exact payments,
 //! supporting both EIP-3009 (`transferWithAuthorization`) and Permit2
-//! transfer methods. Version-specific type aliases live in the [`v1`]
-//! and [`v2`] sub-modules.
+//! transfer methods. Wire format type aliases live in the [`v2`] sub-module.
 
 use alloy_primitives::{Address, B256, Bytes, address};
 use r402::proto::UnixTimestamp;
@@ -325,16 +324,16 @@ pub mod v2 {
     use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
-    /// Type alias for V2 verify requests using the exact EVM payment scheme.
+    /// Type alias for verify requests using the exact EVM payment scheme.
     pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
 
-    /// Type alias for V2 settle requests (same structure as verify requests).
+    /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;
 
-    /// Type alias for V2 payment payloads with embedded requirements and EVM-specific data.
+    /// Type alias for payment payloads with embedded requirements and EVM-specific data.
     pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactPayload>;
 
-    /// Type alias for V2 payment requirements with EVM-specific types.
+    /// Type alias for payment requirements with EVM-specific types.
     pub type PaymentRequirements = proto_v2::PaymentRequirements<
         ExactScheme,
         TokenAmount,

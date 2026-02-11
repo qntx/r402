@@ -279,7 +279,7 @@ impl VerifyRequest {
     /// Extracts the scheme handler slug from the request.
     ///
     /// This determines which scheme handler should process this payment
-    /// based on the protocol version, chain ID, and scheme name.
+    /// based on the chain ID and scheme name.
     ///
     /// Returns `None` if the request format is invalid or the scheme is unknown.
     #[must_use]
@@ -301,7 +301,7 @@ impl VerifyRequest {
             .get("accepted")?
             .get("scheme")?
             .as_str()?;
-        let slug = SchemeSlug::new(chain_id, 2, scheme.into());
+        let slug = SchemeSlug::new(chain_id, scheme.into());
         Some(slug)
     }
 }
@@ -544,12 +544,12 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
     }
 }
 
-/// A payment required response (V2 only).
+/// A payment required response.
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum PaymentRequired {
-    /// Protocol version 2 variant.
-    V2(v2::PaymentRequired),
+    /// The current x402 protocol wire format.
+    Current(v2::PaymentRequired),
 }

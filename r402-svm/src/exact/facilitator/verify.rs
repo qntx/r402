@@ -178,7 +178,7 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError`] if the transfer is invalid.
-pub async fn verify_v2_transfer<P: SolanaChainProviderLike + ChainProvider>(
+pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
     provider: &P,
     request: &types::v2::VerifyRequest,
     config: &SolanaExactFacilitatorConfig,

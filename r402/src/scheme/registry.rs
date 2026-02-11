@@ -40,14 +40,12 @@ impl<T, P> SchemeBlueprint<P> for T where T: SchemeId + for<'a> SchemeBuilder<&'
 
 /// Unique identifier for a scheme handler instance.
 ///
-/// Combines the chain ID, protocol version, and scheme name to uniquely
-/// identify a handler that can process payments for a specific combination.
+/// Combines the chain ID and scheme name to uniquely identify a handler
+/// that can process payments for a specific chain+scheme combination.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct SchemeSlug {
     /// The chain this handler operates on.
     pub chain_id: ChainId,
-    /// The x402 protocol version.
-    pub x402_version: u8,
     /// The scheme name (e.g., "exact").
     pub name: String,
 }
@@ -55,10 +53,9 @@ pub struct SchemeSlug {
 impl SchemeSlug {
     /// Creates a new scheme handler slug.
     #[must_use]
-    pub const fn new(chain_id: ChainId, x402_version: u8, name: String) -> Self {
+    pub const fn new(chain_id: ChainId, name: String) -> Self {
         Self {
             chain_id,
-            x402_version,
             name,
         }
     }
@@ -66,12 +63,11 @@ impl SchemeSlug {
     /// Returns a wildcard version of this slug that matches any chain
     /// within the same namespace.
     ///
-    /// For example, `eip155:8453:v2:exact` becomes `eip155:*:v2:exact`.
+    /// For example, `eip155:8453:exact` becomes `eip155:*:exact`.
     #[must_use]
     pub fn as_wildcard(&self) -> Self {
         Self {
             chain_id: ChainId::new(self.chain_id.namespace(), "*"),
-            x402_version: self.x402_version,
             name: self.name.clone(),
         }
     }
@@ -87,10 +83,9 @@ impl Display for SchemeSlug {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{}:{}:v{}:{}",
+            "{}:{}:{}",
             self.chain_id.namespace(),
             self.chain_id.reference(),
-            self.x402_version,
             self.name
         )
     }
@@ -131,7 +126,6 @@ impl SchemeRegistry {
         let handler = blueprint.build(provider, config)?;
         let slug = SchemeSlug::new(
             chain_id,
-            blueprint.x402_version(),
             blueprint.scheme().to_string(),
         );
         self.0.insert(slug, handler);
@@ -141,8 +135,8 @@ impl SchemeRegistry {
     /// Gets a handler by its slug.
     ///
     /// Performs a two-phase lookup:
-    /// 1. Exact match on the full slug (namespace:reference:version:scheme)
-    /// 2. Wildcard fallback on the namespace (namespace:*:version:scheme)
+    /// 1. Exact match on the full slug (namespace:reference:scheme)
+    /// 2. Wildcard fallback on the namespace (namespace:*:scheme)
     ///
     /// This allows registering a single handler for an entire namespace
     /// (e.g., `eip155:*`) that serves all chains within it.
@@ -175,7 +169,6 @@ impl SchemeRegistry {
         let namespace = provider.chain_id().namespace().to_owned();
         let slug = SchemeSlug::new(
             ChainId::new(namespace, "*"),
-            blueprint.x402_version(),
             blueprint.scheme().to_string(),
         );
         self.0.insert(slug, handler);

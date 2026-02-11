@@ -35,13 +35,9 @@ pub use server::*;
 
 /// Trait for identifying a payment scheme.
 ///
-/// Each scheme has a unique identifier composed of the protocol version,
-/// chain namespace, and scheme name.
+/// Each scheme has a unique identifier composed of the chain namespace
+/// and scheme name.
 pub trait SchemeId {
-    /// Returns the x402 protocol version (1 or 2).
-    fn x402_version(&self) -> u8 {
-        2
-    }
     /// Returns the chain namespace (e.g., "eip155", "solana").
     fn namespace(&self) -> &str;
     /// Returns the scheme name (e.g., "exact").
@@ -58,11 +54,10 @@ pub trait SchemeId {
     fn caip_family(&self) -> String {
         format!("{}:*", self.namespace())
     }
-    /// Returns the full scheme identifier (e.g., "v2-eip155-exact").
+    /// Returns the full scheme identifier (e.g., "eip155-exact").
     fn id(&self) -> String {
         format!(
-            "v{}-{}-{}",
-            self.x402_version(),
+            "{}-{}",
             self.namespace(),
             self.scheme(),
         )

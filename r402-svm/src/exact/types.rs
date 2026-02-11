@@ -1,8 +1,7 @@
 //! Type definitions for the Solana "exact" payment scheme.
 //!
 //! This module defines shared wire format types for SPL Token based payments
-//! on Solana, along with version-specific type aliases in the [`v1`] and
-//! [`v2`] sub-modules.
+//! on Solana. Wire format type aliases live in the [`v2`] sub-module.
 
 use serde::{Deserialize, Serialize};
 use solana_pubkey::{Pubkey, pubkey};
@@ -319,16 +318,16 @@ pub mod v2 {
     use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
     use crate::chain::Address;
 
-    /// Type alias for V2 verify requests using the exact Solana payment scheme.
+    /// Type alias for verify requests using the exact Solana payment scheme.
     pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
 
-    /// Type alias for V2 settle requests (same structure as verify requests).
+    /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;
 
-    /// Type alias for V2 payment payloads with embedded requirements and Solana-specific data.
+    /// Type alias for payment payloads with embedded requirements and Solana-specific data.
     pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactSolanaPayload>;
 
-    /// Type alias for V2 payment requirements with Solana-specific types.
+    /// Type alias for payment requirements with Solana-specific types.
     pub type PaymentRequirements =
         proto_v2::PaymentRequirements<ExactScheme, U64String, Address, SupportedPaymentKindExtra>;
 }

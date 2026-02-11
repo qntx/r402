@@ -43,7 +43,7 @@ use std::pin::Pin;
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
-use crate::exact::{ExactPayload, ExactScheme, V2Eip155Exact};
+use crate::exact::{Eip155Exact, ExactPayload, ExactScheme};
 
 /// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
@@ -93,7 +93,7 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-impl<P> SchemeBuilder<P> for V2Eip155Exact
+impl<P> SchemeBuilder<P> for Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
@@ -103,7 +103,7 @@ where
         provider: P,
         _config: Option<serde_json::Value>,
     ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
-        Ok(Box::new(V2Eip155ExactFacilitator::new(provider)))
+        Ok(Box::new(Eip155ExactFacilitator::new(provider)))
     }
 }
 
@@ -111,25 +111,25 @@ where
 ///
 /// Supports both EIP-3009 and Permit2 transfer methods. The transfer method
 /// is determined by the [`ExactPayload`] variant in the payment payload.
-pub struct V2Eip155ExactFacilitator<P> {
+pub struct Eip155ExactFacilitator<P> {
     provider: P,
 }
 
-impl<P> std::fmt::Debug for V2Eip155ExactFacilitator<P> {
+impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V2Eip155ExactFacilitator")
+        f.debug_struct("Eip155ExactFacilitator")
             .finish_non_exhaustive()
     }
 }
 
-impl<P> V2Eip155ExactFacilitator<P> {
-    /// Creates a new V2 EIP-155 exact scheme facilitator with the given provider.
+impl<P> Eip155ExactFacilitator<P> {
+    /// Creates a new EIP-155 exact scheme facilitator with the given provider.
     pub const fn new(provider: P) -> Self {
         Self { provider }
     }
 }
 
-impl<P> Facilitator for V2Eip155ExactFacilitator<P>
+impl<P> Facilitator for Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
     P::Inner: Provider,
@@ -146,7 +146,7 @@ where
             let requirements = &request.payment_requirements;
             match &payload.payload {
                 ExactPayload::Eip3009(eip3009) => {
-                    let (contract, payment, eip712_domain) = verify::assert_valid_v2_payment(
+                    let (contract, payment, eip712_domain) = verify::assert_valid_payment(
                         self.provider.inner(),
                         self.provider.chain(),
                         eip3009,
@@ -160,7 +160,7 @@ where
                     Ok(v2::VerifyResponse::valid(payer.to_string()))
                 }
                 ExactPayload::Permit2(permit2) => {
-                    let (_erc20, payment, eip712_domain) = verify::assert_valid_v2_permit2_payment(
+                    let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
                         self.provider.inner(),
                         self.provider.chain(),
                         permit2,
@@ -188,7 +188,7 @@ where
             let requirements = &request.payment_requirements;
             match &payload.payload {
                 ExactPayload::Eip3009(eip3009) => {
-                    let (contract, payment, eip712_domain) = verify::assert_valid_v2_payment(
+                    let (contract, payment, eip712_domain) = verify::assert_valid_payment(
                         self.provider.inner(),
                         self.provider.chain(),
                         eip3009,
@@ -208,7 +208,7 @@ where
                 }
                 ExactPayload::Permit2(permit2) => {
                     let (_erc20, payment, _eip712_domain) =
-                        verify::assert_valid_v2_permit2_payment(
+                        verify::assert_valid_permit2_payment(
                             self.provider.inner(),
                             self.provider.chain(),
                             permit2,
@@ -242,10 +242,7 @@ where
             }];
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(
-                    V2Eip155Exact.caip_family(),
-                    self.provider.signer_addresses(),
-                );
+                signers.insert(Eip155Exact.caip_family(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {

@@ -9,9 +9,9 @@ use r402::proto::v2;
 use std::sync::Arc;
 
 use crate::chain::{Address, SolanaTokenDeployment};
-use crate::exact::{ExactScheme, SupportedPaymentKindExtra, V2SolanaExact};
+use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
 
-impl V2SolanaExact {
+impl SolanaExact {
     /// Creates a price tag for a Solana SPL token payment.
     #[allow(clippy::needless_pass_by_value)]
     pub fn price_tag<A: Into<Address>>(

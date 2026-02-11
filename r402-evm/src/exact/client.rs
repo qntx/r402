@@ -1,6 +1,6 @@
 //! Client-side payment signing for the EIP-155 "exact" scheme.
 //!
-//! This module provides [`V2Eip155ExactClient`] for signing ERC-3009
+//! This module provides [`Eip155ExactClient`] for signing ERC-3009
 //! `transferWithAuthorization` payments on EVM chains.
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
@@ -23,9 +23,9 @@ use crate::chain::TokenAmount;
 use crate::exact::types;
 use crate::exact::types::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
-    AssetTransferMethod, Eip3009Authorization, Eip3009Payload, ExactPayload, PERMIT2_ADDRESS,
-    PaymentRequirementsExtra, Permit2Authorization, Permit2Payload, Permit2TokenPermissions,
-    Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization, V2Eip155Exact,
+    AssetTransferMethod, Eip155Exact, Eip3009Authorization, Eip3009Payload, ExactPayload,
+    PERMIT2_ADDRESS, PaymentRequirementsExtra, Permit2Authorization, Permit2Payload,
+    Permit2TokenPermissions, Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization,
     X402_EXACT_PERMIT2_PROXY,
 };
 
@@ -236,33 +236,33 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
 /// payments for EVM chains. Uses CAIP-2 chain IDs and embeds the accepted requirements
 /// directly in the payment payload.
 #[derive(Debug)]
-pub struct V2Eip155ExactClient<S> {
+pub struct Eip155ExactClient<S> {
     signer: S,
 }
 
-impl<S> V2Eip155ExactClient<S> {
-    /// Creates a new V2 EIP-155 exact scheme client with the given signer.
+impl<S> Eip155ExactClient<S> {
+    /// Creates a new EIP-155 exact scheme client with the given signer.
     pub const fn new(signer: S) -> Self {
         Self { signer }
     }
 }
 
-impl<S> SchemeId for V2Eip155ExactClient<S> {
+impl<S> SchemeId for Eip155ExactClient<S> {
     fn namespace(&self) -> &str {
-        V2Eip155Exact.namespace()
+        Eip155Exact.namespace()
     }
 
     fn scheme(&self) -> &str {
-        V2Eip155Exact.scheme()
+        Eip155Exact.scheme()
     }
 }
 
-impl<S> SchemeClient for V2Eip155ExactClient<S>
+impl<S> SchemeClient for Eip155ExactClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
 {
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let PaymentRequired::V2(payment_required) = payment_required else {
+        let PaymentRequired::Current(payment_required) = payment_required else {
             return vec![];
         };
         payment_required
@@ -276,7 +276,6 @@ where
                     asset: requirements.asset.to_string(),
                     amount: requirements.amount.0.to_string(),
                     scheme: self.scheme().to_string(),
-                    x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
                     signer: Box::new(V2PayloadSigner {
                         resource_info: Some(payment_required.resource.clone()),

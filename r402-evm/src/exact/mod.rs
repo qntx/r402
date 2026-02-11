@@ -45,9 +45,9 @@ pub use types::*;
 /// Uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
 /// and embeds requirements directly in the payload.
 #[derive(Debug, Clone, Copy)]
-pub struct V2Eip155Exact;
+pub struct Eip155Exact;
 
-impl SchemeId for V2Eip155Exact {
+impl SchemeId for Eip155Exact {
     fn namespace(&self) -> &'static str {
         "eip155"
     }

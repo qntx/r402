@@ -1,6 +1,6 @@
 //! Client-side payment signing for the Solana "exact" scheme.
 //!
-//! This module provides [`V2SolanaExactClient`] for building and signing
+//! This module provides [`SolanaExactClient`] for building and signing
 //! SPL Token transfer transactions on Solana.
 //!
 //! # Features
@@ -31,7 +31,7 @@ use std::pin::Pin;
 use crate::chain::Address;
 use crate::chain::rpc::RpcClientLike;
 use crate::exact::types;
-use crate::exact::{ATA_PROGRAM_PUBKEY, ExactSolanaPayload, TransactionInt, V2SolanaExact};
+use crate::exact::{ATA_PROGRAM_PUBKEY, ExactSolanaPayload, SolanaExact, TransactionInt};
 
 /// Mint information for SPL tokens.
 #[derive(Debug, Clone, Copy)]
@@ -314,46 +314,41 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
 
 /// Solana exact scheme client for building and signing payment transactions.
 #[derive(Clone)]
-pub struct V2SolanaExactClient<S, R> {
+pub struct SolanaExactClient<S, R> {
     signer: S,
     rpc_client: R,
 }
 
-impl<S, R> std::fmt::Debug for V2SolanaExactClient<S, R> {
+impl<S, R> std::fmt::Debug for SolanaExactClient<S, R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V2SolanaExactClient")
-            .finish_non_exhaustive()
+        f.debug_struct("SolanaExactClient").finish_non_exhaustive()
     }
 }
 
-impl<S, R> V2SolanaExactClient<S, R> {
-    /// Creates a new V2 Solana exact client.
+impl<S, R> SolanaExactClient<S, R> {
+    /// Creates a new Solana exact client.
     pub const fn new(signer: S, rpc_client: R) -> Self {
         Self { signer, rpc_client }
     }
 }
 
-impl<S, R> SchemeId for V2SolanaExactClient<S, R> {
-    fn x402_version(&self) -> u8 {
-        V2SolanaExact.x402_version()
-    }
-
+impl<S, R> SchemeId for SolanaExactClient<S, R> {
     fn namespace(&self) -> &str {
-        V2SolanaExact.namespace()
+        SolanaExact.namespace()
     }
 
     fn scheme(&self) -> &str {
-        V2SolanaExact.scheme()
+        SolanaExact.scheme()
     }
 }
 
-impl<S, R> SchemeClient for V2SolanaExactClient<S, R>
+impl<S, R> SchemeClient for SolanaExactClient<S, R>
 where
     S: Signer + Send + Sync + Clone + 'static,
     R: RpcClientLike + Send + Sync + Clone + 'static,
 {
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let PaymentRequired::V2(payment_required) = payment_required else {
+        let PaymentRequired::Current(payment_required) = payment_required else {
             return vec![];
         };
         payment_required
@@ -370,7 +365,6 @@ where
                     asset: requirements.asset.to_string(),
                     amount: requirements.amount.inner().to_string(),
                     scheme: self.scheme().to_string(),
-                    x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
                     signer: Box::new(V2PayloadSigner {
                         signer: self.signer.clone(),

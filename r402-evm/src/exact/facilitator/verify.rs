@@ -49,7 +49,7 @@ macro_rules! traced {
 
 /// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub(super) async fn assert_valid_v2_payment<P: Provider>(
+pub(super) async fn assert_valid_payment<P: Provider>(
     provider: P,
     chain: &Eip155ChainReference,
     eip3009: &Eip3009Payload,
@@ -317,13 +317,13 @@ pub async fn verify_payment<P: Provider>(
     Ok(payer)
 }
 
-/// Runs all V2 preconditions needed for a successful Permit2 payment.
+/// Runs all preconditions needed for a successful Permit2 payment.
 ///
 /// Validates the Permit2 authorization parameters against the payment requirements,
 /// following the same checks as the official Go SDK's `VerifyPermit2`:
 /// spender, recipient, deadline, validAfter, amount, and token.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub(super) async fn assert_valid_v2_permit2_payment<P: Provider>(
+pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     provider: P,
     chain: &Eip155ChainReference,
     permit2: &crate::exact::Permit2Payload,

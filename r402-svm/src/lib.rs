@@ -2,13 +2,13 @@
 
 //! Solana chain support for the x402 payment protocol.
 //!
-//! This crate provides implementations of the x402 V2 payment protocol for Solana blockchain
+//! This crate provides implementations of the x402 payment protocol for Solana blockchain
 //! with the "exact" payment scheme based on SPL Token `transfer` instructions with
 //! pre-signed authorization.
 //!
 //! # Features
 //!
-//! - **V2 Protocol Support**: Implements the protocol version with CAIP-2 chain ID addressing
+//! - **CAIP-2 Addressing**: Uses CAIP-2 chain IDs for chain identification
 //! - **SPL Token Payments**: Token transfers using pre-signed transaction authorization
 //! - **Compute Budget Management**: Automatic compute unit limit and price configuration
 //! - **`WebSocket` Support**: Optional pubsub for faster transaction confirmation
@@ -34,7 +34,7 @@ pub mod exact;
 mod networks;
 pub use networks::*;
 
-pub use exact::V2SolanaExact;
+pub use exact::SolanaExact;
 
 #[cfg(feature = "client")]
-pub use exact::client::V2SolanaExactClient;
+pub use exact::client::SolanaExactClient;

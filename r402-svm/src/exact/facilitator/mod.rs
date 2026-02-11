@@ -10,7 +10,7 @@ pub use config::SolanaExactFacilitatorConfig;
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
     validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
-    verify_transaction, verify_transfer_instruction, verify_v2_transfer,
+    verify_transaction, verify_transfer_instruction, verify_transfer,
 };
 
 use r402::chain::ChainProvider;
@@ -24,9 +24,9 @@ use std::pin::Pin;
 
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;
-use crate::exact::{ExactScheme, SupportedPaymentKindExtra, V2SolanaExact};
+use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
 
-impl<P> SchemeBuilder<P> for V2SolanaExact
+impl<P> SchemeBuilder<P> for SolanaExact
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync + 'static,
 {
@@ -39,32 +39,32 @@ where
             .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
             .transpose()?
             .unwrap_or_default();
-        Ok(Box::new(V2SolanaExactFacilitator::new(provider, config)))
+        Ok(Box::new(SolanaExactFacilitator::new(provider, config)))
     }
 }
 
 /// Facilitator for Solana exact scheme payments.
-pub struct V2SolanaExactFacilitator<P> {
+pub struct SolanaExactFacilitator<P> {
     provider: P,
     config: SolanaExactFacilitatorConfig,
 }
 
-impl<P> std::fmt::Debug for V2SolanaExactFacilitator<P> {
+impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V2SolanaExactFacilitator")
+        f.debug_struct("SolanaExactFacilitator")
             .field("config", &self.config)
             .finish_non_exhaustive()
     }
 }
 
-impl<P> V2SolanaExactFacilitator<P> {
-    /// Creates a new V2 Solana exact facilitator.
+impl<P> SolanaExactFacilitator<P> {
+    /// Creates a new Solana exact facilitator.
     pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
         Self { provider, config }
     }
 }
 
-impl<P> Facilitator for V2SolanaExactFacilitator<P>
+impl<P> Facilitator for SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
@@ -75,7 +75,7 @@ where
     {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
-            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+            let verification = verify_transfer(&self.provider, &request, &self.config).await?;
             Ok(v2::VerifyResponse::valid(verification.payer.to_string()))
         })
     }
@@ -87,7 +87,7 @@ where
     {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_settle(request)?;
-            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+            let verification = verify_transfer(&self.provider, &request, &self.config).await?;
             let payer = verification.payer.to_string();
             let tx_sig = settle_transaction(&self.provider, verification).await?;
             Ok(v2::SettleResponse::Success {
@@ -117,10 +117,7 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(
-                    V2SolanaExact.caip_family(),
-                    self.provider.signer_addresses(),
-                );
+                signers.insert(SolanaExact.caip_family(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {

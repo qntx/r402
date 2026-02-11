@@ -8,9 +8,9 @@ use r402::chain::{ChainId, DeployedTokenAmount};
 use r402::proto::v2;
 
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
-use crate::exact::{ExactScheme, V2Eip155Exact};
+use crate::exact::{Eip155Exact, ExactScheme};
 
-impl V2Eip155Exact {
+impl Eip155Exact {
     /// Creates a price tag for an ERC-3009 payment on an EVM chain.
     ///
     /// This function generates a price tag that specifies the payment requirements

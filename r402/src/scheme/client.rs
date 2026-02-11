@@ -32,8 +32,6 @@ pub struct PaymentCandidate {
     pub amount: String,
     /// The payment scheme name.
     pub scheme: String,
-    /// The x402 protocol version.
-    pub x402_version: u8,
     /// The recipient address.
     pub pay_to: String,
     /// The signer that can authorize this payment.
@@ -47,7 +45,6 @@ impl Debug for PaymentCandidate {
             .field("asset", &self.asset)
             .field("amount", &self.amount)
             .field("scheme", &self.scheme)
-            .field("x402_version", &self.x402_version)
             .field("pay_to", &self.pay_to)
             .field("signer", &"<dyn PaymentCandidateSigner>")
             .finish()

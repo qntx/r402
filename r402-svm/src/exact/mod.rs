@@ -40,9 +40,9 @@ pub use types::*;
 /// Uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
 /// for chain identification and embeds requirements directly in the payload.
 #[derive(Debug, Clone, Copy)]
-pub struct V2SolanaExact;
+pub struct SolanaExact;
 
-impl SchemeId for V2SolanaExact {
+impl SchemeId for SolanaExact {
     fn namespace(&self) -> &'static str {
         "solana"
     }
