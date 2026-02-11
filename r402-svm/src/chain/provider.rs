@@ -360,7 +360,7 @@ impl SolanaChainProviderLike for SolanaChainProvider {
         } else {
             // Poll for confirmation with a bounded timeout to prevent infinite loops
             // when the transaction never lands (e.g. expired blockhash).
-            const MAX_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
+            const MAX_CONFIRM_TIMEOUT: Duration = Duration::from_mins(1);
             const POLL_INTERVAL: Duration = Duration::from_millis(200);
 
             self.send(tx).await?;
