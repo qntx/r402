@@ -15,8 +15,6 @@
 //! - [`X402SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
 //! - [`PaymentSelector`] - Chooses the best candidate ([`FirstMatch`], [`PreferChain`], [`MaxAmount`])
 
-use alloy_primitives::U256;
-
 use crate::chain::{ChainId, ChainIdPattern, ChainProviderOps};
 use crate::proto;
 use crate::proto::{AsPaymentProblem, ErrorReason, PaymentProblem, PaymentVerificationError};
@@ -295,8 +293,8 @@ pub struct PaymentCandidate {
     pub chain_id: ChainId,
     /// The token asset address.
     pub asset: String,
-    /// The payment amount in token units.
-    pub amount: U256,
+    /// The payment amount in the token's smallest unit (as a decimal string).
+    pub amount: String,
     /// The payment scheme name.
     pub scheme: String,
     /// The x402 protocol version.
@@ -428,10 +426,12 @@ impl PaymentSelector for PreferChain {
 ///
 /// Useful for limiting spending or implementing budget controls.
 #[derive(Debug, Clone, Copy)]
-pub struct MaxAmount(pub U256);
+pub struct MaxAmount(pub u128);
 
 impl PaymentSelector for MaxAmount {
     fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
-        candidates.iter().find(|c| c.amount <= self.0)
+        candidates
+            .iter()
+            .find(|c| c.amount.parse::<u128>().is_ok_and(|a| a <= self.0))
     }
 }

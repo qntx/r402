@@ -11,7 +11,6 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
-use alloy_primitives::U256;
 use r402::chain::ChainId;
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
@@ -382,7 +381,7 @@ where
                 let candidate = PaymentCandidate {
                     chain_id,
                     asset: requirements.asset.to_string(),
-                    amount: U256::from(requirements.max_amount_required.inner()),
+                    amount: requirements.max_amount_required.inner().to_string(),
                     scheme: self.scheme().to_string(),
                     x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
@@ -502,7 +501,7 @@ where
                 let candidate = PaymentCandidate {
                     chain_id,
                     asset: requirements.asset.to_string(),
-                    amount: U256::from(requirements.amount.inner()),
+                    amount: requirements.amount.inner().to_string(),
                     scheme: self.scheme().to_string(),
                     x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),

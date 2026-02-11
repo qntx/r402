@@ -195,7 +195,7 @@ where
                 let candidate = PaymentCandidate {
                     chain_id,
                     asset: requirements.asset.to_string(),
-                    amount: requirements.max_amount_required,
+                    amount: requirements.max_amount_required.to_string(),
                     scheme: self.scheme().to_string(),
                     x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
@@ -295,7 +295,7 @@ where
                 let candidate = PaymentCandidate {
                     chain_id: requirements.network.clone(),
                     asset: requirements.asset.to_string(),
-                    amount: requirements.amount.into(),
+                    amount: requirements.amount.0.to_string(),
                     scheme: self.scheme().to_string(),
                     x402_version: self.x402_version(),
                     pay_to: requirements.pay_to.to_string(),
