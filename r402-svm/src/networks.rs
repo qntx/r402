@@ -1,3 +1,8 @@
+//! Well-known Solana network definitions and token deployments.
+//!
+//! This module provides static network metadata and USDC token deployment
+//! information for Solana mainnet and devnet.
+
 use std::sync::LazyLock;
 
 use r402::networks::NetworkInfo;

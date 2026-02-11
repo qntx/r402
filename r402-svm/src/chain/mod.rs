@@ -15,6 +15,7 @@
 //! Solana networks are identified by the first 32 characters of their genesis block hash:
 //! - Mainnet: `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
 //! - Devnet: `EtWTRABZaYq6iMfeYKouRu166VU2xqa1`
+
 /// Core Solana chain types (addresses, references, token deployments).
 pub mod types;
 pub use types::*;

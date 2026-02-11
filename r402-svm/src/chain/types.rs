@@ -1,3 +1,8 @@
+//! Wire format types for Solana chain interactions.
+//!
+//! This module provides types that handle serialization and deserialization
+//! of Solana-specific values in the x402 protocol wire format.
+
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 

@@ -25,14 +25,13 @@
 //!
 //! See [`X402Client::with_selector`] for custom payment selection.
 
-mod middleware;
 pub mod hooks;
-
-use reqwest::{Client, ClientBuilder};
-use reqwest_middleware as rqm;
+mod middleware;
 
 pub use hooks::ClientHooks;
 pub use middleware::{X402Client, parse_payment_required};
+use reqwest::{Client, ClientBuilder};
+use reqwest_middleware as rqm;
 
 /// Trait for adding x402 payment handling to reqwest clients.
 ///

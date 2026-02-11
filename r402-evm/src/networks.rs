@@ -1,3 +1,8 @@
+//! Well-known EVM network definitions and token deployments.
+//!
+//! This module provides static network metadata and USDC/USDM token deployment
+//! information for all supported EIP-155 chains.
+
 use std::sync::LazyLock;
 
 use r402::networks::NetworkInfo;
