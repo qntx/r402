@@ -1,6 +1,6 @@
 //! Protocol types for x402 payment messages.
 //!
-//! This module defines the wire format types used in the x402 V2 protocol for
+//! This module defines the wire format types used in the x402 protocol for
 //! communication between buyers, sellers, and facilitators.
 //!
 //! # Key Types
@@ -160,11 +160,11 @@ impl<'de> Deserialize<'de> for U64String {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportedPaymentKind {
-    /// The x402 protocol version (1 or 2).
+    /// The x402 protocol version.
     pub x402_version: u8,
     /// The payment scheme identifier (e.g., "exact").
     pub scheme: String,
-    /// The network identifier (CAIP-2 chain ID for V2, network name for V1).
+    /// The network identifier (CAIP-2 chain ID).
     pub network: String,
     /// Optional scheme-specific extra data.
     #[serde(skip_serializing_if = "Option::is_none")]
