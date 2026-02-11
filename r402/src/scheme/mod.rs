@@ -17,10 +17,12 @@
 
 mod client;
 mod handler;
+pub mod hooks;
 mod registry;
 
 pub use client::*;
 pub use handler::*;
+pub use hooks::{FacilitatorHooks, HookedSchemeHandler};
 pub use registry::*;
 
 /// Trait for identifying a payment scheme.

@@ -1,5 +1,5 @@
 use r402::chain::ChainId;
-use r402::networks::USDC;
+use r402::networks::{USDC, USDM};
 
 use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentEip712};
 
@@ -15,110 +15,207 @@ use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentE
 /// - **Token Deployments**: Get per-chain token addresses (e.g., USDC on different EVM chains)
 /// - **Network Configuration**: Get network-specific configuration objects for EVM chains
 /// - **Any Per-Network Data**: Any type that needs EVM network-specific instances
+/// # Default implementations
+///
+/// Every method has a default `unimplemented!()` body so that implementors
+/// only need to override networks where they actually have a deployment.
+/// This avoids massive boilerplate for token types that are only deployed
+/// on a subset of chains (e.g., USDM on `MegaETH` only).
+///
+/// For exhaustive types like [`ChainId`](r402::chain::ChainId), all methods
+/// should be overridden.
+#[allow(clippy::unimplemented, clippy::must_use_candidate)]
 pub trait KnownNetworkEip155<A> {
     /// Returns the instance for Ethereum mainnet (eip155:1)
-    fn ethereum() -> A;
+    fn ethereum() -> A {
+        unimplemented!("no Ethereum deployment")
+    }
     /// Returns the instance for Ethereum Sepolia testnet (eip155:11155111)
-    fn ethereum_sepolia() -> A;
+    fn ethereum_sepolia() -> A {
+        unimplemented!("no Ethereum Sepolia deployment")
+    }
 
     /// Returns the instance for Base mainnet (eip155:8453)
-    fn base() -> A;
+    fn base() -> A {
+        unimplemented!("no Base deployment")
+    }
     /// Returns the instance for Base Sepolia testnet (eip155:84532)
-    fn base_sepolia() -> A;
+    fn base_sepolia() -> A {
+        unimplemented!("no Base Sepolia deployment")
+    }
 
     /// Returns the instance for Arbitrum One mainnet (eip155:42161)
-    fn arbitrum() -> A;
+    fn arbitrum() -> A {
+        unimplemented!("no Arbitrum deployment")
+    }
     /// Returns the instance for Arbitrum Sepolia testnet (eip155:421614)
-    fn arbitrum_sepolia() -> A;
+    fn arbitrum_sepolia() -> A {
+        unimplemented!("no Arbitrum Sepolia deployment")
+    }
 
     /// Returns the instance for OP Mainnet (eip155:10)
-    fn optimism() -> A;
+    fn optimism() -> A {
+        unimplemented!("no OP Mainnet deployment")
+    }
     /// Returns the instance for OP Sepolia testnet (eip155:11155420)
-    fn optimism_sepolia() -> A;
+    fn optimism_sepolia() -> A {
+        unimplemented!("no OP Sepolia deployment")
+    }
 
     /// Returns the instance for Polygon `PoS` mainnet (eip155:137)
-    fn polygon() -> A;
+    fn polygon() -> A {
+        unimplemented!("no Polygon deployment")
+    }
     /// Returns the instance for Polygon Amoy testnet (eip155:80002)
-    fn polygon_amoy() -> A;
+    fn polygon_amoy() -> A {
+        unimplemented!("no Polygon Amoy deployment")
+    }
 
     /// Returns the instance for Avalanche C-Chain mainnet (eip155:43114)
-    fn avalanche() -> A;
+    fn avalanche() -> A {
+        unimplemented!("no Avalanche deployment")
+    }
     /// Returns the instance for Avalanche Fuji testnet (eip155:43113)
-    fn avalanche_fuji() -> A;
+    fn avalanche_fuji() -> A {
+        unimplemented!("no Avalanche Fuji deployment")
+    }
 
     /// Returns the instance for Celo mainnet (eip155:42220)
-    fn celo() -> A;
+    fn celo() -> A {
+        unimplemented!("no Celo deployment")
+    }
     /// Returns the instance for Celo Sepolia testnet (eip155:11142220)
-    fn celo_sepolia() -> A;
+    fn celo_sepolia() -> A {
+        unimplemented!("no Celo Sepolia deployment")
+    }
 
     /// Returns the instance for Sei mainnet (eip155:1329)
-    fn sei() -> A;
+    fn sei() -> A {
+        unimplemented!("no Sei deployment")
+    }
     /// Returns the instance for Sei testnet (eip155:1328)
-    fn sei_testnet() -> A;
+    fn sei_testnet() -> A {
+        unimplemented!("no Sei Testnet deployment")
+    }
 
     /// Returns the instance for Sonic mainnet (eip155:146)
-    fn sonic() -> A;
+    fn sonic() -> A {
+        unimplemented!("no Sonic deployment")
+    }
     /// Returns the instance for Sonic Blaze testnet (eip155:57054)
-    fn sonic_blaze() -> A;
+    fn sonic_blaze() -> A {
+        unimplemented!("no Sonic Blaze deployment")
+    }
 
     /// Returns the instance for Unichain mainnet (eip155:130)
-    fn unichain() -> A;
+    fn unichain() -> A {
+        unimplemented!("no Unichain deployment")
+    }
     /// Returns the instance for Unichain Sepolia testnet (eip155:1301)
-    fn unichain_sepolia() -> A;
+    fn unichain_sepolia() -> A {
+        unimplemented!("no Unichain Sepolia deployment")
+    }
 
     /// Returns the instance for World Chain mainnet (eip155:480)
-    fn world_chain() -> A;
+    fn world_chain() -> A {
+        unimplemented!("no World Chain deployment")
+    }
     /// Returns the instance for World Chain Sepolia testnet (eip155:4801)
-    fn world_chain_sepolia() -> A;
+    fn world_chain_sepolia() -> A {
+        unimplemented!("no World Chain Sepolia deployment")
+    }
 
     /// Returns the instance for `ZKsync` Era mainnet (eip155:324)
-    fn zksync() -> A;
+    fn zksync() -> A {
+        unimplemented!("no ZKsync deployment")
+    }
     /// Returns the instance for `ZKsync` Era Sepolia testnet (eip155:300)
-    fn zksync_sepolia() -> A;
+    fn zksync_sepolia() -> A {
+        unimplemented!("no ZKsync Sepolia deployment")
+    }
 
     /// Returns the instance for Linea mainnet (eip155:59144)
-    fn linea() -> A;
+    fn linea() -> A {
+        unimplemented!("no Linea deployment")
+    }
     /// Returns the instance for Linea Sepolia testnet (eip155:59141)
-    fn linea_sepolia() -> A;
+    fn linea_sepolia() -> A {
+        unimplemented!("no Linea Sepolia deployment")
+    }
 
     /// Returns the instance for Ink mainnet (eip155:57073)
-    fn ink() -> A;
+    fn ink() -> A {
+        unimplemented!("no Ink deployment")
+    }
     /// Returns the instance for Ink Sepolia testnet (eip155:763373)
-    fn ink_sepolia() -> A;
+    fn ink_sepolia() -> A {
+        unimplemented!("no Ink Sepolia deployment")
+    }
 
     /// Returns the instance for `HyperEVM` mainnet (eip155:999)
-    fn hyperevm() -> A;
+    fn hyperevm() -> A {
+        unimplemented!("no HyperEVM deployment")
+    }
     /// Returns the instance for `HyperEVM` testnet (eip155:998)
-    fn hyperevm_testnet() -> A;
+    fn hyperevm_testnet() -> A {
+        unimplemented!("no HyperEVM Testnet deployment")
+    }
 
     /// Returns the instance for Monad mainnet (eip155:143)
-    fn monad() -> A;
+    fn monad() -> A {
+        unimplemented!("no Monad deployment")
+    }
     /// Returns the instance for Monad testnet (eip155:10143)
-    fn monad_testnet() -> A;
+    fn monad_testnet() -> A {
+        unimplemented!("no Monad Testnet deployment")
+    }
 
     /// Returns the instance for Plume mainnet (eip155:98866)
-    fn plume() -> A;
+    fn plume() -> A {
+        unimplemented!("no Plume deployment")
+    }
     /// Returns the instance for Plume testnet (eip155:98867)
-    fn plume_testnet() -> A;
+    fn plume_testnet() -> A {
+        unimplemented!("no Plume Testnet deployment")
+    }
 
     /// Returns the instance for Codex mainnet (eip155:81224)
-    fn codex() -> A;
+    fn codex() -> A {
+        unimplemented!("no Codex deployment")
+    }
     /// Returns the instance for Codex testnet (eip155:812242)
-    fn codex_testnet() -> A;
+    fn codex_testnet() -> A {
+        unimplemented!("no Codex Testnet deployment")
+    }
 
     /// Returns the instance for XDC Network mainnet (eip155:50)
-    fn xdc() -> A;
+    fn xdc() -> A {
+        unimplemented!("no XDC deployment")
+    }
     /// Returns the instance for XDC Apothem testnet (eip155:51)
-    fn xdc_apothem() -> A;
+    fn xdc_apothem() -> A {
+        unimplemented!("no XDC Apothem deployment")
+    }
 
     /// Returns the instance for XRPL EVM sidechain (eip155:1440000)
-    fn xrpl_evm() -> A;
+    fn xrpl_evm() -> A {
+        unimplemented!("no XRPL EVM deployment")
+    }
 
     /// Returns the instance for Peaq mainnet (eip155:3338)
-    fn peaq() -> A;
+    fn peaq() -> A {
+        unimplemented!("no Peaq deployment")
+    }
 
     /// Returns the instance for `IoTeX` mainnet (eip155:4689)
-    fn iotex() -> A;
+    fn iotex() -> A {
+        unimplemented!("no IoTeX deployment")
+    }
+
+    /// Returns the instance for `MegaETH` mainnet (eip155:4326)
+    fn megaeth() -> A {
+        unimplemented!("no MegaETH deployment")
+    }
 }
 
 /// Implementation of `KnownNetworkEip155` for `ChainId`.
@@ -253,6 +350,25 @@ impl KnownNetworkEip155<Self> for ChainId {
     }
     fn iotex() -> Self {
         Self::new("eip155", "4689")
+    }
+    fn megaeth() -> Self {
+        Self::new("eip155", "4326")
+    }
+}
+
+impl KnownNetworkEip155<Eip155TokenDeployment> for USDM {
+    // MegaETH — MegaUSD (USDM), the chain's endorsed default stablecoin
+    // Matches Go SDK: eip155:4326, name "MegaUSD", version "1", decimals 18
+    fn megaeth() -> Eip155TokenDeployment {
+        Eip155TokenDeployment {
+            chain_reference: Eip155ChainReference::new(4326),
+            address: alloy_primitives::address!("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7"),
+            decimals: 18,
+            eip712: Some(TokenDeploymentEip712 {
+                name: "MegaUSD".into(),
+                version: "1".into(),
+            }),
+        }
     }
 }
 

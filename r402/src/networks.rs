@@ -287,6 +287,12 @@ pub static KNOWN_NETWORKS: &[NetworkInfo] = &[
         namespace: "eip155",
         reference: "4689",
     },
+    // MegaETH — https://megaeth.systems
+    NetworkInfo {
+        name: "megaeth",
+        namespace: "eip155",
+        reference: "4326",
+    },
     // Solana — https://solscan.io/token/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
     NetworkInfo {
         name: "solana",
@@ -342,6 +348,14 @@ pub fn network_name_by_chain_id(chain_id: &ChainId) -> Option<&'static str> {
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct USDC;
+
+/// Marker struct for USDM (`MegaUSD`) token deployment implementations.
+///
+/// `MegaETH` uses USDM as its default stablecoin instead of USDC.
+/// This marker enables chain-specific crates to provide USDM deployment data.
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::upper_case_acronyms)]
+pub struct USDM;
 
 #[cfg(test)]
 mod tests {

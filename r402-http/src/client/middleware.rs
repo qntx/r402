@@ -7,7 +7,9 @@ use http::{Extensions, HeaderMap, StatusCode};
 use r402::encoding::Base64Bytes;
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::scheme::{FirstMatch, PaymentCandidate, PaymentSelector, X402Error, X402SchemeClient};
+use r402::scheme::{
+    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, X402Error, X402SchemeClient,
+};
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 use std::sync::Arc;
@@ -28,6 +30,7 @@ use tracing::{debug, info, instrument, trace};
 pub struct X402Client<TSelector> {
     schemes: ClientSchemes,
     selector: TSelector,
+    policies: Vec<Arc<dyn PaymentPolicy>>,
     hooks: Arc<ClientHooks>,
 }
 
@@ -47,6 +50,7 @@ impl Default for X402Client<FirstMatch> {
         Self {
             schemes: ClientSchemes::default(),
             selector: FirstMatch,
+            policies: Vec::new(),
             hooks: Arc::new(ClientHooks::default()),
         }
     }
@@ -82,8 +86,20 @@ impl<TSelector> X402Client<TSelector> {
         X402Client {
             selector,
             schemes: self.schemes,
+            policies: self.policies,
             hooks: self.hooks,
         }
+    }
+
+    /// Adds a payment policy to the filtering pipeline.
+    ///
+    /// Policies are applied in registration order before the selector picks
+    /// the final candidate. Use policies to restrict which networks, schemes,
+    /// or amounts are acceptable.
+    #[must_use]
+    pub fn with_policy<P: PaymentPolicy + 'static>(mut self, policy: P) -> Self {
+        self.policies.push(Arc::new(policy));
+        self
     }
 
     /// Sets the lifecycle hooks for payment creation.
@@ -185,10 +201,19 @@ where
     ) -> Result<HeaderMap, X402Error> {
         let candidates = self.schemes.candidates(payment_required);
 
-        // Select the best candidate
+        // Apply policies to filter candidates
+        let mut filtered: Vec<&PaymentCandidate> = candidates.iter().collect();
+        for policy in &self.policies {
+            filtered = policy.apply(filtered);
+            if filtered.is_empty() {
+                return Err(X402Error::NoMatchingPaymentOption);
+            }
+        }
+
+        // Select the best candidate from filtered list
         let selected = self
             .selector
-            .select(&candidates)
+            .select(&filtered)
             .ok_or(X402Error::NoMatchingPaymentOption)?;
 
         #[cfg(feature = "telemetry")]

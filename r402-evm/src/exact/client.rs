@@ -4,9 +4,9 @@
 //! signing ERC-3009 `transferWithAuthorization` payments on EVM chains.
 //! Both share the core signing logic via [`sign_erc3009_authorization`].
 
-use alloy_primitives::{Address, FixedBytes, Signature, U256};
+use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
-use alloy_sol_types::{SolStruct, eip712_domain};
+use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
 use r402::chain::ChainId;
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
@@ -204,7 +204,7 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
         witness: SolWitness {
             to: params.pay_to,
             validAfter: U256::from(valid_after_secs),
-            extra: alloy_primitives::Bytes::new(),
+            extra: Bytes::new(),
         },
     };
 
@@ -226,7 +226,7 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
         witness: Permit2Witness {
             to: params.pay_to,
             valid_after: TokenAmount::from(U256::from(valid_after_secs)),
-            extra: alloy_primitives::Bytes::new(),
+            extra: Bytes::new(),
         },
     };
 
@@ -457,4 +457,45 @@ where
             Ok(b64.to_string())
         })
     }
+}
+
+sol! {
+    /// Minimal ERC-20 interface for client-side allowance checks and approvals.
+    #[allow(missing_docs)]
+    interface IPermit2Approval {
+        function allowance(address owner, address spender) external view returns (uint256);
+        function approve(address spender, uint256 amount) external returns (bool);
+    }
+}
+
+/// Returns the ABI-encoded calldata for checking a token's Permit2 allowance.
+///
+/// The returned tuple `(token_address, calldata)` can be used with any EVM
+/// provider's `eth_call` to check whether `owner` has approved the canonical
+/// Permit2 contract to spend their tokens.
+///
+/// Mirrors Go SDK's `GetPermit2AllowanceReadParams`.
+#[must_use]
+pub fn permit2_allowance_calldata(token: Address, owner: Address) -> (Address, Bytes) {
+    let call = IPermit2Approval::allowanceCall {
+        owner,
+        spender: PERMIT2_ADDRESS,
+    };
+    (token, call.abi_encode().into())
+}
+
+/// Returns the ABI-encoded calldata for approving the canonical Permit2
+/// contract to spend an unlimited amount of `token`.
+///
+/// The returned tuple `(token_address, calldata)` represents a transaction
+/// the user must send (paying gas) before using the Permit2 payment flow.
+///
+/// Mirrors Go SDK's `CreatePermit2ApprovalTxData`.
+#[must_use]
+pub fn permit2_approval_calldata(token: Address) -> (Address, Bytes) {
+    let call = IPermit2Approval::approveCall {
+        spender: PERMIT2_ADDRESS,
+        amount: U256::MAX,
+    };
+    (token, call.abi_encode().into())
 }

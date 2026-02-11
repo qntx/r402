@@ -101,7 +101,10 @@ pub enum X402Error {
 /// multiple options are available.
 pub trait PaymentSelector: Send + Sync {
     /// Selects a payment candidate from the available options.
-    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate>;
+    ///
+    /// Accepts a slice of references to allow seamless integration with
+    /// the [`PaymentPolicy`] filtering pipeline.
+    fn select<'a>(&self, candidates: &[&'a PaymentCandidate]) -> Option<&'a PaymentCandidate>;
 }
 
 /// Selector that returns the first matching candidate.
@@ -112,8 +115,8 @@ pub trait PaymentSelector: Send + Sync {
 pub struct FirstMatch;
 
 impl PaymentSelector for FirstMatch {
-    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
-        candidates.first()
+    fn select<'a>(&self, candidates: &[&'a PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+        candidates.first().copied()
     }
 }
 
@@ -138,13 +141,13 @@ impl PreferChain {
 }
 
 impl PaymentSelector for PreferChain {
-    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+    fn select<'a>(&self, candidates: &[&'a PaymentCandidate]) -> Option<&'a PaymentCandidate> {
         for pattern in &self.0 {
             if let Some(candidate) = candidates.iter().find(|c| pattern.matches(&c.chain_id)) {
-                return Some(candidate);
+                return Some(*candidate);
             }
         }
-        candidates.first()
+        candidates.first().copied()
     }
 }
 
@@ -155,10 +158,11 @@ impl PaymentSelector for PreferChain {
 pub struct MaxAmount(pub u128);
 
 impl PaymentSelector for MaxAmount {
-    fn select<'a>(&self, candidates: &'a [PaymentCandidate]) -> Option<&'a PaymentCandidate> {
+    fn select<'a>(&self, candidates: &[&'a PaymentCandidate]) -> Option<&'a PaymentCandidate> {
         candidates
             .iter()
             .find(|c| c.amount.parse::<u128>().is_ok_and(|a| a <= self.0))
+            .copied()
     }
 }
 
