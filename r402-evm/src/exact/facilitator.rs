@@ -22,9 +22,7 @@ use alloy_transport::TransportError;
 use r402::chain::{ChainId, ChainProviderOps};
 use r402::proto;
 use r402::proto::{PaymentVerificationError, v1, v2};
-use r402::scheme::{
-    X402SchemeFacilitator, X402SchemeFacilitatorBuilder, X402SchemeFacilitatorError,
-};
+use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError};
 use r402::timestamp::UnixTimestamp;
 use std::collections::HashMap;
 use std::future::Future;
@@ -64,7 +62,7 @@ use crate::exact::{
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
 pub const VALIDATOR_ADDRESS: Address = address!("0xdAcD51A54883eb67D95FAEb2BBfdC4a9a6BD2a3B");
 
-impl<P> X402SchemeFacilitatorBuilder<P> for V1Eip155Exact
+impl<P> SchemeHandlerBuilder<P> for V1Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
@@ -73,12 +71,12 @@ where
         &self,
         provider: P,
         _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
         Ok(Box::new(V1Eip155ExactFacilitator::new(provider)))
     }
 }
 
-impl<P> X402SchemeFacilitatorBuilder<P> for V2Eip155Exact
+impl<P> SchemeHandlerBuilder<P> for V2Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync + 'static,
     Eip155ExactError: From<P::Error>,
@@ -87,14 +85,14 @@ where
         &self,
         provider: P,
         _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
         Ok(Box::new(V2Eip155ExactFacilitator::new(provider)))
     }
 }
 
 /// Facilitator for V1 EIP-155 exact scheme payments.
 ///
-/// This struct implements the [`X402SchemeFacilitator`] trait to provide payment
+/// This struct implements the [`SchemeHandler`] trait to provide payment
 /// verification and settlement services for ERC-3009 based payments on EVM chains.
 pub struct V1Eip155ExactFacilitator<P> {
     provider: P,
@@ -114,7 +112,7 @@ impl<P> V1Eip155ExactFacilitator<P> {
     }
 }
 
-impl<P> X402SchemeFacilitator for V1Eip155ExactFacilitator<P>
+impl<P> SchemeHandler for V1Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
@@ -123,13 +121,8 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v1::VerifyRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -152,13 +145,8 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v1::SettleRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -185,11 +173,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
@@ -222,7 +206,7 @@ where
 
 /// Facilitator for V2 EIP-155 exact scheme payments.
 ///
-/// This struct implements the [`X402SchemeFacilitator`] trait to provide payment
+/// This struct implements the [`SchemeHandler`] trait to provide payment
 /// verification and settlement services for ERC-3009 based payments on EVM chains
 /// using the V2 protocol.
 pub struct V2Eip155ExactFacilitator<P> {
@@ -243,7 +227,7 @@ impl<P> V2Eip155ExactFacilitator<P> {
     }
 }
 
-impl<P> X402SchemeFacilitator for V2Eip155ExactFacilitator<P>
+impl<P> SchemeHandler for V2Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
@@ -252,13 +236,8 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -280,13 +259,8 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -314,11 +288,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
@@ -1228,7 +1198,7 @@ pub enum Eip155ExactError {
     PaymentVerification(#[from] PaymentVerificationError),
 }
 
-impl From<Eip155ExactError> for X402SchemeFacilitatorError {
+impl From<Eip155ExactError> for SchemeHandlerError {
     fn from(value: Eip155ExactError) -> Self {
         match value {
             Eip155ExactError::Transport(_)

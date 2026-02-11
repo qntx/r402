@@ -1,6 +1,6 @@
 use r402::chain::{ChainId, ChainProviderOps};
 use r402::proto::PaymentVerificationError;
-use r402::scheme::X402SchemeFacilitatorError;
+use r402::scheme::SchemeHandlerError;
 use solana_account::Account;
 use solana_client::client_error::{ClientError, ClientErrorKind};
 use solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -50,7 +50,7 @@ impl From<ClientError> for SolanaChainProviderError {
     }
 }
 
-impl From<SolanaChainProviderError> for X402SchemeFacilitatorError {
+impl From<SolanaChainProviderError> for SchemeHandlerError {
     fn from(value: SolanaChainProviderError) -> Self {
         Self::OnchainFailure(value.to_string())
     }

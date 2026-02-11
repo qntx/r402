@@ -8,9 +8,7 @@ use r402::chain::{ChainId, ChainProviderOps};
 use r402::encoding::Base64Bytes;
 use r402::proto;
 use r402::proto::{PaymentVerificationError, v1, v2};
-use r402::scheme::{
-    X402SchemeFacilitator, X402SchemeFacilitatorBuilder, X402SchemeFacilitatorError,
-};
+use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_response::{TransactionError, UiTransactionError};
@@ -123,7 +121,7 @@ impl SolanaExactFacilitatorConfig {
     }
 }
 
-impl<P> X402SchemeFacilitatorBuilder<P> for V1SolanaExact
+impl<P> SchemeHandlerBuilder<P> for V1SolanaExact
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
 {
@@ -131,7 +129,7 @@ where
         &self,
         provider: P,
         config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
         let config = config
             .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
             .transpose()?
@@ -140,7 +138,7 @@ where
     }
 }
 
-impl<P> X402SchemeFacilitatorBuilder<P> for V2SolanaExact
+impl<P> SchemeHandlerBuilder<P> for V2SolanaExact
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
 {
@@ -148,7 +146,7 @@ where
         &self,
         provider: P,
         config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
         let config = config
             .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
             .transpose()?
@@ -178,20 +176,15 @@ impl<P> V1SolanaExactFacilitator<P> {
     }
 }
 
-impl<P> X402SchemeFacilitator for V1SolanaExactFacilitator<P>
+impl<P> SchemeHandler for V1SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
 {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v1::VerifyRequest::from_proto(request)?;
             let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
@@ -202,13 +195,8 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v1::SettleRequest::from_proto(request)?;
             let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
@@ -226,11 +214,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
@@ -284,20 +268,15 @@ impl<P> V2SolanaExactFacilitator<P> {
     }
 }
 
-impl<P> X402SchemeFacilitator for V2SolanaExactFacilitator<P>
+impl<P> SchemeHandler for V2SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
 {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
@@ -308,13 +287,8 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_proto(request)?;
             let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
@@ -332,11 +306,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();

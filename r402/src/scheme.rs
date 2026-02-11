@@ -6,8 +6,8 @@
 //!
 //! # Facilitator-Side
 //!
-//! - [`X402SchemeFacilitator`] - Processes verify/settle requests
-//! - [`X402SchemeBlueprint`] / [`SchemeBlueprints`] - Factories that create handlers
+//! - [`SchemeHandler`] - Processes verify/settle requests
+//! - [`SchemeBlueprint`] / [`SchemeBlueprints`] - Factories that create handlers
 //! - [`SchemeRegistry`] - Maps chain+scheme combinations to handlers
 //!
 //! # Client-Side
@@ -30,7 +30,7 @@ use std::pin::Pin;
 ///
 /// Implementations of this trait handle the core payment processing logic:
 /// verifying that payments are valid and settling them on-chain.
-pub trait X402SchemeFacilitator: Send + Sync {
+pub trait SchemeHandler: Send + Sync {
     /// Verifies a payment authorization without settling it.
     ///
     /// This checks that the payment is properly signed, matches the requirements,
@@ -38,13 +38,7 @@ pub trait X402SchemeFacilitator: Send + Sync {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>;
 
     /// Settles a verified payment on-chain.
     ///
@@ -53,38 +47,22 @@ pub trait X402SchemeFacilitator: Send + Sync {
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>;
 
     /// Returns the payment methods supported by this handler.
     fn supported(
         &self,
     ) -> Pin<
-        Box<
-            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
-                + Send
-                + '_,
-        >,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
     >;
 }
 
 /// Marker trait for types that are both identifiable and buildable.
 ///
-/// This combines [`X402SchemeId`] and [`X402SchemeFacilitatorBuilder`] for
+/// This combines [`X402SchemeId`] and [`SchemeHandlerBuilder`] for
 /// use in the blueprint registry.
-pub trait X402SchemeBlueprint<P>:
-    X402SchemeId + for<'a> X402SchemeFacilitatorBuilder<&'a P>
-{
-}
-impl<T, P> X402SchemeBlueprint<P> for T where
-    T: X402SchemeId + for<'a> X402SchemeFacilitatorBuilder<&'a P>
-{
-}
+pub trait SchemeBlueprint<P>: X402SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
+impl<T, P> SchemeBlueprint<P> for T where T: X402SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
 
 /// Trait for identifying a payment scheme.
 ///
@@ -113,7 +91,7 @@ pub trait X402SchemeId {
 /// Trait for building scheme handlers from chain providers.
 ///
 /// The type parameter `P` represents the chain provider type.
-pub trait X402SchemeFacilitatorBuilder<P> {
+pub trait SchemeHandlerBuilder<P> {
     /// Creates a new scheme handler for the given chain provider.
     ///
     /// # Errors
@@ -123,12 +101,12 @@ pub trait X402SchemeFacilitatorBuilder<P> {
         &self,
         provider: P,
         config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn X402SchemeFacilitator>, Box<dyn std::error::Error>>;
+    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>>;
 }
 
 /// Errors that can occur during scheme operations.
 #[derive(Debug, thiserror::Error)]
-pub enum X402SchemeFacilitatorError {
+pub enum SchemeHandlerError {
     /// Payment verification failed.
     #[error(transparent)]
     PaymentVerification(#[from] PaymentVerificationError),
@@ -137,7 +115,7 @@ pub enum X402SchemeFacilitatorError {
     OnchainFailure(String),
 }
 
-impl AsPaymentProblem for X402SchemeFacilitatorError {
+impl AsPaymentProblem for SchemeHandlerError {
     fn as_payment_problem(&self) -> PaymentProblem {
         match self {
             Self::PaymentVerification(e) => e.as_payment_problem(),
@@ -155,10 +133,7 @@ impl AsPaymentProblem for X402SchemeFacilitatorError {
 ///
 /// - `P` - The chain provider type
 #[derive(Default)]
-pub struct SchemeBlueprints<P>(
-    HashMap<String, Box<dyn X402SchemeBlueprint<P>>>,
-    PhantomData<P>,
-);
+pub struct SchemeBlueprints<P>(HashMap<String, Box<dyn SchemeBlueprint<P>>>, PhantomData<P>);
 
 impl<P> Debug for SchemeBlueprints<P> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -176,19 +151,19 @@ impl<P> SchemeBlueprints<P> {
 
     /// Registers a blueprint and returns self for chaining.
     #[must_use]
-    pub fn and_register<B: X402SchemeBlueprint<P> + 'static>(mut self, blueprint: B) -> Self {
+    pub fn and_register<B: SchemeBlueprint<P> + 'static>(mut self, blueprint: B) -> Self {
         self.register(blueprint);
         self
     }
 
     /// Registers a scheme blueprint.
-    pub fn register<B: X402SchemeBlueprint<P> + 'static>(&mut self, blueprint: B) {
+    pub fn register<B: SchemeBlueprint<P> + 'static>(&mut self, blueprint: B) {
         self.0.insert(blueprint.id(), Box::new(blueprint));
     }
 
     /// Gets a blueprint by its ID.
     #[must_use]
-    pub fn get(&self, id: &str) -> Option<&dyn X402SchemeBlueprint<P>> {
+    pub fn get(&self, id: &str) -> Option<&dyn SchemeBlueprint<P>> {
         self.0.get(id).map(|v| &**v)
     }
 }
@@ -233,7 +208,7 @@ impl Display for SchemeHandlerSlug {
 ///
 /// Maps chain+scheme combinations to their handlers.
 #[derive(Default)]
-pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn X402SchemeFacilitator>>);
+pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn SchemeHandler>>);
 
 impl Debug for SchemeRegistry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -256,7 +231,7 @@ impl SchemeRegistry {
     /// Returns an error if the handler cannot be built from the provider.
     pub fn register<P: ChainProviderOps>(
         &mut self,
-        blueprint: &dyn X402SchemeBlueprint<P>,
+        blueprint: &dyn SchemeBlueprint<P>,
         provider: &P,
         config: Option<serde_json::Value>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -273,13 +248,13 @@ impl SchemeRegistry {
 
     /// Gets a handler by its slug.
     #[must_use]
-    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn X402SchemeFacilitator> {
+    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn SchemeHandler> {
         let handler = &**self.0.get(slug)?;
         Some(handler)
     }
 
     /// Returns an iterator over all registered handlers.
-    pub fn values(&self) -> impl Iterator<Item = &dyn X402SchemeFacilitator> {
+    pub fn values(&self) -> impl Iterator<Item = &dyn SchemeHandler> {
         self.0.values().map(|v| &**v)
     }
 }
