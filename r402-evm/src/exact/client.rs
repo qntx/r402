@@ -341,6 +341,7 @@ where
                 accepted: self.requirements.clone(),
                 resource: self.resource_info.clone(),
                 payload: evm_payload,
+                extensions: None,
             };
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);

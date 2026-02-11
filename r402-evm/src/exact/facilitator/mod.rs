@@ -142,7 +142,7 @@ where
             let payer =
                 verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
 
-            Ok(v1::VerifyResponse::valid(payer.to_string()).into())
+            Ok(v1::VerifyResponse::valid(payer.to_string()))
         })
     }
 
@@ -169,8 +169,8 @@ where
                 payer: payment.from.to_string(),
                 transaction: tx_hash.to_string(),
                 network: payload.network.clone(),
-            }
-            .into())
+                extensions: None,
+            })
         })
     }
 
@@ -196,7 +196,7 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
+                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {
@@ -256,7 +256,7 @@ where
 
             let payer =
                 verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
-            Ok(v2::VerifyResponse::valid(payer.to_string()).into())
+            Ok(v2::VerifyResponse::valid(payer.to_string()))
         })
     }
 
@@ -284,8 +284,8 @@ where
                 payer: payment.from.to_string(),
                 transaction: tx_hash.to_string(),
                 network: payload.accepted.network.to_string(),
-            }
-            .into())
+                extensions: None,
+            })
         })
     }
 
@@ -304,7 +304,7 @@ where
             }];
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
+                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {

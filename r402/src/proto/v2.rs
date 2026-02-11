@@ -23,7 +23,6 @@
 use crate::chain::ChainId;
 use crate::proto;
 use crate::proto::SupportedResponse;
-use crate::proto::v1;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
@@ -87,13 +86,13 @@ impl Display for X402Version2 {
 
 /// Response from a V2 payment verification request.
 ///
-/// V2 uses the same response format as V1.
-pub type VerifyResponse = v1::VerifyResponse;
+/// V2 uses the same response format as the protocol-level type.
+pub type VerifyResponse = proto::VerifyResponse;
 
 /// Response from a V2 payment settlement request.
 ///
-/// V2 uses the same response format as V1.
-pub type SettleResponse = v1::SettleResponse;
+/// V2 uses the same response format as the protocol-level type.
+pub type SettleResponse = proto::SettleResponse;
 
 /// Metadata about the resource being paid for.
 ///
@@ -160,6 +159,9 @@ pub struct PaymentPayload<TAccepted, TPayload> {
     pub resource: Option<ResourceInfo>,
     /// Protocol version (always 2).
     pub x402_version: X402Version2,
+    /// Optional protocol extensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<proto::Extensions>,
 }
 
 /// Payment requirements set by the seller (V2 format).
@@ -246,6 +248,9 @@ pub struct PaymentRequired {
     /// List of acceptable payment methods.
     #[serde(default)]
     pub accepts: Vec<PaymentRequirements>,
+    /// Optional protocol extensions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<proto::Extensions>,
 }
 
 /// Builder for creating V2 payment requirements.

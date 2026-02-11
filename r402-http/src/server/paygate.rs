@@ -213,13 +213,9 @@ impl PaygateProtocol for v1::PriceTag {
     fn validate_verify_response(
         verify_response: proto::VerifyResponse,
     ) -> Result<(), VerificationError> {
-        let verify_response_v1: v1::VerifyResponse = verify_response
-            .try_into()
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-
-        match verify_response_v1 {
-            v1::VerifyResponse::Valid { .. } => Ok(()),
-            v1::VerifyResponse::Invalid { reason, .. } => {
+        match verify_response {
+            proto::VerifyResponse::Valid { .. } => Ok(()),
+            proto::VerifyResponse::Invalid { reason, .. } => {
                 Err(VerificationError::VerificationFailed(reason))
             }
         }
@@ -297,6 +293,7 @@ impl PaygateProtocol for v2::PriceTag {
                     accepts: accepts.iter().map(|pt| pt.requirements.clone()).collect(),
                     x402_version: v2::X402Version2,
                     resource: resource.clone(),
+                    extensions: None,
                 };
                 // V2 sends payment required in the "Payment-Required" header (base64 encoded)
                 let payment_required_bytes =
@@ -331,13 +328,9 @@ impl PaygateProtocol for v2::PriceTag {
     fn validate_verify_response(
         verify_response: proto::VerifyResponse,
     ) -> Result<(), VerificationError> {
-        let verify_response_v2: v2::VerifyResponse = verify_response
-            .try_into()
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-
-        match verify_response_v2 {
-            v2::VerifyResponse::Valid { .. } => Ok(()),
-            v2::VerifyResponse::Invalid { reason, .. } => {
+        match verify_response {
+            proto::VerifyResponse::Valid { .. } => Ok(()),
+            proto::VerifyResponse::Invalid { reason, .. } => {
                 Err(VerificationError::VerificationFailed(reason))
             }
         }

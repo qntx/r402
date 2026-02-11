@@ -93,7 +93,7 @@ where
         Box::pin(async move {
             let request = types::v1::VerifyRequest::from_proto(request)?;
             let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v1::VerifyResponse::valid(verification.payer.to_string()).into())
+            Ok(v1::VerifyResponse::valid(verification.payer.to_string()))
         })
     }
 
@@ -111,8 +111,8 @@ where
                 payer,
                 transaction: tx_sig.to_string(),
                 network: self.provider.chain_id().to_string(),
-            }
-            .into())
+                extensions: None,
+            })
         })
     }
 
@@ -140,7 +140,7 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
+                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {
@@ -185,7 +185,7 @@ where
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v2::VerifyResponse::valid(verification.payer.to_string()).into())
+            Ok(v2::VerifyResponse::valid(verification.payer.to_string()))
         })
     }
 
@@ -203,8 +203,8 @@ where
                 payer,
                 transaction: tx_sig.to_string(),
                 network: self.provider.chain_id().to_string(),
-            }
-            .into())
+                extensions: None,
+            })
         })
     }
 
@@ -227,7 +227,7 @@ where
             };
             let signers = {
                 let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
+                signers.insert(chain_id.to_string(), self.provider.signer_addresses());
                 signers
             };
             Ok(proto::SupportedResponse {
