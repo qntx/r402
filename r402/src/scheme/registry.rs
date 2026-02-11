@@ -4,6 +4,7 @@
 //! [`SchemeRegistry`] holds the active handler instances keyed by chain+scheme.
 
 use crate::chain::{ChainId, ChainProviderOps};
+use crate::facilitator::Facilitator;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -11,7 +12,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 
 use super::X402SchemeId;
-use super::handler::{SchemeHandler, SchemeHandlerBuilder};
+use super::handler::SchemeHandlerBuilder;
 
 /// Marker trait for types that are both identifiable and buildable.
 ///
@@ -126,7 +127,7 @@ impl Display for SchemeHandlerSlug {
 ///
 /// Maps chain+scheme combinations to their handlers.
 #[derive(Default)]
-pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn SchemeHandler>>);
+pub struct SchemeRegistry(HashMap<SchemeHandlerSlug, Box<dyn Facilitator>>);
 
 impl Debug for SchemeRegistry {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -173,7 +174,7 @@ impl SchemeRegistry {
     /// This allows registering a single handler for an entire namespace
     /// (e.g., `eip155:*`) that serves all chains within it.
     #[must_use]
-    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn SchemeHandler> {
+    pub fn by_slug(&self, slug: &SchemeHandlerSlug) -> Option<&dyn Facilitator> {
         self.0
             .get(slug)
             .or_else(|| {
@@ -209,7 +210,7 @@ impl SchemeRegistry {
     }
 
     /// Returns an iterator over all registered handlers.
-    pub fn values(&self) -> impl Iterator<Item = &dyn SchemeHandler> {
+    pub fn values(&self) -> impl Iterator<Item = &dyn Facilitator> {
         self.0.values().map(|v| &**v)
     }
 }

@@ -34,7 +34,8 @@ use alloy_provider::Provider;
 use r402::chain::ChainProviderOps;
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError, X402SchemeId};
+use r402::facilitator::{Facilitator, FacilitatorError};
+use r402::scheme::{SchemeHandlerBuilder, X402SchemeId};
 use r402::timestamp::UnixTimestamp;
 use std::collections::HashMap;
 use std::future::Future;
@@ -101,7 +102,7 @@ where
         &self,
         provider: P,
         _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
         Ok(Box::new(V1Eip155ExactFacilitator::new(provider)))
     }
 }
@@ -115,7 +116,7 @@ where
         &self,
         provider: P,
         _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
         Ok(Box::new(V2Eip155ExactFacilitator::new(provider)))
     }
 }
@@ -142,7 +143,7 @@ impl<P> V1Eip155ExactFacilitator<P> {
     }
 }
 
-impl<P> SchemeHandler for V1Eip155ExactFacilitator<P>
+impl<P> Facilitator for V1Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
@@ -151,7 +152,7 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
     {
         Box::pin(async move {
             let request = types::v1::VerifyRequest::from_proto(request)?;
@@ -160,7 +161,7 @@ where
             let eip3009 = match &payload.payload {
                 ExactPayload::Eip3009(p) => p,
                 ExactPayload::Permit2(_) => {
-                    return Err(SchemeHandlerError::PaymentVerification(
+                    return Err(FacilitatorError::PaymentVerification(
                         proto::PaymentVerificationError::UnsupportedScheme,
                     ));
                 }
@@ -184,7 +185,7 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
     {
         Box::pin(async move {
             let request = types::v1::SettleRequest::from_settle(request)?;
@@ -193,7 +194,7 @@ where
             let eip3009 = match &payload.payload {
                 ExactPayload::Eip3009(p) => p,
                 ExactPayload::Permit2(_) => {
-                    return Err(SchemeHandlerError::PaymentVerification(
+                    return Err(FacilitatorError::PaymentVerification(
                         proto::PaymentVerificationError::UnsupportedScheme,
                     ));
                 }
@@ -221,7 +222,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
@@ -277,7 +278,7 @@ impl<P> V2Eip155ExactFacilitator<P> {
     }
 }
 
-impl<P> SchemeHandler for V2Eip155ExactFacilitator<P>
+impl<P> Facilitator for V2Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
@@ -286,7 +287,7 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
     {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
@@ -328,7 +329,7 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
     {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_settle(request)?;
@@ -379,7 +380,7 @@ where
     fn supported(
         &self,
     ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
+        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
     > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();

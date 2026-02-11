@@ -20,12 +20,14 @@
 //!
 
 use http::{HeaderMap, StatusCode};
-use r402::facilitator::Facilitator;
+use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use reqwest::Client;
 use std::fmt::Display;
+use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 use tokio::sync::RwLock;
 use url::Url;
@@ -120,57 +122,50 @@ pub struct FacilitatorClient {
 }
 
 impl Facilitator for FacilitatorClient {
-    type Error = FacilitatorClientError;
-
-    /// Verifies a payment payload with the facilitator.
-    #[cfg(feature = "telemetry")]
-    async fn verify(
+    fn verify(
         &self,
         request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorClientError> {
-        with_span(
-            Self::verify(self, &request),
-            tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
-        )
-        .await
+    ) -> Pin<Box<dyn Future<Output = Result<VerifyResponse, FacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            #[cfg(feature = "telemetry")]
+            let result = with_span(
+                Self::verify(self, &request),
+                tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
+            )
+            .await;
+            #[cfg(not(feature = "telemetry"))]
+            let result = Self::verify(self, &request).await;
+            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
     }
 
-    /// Verifies a payment payload with the facilitator.
-    #[cfg(not(feature = "telemetry"))]
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorClientError> {
-        FacilitatorClient::verify(self, &request).await
-    }
-
-    /// Settles a verified payment with the facilitator.
-    #[cfg(feature = "telemetry")]
-    async fn settle(
+    fn settle(
         &self,
         request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorClientError> {
-        with_span(
-            Self::settle(self, &request),
-            tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
-        )
-        .await
+    ) -> Pin<Box<dyn Future<Output = Result<SettleResponse, FacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            #[cfg(feature = "telemetry")]
+            let result = with_span(
+                Self::settle(self, &request),
+                tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
+            )
+            .await;
+            #[cfg(not(feature = "telemetry"))]
+            let result = Self::settle(self, &request).await;
+            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
     }
 
-    /// Settles a verified payment with the facilitator.
-    #[cfg(not(feature = "telemetry"))]
-    async fn settle(
+    fn supported(
         &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorClientError> {
-        FacilitatorClient::settle(self, &request).await
-    }
-
-    /// Retrieves the supported payment kinds from the facilitator.
-    ///
-    /// Results are cached with a configurable TTL to avoid repeated HTTP requests.
-    async fn supported(&self) -> Result<SupportedResponse, Self::Error> {
-        Self::supported(self).await
+    ) -> Pin<
+        Box<dyn Future<Output = Result<SupportedResponse, FacilitatorError>> + Send + '_>,
+    > {
+        Box::pin(async move {
+            Self::supported(self)
+                .await
+                .map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
     }
 }
 

@@ -3,7 +3,7 @@
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;
 use r402::proto::PaymentVerificationError;
-use r402::scheme::SchemeHandlerError;
+use r402::facilitator::FacilitatorError;
 
 use super::signature::StructuredSignatureFormatError;
 use crate::chain::MetaTransactionSendError;
@@ -28,7 +28,7 @@ pub enum Eip155ExactError {
     PaymentVerification(#[from] PaymentVerificationError),
 }
 
-impl From<Eip155ExactError> for SchemeHandlerError {
+impl From<Eip155ExactError> for FacilitatorError {
     fn from(value: Eip155ExactError) -> Self {
         match value {
             Eip155ExactError::Transport(_)

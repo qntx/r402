@@ -20,7 +20,7 @@ use std::fmt::{self, Debug};
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::facilitator::Facilitator;
+use crate::facilitator::{Facilitator, FacilitatorError};
 use crate::proto;
 
 /// Decision returned by "before" hooks to control whether an operation proceeds.
@@ -169,24 +169,6 @@ pub trait FacilitatorHooks: Send + Sync {
     }
 }
 
-/// Error type for [`HookedFacilitator`] that wraps inner facilitator errors
-/// and adds hook-triggered abort errors.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum HookedFacilitatorError<E> {
-    /// The inner facilitator returned an error.
-    #[error(transparent)]
-    Inner(E),
-    /// A "before" hook aborted the operation.
-    #[error("{reason}: {message}")]
-    Aborted {
-        /// Machine-readable abort reason.
-        reason: String,
-        /// Human-readable abort message.
-        message: String,
-    },
-}
-
 /// A facilitator decorator that applies lifecycle hooks around verify/settle operations.
 ///
 /// Wraps any type implementing [`Facilitator`] and executes registered
@@ -247,91 +229,95 @@ impl<F> HookedFacilitator<F> {
 
 impl<F> Facilitator for HookedFacilitator<F>
 where
-    F: Facilitator + Send + Sync,
-    F::Error: std::error::Error + Send + Sync + 'static,
+    F: Facilitator,
 {
-    type Error = HookedFacilitatorError<F::Error>;
-
-    async fn verify(
+    fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, Self::Error> {
-        let ctx = VerifyContext {
-            request: request.clone(),
-        };
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let ctx = VerifyContext {
+                request: request.clone(),
+            };
 
-        // Phase 1: Before hooks — first abort wins
-        for hook in &self.hooks {
-            if let HookDecision::Abort { reason, message } = hook.before_verify(&ctx).await {
-                return Err(HookedFacilitatorError::Aborted { reason, message });
-            }
-        }
-
-        // Phase 2: Execute inner facilitator
-        match self.inner.verify(request).await {
-            Ok(response) => {
-                // Phase 3a: After hooks (fire-and-forget)
-                for hook in &self.hooks {
-                    hook.after_verify(&ctx, &response).await;
+            // Phase 1: Before hooks — first abort wins
+            for hook in &self.hooks {
+                if let HookDecision::Abort { reason, message } = hook.before_verify(&ctx).await {
+                    return Err(FacilitatorError::Aborted { reason, message });
                 }
-                Ok(response)
             }
-            Err(e) => {
-                // Phase 3b: Failure hooks — first recovery wins
-                for hook in &self.hooks {
-                    if let FailureRecovery::Recovered(response) =
-                        hook.on_verify_failure(&ctx, &e).await
-                    {
-                        return Ok(response);
+
+            // Phase 2: Execute inner facilitator
+            match self.inner.verify(request).await {
+                Ok(response) => {
+                    // Phase 3a: After hooks (fire-and-forget)
+                    for hook in &self.hooks {
+                        hook.after_verify(&ctx, &response).await;
                     }
+                    Ok(response)
                 }
-                Err(HookedFacilitatorError::Inner(e))
+                Err(e) => {
+                    // Phase 3b: Failure hooks — first recovery wins
+                    for hook in &self.hooks {
+                        if let FailureRecovery::Recovered(response) =
+                            hook.on_verify_failure(&ctx, &e).await
+                        {
+                            return Ok(response);
+                        }
+                    }
+                    Err(e)
+                }
             }
-        }
+        })
     }
 
-    async fn settle(
+    fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, Self::Error> {
-        let ctx = SettleContext {
-            request: request.clone(),
-        };
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let ctx = SettleContext {
+                request: request.clone(),
+            };
 
-        // Phase 1: Before hooks — first abort wins
-        for hook in &self.hooks {
-            if let HookDecision::Abort { reason, message } = hook.before_settle(&ctx).await {
-                return Err(HookedFacilitatorError::Aborted { reason, message });
-            }
-        }
-
-        // Phase 2: Execute inner facilitator
-        match self.inner.settle(request).await {
-            Ok(response) => {
-                // Phase 3a: After hooks (fire-and-forget)
-                for hook in &self.hooks {
-                    hook.after_settle(&ctx, &response).await;
+            // Phase 1: Before hooks — first abort wins
+            for hook in &self.hooks {
+                if let HookDecision::Abort { reason, message } = hook.before_settle(&ctx).await {
+                    return Err(FacilitatorError::Aborted { reason, message });
                 }
-                Ok(response)
             }
-            Err(e) => {
-                // Phase 3b: Failure hooks — first recovery wins
-                for hook in &self.hooks {
-                    if let FailureRecovery::Recovered(response) =
-                        hook.on_settle_failure(&ctx, &e).await
-                    {
-                        return Ok(response);
+
+            // Phase 2: Execute inner facilitator
+            match self.inner.settle(request).await {
+                Ok(response) => {
+                    // Phase 3a: After hooks (fire-and-forget)
+                    for hook in &self.hooks {
+                        hook.after_settle(&ctx, &response).await;
                     }
+                    Ok(response)
                 }
-                Err(HookedFacilitatorError::Inner(e))
+                Err(e) => {
+                    // Phase 3b: Failure hooks — first recovery wins
+                    for hook in &self.hooks {
+                        if let FailureRecovery::Recovered(response) =
+                            hook.on_settle_failure(&ctx, &e).await
+                        {
+                            return Ok(response);
+                        }
+                    }
+                    Err(e)
+                }
             }
-        }
+        })
     }
 
-    async fn supported(&self) -> Result<proto::SupportedResponse, Self::Error> {
-        self.inner
-            .supported()
-            .await
-            .map_err(HookedFacilitatorError::Inner)
+    fn supported(
+        &self,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
+    > {
+        Box::pin(async move { self.inner.supported().await })
     }
 }
