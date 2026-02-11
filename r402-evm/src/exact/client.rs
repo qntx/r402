@@ -25,7 +25,7 @@ use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::X402SchemeId;
 use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::timestamp::UnixTimestamp;
-use r402::util::Base64Bytes;
+use r402::encoding::Base64Bytes;
 use rand::RngExt;
 use rand::rng;
 use std::future::Future;

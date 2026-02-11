@@ -1,5 +1,5 @@
 use r402::chain::{ChainId, DeployedTokenAmount};
-use r402::util::money_amount::{MoneyAmount, MoneyAmountParseError};
+use r402::amount::{MoneyAmount, MoneyAmountParseError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solana_pubkey::Pubkey;
 use std::fmt::{Debug, Display, Formatter};

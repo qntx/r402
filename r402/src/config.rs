@@ -1,15 +1,14 @@
 //! Configuration types for x402 infrastructure.
 //!
 //! This module provides the core configuration types used throughout the x402 ecosystem,
-//! including server configuration, RPC provider configuration, CLI argument parsing,
-//! and environment variable resolution.
+//! including server configuration, RPC provider configuration, and environment variable
+//! resolution.
 //!
 //! # Overview
 //!
 //! The configuration system is designed to be reusable across different x402 components:
 //!
 //! - [`Config<T>`] - Generic server configuration parameterized by chain config type
-//! - [`CliArgs`] - CLI argument parsing (requires `cli` feature)
 //! - [`LiteralOrEnv`] - Transparent wrapper for environment variable resolution
 //!
 //! # Configuration File Format
@@ -49,22 +48,12 @@
 //! This is particularly useful for keeping secrets out of configuration files
 //! while still allowing them to be loaded at runtime.
 //!
-//! # Feature Flags
-//!
-//! - `cli` - Enables CLI argument parsing via [`clap`]. When enabled, [`Config::load()`]
-//!   parses command-line arguments to determine the config file path.
-
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::net::IpAddr;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::str::FromStr;
-
-#[cfg(feature = "cli")]
-use clap::Parser;
-#[cfg(feature = "cli")]
-use std::path::Path;
 
 use crate::scheme::SchemeConfig;
 
@@ -172,20 +161,6 @@ where
     }
 }
 
-/// CLI arguments for the x402 facilitator server.
-#[derive(Debug)]
-#[cfg_attr(feature = "cli", derive(Parser))]
-#[cfg_attr(feature = "cli", command(name = "r402"))]
-#[cfg_attr(feature = "cli", command(about = "x402 Facilitator HTTP server"))]
-pub struct CliArgs {
-    /// Path to the JSON configuration file
-    #[cfg_attr(
-        feature = "cli",
-        arg(long, short, env = "CONFIG", default_value = "config.json")
-    )]
-    pub config: PathBuf,
-}
-
 /// Server configuration.
 ///
 /// Fields use serde defaults that fall back to environment variables,
@@ -279,27 +254,7 @@ impl<TChainsConfig> Config<TChainsConfig>
 where
     TChainsConfig: Default + for<'de> Deserialize<'de>,
 {
-    /// Load configuration from CLI arguments and JSON file.
-    ///
-    /// The config file path is determined by:
-    /// 1. `--config <path>` CLI argument
-    /// 2. `./config.json` (if it exists)
-    ///
-    /// Values not present in the config file will be resolved via
-    /// environment variables or defaults during deserialization.
-    /// # Errors
-    ///
-    /// Returns [`ConfigError`] if the config file cannot be read or parsed.
-    #[cfg(feature = "cli")]
-    pub fn load() -> Result<Self, ConfigError> {
-        let cli_args = CliArgs::parse();
-        let config_path = Path::new(&cli_args.config)
-            .canonicalize()
-            .map_err(|e| ConfigError::FileRead(cli_args.config, e))?;
-        Self::load_from_path(config_path)
-    }
-
-    /// Load configuration from a specific path (or use defaults if None).
+    /// Load configuration from a specific file path.
     ///
     /// # Errors
     ///

@@ -17,7 +17,7 @@ use std::fmt::Display;
 /// # Example
 ///
 /// ```rust
-/// use r402::util::Base64Bytes;
+/// use r402::encoding::Base64Bytes;
 ///
 /// // Encode some data
 /// let encoded = Base64Bytes::encode(b"hello world");

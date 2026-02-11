@@ -15,7 +15,7 @@ use crate::chain::Address;
 use crate::chain::{SolanaChainProviderError, SolanaChainProviderLike};
 
 #[cfg(any(feature = "client", feature = "facilitator"))]
-use r402::util::Base64Bytes;
+use r402::encoding::Base64Bytes;
 #[cfg(feature = "facilitator")]
 use solana_commitment_config::CommitmentConfig;
 #[cfg(any(feature = "client", feature = "facilitator"))]

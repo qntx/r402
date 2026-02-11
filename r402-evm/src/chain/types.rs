@@ -5,7 +5,7 @@
 
 use alloy_primitives::{Address, U256, hex};
 use r402::chain::{ChainId, DeployedTokenAmount};
-use r402::util::money_amount::{MoneyAmount, MoneyAmountParseError};
+use r402::amount::{MoneyAmount, MoneyAmountParseError};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::ops::Mul;

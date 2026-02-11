@@ -13,7 +13,7 @@
 //! # Example
 //!
 //! ```rust
-//! use r402::util::money_amount::MoneyAmount;
+//! use r402::amount::MoneyAmount;
 //!
 //! let amount = MoneyAmount::parse("$10.50").unwrap();
 //! assert_eq!(amount.scale(), 2);  // 2 decimal places

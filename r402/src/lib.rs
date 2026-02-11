@@ -15,14 +15,16 @@
 //!
 //! # Modules
 //!
+//! - [`amount`] - Human-readable currency amount parsing
 //! - [`chain`] - Blockchain identifiers and provider abstractions (CAIP-2 chain IDs)
-//! - [`config`] - Server configuration, CLI parsing, RPC config, and environment variable resolution
+//! - [`config`] - Server configuration, RPC config, and environment variable resolution
+//! - [`encoding`] - Base64 encoding/decoding utilities
 //! - [`facilitator`] - Core trait for payment verification and settlement
+//! - [`lit_str`] - Compile-time string literal type generation macro
 //! - [`networks`] - Registry of well-known blockchain networks
 //! - [`proto`] - Wire format types for protocol messages (V1 and V2)
 //! - [`scheme`] - Payment scheme system for extensible payment methods
 //! - [`timestamp`] - Unix timestamp utilities for payment authorization windows
-//! - [`util`] - Helper types (base64, string literals, money amounts)
 //!
 //! # Protocol Versions
 //!
@@ -33,14 +35,28 @@
 //!
 //! # Feature Flags
 //!
-//! - `cli` - Enables CLI argument parsing via clap for configuration loading
 //! - `telemetry` - Enables tracing instrumentation for debugging and monitoring
 
+pub mod amount;
 pub mod chain;
 pub mod config;
+pub mod encoding;
 pub mod facilitator;
+pub mod lit_str;
 pub mod networks;
 pub mod proto;
 pub mod scheme;
 pub mod timestamp;
-pub mod util;
+
+/// Backward-compatible re-exports from the former `util` module.
+#[doc(hidden)]
+#[deprecated(note = "use `r402::encoding`, `r402::amount`, or `r402::lit_str` directly")]
+pub mod util {
+    pub use crate::amount::{MoneyAmount, MoneyAmountParseError};
+    pub use crate::encoding::*;
+
+    #[doc(hidden)]
+    pub mod money_amount {
+        pub use crate::amount::*;
+    }
+}

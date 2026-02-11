@@ -9,7 +9,7 @@ use r402::proto::{v1, v2};
 use r402::scheme::client::{
     FirstMatch, PaymentCandidate, PaymentSelector, X402Error, X402SchemeClient,
 };
-use r402::util::Base64Bytes;
+use r402::encoding::Base64Bytes;
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 use std::sync::Arc;
