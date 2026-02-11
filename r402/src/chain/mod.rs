@@ -114,7 +114,6 @@ impl<P> ChainRegistry<P> {
     /// Looks up a provider by exact chain ID.
     ///
     /// Returns `None` if no provider is configured for the given chain.
-    #[allow(dead_code)]
     #[must_use]
     pub fn by_chain_id(&self, chain_id: &ChainId) -> Option<&P> {
         self.0.get(chain_id)
@@ -164,7 +163,7 @@ impl<P> ChainRegistry<P> {
 /// - `TAmount` - The numeric type for the amount (e.g., `U256` for EVM, `u64` for Solana)
 /// - `TToken` - The token deployment type containing chain and address information
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
+
 pub struct DeployedTokenAmount<TAmount, TToken> {
     /// The token amount in the token's smallest unit (e.g., wei for ETH, lamports for SOL).
     pub amount: TAmount,

@@ -53,7 +53,6 @@ pub trait Facilitator {
     ) -> impl Future<Output = Result<proto::SettleResponse, Self::Error>> + Send;
 
     /// Returns the payment kinds supported by this facilitator.
-    #[allow(dead_code)] // For some reason clippy believes it is not used.
     fn supported(
         &self,
     ) -> impl Future<Output = Result<proto::SupportedResponse, Self::Error>> + Send;

@@ -315,7 +315,6 @@ impl ChainIdPattern {
     }
 
     /// Returns the namespace of this pattern.
-    #[allow(dead_code)]
     #[must_use]
     pub fn namespace(&self) -> &str {
         match self {

@@ -42,7 +42,6 @@ pub enum SolanaChainProviderError {
     PubsubTransport(#[from] PubsubClientError),
     /// A custom error message.
     #[error("{0}")]
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     Custom(String),
 }
 
@@ -169,14 +168,12 @@ impl SolanaChainProvider {
     }
 
     /// Returns a cloned reference to the RPC client.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
     pub fn rpc_client(&self) -> Arc<RpcClient> {
         Arc::clone(&self.rpc_client)
     }
 
     /// Returns a cloned reference to the optional pubsub client.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
     pub fn pubsub_client(&self) -> Option<Arc<PubsubClient>> {
         self.pubsub_client.clone()

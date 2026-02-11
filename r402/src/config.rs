@@ -86,13 +86,11 @@ impl<T> LiteralOrEnv<T> {
     }
 
     /// Get a reference to the inner value
-    #[allow(dead_code)]
     pub const fn inner(&self) -> &T {
         &self.0
     }
 
     /// Consume the wrapper and return the inner value
-    #[allow(dead_code)]
     pub fn into_inner(self) -> T {
         self.0
     }
@@ -179,7 +177,6 @@ where
 #[cfg_attr(feature = "cli", derive(Parser))]
 #[cfg_attr(feature = "cli", command(name = "x402-rs"))]
 #[cfg_attr(feature = "cli", command(about = "x402 Facilitator HTTP server"))]
-#[allow(dead_code)] // For downstream crates to use
 pub struct CliArgs {
     /// Path to the JSON configuration file
     #[cfg_attr(

@@ -17,7 +17,7 @@ impl V1SolanaExact {
     /// # Panics
     ///
     /// Panics if the chain ID has no known network name.
-    #[allow(dead_code, clippy::panic, clippy::needless_pass_by_value)]
+    #[allow(clippy::panic, clippy::needless_pass_by_value)]
     pub fn price_tag<A: Into<Address>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,
@@ -40,7 +40,6 @@ impl V1SolanaExact {
 }
 
 /// Enricher function for V1 Solana price tags - adds `fee_payer` to extra field
-#[allow(dead_code)]
 pub fn solana_fee_payer_enricher(
     price_tag: &mut v1::PriceTag,
     capabilities: &proto::SupportedResponse,
@@ -67,7 +66,7 @@ pub fn solana_fee_payer_enricher(
 
 impl V2SolanaExact {
     /// Creates a V2 price tag for a Solana SPL token payment.
-    #[allow(dead_code, clippy::needless_pass_by_value)]
+    #[allow(clippy::needless_pass_by_value)]
     pub fn price_tag<A: Into<Address>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,

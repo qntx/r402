@@ -58,10 +58,8 @@ where
     T::V2: std::fmt::Debug,
 {
     /// Protocol version 1 variant.
-    #[allow(dead_code)]
     V1(T::V1),
     /// Protocol version 2 variant.
-    #[allow(dead_code)]
     V2(T::V2),
 }
 
@@ -114,7 +112,6 @@ pub struct SupportedPaymentKind {
 #[serde_as]
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct SupportedResponse {
     /// List of supported payment kinds.
     #[serde_as(as = "VecSkipError<_>")]

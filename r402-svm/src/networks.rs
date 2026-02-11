@@ -32,7 +32,6 @@ use crate::chain::{SolanaChainReference, SolanaTokenDeployment};
 /// let devnet = ChainId::solana_devnet();
 /// assert_eq!(devnet.namespace, "solana");
 /// ```
-#[allow(dead_code)]
 pub trait KnownNetworkSolana<A> {
     /// Returns the instance for Solana mainnet (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp)
     fn solana() -> A;

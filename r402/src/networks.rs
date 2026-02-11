@@ -416,7 +416,7 @@ pub fn network_name_by_chain_id(chain_id: &ChainId) -> Option<&'static str> {
 /// assert_eq!(usdc_base.chain_reference.value(), 8453);
 /// ```
 #[derive(Debug, Clone, Copy)]
-#[allow(dead_code, clippy::upper_case_acronyms)] // Public for consumption by downstream crates.
+#[allow(clippy::upper_case_acronyms)]
 pub struct USDC;
 
 #[cfg(test)]

@@ -89,7 +89,6 @@ impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
 /// Shared EIP-712 signing parameters for ERC-3009 authorization.
 /// Used by both V1 and V2 EIP-155 exact scheme clients.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct Eip3009SigningParams {
     /// The EIP-155 chain ID (numeric)
     pub chain_id: u64,
@@ -114,7 +113,6 @@ pub struct Eip3009SigningParams {
 /// # Errors
 ///
 /// Returns [`X402Error`] if EIP-712 signing fails.
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     signer: &S,
     params: &Eip3009SigningParams,
@@ -188,12 +186,10 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
 /// let client = V1Eip155ExactClient::new(signer);
 /// ```
 #[derive(Debug)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct V1Eip155ExactClient<S> {
     signer: S,
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl<S> V1Eip155ExactClient<S> {
     /// Creates a new V1 EIP-155 exact scheme client with the given signer.
     pub const fn new(signer: S) -> Self {
@@ -248,7 +244,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 struct V1PayloadSigner<S> {
     signer: S,
     chain_reference: Eip155ChainReference,
@@ -302,12 +297,10 @@ where
 /// let client = V2Eip155ExactClient::new(signer);
 /// ```
 #[derive(Debug)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct V2Eip155ExactClient<S> {
     signer: S,
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl<S> V2Eip155ExactClient<S> {
     /// Creates a new V2 EIP-155 exact scheme client with the given signer.
     pub const fn new(signer: S) -> Self {
@@ -362,7 +355,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 struct V2PayloadSigner<S> {
     signer: S,
     resource_info: Option<ResourceInfo>,

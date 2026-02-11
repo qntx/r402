@@ -44,10 +44,8 @@ static MONEY_STRIP_RE: LazyLock<Regex> =
 /// and [`mantissa`](MoneyAmount::mantissa) returns the value as an integer.
 /// For example, `"10.50"` has scale 2 and mantissa 1050.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct MoneyAmount(pub Decimal);
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl MoneyAmount {
     /// Returns the number of decimal places in the original input.
     ///
@@ -69,7 +67,6 @@ impl MoneyAmount {
 
 /// Errors that can occur when parsing a monetary amount.
 #[derive(Debug, Clone, Copy, thiserror::Error)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub enum MoneyAmountParseError {
     /// The input string could not be parsed as a number.
     #[error("Invalid number format")]
@@ -107,7 +104,6 @@ mod constants {
         LazyLock::new(|| Decimal::from_str(MAX_STR).expect("valid decimal"));
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl MoneyAmount {
     /// Parses a human-readable currency string into a [`MoneyAmount`].
     ///

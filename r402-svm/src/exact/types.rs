@@ -143,7 +143,6 @@ impl TransactionInt {
     /// # Errors
     ///
     /// Returns [`TransactionSignError`] if the signer is not in the required signers list.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     pub fn sign_with_keypair<S: Signer>(self, signer: &S) -> Result<Self, TransactionSignError> {
         let mut tx = self.inner;
         let msg_bytes = tx.message.serialize();
@@ -190,7 +189,6 @@ impl TransactionInt {
     /// # Errors
     ///
     /// Returns [`TransactionToB64Error`] if serialization or encoding fails.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     pub fn as_base64(&self) -> Result<String, TransactionToB64Error> {
         let bytes =
             bincode::serialize(&self.inner).map_err(|e| TransactionToB64Error(format!("{e}")))?;

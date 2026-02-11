@@ -36,7 +36,6 @@ use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentE
 /// // let usdc_base = UsdcAddress::base();
 /// // let usdc_polygon = UsdcAddress::polygon();
 /// ```
-#[allow(dead_code)]
 pub trait KnownNetworkEip155<A> {
     /// Returns the instance for Base mainnet (eip155:8453)
     fn base() -> A;

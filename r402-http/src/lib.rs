@@ -7,8 +7,8 @@
 //!
 //! # Feature Flags
 //!
-//! - `server` — Axum/Tower middleware for payment gating (from x402-axum)
-//! - `client` — reqwest-middleware for automatic 402 handling (from x402-reqwest)
+//! - `server` — Axum/Tower middleware for payment gating
+//! - `client` — reqwest-middleware for automatic 402 handling
 //! - `telemetry` — Tracing instrumentation
 
 #[cfg(feature = "server")]

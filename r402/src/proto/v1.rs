@@ -224,7 +224,6 @@ impl VerifyResponse {
     ///
     /// Indicates that the payment was recognized but rejected due to reasons such as
     /// insufficient funds, invalid network, or scheme mismatch.
-    #[allow(dead_code)]
     #[must_use]
     pub const fn invalid(payer: Option<String>, reason: String) -> Self {
         Self::Invalid { reason, payer }
@@ -400,7 +399,6 @@ impl PaymentRequirements {
     /// # Errors
     ///
     /// Returns an error if any of the type conversions fail.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
     pub fn as_concrete<
         TScheme: FromStr,
@@ -473,7 +471,6 @@ pub struct PaymentRequired {
 /// };
 /// ```
 #[derive(Clone)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct PriceTag {
     /// The payment scheme (e.g., "exact").
     pub scheme: String,
@@ -520,7 +517,6 @@ impl PriceTag {
     ///
     /// This is called automatically when building payment requirements
     /// to add facilitator-specific data.
-    #[allow(dead_code)]
     pub fn enrich(&mut self, capabilities: &SupportedResponse) {
         if let Some(enricher) = self.enricher.clone() {
             enricher(self, capabilities);
@@ -528,7 +524,6 @@ impl PriceTag {
     }
 
     /// Sets the maximum timeout for this price tag.
-    #[allow(dead_code)]
     #[must_use]
     pub const fn with_timeout(mut self, seconds: u64) -> Self {
         self.max_timeout_seconds = seconds;

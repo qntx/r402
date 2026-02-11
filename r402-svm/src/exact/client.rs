@@ -349,7 +349,6 @@ impl<S, R> std::fmt::Debug for V1SolanaExactClient<S, R> {
     }
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl<S, R> V1SolanaExactClient<S, R> {
     /// Creates a new V1 Solana exact client.
     pub const fn new(signer: S, rpc_client: R) -> Self {
@@ -418,7 +417,6 @@ struct V1PayloadSigner<S, R> {
     requirements: types::v1::PaymentRequirements,
 }
 
-#[allow(dead_code)]
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1PayloadSigner<S, R> {
     fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
         Box::pin(async move {
@@ -459,7 +457,6 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1Pay
 
 /// V2 Solana exact scheme client for building and signing payment transactions.
 #[derive(Clone)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct V2SolanaExactClient<S, R> {
     signer: S,
     rpc_client: R,
@@ -472,7 +469,6 @@ impl<S, R> std::fmt::Debug for V2SolanaExactClient<S, R> {
     }
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl<S, R> V2SolanaExactClient<S, R> {
     /// Creates a new V2 Solana exact client.
     pub const fn new(signer: S, rpc_client: R) -> Self {
@@ -535,7 +531,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 struct V2PayloadSigner<S, R> {
     signer: S,
     rpc_client: R,
@@ -543,7 +538,6 @@ struct V2PayloadSigner<S, R> {
     resource: ResourceInfo,
 }
 
-#[allow(dead_code)]
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
     fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
         Box::pin(async move {

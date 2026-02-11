@@ -138,7 +138,6 @@ pub enum MetaTransactionSendError {
     #[error(transparent)]
     PendingTransaction(#[from] PendingTransactionError),
     /// Custom error message.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[error("{0}")]
     Custom(String),
 }

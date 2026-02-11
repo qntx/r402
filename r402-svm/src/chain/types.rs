@@ -40,14 +40,12 @@ impl SolanaChainReference {
     ///
     /// This function does not validate that the bytes are valid ASCII.
     /// Use [`FromStr`] for validated parsing.
-    #[allow(dead_code)]
     #[must_use]
     pub const fn new(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
 
     /// Returns the underlying bytes.
-    #[allow(dead_code)]
     #[must_use]
     pub const fn as_bytes(&self) -> &[u8; 32] {
         &self.0
@@ -181,7 +179,6 @@ pub enum SolanaChainReferenceFormatError {
 /// assert_eq!(amount.amount, 10_500_000); // 10.50 * 10^6
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct SolanaTokenDeployment {
     /// The Solana network where this token is deployed.
     pub chain_reference: SolanaChainReference,
@@ -193,7 +190,6 @@ pub struct SolanaTokenDeployment {
 
 impl SolanaTokenDeployment {
     /// Creates a new token deployment.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
     pub const fn new(
         chain_reference: SolanaChainReference,
@@ -208,7 +204,6 @@ impl SolanaTokenDeployment {
     }
 
     /// Creates a deployed token amount with the given raw value.
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     #[must_use]
     pub const fn amount(&self, v: u64) -> DeployedTokenAmount<u64, Self> {
         DeployedTokenAmount {
@@ -226,7 +221,6 @@ impl SolanaTokenDeployment {
     /// # Panics
     ///
     /// Panics if the mantissa does not fit in a `u64` (should not occur for valid inputs).
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     pub fn parse<V>(&self, v: V) -> Result<DeployedTokenAmount<u64, Self>, MoneyAmountParseError>
     where
         V: TryInto<MoneyAmount>,

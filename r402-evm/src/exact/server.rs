@@ -43,7 +43,7 @@ impl V1Eip155Exact {
     ///
     /// Panics if the chain ID cannot be converted to a network name. This should
     /// only happen for unsupported or custom chains without registered network names.
-    #[allow(dead_code, clippy::panic)] // Public for consumption by downstream crates.
+    #[allow(clippy::panic)]
     pub fn price_tag<A: Into<ChecksummedAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
@@ -97,7 +97,6 @@ impl V2Eip155Exact {
     ///     usdc.amount(1_000_000u64), // 1 USDC
     /// );
     /// ```
-    #[allow(dead_code)] // Public for consumption by downstream crates.
     pub fn price_tag<A: Into<ChecksummedAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,

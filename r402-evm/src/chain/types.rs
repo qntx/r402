@@ -275,7 +275,6 @@ impl Display for Eip155ChainReference {
 /// assert_eq!(amount.amount, U256::from(10_500_000u64));
 /// ```
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct Eip155TokenDeployment {
     /// The chain this token is deployed on.
     pub chain_reference: Eip155ChainReference,
@@ -287,7 +286,6 @@ pub struct Eip155TokenDeployment {
     pub eip712: Option<TokenDeploymentEip712>,
 }
 
-#[allow(dead_code)] // Public for consumption by downstream crates.
 impl Eip155TokenDeployment {
     /// Creates a token amount from a raw value.
     ///
@@ -351,7 +349,6 @@ impl Eip155TokenDeployment {
 /// These parameters are used when verifying EIP-712 typed data signatures
 /// for ERC-3009 `transferWithAuthorization` calls.
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
-#[allow(dead_code)] // Public for consumption by downstream crates.
 pub struct TokenDeploymentEip712 {
     /// The token name as specified in the EIP-712 domain.
     pub name: String,
