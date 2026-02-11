@@ -89,33 +89,6 @@ impl<'de> Deserialize<'de> for U64String {
     }
 }
 
-/// Trait for types that have both V1 and V2 protocol variants.
-///
-/// This trait enables generic handling of protocol-versioned types through
-/// the [`ProtocolVersioned`] enum.
-pub trait ProtocolV {
-    /// The V1 protocol variant of this type.
-    type V1;
-    /// The V2 protocol variant of this type.
-    type V2;
-}
-
-/// A versioned protocol type that can be either V1 or V2.
-///
-/// This enum wraps protocol-specific types to allow handling both versions
-/// in a unified way.
-#[derive(Debug)]
-pub enum ProtocolVersioned<T>
-where
-    T: ProtocolV,
-    T::V1: std::fmt::Debug,
-    T::V2: std::fmt::Debug,
-{
-    /// Protocol version 1 variant.
-    V1(T::V1),
-    /// Protocol version 2 variant.
-    V2(T::V2),
-}
 
 /// Describes a payment method supported by a facilitator.
 ///
@@ -227,14 +200,30 @@ impl VerifyRequest {
 /// Contains the verification result as JSON. The structure varies by
 /// protocol version and scheme.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VerifyResponse(pub serde_json::Value);
+pub struct VerifyResponse(serde_json::Value);
+
+impl VerifyResponse {
+    /// Consumes the response and returns the inner JSON value.
+    #[must_use]
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
+    }
+}
 
 /// Response from a payment settlement request.
 ///
 /// Contains the settlement result as JSON, typically including the
 /// transaction hash if settlement was successful.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SettleResponse(pub serde_json::Value);
+pub struct SettleResponse(serde_json::Value);
+
+impl SettleResponse {
+    /// Consumes the response and returns the inner JSON value.
+    #[must_use]
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
+    }
+}
 
 /// Errors that can occur during payment verification.
 ///
@@ -385,16 +374,13 @@ impl PaymentProblem {
     }
 }
 
-/// Protocol version marker for [`PaymentRequired`] responses.
-#[derive(Debug, Clone, Copy)]
-pub struct PaymentRequiredV;
-
-impl ProtocolV for PaymentRequiredV {
-    type V1 = v1::PaymentRequired;
-    type V2 = v2::PaymentRequired;
-}
-
 /// A payment required response that can be either V1 or V2.
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
-pub type PaymentRequired = ProtocolVersioned<PaymentRequiredV>;
+#[derive(Debug)]
+pub enum PaymentRequired {
+    /// Protocol version 1 variant.
+    V1(v1::PaymentRequired),
+    /// Protocol version 2 variant.
+    V2(v2::PaymentRequired),
+}
