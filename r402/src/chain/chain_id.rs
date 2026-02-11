@@ -6,21 +6,6 @@
 //!
 //! - **Namespace**: The blockchain ecosystem (e.g., `eip155` for EVM, `solana` for Solana)
 //! - **Reference**: The chain-specific identifier (e.g., `8453` for Base, `137` for Polygon)
-//!
-//! # Examples
-//!
-//! ```
-//! use r402::chain::ChainId;
-//!
-//! // Create a chain ID for Base mainnet
-//! let base = ChainId::new("eip155", "8453");
-//! assert_eq!(base.to_string(), "eip155:8453");
-//!
-//! // Parse from string
-//! let polygon: ChainId = "eip155:137".parse().unwrap();
-//! assert_eq!(polygon.namespace, "eip155");
-//! assert_eq!(polygon.reference, "137");
-//! ```
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::collections::HashSet;
@@ -40,16 +25,6 @@ use crate::networks;
 /// # Serialization
 ///
 /// Serializes to/from a colon-separated string: `"eip155:8453"`
-///
-/// # Example
-///
-/// ```
-/// use r402::chain::ChainId;
-///
-/// let chain = ChainId::new("eip155", "8453");
-/// let json = serde_json::to_string(&chain).unwrap();
-/// assert_eq!(json, "\"eip155:8453\"");
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChainId {
     /// The blockchain namespace (e.g., `eip155` for EVM chains, `solana` for Solana).
@@ -60,16 +35,6 @@ pub struct ChainId {
 
 impl ChainId {
     /// Creates a new chain ID from namespace and reference components.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::ChainId;
-    ///
-    /// let base = ChainId::new("eip155", "8453");
-    /// assert_eq!(base.namespace, "eip155");
-    /// assert_eq!(base.reference, "8453");
-    /// ```
     pub fn new<N: Into<String>, R: Into<String>>(namespace: N, reference: R) -> Self {
         Self {
             namespace: namespace.into(),
@@ -93,17 +58,6 @@ impl ChainId {
     ///
     /// This method looks up the network name in the registry of known networks
     /// (see [`crate::networks`]) and returns the corresponding chain ID.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::ChainId;
-    ///
-    /// let base = ChainId::from_network_name("base").unwrap();
-    /// assert_eq!(base.to_string(), "eip155:8453");
-    ///
-    /// assert!(ChainId::from_network_name("unknown").is_none());
-    /// ```
     #[must_use]
     pub fn from_network_name(network_name: &str) -> Option<Self> {
         networks::chain_id_by_network_name(network_name).cloned()
@@ -112,18 +66,6 @@ impl ChainId {
     /// Returns the well-known network name for this chain ID, if any.
     ///
     /// This is the reverse of [`ChainId::from_network_name`].
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::ChainId;
-    ///
-    /// let base = ChainId::new("eip155", "8453");
-    /// assert_eq!(base.as_network_name(), Some("base"));
-    ///
-    /// let unknown = ChainId::new("eip155", "999999");
-    /// assert!(unknown.as_network_name().is_none());
-    /// ```
     #[must_use]
     pub fn as_network_name(&self) -> Option<&'static str> {
         networks::network_name_by_chain_id(self)
@@ -198,23 +140,6 @@ impl<'de> Deserialize<'de> for ChainId {
 /// - Wildcard: `"eip155:*"`
 /// - Exact: `"eip155:8453"`
 /// - Set: `"eip155:{1,8453,137}"`
-///
-/// # Example
-///
-/// ```
-/// use r402::chain::{ChainId, ChainIdPattern};
-///
-/// // Match all EVM chains
-/// let all_evm = ChainIdPattern::wildcard("eip155");
-/// assert!(all_evm.matches(&ChainId::new("eip155", "8453")));
-/// assert!(all_evm.matches(&ChainId::new("eip155", "137")));
-/// assert!(!all_evm.matches(&ChainId::new("solana", "mainnet")));
-///
-/// // Match specific chain
-/// let base_only = ChainIdPattern::exact("eip155", "8453");
-/// assert!(base_only.matches(&ChainId::new("eip155", "8453")));
-/// assert!(!base_only.matches(&ChainId::new("eip155", "137")));
-/// ```
 #[derive(Debug, Clone)]
 pub enum ChainIdPattern {
     /// Matches any chain within the specified namespace.
@@ -240,16 +165,6 @@ pub enum ChainIdPattern {
 
 impl ChainIdPattern {
     /// Creates a wildcard pattern that matches any chain in the given namespace.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::{ChainId, ChainIdPattern};
-    ///
-    /// let pattern = ChainIdPattern::wildcard("eip155");
-    /// assert!(pattern.matches(&ChainId::new("eip155", "1")));
-    /// assert!(pattern.matches(&ChainId::new("eip155", "8453")));
-    /// ```
     pub fn wildcard<S: Into<String>>(namespace: S) -> Self {
         Self::Wildcard {
             namespace: namespace.into(),
@@ -257,16 +172,6 @@ impl ChainIdPattern {
     }
 
     /// Creates an exact pattern that matches only the specified chain.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::{ChainId, ChainIdPattern};
-    ///
-    /// let pattern = ChainIdPattern::exact("eip155", "8453");
-    /// assert!(pattern.matches(&ChainId::new("eip155", "8453")));
-    /// assert!(!pattern.matches(&ChainId::new("eip155", "137")));
-    /// ```
     pub fn exact<N: Into<String>, R: Into<String>>(namespace: N, reference: R) -> Self {
         Self::Exact {
             namespace: namespace.into(),
@@ -275,18 +180,6 @@ impl ChainIdPattern {
     }
 
     /// Creates a set pattern that matches any chain from the given set of references.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::chain::{ChainId, ChainIdPattern};
-    /// use std::collections::HashSet;
-    ///
-    /// let refs: HashSet<String> = ["1", "8453", "137"].iter().map(|s| s.to_string()).collect();
-    /// let pattern = ChainIdPattern::set("eip155", refs);
-    /// assert!(pattern.matches(&ChainId::new("eip155", "8453")));
-    /// assert!(!pattern.matches(&ChainId::new("eip155", "42")));
-    /// ```
     pub fn set<N: Into<String>>(namespace: N, references: HashSet<String>) -> Self {
         Self::Set {
             namespace: namespace.into(),

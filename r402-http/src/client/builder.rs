@@ -12,27 +12,6 @@ use crate::client::X402Client;
 ///
 /// This trait is implemented on [`Client`] and [`ClientBuilder`], allowing
 /// you to create a reqwest client with automatic x402 payment handling.
-///
-/// ## Example
-///
-/// ```rust,no_run
-/// use r402_http::client::{ReqwestWithPayments, ReqwestWithPaymentsBuild, X402Client};
-/// use r402_evm::V1Eip155ExactClient;
-/// use alloy_signer_local::PrivateKeySigner;
-/// use std::sync::Arc;
-/// use reqwest::Client;
-///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let signer = Arc::new("PRIVATE_KEY".parse::<PrivateKeySigner>().unwrap());
-/// let x402_client = X402Client::new()
-///     .register(V1Eip155ExactClient::new(signer));
-///
-/// let http_client = Client::new()
-///     .with_payments(x402_client)
-///     .build();
-/// # Ok(())
-/// # }
-/// ```
 pub trait ReqwestWithPayments<A, S> {
     /// Adds x402 payment middleware to the client or builder.
     ///

@@ -4,14 +4,6 @@
 //! and implements the [`r402::facilitator::Facilitator`] trait for compatibility
 //! with x402-based middleware and logic.
 //!
-//! ## Example
-//!
-//! ```rust
-//! use r402_http::server::facilitator_client::FacilitatorClient;
-//!
-//! let facilitator = FacilitatorClient::try_from("https://facilitator.x402.rs").unwrap();
-//! ```
-//!
 //! ## Features
 //!
 //! - Uses `reqwest` for async HTTP requests

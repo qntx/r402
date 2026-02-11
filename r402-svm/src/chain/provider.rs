@@ -75,20 +75,6 @@ impl From<SolanaChainProviderError> for PaymentVerificationError {
 /// - An RPC endpoint URL
 /// - Optionally, a `WebSocket` pubsub URL for faster confirmations
 /// - Compute unit limits and prices for transaction prioritization
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_svm::chain::{SolanaChainProvider, SolanaChainReference};
-/// use solana_keypair::Keypair;
-///
-/// let keypair = Keypair::new();
-/// let provider = SolanaChainProvider::new(
-///     keypair, "https://api.devnet.solana.com".into(),
-///     None, SolanaChainReference::devnet(), 400_000, 1_000_000,
-/// ).await?;
-/// println!("Fee payer: {}", provider.fee_payer());
-/// ```
 pub struct SolanaChainProvider {
     /// The Solana network this provider connects to.
     chain: SolanaChainReference,

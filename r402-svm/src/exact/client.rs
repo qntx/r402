@@ -10,28 +10,15 @@
 //! - Priority fee calculation from recent fees
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use r402_svm::exact::client::{V1SolanaExactClient, V2SolanaExactClient};
-//! use solana_client::nonblocking::rpc_client::RpcClient;
-//! use solana_keypair::Keypair;
-//!
-//! let keypair = Keypair::new();
-//! let rpc = RpcClient::new("https://api.mainnet-beta.solana.com".to_string());
-//! let v1_client = V1SolanaExactClient::new(keypair.insecure_clone(), rpc.clone());
-//! let v2_client = V2SolanaExactClient::new(keypair, rpc);
-//! ```
 
 use alloy_primitives::U256;
 use r402::chain::ChainId;
+use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
 use r402::proto::v2::{ResourceInfo, X402Version2};
 use r402::scheme::X402SchemeId;
 use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
-use r402::encoding::Base64Bytes;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;

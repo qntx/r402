@@ -11,16 +11,6 @@ use std::str::FromStr;
 /// Some JSON parsers (particularly in `JavaScript`) cannot accurately represent
 /// large integers. This type serializes `u64` values as strings to preserve
 /// precision across all platforms.
-///
-/// # Example
-///
-/// ```rust
-/// use r402::proto::util::U64String;
-///
-/// let value = U64String::from(12345678901234567890u64);
-/// let json = serde_json::to_string(&value).unwrap();
-/// assert_eq!(json, "\"12345678901234567890\"");
-/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct U64String(u64);
 

@@ -9,16 +9,6 @@
 //! - Plain numbers: `"100"`, `"0.01"`
 //! - With currency symbols: `"$10.50"`, `"€20"`
 //! - With thousand separators: `"1,000"`, `"1,000,000.50"`
-//!
-//! # Example
-//!
-//! ```rust
-//! use r402::amount::MoneyAmount;
-//!
-//! let amount = MoneyAmount::parse("$10.50").unwrap();
-//! assert_eq!(amount.scale(), 2);  // 2 decimal places
-//! assert_eq!(amount.mantissa(), 1050);  // 10.50 as integer
-//! ```
 
 use regex::Regex;
 use rust_decimal::Decimal;

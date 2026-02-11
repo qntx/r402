@@ -11,23 +11,6 @@
 //! - Verifying payments with the facilitator
 //! - Settling payments on-chain
 //! - Returning appropriate 402 responses when payment is required
-//!
-//! ## Example
-//!
-//! ```ignore
-//! use r402_http::server::paygate::{Paygate, PaygateProtocol};
-//!
-//! // Create a paygate for V1 or V2 protocol
-//! let paygate = Paygate {
-//!     facilitator,
-//!     settle_before_execution: false,
-//!     accepts: Arc::new(price_tags),
-//!     resource: ResourceInfoBuilder::default().as_resource_info(&base_url, &uri),
-//! };
-//!
-//! // Handle a request
-//! let response = paygate.handle_request(inner, request).await;
-//! ```
 
 use axum_core::body::Body;
 use axum_core::extract::Request;
@@ -644,20 +627,6 @@ fn settlement_to_header(settlement: proto::SettleResponse) -> Result<HeaderValue
 ///
 /// This trait abstracts over static and dynamic pricing strategies.
 /// Implementations must be infallible - they always return price tags.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_http::server::paygate::{PriceTagSource, StaticPriceTags, DynamicPriceTags};
-///
-/// // Static pricing - same price for every request
-/// let static_source = StaticPriceTags::new(vec![my_price_tag]);
-///
-/// // Dynamic pricing - compute price per-request
-/// let dynamic_source = DynamicPriceTags::new(|headers, uri, base_url| async move {
-///     vec![compute_price_tag(headers)]
-/// });
-/// ```
 pub trait PriceTagSource {
     /// The concrete price tag type produced by this source.
     type PriceTag: PaygateProtocol;
@@ -677,14 +646,6 @@ pub trait PriceTagSource {
 ///
 /// This is the default implementation used when calling `with_price_tag()`.
 /// It simply stores a vector of price tags and returns clones on each request.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_http::server::paygate::StaticPriceTags;
-///
-/// let source = StaticPriceTags::new(vec![V1Eip155Exact::price_tag(pay_to, amount)]);
-/// ```
 #[derive(Clone, Debug)]
 pub struct StaticPriceTags<TPriceTag> {
     tags: Arc<Vec<TPriceTag>>,
@@ -754,30 +715,6 @@ type BoxedDynamicPriceCallback<TPriceTag> = dyn for<'a> Fn(
 ///
 /// This implementation allows computing different prices based on request
 /// headers, URI, or other runtime factors.
-///
-/// # Example
-///
-/// ```ignore
-/// use alloy_primitives::address;
-/// use r402_http::server::paygate::DynamicPriceTags;
-/// use r402_evm::V1Eip155Exact;
-/// use r402::networks::USDC;
-///
-/// // Users write a simple async closure - no Box::pin needed!
-/// let source = DynamicPriceTags::new(|headers, uri, _base_url| async move {
-///     let is_premium = headers
-///         .get("X-User-Tier")
-///         .and_then(|v| v.to_str().ok())
-///         .map(|v| v == "premium")
-///         .unwrap_or(false);
-///
-///     let amount = if is_premium { "0.005" } else { "0.01" };
-///     vec![V1Eip155Exact::price_tag(
-///         address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
-///         USDC::base_sepolia().parse(amount).unwrap()
-///     )]
-/// });
-/// ```
 pub struct DynamicPriceTags<TPriceTag> {
     callback: Arc<BoxedDynamicPriceCallback<TPriceTag>>,
 }
@@ -802,21 +739,6 @@ impl<TPriceTag> DynamicPriceTags<TPriceTag> {
     /// Creates a new dynamic price source from an async closure.
     ///
     /// The closure receives request context and returns a vector of price tags.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use alloy_primitives::address;
-    /// use r402_evm::V1Eip155Exact;
-    /// use r402::networks::USDC;
-    ///
-    /// DynamicPriceTags::new(|_headers, _uri, _base_url| async move {
-    ///     vec![V1Eip155Exact::price_tag(
-    ///         address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
-    ///         USDC::base_sepolia().parse("0.01").unwrap()
-    ///     )]
-    /// })
-    /// ```
     pub fn new<F, Fut>(callback: F) -> Self
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,

@@ -33,7 +33,6 @@ use tokio::sync::Mutex;
 /// The nonce cache is shared across all clones using `Arc<DashMap>`, ensuring that concurrent
 /// requests see consistent nonce values. Each address's nonce is protected by its own `Mutex`
 /// to prevent race conditions during allocation.
-/// ```
 #[derive(Clone, Debug, Default)]
 pub struct PendingNonceManager {
     /// Cache of nonces per address. Each address has its own mutex-protected nonce value.

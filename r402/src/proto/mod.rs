@@ -67,16 +67,6 @@ where
 ///
 /// This type is returned in the [`SupportedResponse`] to indicate what
 /// payment schemes, networks, and protocol versions a facilitator can handle.
-///
-/// # Example
-///
-/// ```json
-/// {
-///   "x402Version": 2,
-///   "scheme": "exact",
-///   "network": "eip155:8453"
-/// }
-/// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportedPaymentKind {
@@ -95,20 +85,6 @@ pub struct SupportedPaymentKind {
 ///
 /// This response tells clients what payment methods the facilitator supports,
 /// including protocol versions, schemes, networks, and signer addresses.
-///
-/// # Example
-///
-/// ```json
-/// {
-///   "kinds": [
-///     { "x402Version": 2, "scheme": "exact", "network": "eip155:8453" }
-///   ],
-///   "extensions": [],
-///   "signers": {
-///     "eip155:8453": ["0x1234..."]
-///   }
-/// }
-/// ```
 #[serde_as]
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

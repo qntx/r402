@@ -13,20 +13,6 @@ use std::fmt::Display;
 /// This type holds bytes that represent base64-encoded data and provides
 /// methods for encoding and decoding. It uses copy-on-write semantics
 /// to avoid unnecessary allocations.
-///
-/// # Example
-///
-/// ```rust
-/// use r402::encoding::Base64Bytes;
-///
-/// // Encode some data
-/// let encoded = Base64Bytes::encode(b"hello world");
-/// assert_eq!(encoded.to_string(), "aGVsbG8gd29ybGQ=");
-///
-/// // Decode it back
-/// let decoded = encoded.decode().unwrap();
-/// assert_eq!(decoded, b"hello world");
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Base64Bytes<'a>(pub Cow<'a, [u8]>);
 

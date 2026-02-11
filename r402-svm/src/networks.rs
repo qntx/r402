@@ -16,22 +16,6 @@ use crate::chain::{SolanaChainReference, SolanaTokenDeployment};
 /// - **Token Deployments**: Get per-chain token addresses (e.g., USDC on different Solana networks)
 /// - **Network Configuration**: Get network-specific configuration objects for Solana chains
 /// - **Any Per-Network Data**: Any type that needs Solana network-specific instances
-///
-/// # Examples
-///
-/// ```ignore
-/// use r402::chain::ChainId;
-/// use r402_svm::KnownNetworkSolana;
-///
-/// // Get Solana mainnet chain ID
-/// let solana = ChainId::solana();
-/// assert_eq!(solana.namespace, "solana");
-/// assert_eq!(solana.reference, "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-///
-/// // Get Solana devnet chain ID
-/// let devnet = ChainId::solana_devnet();
-/// assert_eq!(devnet.namespace, "solana");
-/// ```
 pub trait KnownNetworkSolana<A> {
     /// Returns the instance for Solana mainnet (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp)
     fn solana() -> A;

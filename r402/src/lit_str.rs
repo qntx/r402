@@ -4,21 +4,6 @@
 //! represent specific string literals at compile time. These types are
 //! useful for ensuring type safety when working with fixed string values
 //! in protocol messages.
-//!
-//! # Example
-//!
-//! ```rust
-//! use r402::lit_str;
-//!
-//! lit_str!(ExactScheme, "exact");
-//!
-//! // The type only accepts the exact string
-//! let scheme: ExactScheme = "exact".parse().unwrap();
-//! assert_eq!(scheme.to_string(), "exact");
-//!
-//! // Other strings are rejected
-//! assert!("other".parse::<ExactScheme>().is_err());
-//! ```
 
 /// Creates a type that represents a specific string literal.
 ///

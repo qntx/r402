@@ -21,23 +21,6 @@
 //! The x402 protocol uses ERC-3009 `transferWithAuthorization` for payments. This allows
 //! users to sign payment authorizations off-chain, which the facilitator then submits
 //! on-chain. The facilitator pays the gas fees and is reimbursed through the payment.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use r402_evm::chain::{Eip155ChainReference, Eip155TokenDeployment};
-//! use r402_evm::KnownNetworkEip155;
-//! use r402::networks::USDC;
-//!
-//! // Get USDC deployment on Base
-//! let usdc = USDC::base();
-//! assert_eq!(usdc.decimals, 6);
-//!
-//! // Parse a human-readable amount
-//! let amount = usdc.parse("10.50").unwrap();
-//! // amount.amount is now 10_500_000 (10.50 * 10^6)
-//! ```
-
 pub mod types;
 
 /// Pending nonce management for EVM transactions.

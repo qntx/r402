@@ -4,12 +4,12 @@
 //! and payment selection for automatic payment handling.
 
 use http::{Extensions, HeaderMap, StatusCode};
+use r402::encoding::Base64Bytes;
 use r402::proto;
 use r402::proto::{v1, v2};
 use r402::scheme::client::{
     FirstMatch, PaymentCandidate, PaymentSelector, X402Error, X402SchemeClient,
 };
-use r402::encoding::Base64Bytes;
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 use std::sync::Arc;
@@ -22,34 +22,6 @@ use tracing::{debug, info, instrument, trace};
 /// The [`X402Client`] acts as middleware for reqwest, automatically handling
 /// 402 Payment Required responses by extracting payment requirements, signing
 /// payments, and retrying requests.
-///
-/// ## Creating an `X402Client`
-///
-/// ```rust
-/// use r402_http::client::X402Client;
-///
-/// let client = X402Client::new();
-/// ```
-///
-/// ## Registering Scheme Clients
-///
-/// To handle payments on different chains, register scheme clients:
-///
-/// ```rust
-/// use r402_http::client::X402Client;
-/// use r402_evm::V1Eip155ExactClient;
-/// use alloy_signer_local::PrivateKeySigner;
-/// use std::sync::Arc;
-///
-/// let private_key_hex = "0x0000000000000000000000000000000000000000000000000000000000000001";
-/// let signer = Arc::new(private_key_hex.parse::<PrivateKeySigner>().unwrap());
-/// let client = X402Client::new()
-///     .register(V1Eip155ExactClient::new(signer));
-/// ```
-///
-/// ## Using with Reqwest
-///
-/// See the [`ReqwestWithPayments`] trait for integrating with reqwest.
 #[allow(missing_debug_implementations)] // ClientSchemes contains dyn trait objects
 pub struct X402Client<TSelector> {
     schemes: ClientSchemes,
@@ -89,20 +61,6 @@ impl<TSelector> X402Client<TSelector> {
     /// # Returns
     ///
     /// A new [`X402Client`] with the additional scheme registered.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use r402_http::client::X402Client;
-    /// use r402_evm::V1Eip155ExactClient;
-    /// use alloy_signer_local::PrivateKeySigner;
-    /// use std::sync::Arc;
-    ///
-    /// let private_key_hex = "0x0000000000000000000000000000000000000000000000000000000000000001";
-    /// let signer = Arc::new(private_key_hex.parse::<PrivateKeySigner>().unwrap());
-    /// let client = X402Client::new()
-    ///     .register(V1Eip155ExactClient::new(signer));
-    /// ```
     #[must_use]
     pub fn register<S>(mut self, scheme: S) -> Self
     where
@@ -116,16 +74,6 @@ impl<TSelector> X402Client<TSelector> {
     ///
     /// By default, [`FirstMatch`] is used which selects the first matching scheme.
     /// You can implement custom selection logic by providing your own [`PaymentSelector`].
-    ///
-    /// # Examples
-    ///
-    /// ```rust,ignore
-    /// use r402_http::client::X402Client;
-    /// use r402::scheme::client::{FirstMatch, PaymentSelector};
-    ///
-    /// let client = X402Client::new()
-    ///     .with_selector(MyCustomSelector);
-    /// ```
     pub fn with_selector<P: PaymentSelector + 'static>(self, selector: P) -> X402Client<P> {
         X402Client {
             selector,

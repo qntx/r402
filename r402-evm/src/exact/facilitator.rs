@@ -42,9 +42,13 @@ use tracing_core::Level;
 macro_rules! traced {
     ($fut:expr, $span:expr) => {{
         #[cfg(feature = "telemetry")]
-        { $fut.instrument($span).await }
+        {
+            $fut.instrument($span).await
+        }
         #[cfg(not(feature = "telemetry"))]
-        { $fut.await }
+        {
+            $fut.await
+        }
     }};
 }
 
@@ -558,7 +562,10 @@ pub async fn assert_domain<P: Provider>(
     } else {
         let name_b = token_contract.name();
         let name_fut = name_b.call().into_future();
-        traced!(name_fut, tracing::info_span!("fetch_eip712_name", otel.kind = "client"))?
+        traced!(
+            name_fut,
+            tracing::info_span!("fetch_eip712_name", otel.kind = "client")
+        )?
     };
     let version = extra.as_ref().map(|extra| extra.version.clone());
     let version = if let Some(version) = version {
@@ -566,7 +573,10 @@ pub async fn assert_domain<P: Provider>(
     } else {
         let version_b = token_contract.version();
         let version_fut = version_b.call().into_future();
-        traced!(version_fut, tracing::info_span!("fetch_eip712_version", otel.kind = "client"))?
+        traced!(
+            version_fut,
+            tracing::info_span!("fetch_eip712_version", otel.kind = "client")
+        )?
     };
     let domain = eip712_domain! {
         name: name,
@@ -594,12 +604,15 @@ pub async fn assert_enough_balance<P: Provider>(
 ) -> Result<(), Eip155ExactError> {
     let balance_of = ieip3009_token_contract.balanceOf(*sender);
     let balance_fut = balance_of.call().into_future();
-    let balance = traced!(balance_fut, tracing::info_span!(
-        "fetch_token_balance",
-        token_contract = %ieip3009_token_contract.address(),
-        sender = %sender,
-        otel.kind = "client"
-    ))?;
+    let balance = traced!(
+        balance_fut,
+        tracing::info_span!(
+            "fetch_token_balance",
+            token_contract = %ieip3009_token_contract.address(),
+            sender = %sender,
+            otel.kind = "client"
+        )
+    )?;
 
     if balance < max_amount_required {
         Err(PaymentVerificationError::InsufficientFunds.into())
@@ -911,10 +924,13 @@ async fn is_contract_deployed<P: Provider>(
     address: &Address,
 ) -> Result<bool, TransportError> {
     let bytes_fut = provider.get_code_at(*address).into_future();
-    let bytes = traced!(bytes_fut, tracing::info_span!("get_code_at",
-        address = %address,
-        otel.kind = "client",
-    ))?;
+    let bytes = traced!(
+        bytes_fut,
+        tracing::info_span!("get_code_at",
+            address = %address,
+            otel.kind = "client",
+        )
+    )?;
     Ok(!bytes.is_empty())
 }
 
@@ -950,7 +966,8 @@ pub async fn verify_payment<P: Provider>(
                 .add(is_valid_signature_call)
                 .add(transfer_call.tx);
             let aggregate3_call = aggregate3.aggregate3();
-            let (is_valid_signature_result, transfer_result) = traced!(aggregate3_call,
+            let (is_valid_signature_result, transfer_result) = traced!(
+                aggregate3_call,
                 tracing::info_span!("call_transferWithAuthorization_0",
                     from = %transfer_call.from,
                     to = %transfer_call.to,
@@ -978,33 +995,39 @@ pub async fn verify_payment<P: Provider>(
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
-            traced!(transfer_call_fut, tracing::info_span!("call_transferWithAuthorization_0",
-                from = %transfer_call.from,
-                to = %transfer_call.to,
-                value = %transfer_call.value,
-                valid_after = %transfer_call.valid_after,
-                valid_before = %transfer_call.valid_before,
-                nonce = %transfer_call.nonce,
-                signature = %transfer_call.signature,
-                token_contract = %transfer_call.contract_address,
-                otel.kind = "client",
-            ))?;
+            traced!(
+                transfer_call_fut,
+                tracing::info_span!("call_transferWithAuthorization_0",
+                    from = %transfer_call.from,
+                    to = %transfer_call.to,
+                    value = %transfer_call.value,
+                    valid_after = %transfer_call.valid_after,
+                    valid_before = %transfer_call.valid_before,
+                    nonce = %transfer_call.nonce,
+                    signature = %transfer_call.signature,
+                    token_contract = %transfer_call.contract_address,
+                    otel.kind = "client",
+                )
+            )?;
         }
         StructuredSignature::EOA(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
-            traced!(transfer_call_fut, tracing::info_span!("call_transferWithAuthorization_1",
-                from = %transfer_call.from,
-                to = %transfer_call.to,
-                value = %transfer_call.value,
-                valid_after = %transfer_call.valid_after,
-                valid_before = %transfer_call.valid_before,
-                nonce = %transfer_call.nonce,
-                signature = %transfer_call.signature,
-                token_contract = %transfer_call.contract_address,
-                otel.kind = "client",
-            ))?;
+            traced!(
+                transfer_call_fut,
+                tracing::info_span!("call_transferWithAuthorization_1",
+                    from = %transfer_call.from,
+                    to = %transfer_call.to,
+                    value = %transfer_call.value,
+                    valid_after = %transfer_call.valid_after,
+                    valid_before = %transfer_call.valid_before,
+                    nonce = %transfer_call.nonce,
+                    signature = %transfer_call.signature,
+                    token_contract = %transfer_call.contract_address,
+                    otel.kind = "client",
+                )
+            )?;
         }
     }
 
@@ -1052,18 +1075,21 @@ where
                         confirmations: 1,
                     },
                 );
-                traced!(tx_fut, tracing::info_span!("call_transferWithAuthorization_0",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    sig_kind="EIP6492.deployed",
-                    otel.kind = "client",
-                ))?
+                traced!(
+                    tx_fut,
+                    tracing::info_span!("call_transferWithAuthorization_0",
+                        from = %transfer_call.from,
+                        to = %transfer_call.to,
+                        value = %transfer_call.value,
+                        valid_after = %transfer_call.valid_after,
+                        valid_before = %transfer_call.valid_before,
+                        nonce = %transfer_call.nonce,
+                        signature = %transfer_call.signature,
+                        token_contract = %transfer_call.contract_address,
+                        sig_kind="EIP6492.deployed",
+                        otel.kind = "client",
+                    )
+                )?
             } else {
                 let deployment_call = IMulticall3::Call3 {
                     allowFailure: true,
@@ -1086,18 +1112,21 @@ where
                         confirmations: 1,
                     },
                 );
-                traced!(tx_fut, tracing::info_span!("call_transferWithAuthorization_0",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    sig_kind="EIP6492.counterfactual",
-                    otel.kind = "client",
-                ))?
+                traced!(
+                    tx_fut,
+                    tracing::info_span!("call_transferWithAuthorization_0",
+                        from = %transfer_call.from,
+                        to = %transfer_call.to,
+                        value = %transfer_call.value,
+                        valid_after = %transfer_call.valid_after,
+                        valid_before = %transfer_call.valid_before,
+                        nonce = %transfer_call.nonce,
+                        signature = %transfer_call.signature,
+                        token_contract = %transfer_call.contract_address,
+                        sig_kind="EIP6492.counterfactual",
+                        otel.kind = "client",
+                    )
+                )?
             }
         }
         StructuredSignature::EIP1271(eip1271_signature) => {
@@ -1112,18 +1141,21 @@ where
                     confirmations: 1,
                 },
             );
-            traced!(tx_fut, tracing::info_span!("call_transferWithAuthorization_0",
-                from = %transfer_call.from,
-                to = %transfer_call.to,
-                value = %transfer_call.value,
-                valid_after = %transfer_call.valid_after,
-                valid_before = %transfer_call.valid_before,
-                nonce = %transfer_call.nonce,
-                signature = %transfer_call.signature,
-                token_contract = %transfer_call.contract_address,
-                sig_kind="EIP1271",
-                otel.kind = "client",
-            ))?
+            traced!(
+                tx_fut,
+                tracing::info_span!("call_transferWithAuthorization_0",
+                    from = %transfer_call.from,
+                    to = %transfer_call.to,
+                    value = %transfer_call.value,
+                    valid_after = %transfer_call.valid_after,
+                    valid_before = %transfer_call.valid_before,
+                    nonce = %transfer_call.nonce,
+                    signature = %transfer_call.signature,
+                    token_contract = %transfer_call.contract_address,
+                    sig_kind="EIP1271",
+                    otel.kind = "client",
+                )
+            )?
         }
         StructuredSignature::EOA(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
@@ -1136,18 +1168,21 @@ where
                     confirmations: 1,
                 },
             );
-            traced!(tx_fut, tracing::info_span!("call_transferWithAuthorization_1",
-                from = %transfer_call.from,
-                to = %transfer_call.to,
-                value = %transfer_call.value,
-                valid_after = %transfer_call.valid_after,
-                valid_before = %transfer_call.valid_before,
-                nonce = %transfer_call.nonce,
-                signature = %transfer_call.signature,
-                token_contract = %transfer_call.contract_address,
-                sig_kind="EOA",
-                otel.kind = "client",
-            ))?
+            traced!(
+                tx_fut,
+                tracing::info_span!("call_transferWithAuthorization_1",
+                    from = %transfer_call.from,
+                    to = %transfer_call.to,
+                    value = %transfer_call.value,
+                    valid_after = %transfer_call.valid_after,
+                    valid_before = %transfer_call.valid_before,
+                    nonce = %transfer_call.nonce,
+                    signature = %transfer_call.signature,
+                    token_contract = %transfer_call.contract_address,
+                    sig_kind="EOA",
+                    otel.kind = "client",
+                )
+            )?
         }
     };
     let success = receipt.status();

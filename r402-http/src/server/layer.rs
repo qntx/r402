@@ -5,34 +5,6 @@
 //!
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
 //!
-//! ## Example Usage
-//!
-//! ```rust
-//! use alloy_primitives::address;
-//! use axum::{Router, routing::get};
-//! use axum::response::IntoResponse;
-//! use http::StatusCode;
-//! use r402_http::server::X402Middleware;
-//! use r402_evm::{KnownNetworkEip155, V1Eip155Exact};
-//! use r402::networks::USDC;
-//!
-//! let x402 = X402Middleware::new("https://facilitator.x402.rs");
-//!
-//! let app: Router = Router::new().route(
-//!     "/protected",
-//!     get(my_handler).layer(
-//!         x402.with_price_tag(V1Eip155Exact::price_tag(
-//!             address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
-//!             USDC::base_sepolia().parse("0.01").unwrap(),
-//!         ))
-//!     ),
-//! );
-//!
-//! async fn my_handler() -> impl IntoResponse {
-//!     (StatusCode::OK, "This is VIP content!")
-//! }
-//! ```
-//!
 //! ## Settlement Timing
 //!
 //! By default, settlement occurs **after** the request is processed. You can change this behavior:
@@ -223,28 +195,6 @@ where
     ///
     /// The `callback` receives request headers, URI, and base URL, and returns
     /// a vector of price tags.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use alloy_primitives::address;
-    /// use r402_evm::V1Eip155Exact;
-    /// use r402::networks::USDC;
-    ///
-    /// x402.with_dynamic_price(|headers, uri, _base_url| async move {
-    ///     let is_premium = headers
-    ///         .get("X-User-Tier")
-    ///         .and_then(|v| v.to_str().ok())
-    ///         .map(|v| v == "premium")
-    ///         .unwrap_or(false);
-    ///
-    ///     let amount = if is_premium { "0.005" } else { "0.01" };
-    ///     vec![V1Eip155Exact::price_tag(
-    ///         address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
-    ///         USDC::base_sepolia().parse(amount).unwrap()
-    ///     )]
-    /// })
-    /// ```
     #[must_use]
     pub fn with_dynamic_price<F, Fut, TPriceTag>(
         &self,

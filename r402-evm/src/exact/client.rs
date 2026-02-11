@@ -3,29 +3,18 @@
 //! This module provides [`V1Eip155ExactClient`] and [`V2Eip155ExactClient`] for
 //! signing ERC-3009 `transferWithAuthorization` payments on EVM chains.
 //! Both share the core signing logic via [`sign_erc3009_authorization`].
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use r402_evm::exact::client::{V1Eip155ExactClient, V2Eip155ExactClient};
-//! use alloy_signer_local::PrivateKeySigner;
-//!
-//! let signer = PrivateKeySigner::random();
-//! let v1_client = V1Eip155ExactClient::new(signer.clone());
-//! let v2_client = V2Eip155ExactClient::new(signer);
-//! ```
 
 use alloy_primitives::{Address, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolStruct, eip712_domain};
 use r402::chain::ChainId;
+use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::X402SchemeId;
 use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::timestamp::UnixTimestamp;
-use r402::encoding::Base64Bytes;
 use rand::RngExt;
 use rand::rng;
 use std::future::Future;
@@ -43,18 +32,6 @@ use crate::exact::{
 ///
 /// This is necessary because Alloy's `Signer` trait is not implemented for `Arc<T>`,
 /// but users may want to share signers via `Arc` (especially when `PrivateKeySigner` doesn't implement `Clone`).
-///
-/// # Example
-///
-/// ```ignore
-/// use std::sync::Arc;
-/// use alloy_signer_local::PrivateKeySigner;
-/// use r402_evm::exact::client::SignerLike;
-///
-/// let signer: PrivateKeySigner = PrivateKeySigner::random();
-/// let signer = Arc::new(signer);
-/// // Now you can use `signer` anywhere `SignerLike` is expected
-/// ```
 pub trait SignerLike: Send + Sync {
     /// Returns the address of the signer.
     fn address(&self) -> Address;
@@ -175,16 +152,6 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
 /// This client handles the creation and signing of ERC-3009 `transferWithAuthorization`
 /// payments for EVM chains. It accepts payment requirements from servers and produces
 /// signed payment payloads that can be verified and settled by facilitators.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_evm::V1Eip155ExactClient;
-/// use alloy_signer_local::PrivateKeySigner;
-///
-/// let signer = PrivateKeySigner::random();
-/// let client = V1Eip155ExactClient::new(signer);
-/// ```
 #[derive(Debug)]
 pub struct V1Eip155ExactClient<S> {
     signer: S,
@@ -286,16 +253,6 @@ where
 /// This client handles the creation and signing of ERC-3009 `transferWithAuthorization`
 /// payments for EVM chains using the V2 protocol. Unlike V1, V2 uses CAIP-2 chain IDs
 /// and embeds the accepted requirements directly in the payment payload.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_evm::V2Eip155ExactClient;
-/// use alloy_signer_local::PrivateKeySigner;
-///
-/// let signer = PrivateKeySigner::random();
-/// let client = V2Eip155ExactClient::new(signer);
-/// ```
 #[derive(Debug)]
 pub struct V2Eip155ExactClient<S> {
     signer: S,

@@ -26,19 +26,6 @@ impl V1Eip155Exact {
     ///
     /// A [`v1::PriceTag`] that can be included in a `PaymentRequired` response.
     ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use r402_evm::{V1Eip155Exact, KnownNetworkEip155};
-    /// use r402::networks::USDC;
-    ///
-    /// let usdc = USDC::base();
-    /// let price_tag = V1Eip155Exact::price_tag(
-    ///     "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-    ///     usdc.amount(1_000_000u64), // 1 USDC
-    /// );
-    /// ```
-    ///
     /// # Panics
     ///
     /// Panics if the chain ID cannot be converted to a network name. This should
@@ -84,19 +71,6 @@ impl V2Eip155Exact {
     /// # Returns
     ///
     /// A [`v2::PriceTag`] that can be included in a `PaymentRequired` response.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use r402_evm::{V2Eip155Exact, KnownNetworkEip155};
-    /// use r402::networks::USDC;
-    ///
-    /// let usdc = USDC::base();
-    /// let price_tag = V2Eip155Exact::price_tag(
-    ///     "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-    ///     usdc.amount(1_000_000u64), // 1 USDC
-    /// );
-    /// ```
     pub fn price_tag<A: Into<ChecksummedAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,

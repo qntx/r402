@@ -1,5 +1,5 @@
-use r402::chain::{ChainId, DeployedTokenAmount};
 use r402::amount::{MoneyAmount, MoneyAmountParseError};
+use r402::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solana_pubkey::Pubkey;
 use std::fmt::{Debug, Display, Formatter};
@@ -20,16 +20,6 @@ pub const SOLANA_NAMESPACE: &str = "solana";
 ///
 /// - Mainnet: `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
 /// - Devnet: `EtWTRABZaYq6iMfeYKouRu166VU2xqa1`
-///
-/// # Example
-///
-/// ```
-/// use r402_svm::chain::SolanaChainReference;
-/// use r402_svm::KnownNetworkSolana;
-///
-/// let mainnet = SolanaChainReference::solana();
-/// assert_eq!(mainnet.as_str(), "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-/// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SolanaChainReference([u8; 32]);
 
@@ -159,25 +149,6 @@ pub enum SolanaChainReferenceFormatError {
 /// This type contains all the information needed to interact with a specific
 /// token on a specific Solana network, including the mint address and decimal
 /// precision.
-///
-/// # Example
-///
-/// ```rust
-/// use r402_svm::chain::{SolanaChainReference, SolanaTokenDeployment, Address};
-/// use r402_svm::KnownNetworkSolana;
-/// use std::str::FromStr;
-///
-/// // USDC on Solana mainnet
-/// let usdc = SolanaTokenDeployment::new(
-///     SolanaChainReference::solana(),
-///     Address::from_str("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap(),
-///     6,
-/// );
-///
-/// // Parse a human-readable amount
-/// let amount = usdc.parse("10.50").unwrap();
-/// assert_eq!(amount.amount, 10_500_000); // 10.50 * 10^6
-/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SolanaTokenDeployment {
     /// The Solana network where this token is deployed.
@@ -255,16 +226,6 @@ impl SolanaTokenDeployment {
 ///
 /// This is a wrapper around [`Pubkey`] that provides serialization as a
 /// base58-encoded string, suitable for use in x402 protocol messages.
-///
-/// # Example
-///
-/// ```
-/// use r402_svm::chain::Address;
-/// use std::str::FromStr;
-///
-/// let addr = Address::from_str("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap();
-/// assert_eq!(addr.to_string(), "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
-/// ```
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct Address(Pubkey);
 

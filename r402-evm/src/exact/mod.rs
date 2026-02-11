@@ -28,22 +28,6 @@
 //!
 //! - **EIP-6492 signatures**: Detected by the 32-byte magic suffix and validated via
 //!   the universal EIP-6492 validator contract before settlement.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use r402_evm::exact::V1Eip155Exact;
-//! use r402_evm::KnownNetworkEip155;
-//! use r402::networks::USDC;
-//!
-//! // Create a V1 price tag for 1 USDC on Base
-//! let usdc = USDC::base();
-//! let price = V1Eip155Exact::price_tag(
-//!     "0x1234...",  // pay_to address
-//!     usdc.amount(1_000_000u64.into()),  // 1 USDC
-//! );
-//! ```
-
 use r402::scheme::X402SchemeId;
 
 #[cfg(feature = "server")]

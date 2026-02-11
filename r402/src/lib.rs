@@ -45,16 +45,3 @@ pub mod networks;
 pub mod proto;
 pub mod scheme;
 pub mod timestamp;
-
-/// Backward-compatible re-exports from the former `util` module.
-#[doc(hidden)]
-#[deprecated(note = "use `r402::encoding`, `r402::amount`, or `r402::lit_str` directly")]
-pub mod util {
-    pub use crate::amount::{MoneyAmount, MoneyAmountParseError};
-    pub use crate::encoding::*;
-
-    #[doc(hidden)]
-    pub mod money_amount {
-        pub use crate::amount::*;
-    }
-}

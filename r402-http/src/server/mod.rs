@@ -7,34 +7,6 @@
 //!
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
 //!
-//! ## Example Usage
-//!
-//! ```rust
-//! use alloy_primitives::address;
-//! use axum::{Router, routing::get};
-//! use axum::response::IntoResponse;
-//! use http::StatusCode;
-//! use r402_http::server::X402Middleware;
-//! use r402_evm::{KnownNetworkEip155, V1Eip155Exact};
-//! use r402::networks::USDC;
-//!
-//! let x402 = X402Middleware::new("https://facilitator.x402.rs");
-//!
-//! let app: Router = Router::new().route(
-//!     "/protected",
-//!     get(my_handler).layer(
-//!         x402.with_price_tag(V1Eip155Exact::price_tag(
-//!             address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"),
-//!             USDC::base_sepolia().parse("0.01").unwrap(),
-//!         ))
-//!     ),
-//! );
-//!
-//! async fn my_handler() -> impl IntoResponse {
-//!     (StatusCode::OK, "This is VIP content!")
-//! }
-//! ```
-//!
 //! See [`X402Middleware`] for full configuration options.
 //! For low-level interaction with the facilitator, see [`facilitator_client::FacilitatorClient`].
 //!
@@ -42,47 +14,6 @@
 //!
 //! Supports both V1 and V2 x402 protocols through the [`PaygateProtocol`] trait.
 //! The protocol version is determined by the price tag type used.
-//!
-//! ## Dynamic Pricing
-//!
-//! For dynamic pricing based on request context, use [`X402Middleware::with_dynamic_price`]:
-//!
-//! ```rust
-//! use axum::Router;
-//! use axum::routing::get;
-//! use axum::response::IntoResponse;
-//! use axum::http::StatusCode;
-//! use alloy_primitives::address;
-//! use r402_http::server::X402Middleware;
-//! use r402_evm::KnownNetworkEip155;
-//! use r402_evm::V1Eip155Exact;
-//! use r402::networks::USDC;
-//!
-//! let x402 = X402Middleware::new("https://facilitator.x402.rs");
-//!
-//! let app: Router = Router::new().route(
-//!     "/protected",
-//!     get(my_handler).layer(
-//!         x402.with_dynamic_price(|headers, uri, base_url| {
-//!             // Compute price based on request context
-//!             let is_premium = headers
-//!                 .get("X-User-Tier")
-//!                 .and_then(|v| v.to_str().ok())
-//!                 .map(|v| v == "premium")
-//!                 .unwrap_or(false);
-//!
-//!             let amount = if is_premium { "0.005" } else { "0.01" };
-//!             async move {
-//!                 vec![V1Eip155Exact::price_tag(address!("0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045"), USDC::base_sepolia().parse(amount).unwrap())]
-//!             }
-//!         })
-//!     ),
-//! );
-//!
-//! async fn my_handler() -> impl IntoResponse {
-//!     (StatusCode::OK, "This is a VIP content!")
-//! }
-//! ```
 //!
 //! ## Settlement Timing
 //!

@@ -29,53 +29,6 @@
 //! - `facilitator` - Facilitator-side payment verification and settlement
 //! - `telemetry` - `OpenTelemetry` tracing support
 //!
-//! # Usage Examples
-//!
-//! ## Server: Creating a Price Tag
-//!
-//! ```ignore
-//! use r402_svm::{V1SolanaExact, KnownNetworkSolana};
-//! use r402::networks::USDC;
-//!
-//! // Get USDC deployment on Solana mainnet
-//! let usdc = USDC::solana();
-//!
-//! // Create a price tag for 1 USDC
-//! let price_tag = V1SolanaExact::price_tag(
-//!     "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-//!     usdc.amount(1_000_000u64),
-//! );
-//! ```
-//!
-//! ## Client: Signing a Payment
-//!
-//! ```ignore
-//! use r402_svm::V1SolanaExactClient;
-//! use solana_keypair::Keypair;
-//!
-//! let keypair = Keypair::new();
-//! let client = V1SolanaExactClient::new(keypair);
-//!
-//! // Use client to sign payment candidates
-//! let candidates = client.accept(&payment_required);
-//! ```
-//!
-//! ## Facilitator: Verifying and Settling
-//!
-//! ```ignore
-//! use r402_svm::{V1SolanaExact, SolanaChainProvider};
-//! use r402::scheme::X402SchemeFacilitatorBuilder;
-//!
-//! let provider = SolanaChainProvider::from_config(&config).await?;
-//! let facilitator = V1SolanaExact.build(provider, None)?;
-//!
-//! // Verify payment
-//! let verify_response = facilitator.verify(verify_request).await?;
-//!
-//! // Settle payment
-//! let settle_response = facilitator.settle(settle_request).await?;
-//! ```
-
 pub mod chain;
 pub mod exact;
 

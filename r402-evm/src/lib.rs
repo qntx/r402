@@ -29,53 +29,6 @@
 //! - `facilitator` - Facilitator-side payment verification and settlement
 //! - `telemetry` - `OpenTelemetry` tracing support
 //!
-//! # Usage Examples
-//!
-//! ## Server: Creating a Price Tag
-//!
-//! ```ignore
-//! use r402_evm::{V1Eip155Exact, KnownNetworkEip155};
-//! use r402::networks::USDC;
-//!
-//! // Get USDC deployment on Base
-//! let usdc = USDC::base();
-//!
-//! // Create a price tag for 1 USDC
-//! let price_tag = V1Eip155Exact::price_tag(
-//!     "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb",
-//!     usdc.amount(1_000_000u64),
-//! );
-//! ```
-//!
-//! ## Client: Signing a Payment
-//!
-//! ```ignore
-//! use r402_evm::V1Eip155ExactClient;
-//! use alloy_signer_local::PrivateKeySigner;
-//!
-//! let signer = PrivateKeySigner::random();
-//! let client = V1Eip155ExactClient::new(signer);
-//!
-//! // Use client to sign payment candidates
-//! let candidates = client.accept(&payment_required);
-//! ```
-//!
-//! ## Facilitator: Verifying and Settling
-//!
-//! ```ignore
-//! use r402_evm::{V1Eip155Exact, Eip155ChainProvider};
-//! use r402::scheme::X402SchemeFacilitatorBuilder;
-//!
-//! let provider = Eip155ChainProvider::from_config(&config).await?;
-//! let facilitator = V1Eip155Exact.build(provider, None)?;
-//!
-//! // Verify payment
-//! let verify_response = facilitator.verify(verify_request).await?;
-//!
-//! // Settle payment
-//! let settle_response = facilitator.settle(settle_request).await?;
-//! ```
-
 pub mod chain;
 pub mod exact;
 

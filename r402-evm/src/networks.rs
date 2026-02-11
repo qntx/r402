@@ -15,23 +15,6 @@ use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentE
 /// - **Token Deployments**: Get per-chain token addresses (e.g., USDC on different EVM chains)
 /// - **Network Configuration**: Get network-specific configuration objects for EVM chains
 /// - **Any Per-Network Data**: Any type that needs EVM network-specific instances
-///
-/// # Examples
-///
-/// ```ignore
-/// use r402::chain::ChainId;
-/// use r402_evm::KnownNetworkEip155;
-///
-/// // Get Base mainnet chain ID
-/// let base = ChainId::base();
-/// assert_eq!(base.namespace, "eip155");
-/// assert_eq!(base.reference, "8453");
-///
-/// // Get Polygon mainnet chain ID
-/// let polygon = ChainId::polygon();
-/// assert_eq!(polygon.namespace, "eip155");
-/// assert_eq!(polygon.reference, "137");
-/// ```
 pub trait KnownNetworkEip155<A> {
     /// Returns the instance for Base mainnet (eip155:8453)
     fn base() -> A;

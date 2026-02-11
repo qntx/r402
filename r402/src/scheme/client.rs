@@ -138,19 +138,6 @@ impl PaymentSelector for FirstMatch {
 ///
 /// Patterns are tried in order; the first matching candidate is returned.
 /// If no patterns match, falls back to the first available candidate.
-///
-/// # Example
-///
-/// ```rust
-/// use r402::scheme::client::PreferChain;
-/// use r402::chain::ChainIdPattern;
-///
-/// // Prefer Base, then any EVM chain, then anything else
-/// let selector = PreferChain::new(vec![
-///     "eip155:8453".parse().unwrap(),  // Base mainnet
-///     "eip155:*".parse().unwrap(),     // Any EVM chain
-/// ]);
-/// ```
 #[derive(Debug)]
 pub struct PreferChain(Vec<ChainIdPattern>);
 

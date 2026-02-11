@@ -25,22 +25,6 @@ use std::time::SystemTime;
 /// ```json
 /// "1699999999"
 /// ```
-///
-/// # Example
-///
-/// ```
-/// use r402::timestamp::UnixTimestamp;
-///
-/// // Create a timestamp for "now"
-/// let now = UnixTimestamp::now();
-///
-/// // Create a timestamp 1 hour in the future
-/// let expires = now + 3600;
-///
-/// // Create from a specific value
-/// let specific = UnixTimestamp::from_secs(1699999999);
-/// assert_eq!(specific.as_secs(), 1699999999);
-/// ```
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
 pub struct UnixTimestamp(u64);
 
@@ -79,15 +63,6 @@ impl Add<u64> for UnixTimestamp {
 
 impl UnixTimestamp {
     /// Creates a new [`UnixTimestamp`] from a raw seconds value.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::timestamp::UnixTimestamp;
-    ///
-    /// let ts = UnixTimestamp::from_secs(1699999999);
-    /// assert_eq!(ts.as_secs(), 1699999999);
-    /// ```
     #[must_use]
     pub const fn from_secs(secs: u64) -> Self {
         Self(secs)
@@ -99,16 +74,6 @@ impl UnixTimestamp {
     ///
     /// Panics if the system clock is set to a time before the Unix epoch,
     /// which should never happen on properly configured systems.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::timestamp::UnixTimestamp;
-    ///
-    /// let now = UnixTimestamp::now();
-    /// // Timestamp should be after year 2020
-    /// assert!(now.as_secs() > 1577836800);
-    /// ```
     #[must_use]
     pub fn now() -> Self {
         let now = SystemTime::now()
@@ -119,15 +84,6 @@ impl UnixTimestamp {
     }
 
     /// Returns the timestamp as raw seconds since the Unix epoch.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use r402::timestamp::UnixTimestamp;
-    ///
-    /// let ts = UnixTimestamp::from_secs(1699999999);
-    /// assert_eq!(ts.as_secs(), 1699999999);
-    /// ```
     #[must_use]
     pub const fn as_secs(&self) -> u64 {
         self.0

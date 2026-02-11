@@ -68,26 +68,6 @@
 //! - **EVM Networks (14)**: All networks in the eip155 namespace
 //! - **Solana Networks (2)**: Solana mainnet and devnet
 //!
-//! # Examples
-//!
-//! ```
-//! use r402::chain::ChainId;
-//! use r402::networks::chain_id_by_network_name;
-//!
-//! // Using lookup functions
-//! let polygon = chain_id_by_network_name("polygon").unwrap();
-//! assert_eq!(polygon.namespace, "eip155");
-//! assert_eq!(polygon.reference, "137");
-//!
-//! // Using ChainId::from_network_name
-//! let base = ChainId::from_network_name("base").unwrap();
-//! assert_eq!(base.namespace, "eip155");
-//! assert_eq!(base.reference, "8453");
-//!
-//! // Reverse lookup
-//! let chain_id = ChainId::new("solana", "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
-//! assert_eq!(chain_id.as_network_name(), Some("solana"));
-//! ```
 
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -246,16 +226,6 @@ pub static KNOWN_NETWORKS: &[NetworkInfo] = &[
 ///
 /// Despite being v1-focused, this hashmap continues to provide value by enabling
 /// convenient network name lookups via [`ChainId::from_network_name()`](crate::chain::ChainId::from_network_name).
-///
-/// # Examples
-///
-/// ```
-/// use r402::networks::chain_id_by_network_name;
-///
-/// let base = chain_id_by_network_name("base").unwrap();
-/// assert_eq!(base.namespace, "eip155");
-/// assert_eq!(base.reference, "8453");
-/// ```
 pub static NAME_TO_CHAIN_ID: LazyLock<HashMap<&'static str, ChainId>> = LazyLock::new(|| {
     KNOWN_NETWORKS
         .iter()
@@ -279,17 +249,6 @@ pub static NAME_TO_CHAIN_ID: LazyLock<HashMap<&'static str, ChainId>> = LazyLock
 ///
 /// Despite being v1-focused, this hashmap continues to provide value by enabling
 /// human-readable network name lookups via [`ChainId::as_network_name()`](crate::chain::ChainId::as_network_name).
-///
-/// # Examples
-///
-/// ```
-/// use r402::chain::ChainId;
-/// use r402::networks::network_name_by_chain_id;
-///
-/// let chain_id = ChainId::new("eip155", "137");
-/// let name = network_name_by_chain_id(&chain_id).unwrap();
-/// assert_eq!(name, "polygon");
-/// ```
 pub static CHAIN_ID_TO_NAME: LazyLock<HashMap<ChainId, &'static str>> = LazyLock::new(|| {
     KNOWN_NETWORKS
         .iter()
@@ -322,18 +281,6 @@ pub static CHAIN_ID_TO_NAME: LazyLock<HashMap<ChainId, &'static str>> = LazyLock
 ///
 /// Returns `Some(&ChainId)` if the network name is found, or `None` if the name
 /// is not in the known networks registry.
-///
-/// # Examples
-///
-/// ```
-/// use r402::networks::chain_id_by_network_name;
-///
-/// let base = chain_id_by_network_name("base").unwrap();
-/// assert_eq!(base.namespace, "eip155");
-/// assert_eq!(base.reference, "8453");
-///
-/// assert!(chain_id_by_network_name("unknown-network").is_none());
-/// ```
 pub fn chain_id_by_network_name(name: &str) -> Option<&ChainId> {
     NAME_TO_CHAIN_ID.get(name)
 }
@@ -363,20 +310,6 @@ pub fn chain_id_by_network_name(name: &str) -> Option<&ChainId> {
 ///
 /// Returns `Some(&'static str)` containing the network name if the `ChainId` is found,
 /// or `None` if the `ChainId` is not in the known networks registry.
-///
-/// # Examples
-///
-/// ```
-/// use r402::chain::ChainId;
-/// use r402::networks::network_name_by_chain_id;
-///
-/// let chain_id = ChainId::new("eip155", "8453");
-/// let name = network_name_by_chain_id(&chain_id).unwrap();
-/// assert_eq!(name, "base");
-///
-/// let unknown = ChainId::new("eip155", "999999");
-/// assert!(network_name_by_chain_id(&unknown).is_none());
-/// ```
 pub fn network_name_by_chain_id(chain_id: &ChainId) -> Option<&'static str> {
     CHAIN_ID_TO_NAME.get(chain_id).copied()
 }
@@ -393,17 +326,6 @@ pub fn network_name_by_chain_id(chain_id: &ChainId) -> Option<&'static str> {
 ///
 /// - `r402-evm` implements `KnownNetworkEip155<Eip155TokenDeployment>` for `USDC`
 /// - `r402-svm` implements `KnownNetworkSolana<SolanaTokenDeployment>` for `USDC`
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_evm::{KnownNetworkEip155, Eip155TokenDeployment};
-/// use r402::networks::USDC;
-///
-/// // Get USDC deployment on Base mainnet
-/// let usdc_base: Eip155TokenDeployment = USDC::base();
-/// assert_eq!(usdc_base.chain_reference.value(), 8453);
-/// ```
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct USDC;

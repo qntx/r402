@@ -252,28 +252,6 @@ pub struct PaymentRequired {
 ///
 /// A `PriceTag` wraps [`PaymentRequirements`] and provides enrichment
 /// capabilities for adding facilitator-specific data.
-///
-/// # Example
-///
-/// ```rust
-/// use r402::proto::v2::{PriceTag, PaymentRequirements};
-/// use r402::chain::ChainId;
-///
-/// let requirements = PaymentRequirements {
-///     scheme: "exact".to_string(),
-///     network: "eip155:8453".parse().unwrap(),
-///     amount: "1000000".to_string(),
-///     pay_to: "0x1234...".to_string(),
-///     asset: "0xUSDC...".to_string(),
-///     max_timeout_seconds: 300,
-///     extra: None,
-/// };
-///
-/// let price = PriceTag {
-///     requirements,
-///     enricher: None,
-/// };
-/// ```
 #[derive(Clone)]
 pub struct PriceTag {
     /// The payment requirements.

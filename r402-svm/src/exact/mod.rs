@@ -20,21 +20,6 @@
 //! - Index 1: `SetComputeUnitPrice` instruction
 //! - Index 2: `TransferChecked` instruction (SPL Token or Token-2022)
 //! - Index 3+: Additional instructions (if allowed by configuration)
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use r402_svm::exact::V1SolanaExact;
-//! use r402_svm::KnownNetworkSolana;
-//! use r402::networks::USDC;
-//!
-//! let usdc = USDC::solana();
-//! let price = V1SolanaExact::price_tag(
-//!     "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
-//!     usdc.amount(1_000_000u64),
-//! );
-//! ```
-
 use r402::scheme::X402SchemeId;
 
 #[cfg(feature = "server")]

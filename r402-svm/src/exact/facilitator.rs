@@ -5,12 +5,12 @@
 //! protocol versions through shared core logic.
 
 use r402::chain::{ChainId, ChainProviderOps};
+use r402::encoding::Base64Bytes;
 use r402::proto;
 use r402::proto::{PaymentVerificationError, v1, v2};
 use r402::scheme::{
     X402SchemeFacilitator, X402SchemeFacilitatorBuilder, X402SchemeFacilitatorError,
 };
-use r402::encoding::Base64Bytes;
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_response::{TransactionError, UiTransactionError};

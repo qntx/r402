@@ -452,23 +452,6 @@ pub struct PaymentRequired {
 ///
 /// A `PriceTag` is a convenient way to specify payment terms that can
 /// be converted into [`PaymentRequirements`] for inclusion in a 402 response.
-///
-/// # Example
-///
-/// ```rust
-/// use r402::proto::v1::PriceTag;
-///
-/// let price = PriceTag {
-///     scheme: "exact".to_string(),
-///     pay_to: "0x1234...".to_string(),
-///     asset: "0xUSDC...".to_string(),
-///     network: "base".to_string(),
-///     amount: "1000000".to_string(), // 1 USDC
-///     max_timeout_seconds: 300,
-///     extra: None,
-///     enricher: None,
-/// };
-/// ```
 #[derive(Clone)]
 pub struct PriceTag {
     /// The payment scheme (e.g., "exact").

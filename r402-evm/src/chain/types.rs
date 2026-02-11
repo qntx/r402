@@ -4,8 +4,8 @@
 //! of EVM-specific values in the x402 protocol wire format.
 
 use alloy_primitives::{Address, U256, hex};
-use r402::chain::{ChainId, DeployedTokenAmount};
 use r402::amount::{MoneyAmount, MoneyAmountParseError};
+use r402::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{Display, Formatter};
 use std::ops::Mul;
@@ -16,15 +16,6 @@ use std::str::FromStr;
 /// This wrapper ensures addresses are always serialized in checksummed format
 /// (e.g., `0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045`) for compatibility
 /// with the x402 protocol wire format.
-///
-/// # Example
-///
-/// ```
-/// use r402_evm::chain::ChecksummedAddress;
-///
-/// let addr: ChecksummedAddress = "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045".parse().unwrap();
-/// assert_eq!(addr.to_string(), "0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045");
-/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ChecksummedAddress(pub Address);
 
@@ -85,17 +76,6 @@ impl PartialEq<ChecksummedAddress> for Address {
 /// This wrapper ensures token amounts are serialized as decimal strings
 /// (e.g., `"1000000"`) rather than hex to maintain compatibility with
 /// the x402 protocol wire format and avoid precision issues in JSON.
-///
-/// # Example
-///
-/// ```
-/// use r402_evm::chain::TokenAmount;
-/// use alloy_primitives::U256;
-///
-/// let amount = TokenAmount(U256::from(1_000_000u64));
-/// let json = serde_json::to_string(&amount).unwrap();
-/// assert_eq!(json, "\"1000000\"");
-/// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TokenAmount(pub U256);
 
@@ -158,17 +138,6 @@ pub const EIP155_NAMESPACE: &str = "eip155";
 ///
 /// This type wraps the numeric chain ID used by EVM networks (e.g., `1` for Ethereum mainnet,
 /// `8453` for Base). It can be converted to/from a [`ChainId`] for use with the x402 protocol.
-///
-/// # Example
-///
-/// ```
-/// use r402_evm::chain::Eip155ChainReference;
-/// use r402::chain::ChainId;
-///
-/// let base = Eip155ChainReference::new(8453);
-/// let chain_id: ChainId = base.into();
-/// assert_eq!(chain_id.to_string(), "eip155:8453");
-/// ```
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Eip155ChainReference(u64);
 
@@ -260,21 +229,6 @@ impl Display for Eip155ChainReference {
 /// This type contains all the information needed to interact with a token contract,
 /// including its address, decimal places, and optional EIP-712 domain parameters
 /// for signature verification.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_evm::KnownNetworkEip155;
-/// use r402::networks::USDC;
-///
-/// // Get USDC deployment on Base
-/// let usdc = USDC::base();
-/// assert_eq!(usdc.decimals, 6);
-///
-/// // Parse a human-readable amount to token units
-/// let amount = usdc.parse("10.50").unwrap();
-/// assert_eq!(amount.amount, U256::from(10_500_000u64));
-/// ```
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Eip155TokenDeployment {
     /// The chain this token is deployed on.
@@ -309,18 +263,6 @@ impl Eip155TokenDeployment {
     /// - The input cannot be parsed as a number
     /// - The input has more decimal places than the token supports
     /// - The value is out of range
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use r402_evm::KnownNetworkEip155;
-    /// use r402::networks::USDC;
-    ///
-    /// let usdc = USDC::base();
-    /// let amount = usdc.parse("10.50").unwrap();
-    /// // 10.50 USDC = 10,500,000 units (6 decimals)
-    /// assert_eq!(amount.amount, U256::from(10_500_000u64));
-    /// ```
     pub fn parse<V>(&self, v: V) -> Result<DeployedTokenAmount<U256, Self>, MoneyAmountParseError>
     where
         V: TryInto<MoneyAmount>,

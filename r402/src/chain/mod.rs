@@ -50,18 +50,6 @@ impl<T: ChainProviderOps> ChainProviderOps for Arc<T> {
 /// # Type Parameters
 ///
 /// - `P` - The chain provider type (e.g., `Eip155ChainProvider` or `SolanaChainProvider`)
-///
-/// # Example
-///
-/// ```ignore
-/// use r402::chain::{ChainRegistry, ChainIdPattern, ChainId};
-///
-/// // Find provider for a specific chain
-/// let base_provider = registry.by_chain_id(&ChainId::new("eip155", "8453"));
-///
-/// // Find providers matching a pattern
-/// let any_evm = registry.by_chain_id_pattern(&ChainIdPattern::wildcard("eip155"));
-/// ```
 #[derive(Debug)]
 pub struct ChainRegistry<P>(HashMap<ChainId, P>);
 
@@ -93,20 +81,6 @@ impl<P> ChainRegistry<P> {
     /// - Wildcard: Matches any chain within a namespace (e.g., `eip155:*`)
     /// - Exact: Matches a specific chain (e.g., `eip155:8453`)
     /// - Set: Matches any chain from a set of references (e.g., `eip155:{1,8453,137}`)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// use r402::chain::{ChainRegistry, ChainIdPattern};
-    ///
-    /// // Find all EVM chain providers
-    /// let evm_providers = registry.by_chain_id_pattern(&ChainIdPattern::wildcard("eip155"));
-    /// assert!(!evm_providers.is_empty());
-    ///
-    /// // Find providers for specific chains
-    /// let mainnet_chains = ChainIdPattern::set("eip155", ["1", "8453", "137"].into_iter().map(String::from).collect());
-    /// let mainnet_providers = registry.by_chain_id_pattern(&mainnet_chains);
-    /// ```
     #[must_use]
     pub fn by_chain_id_pattern(&self, pattern: &ChainIdPattern) -> Vec<&P> {
         self.0

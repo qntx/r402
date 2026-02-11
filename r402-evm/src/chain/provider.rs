@@ -377,4 +377,3 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         }
     }
 }
-
