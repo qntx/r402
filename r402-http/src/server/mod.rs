@@ -8,7 +8,7 @@
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
 //!
 //! See [`X402Middleware`] for full configuration options.
-//! For low-level interaction with the facilitator, see [`facilitator_client::FacilitatorClient`].
+//! For low-level interaction with the facilitator, see [`facilitator::FacilitatorClient`].
 //!
 //! ## Settlement Timing
 //!
@@ -31,11 +31,11 @@
 //! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
 
 pub mod error;
-pub mod facilitator_client;
+pub mod facilitator;
 pub mod layer;
 pub mod paygate;
-pub mod price_source;
+pub mod pricing;
 
 pub use error::{PaygateError, VerificationError};
 pub use layer::{X402LayerBuilder, X402Middleware};
-pub use price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};

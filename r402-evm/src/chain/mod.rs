@@ -14,7 +14,7 @@
 //! # Submodules
 //!
 //! - [`types`] - Wire format types like [`ChecksummedAddress`](types::ChecksummedAddress) and [`TokenAmount`](types::TokenAmount)
-//! - [`pending_nonce_manager`] - Nonce management for concurrent transaction submission
+//! - [`nonce`] - Nonce management for concurrent transaction submission
 //!
 //! # ERC-3009 Support
 //!
@@ -25,13 +25,13 @@ pub mod types;
 
 /// Pending nonce management for EVM transactions.
 #[cfg(feature = "facilitator")]
-pub mod pending_nonce_manager;
+pub mod nonce;
 /// EVM chain provider implementation.
 #[cfg(feature = "facilitator")]
 pub mod provider;
 
 #[cfg(feature = "facilitator")]
-pub use pending_nonce_manager::*;
+pub use nonce::*;
 #[cfg(feature = "facilitator")]
 pub use provider::*;
 pub use types::*;

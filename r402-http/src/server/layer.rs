@@ -40,9 +40,9 @@ use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
-use super::facilitator_client::FacilitatorClient;
+use super::facilitator::FacilitatorClient;
 use super::paygate::{Paygate, ResourceInfoBuilder};
-use super::price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
 ///

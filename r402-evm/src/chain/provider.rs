@@ -21,7 +21,7 @@ use tower::ServiceBuilder;
 use tracing::Instrument;
 use url::Url;
 
-use crate::chain::pending_nonce_manager::PendingNonceManager;
+use crate::chain::nonce::PendingNonceManager;
 use crate::chain::types::Eip155ChainReference;
 
 /// Combined filler type for gas, blob gas, nonce, and chain ID.
