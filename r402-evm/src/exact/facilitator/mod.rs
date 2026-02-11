@@ -207,15 +207,14 @@ where
                     })
                 }
                 ExactPayload::Permit2(permit2) => {
-                    let (_erc20, payment, _eip712_domain) =
-                        verify::assert_valid_permit2_payment(
-                            self.provider.inner(),
-                            self.provider.chain(),
-                            permit2,
-                            payload,
-                            requirements,
-                        )
-                        .await?;
+                    let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
+                        self.provider.inner(),
+                        self.provider.chain(),
+                        permit2,
+                        payload,
+                        requirements,
+                    )
+                    .await?;
                     let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
                     Ok(v2::SettleResponse::Success {
                         payer: payment.from.to_string(),

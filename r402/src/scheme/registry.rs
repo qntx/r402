@@ -54,10 +54,7 @@ impl SchemeSlug {
     /// Creates a new scheme handler slug.
     #[must_use]
     pub const fn new(chain_id: ChainId, name: String) -> Self {
-        Self {
-            chain_id,
-            name,
-        }
+        Self { chain_id, name }
     }
 
     /// Returns a wildcard version of this slug that matches any chain
@@ -124,10 +121,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chain_id = provider.chain_id();
         let handler = blueprint.build(provider, config)?;
-        let slug = SchemeSlug::new(
-            chain_id,
-            blueprint.scheme().to_string(),
-        );
+        let slug = SchemeSlug::new(chain_id, blueprint.scheme().to_string());
         self.0.insert(slug, handler);
         Ok(())
     }
@@ -167,10 +161,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let handler = blueprint.build(provider, config)?;
         let namespace = provider.chain_id().namespace().to_owned();
-        let slug = SchemeSlug::new(
-            ChainId::new(namespace, "*"),
-            blueprint.scheme().to_string(),
-        );
+        let slug = SchemeSlug::new(ChainId::new(namespace, "*"), blueprint.scheme().to_string());
         self.0.insert(slug, handler);
         Ok(())
     }

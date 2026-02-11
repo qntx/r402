@@ -10,7 +10,7 @@ pub use config::SolanaExactFacilitatorConfig;
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
     validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
-    verify_transaction, verify_transfer_instruction, verify_transfer,
+    verify_transaction, verify_transfer, verify_transfer_instruction,
 };
 
 use r402::chain::ChainProvider;

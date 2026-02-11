@@ -33,6 +33,61 @@ pub use client::*;
 pub use registry::*;
 pub use server::*;
 
+/// A unit struct representing the string literal `"exact"`.
+///
+/// This is the canonical scheme name for exact-amount payment schemes
+/// across all chain families (EVM, Solana, etc.).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExactScheme;
+
+impl ExactScheme {
+    /// The string literal value: `"exact"`.
+    pub const VALUE: &'static str = "exact";
+}
+
+impl std::fmt::Display for ExactScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::VALUE)
+    }
+}
+
+impl AsRef<str> for ExactScheme {
+    fn as_ref(&self) -> &str {
+        Self::VALUE
+    }
+}
+
+impl std::str::FromStr for ExactScheme {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == Self::VALUE {
+            Ok(Self)
+        } else {
+            Err(format!("expected '{}', got '{s}'", Self::VALUE))
+        }
+    }
+}
+
+impl serde::Serialize for ExactScheme {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(Self::VALUE)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ExactScheme {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == Self::VALUE {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected '{}', got '{s}'",
+                Self::VALUE,
+            )))
+        }
+    }
+}
+
 /// Trait for identifying a payment scheme.
 ///
 /// Each scheme has a unique identifier composed of the chain namespace
@@ -56,10 +111,6 @@ pub trait SchemeId {
     }
     /// Returns the full scheme identifier (e.g., "eip155-exact").
     fn id(&self) -> String {
-        format!(
-            "{}-{}",
-            self.namespace(),
-            self.scheme(),
-        )
+        format!("{}-{}", self.namespace(), self.scheme(),)
     }
 }

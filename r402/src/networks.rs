@@ -27,4 +27,3 @@ impl NetworkInfo {
         ChainId::new(self.namespace, self.reference)
     }
 }
-
