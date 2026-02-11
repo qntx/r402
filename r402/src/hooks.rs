@@ -129,7 +129,7 @@ pub trait FacilitatorHooks: Send + Sync {
     fn on_verify_failure<'a>(
         &'a self,
         _ctx: &'a VerifyContext,
-        _error: &'a (dyn std::error::Error + Send + Sync),
+        _error: &'a str,
     ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::VerifyResponse>> + Send + 'a>> {
         Box::pin(async { FailureRecovery::Propagate })
     }
@@ -163,7 +163,7 @@ pub trait FacilitatorHooks: Send + Sync {
     fn on_settle_failure<'a>(
         &'a self,
         _ctx: &'a SettleContext,
-        _error: &'a (dyn std::error::Error + Send + Sync),
+        _error: &'a str,
     ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::SettleResponse>> + Send + 'a>> {
         Box::pin(async { FailureRecovery::Propagate })
     }
@@ -259,9 +259,10 @@ where
                 }
                 Err(e) => {
                     // Phase 3b: Failure hooks — first recovery wins
+                    let err_msg = e.to_string();
                     for hook in &self.hooks {
                         if let FailureRecovery::Recovered(response) =
-                            hook.on_verify_failure(&ctx, &e).await
+                            hook.on_verify_failure(&ctx, &err_msg).await
                         {
                             return Ok(response);
                         }
@@ -300,9 +301,10 @@ where
                 }
                 Err(e) => {
                     // Phase 3b: Failure hooks — first recovery wins
+                    let err_msg = e.to_string();
                     for hook in &self.hooks {
                         if let FailureRecovery::Recovered(response) =
-                            hook.on_settle_failure(&ctx, &e).await
+                            hook.on_settle_failure(&ctx, &err_msg).await
                         {
                             return Ok(response);
                         }

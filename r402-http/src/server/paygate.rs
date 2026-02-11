@@ -27,8 +27,9 @@ use tracing::instrument;
 
 use r402::hooks::{FailureRecovery, HookDecision};
 
+use r402::hooks::{FacilitatorHooks, SettleContext, VerifyContext};
+
 use super::error::{PaygateError, VerificationError};
-use super::hooks::{PaygateHooks, SettleContext, VerifyContext};
 use super::protocol::PaygateProtocol;
 
 /// Builder for resource information that can be used with both V1 and V2 protocols.
@@ -105,7 +106,7 @@ pub struct Paygate<TPriceTag, TFacilitator> {
     /// Lifecycle hooks for verify/settle operations.
     ///
     /// Hooks are executed in order; the first abort or recovery wins.
-    pub hooks: Arc<[Arc<dyn PaygateHooks>]>,
+    pub hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
 impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {

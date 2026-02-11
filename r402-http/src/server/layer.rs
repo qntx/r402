@@ -38,8 +38,9 @@ use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
+use r402::hooks::FacilitatorHooks;
+
 use super::facilitator_client::FacilitatorClient;
-use super::hooks::PaygateHooks;
 use super::paygate::{Paygate, ResourceInfoBuilder};
 use super::price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 use super::protocol::PaygateProtocol;
@@ -52,7 +53,7 @@ pub struct X402Middleware<F> {
     facilitator: F,
     base_url: Option<Url>,
     settle_before_execution: bool,
-    hooks: Arc<[Arc<dyn PaygateHooks>]>,
+    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
 impl<F: Clone> Clone for X402Middleware<F> {
@@ -199,10 +200,10 @@ where
     /// custom validation, or error recovery. Multiple hooks are executed
     /// in registration order.
     #[must_use]
-    pub fn with_hook(&self, hook: impl PaygateHooks + 'static) -> Self {
+    pub fn with_hook(&self, hook: impl FacilitatorHooks + 'static) -> Self {
         let mut this = self.clone();
         let mut hooks = (*this.hooks).to_vec();
-        let hook: Arc<dyn PaygateHooks> = Arc::new(hook);
+        let hook: Arc<dyn FacilitatorHooks> = Arc::new(hook);
         hooks.push(hook);
         this.hooks = Arc::from(hooks);
         this
@@ -268,7 +269,7 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     base_url: Option<Arc<Url>>,
     price_source: TSource,
     resource: Arc<ResourceInfoBuilder>,
-    hooks: Arc<[Arc<dyn PaygateHooks>]>,
+    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
 impl<TPriceTag, TFacilitator> X402LayerBuilder<StaticPriceTags<TPriceTag>, TFacilitator>
@@ -365,7 +366,7 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     /// Resource information
     resource: Arc<ResourceInfoBuilder>,
     /// Lifecycle hooks
-    hooks: Arc<[Arc<dyn PaygateHooks>]>,
+    hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
