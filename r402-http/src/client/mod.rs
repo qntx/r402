@@ -11,7 +11,7 @@
 //!
 //! ```rust,ignore
 //! use r402_http::client::{ReqwestWithPayments, ReqwestWithPaymentsBuild, X402Client};
-//! use x402_chain_eip155::V1Eip155ExactClient;
+//! use r402_evm::V1Eip155ExactClient;
 //! use alloy_signer_local::PrivateKeySigner;
 //! use std::sync::Arc;
 //! use reqwest::Client;

@@ -15,7 +15,7 @@
 //! use axum::response::IntoResponse;
 //! use http::StatusCode;
 //! use r402_http::server::X402Middleware;
-//! use x402_chain_eip155::{KnownNetworkEip155, V1Eip155Exact};
+//! use r402_evm::{KnownNetworkEip155, V1Eip155Exact};
 //! use r402::networks::USDC;
 //!
 //! let x402 = X402Middleware::new("https://facilitator.x402.rs");
@@ -54,8 +54,8 @@
 //! use axum::http::StatusCode;
 //! use alloy_primitives::address;
 //! use r402_http::server::X402Middleware;
-//! use x402_chain_eip155::KnownNetworkEip155;
-//! use x402_chain_eip155::V1Eip155Exact;
+//! use r402_evm::KnownNetworkEip155;
+//! use r402_evm::V1Eip155Exact;
 //! use r402::networks::USDC;
 //!
 //! let x402 = X402Middleware::new("https://facilitator.x402.rs");

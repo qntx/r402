@@ -16,9 +16,8 @@
 //!
 //! Scheme implementations are provided by chain-specific crates:
 //!
-//! - **EVM chains** (`x402-chain-eip155`): `v1-eip155-exact`, `v2-eip155-exact`
-//! - **Solana** (`x402-chain-solana`): `v1-solana-exact`, `v2-solana-exact`
-//! - **Aptos** (`x402-chain-aptos`): `v2-aptos-exact`
+//! - **EVM chains** (`r402-evm`): `v1-eip155-exact`, `v2-eip155-exact`
+//! - **Solana** (`r402-svm`): `v1-solana-exact`, `v2-solana-exact`
 //!
 //! # Implementing a Custom Scheme
 //!
@@ -29,7 +28,7 @@
 //! 3. Implement [`X402SchemeFacilitator`] for the actual verification/settlement logic
 //! 4. Register your scheme with [`SchemeBlueprints::register`]
 //!
-//! See the `docs/how-to-write-a-scheme.md` guide in the repository for details.
+//! See the repository documentation for details.
 
 pub mod client;
 

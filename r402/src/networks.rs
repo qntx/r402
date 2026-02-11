@@ -30,7 +30,7 @@
 //! - **`ChainId` Methods**: The [`ChainId::from_network_name()`](crate::chain::ChainId::from_network_name)
 //!   and [`ChainId::as_network_name()`](crate::chain::ChainId::as_network_name) methods use this
 //!   module for convenient network name lookups
-//! - **Chain-Specific Traits**: Chain-specific crates (e.g., `x402-chain-eip155`, `x402-chain-solana`)
+//! - **Chain-Specific Traits**: Chain-specific crates (e.g., `r402-evm`, `r402-svm`)
 //!   implement namespace-specific traits like [`KnownNetworkEip155`] and [`KnownNetworkSolana`]
 //!   for type-safe network access
 //! - **Token Deployments**: The [`USDC`] marker struct is used by chain-specific crates to provide
@@ -402,14 +402,13 @@ pub fn network_name_by_chain_id(chain_id: &ChainId) -> Option<&'static str> {
 /// Chain-specific crates implement traits for this marker struct to provide USDC token
 /// deployments on different networks. For example:
 ///
-/// - `x402-chain-eip155` implements `KnownNetworkEip155<Eip155TokenDeployment>` for `USDC`
-/// - `x402-chain-solana` implements `KnownNetworkSolana<SolanaTokenDeployment>` for `USDC`
-/// - `x402-chain-aptos` implements `KnownNetworkAptos<AptosTokenDeployment>` for `USDC`
+/// - `r402-evm` implements `KnownNetworkEip155<Eip155TokenDeployment>` for `USDC`
+/// - `r402-svm` implements `KnownNetworkSolana<SolanaTokenDeployment>` for `USDC`
 ///
 /// # Example
 ///
 /// ```ignore
-/// use x402_chain_eip155::{KnownNetworkEip155, Eip155TokenDeployment};
+/// use r402_evm::{KnownNetworkEip155, Eip155TokenDeployment};
 /// use r402::networks::USDC;
 ///
 /// // Get USDC deployment on Base mainnet

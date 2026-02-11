@@ -760,7 +760,7 @@ type BoxedDynamicPriceCallback<TPriceTag> = dyn for<'a> Fn(
 /// ```ignore
 /// use alloy_primitives::address;
 /// use r402_http::server::paygate::DynamicPriceTags;
-/// use x402_chain_eip155::V1Eip155Exact;
+/// use r402_evm::V1Eip155Exact;
 /// use r402::networks::USDC;
 ///
 /// // Users write a simple async closure - no Box::pin needed!
@@ -807,7 +807,7 @@ impl<TPriceTag> DynamicPriceTags<TPriceTag> {
     ///
     /// ```ignore
     /// use alloy_primitives::address;
-    /// use x402_chain_eip155::V1Eip155Exact;
+    /// use r402_evm::V1Eip155Exact;
     /// use r402::networks::USDC;
     ///
     /// DynamicPriceTags::new(|_headers, _uri, _base_url| async move {

@@ -1,4 +1,4 @@
-# Makefile for x402 LLM Gateway
+# Makefile for r402
 
 .PHONY: all
 all: pre-commit

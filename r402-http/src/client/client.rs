@@ -37,7 +37,7 @@ use tracing::{debug, info, instrument, trace};
 ///
 /// ```rust
 /// use r402_http::client::X402Client;
-/// use x402_chain_eip155::V1Eip155ExactClient;
+/// use r402_evm::V1Eip155ExactClient;
 /// use alloy_signer_local::PrivateKeySigner;
 /// use std::sync::Arc;
 ///
@@ -94,7 +94,7 @@ impl<TSelector> X402Client<TSelector> {
     ///
     /// ```rust
     /// use r402_http::client::X402Client;
-    /// use x402_chain_eip155::V1Eip155ExactClient;
+    /// use r402_evm::V1Eip155ExactClient;
     /// use alloy_signer_local::PrivateKeySigner;
     /// use std::sync::Arc;
     ///
