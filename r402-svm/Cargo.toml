@@ -47,7 +47,6 @@ facilitator = [
 full = ["telemetry", "client", "server", "facilitator"]
 
 [dependencies]
-async-trait = { workspace = true }
 r402 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

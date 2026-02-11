@@ -25,7 +25,6 @@
 //! ```
 
 use alloy_primitives::U256;
-use async_trait::async_trait;
 use r402::chain::ChainId;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
@@ -33,6 +32,8 @@ use r402::proto::v2::{ResourceInfo, X402Version2};
 use r402::scheme::X402SchemeId;
 use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::util::Base64Bytes;
+use std::future::Future;
+use std::pin::Pin;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -418,40 +419,41 @@ struct V1PayloadSigner<S, R> {
 }
 
 #[allow(dead_code)]
-#[async_trait]
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1PayloadSigner<S, R> {
-    async fn sign_payment(&self) -> Result<String, X402Error> {
-        let fee_payer = self
-            .requirements
-            .extra
-            .as_ref()
-            .map(|extra| extra.fee_payer)
-            .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
-        let fee_payer_pubkey: Pubkey = fee_payer.into();
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+        Box::pin(async move {
+            let fee_payer = self
+                .requirements
+                .extra
+                .as_ref()
+                .map(|extra| extra.fee_payer)
+                .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
+            let fee_payer_pubkey: Pubkey = fee_payer.into();
 
-        let amount = self.requirements.max_amount_required.inner();
-        let tx_b64 = build_signed_transfer_transaction(
-            &self.signer,
-            &self.rpc_client,
-            &fee_payer_pubkey,
-            &self.requirements.pay_to,
-            &self.requirements.asset,
-            amount,
-        )
-        .await?;
+            let amount = self.requirements.max_amount_required.inner();
+            let tx_b64 = build_signed_transfer_transaction(
+                &self.signer,
+                &self.rpc_client,
+                &fee_payer_pubkey,
+                &self.requirements.pay_to,
+                &self.requirements.asset,
+                amount,
+            )
+            .await?;
 
-        let payload = types::v1::PaymentPayload {
-            x402_version: X402Version1,
-            scheme: ExactScheme,
-            network: self.requirements.network.clone(),
-            payload: ExactSolanaPayload {
-                transaction: tx_b64,
-            },
-        };
-        let json = serde_json::to_vec(&payload)?;
-        let b64 = Base64Bytes::encode(&json);
+            let payload = types::v1::PaymentPayload {
+                x402_version: X402Version1,
+                scheme: ExactScheme,
+                network: self.requirements.network.clone(),
+                payload: ExactSolanaPayload {
+                    transaction: tx_b64,
+                },
+            };
+            let json = serde_json::to_vec(&payload)?;
+            let b64 = Base64Bytes::encode(&json);
 
-        Ok(b64.to_string())
+            Ok(b64.to_string())
+        })
     }
 }
 
@@ -542,39 +544,40 @@ struct V2PayloadSigner<S, R> {
 }
 
 #[allow(dead_code)]
-#[async_trait]
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
-    async fn sign_payment(&self) -> Result<String, X402Error> {
-        let fee_payer = self
-            .requirements
-            .extra
-            .as_ref()
-            .map(|extra| extra.fee_payer)
-            .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
-        let fee_payer_pubkey: Pubkey = fee_payer.into();
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+        Box::pin(async move {
+            let fee_payer = self
+                .requirements
+                .extra
+                .as_ref()
+                .map(|extra| extra.fee_payer)
+                .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
+            let fee_payer_pubkey: Pubkey = fee_payer.into();
 
-        let amount = self.requirements.amount.inner();
-        let tx_b64 = build_signed_transfer_transaction(
-            &self.signer,
-            &self.rpc_client,
-            &fee_payer_pubkey,
-            &self.requirements.pay_to,
-            &self.requirements.asset,
-            amount,
-        )
-        .await?;
+            let amount = self.requirements.amount.inner();
+            let tx_b64 = build_signed_transfer_transaction(
+                &self.signer,
+                &self.rpc_client,
+                &fee_payer_pubkey,
+                &self.requirements.pay_to,
+                &self.requirements.asset,
+                amount,
+            )
+            .await?;
 
-        let payload = types::v2::PaymentPayload {
-            x402_version: X402Version2,
-            accepted: self.requirements.clone(),
-            resource: Some(self.resource.clone()),
-            payload: ExactSolanaPayload {
-                transaction: tx_b64,
-            },
-        };
-        let json = serde_json::to_vec(&payload)?;
-        let b64 = Base64Bytes::encode(&json);
+            let payload = types::v2::PaymentPayload {
+                x402_version: X402Version2,
+                accepted: self.requirements.clone(),
+                resource: Some(self.resource.clone()),
+                payload: ExactSolanaPayload {
+                    transaction: tx_b64,
+                },
+            };
+            let json = serde_json::to_vec(&payload)?;
+            let b64 = Base64Bytes::encode(&json);
 
-        Ok(b64.to_string())
+            Ok(b64.to_string())
+        })
     }
 }

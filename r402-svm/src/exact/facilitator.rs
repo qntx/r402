@@ -20,6 +20,8 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
@@ -176,62 +178,71 @@ impl<P> V1SolanaExactFacilitator<P> {
     }
 }
 
-#[async_trait::async_trait]
 impl<P> X402SchemeFacilitator for V1SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
 {
-    async fn verify(
+    fn verify(
         &self,
         request: &proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::v1::VerifyRequest::from_proto(request.clone())?;
-        let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
-        Ok(v1::VerifyResponse::valid(verification.payer.to_string()).into())
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v1::VerifyRequest::from_proto(request)?;
+            let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
+            Ok(v1::VerifyResponse::valid(verification.payer.to_string()).into())
+        })
     }
 
-    async fn settle(
+    fn settle(
         &self,
         request: &proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::v1::SettleRequest::from_proto(request.clone())?;
-        let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
-        let payer = verification.payer.to_string();
-        let tx_sig = settle_transaction(&self.provider, verification).await?;
-        Ok(v1::SettleResponse::Success {
-            payer,
-            transaction: tx_sig.to_string(),
-            network: self.provider.chain_id().to_string(),
-        }
-        .into())
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v1::SettleRequest::from_proto(request)?;
+            let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
+            let payer = verification.payer.to_string();
+            let tx_sig = settle_transaction(&self.provider, verification).await?;
+            Ok(v1::SettleResponse::Success {
+                payer,
+                transaction: tx_sig.to_string(),
+                network: self.provider.chain_id().to_string(),
+            }
+            .into())
+        })
     }
 
-    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
-        let chain_id = self.provider.chain_id();
-        let kinds: Vec<proto::SupportedPaymentKind> = {
-            let mut kinds = Vec::with_capacity(1);
-            let fee_payer = self.provider.fee_payer();
-            let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-            let network = chain_id.as_network_name();
-            if let Some(network) = network {
-                kinds.push(proto::SupportedPaymentKind {
-                    x402_version: v1::X402Version1.into(),
-                    scheme: ExactScheme.to_string(),
-                    network: network.to_string(),
-                    extra,
-                });
-            }
-            kinds
-        };
-        let signers = {
-            let mut signers = HashMap::with_capacity(1);
-            signers.insert(chain_id, self.provider.signer_addresses());
-            signers
-        };
-        Ok(proto::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            let chain_id = self.provider.chain_id();
+            let kinds: Vec<proto::SupportedPaymentKind> = {
+                let mut kinds = Vec::with_capacity(1);
+                let fee_payer = self.provider.fee_payer();
+                let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
+                let network = chain_id.as_network_name();
+                if let Some(network) = network {
+                    kinds.push(proto::SupportedPaymentKind {
+                        x402_version: v1::X402Version1.into(),
+                        scheme: ExactScheme.to_string(),
+                        network: network.to_string(),
+                        extra,
+                    });
+                }
+                kinds
+            };
+            let signers = {
+                let mut signers = HashMap::with_capacity(1);
+                signers.insert(chain_id, self.provider.signer_addresses());
+                signers
+            };
+            Ok(proto::SupportedResponse {
+                kinds,
+                extensions: Vec::new(),
+                signers,
+            })
         })
     }
 }
@@ -257,57 +268,66 @@ impl<P> V2SolanaExactFacilitator<P> {
     }
 }
 
-#[async_trait::async_trait]
 impl<P> X402SchemeFacilitator for V2SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
 {
-    async fn verify(
+    fn verify(
         &self,
         request: &proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::v2::VerifyRequest::from_proto(request.clone())?;
-        let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
-        Ok(v2::VerifyResponse::valid(verification.payer.to_string()).into())
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v2::VerifyRequest::from_proto(request)?;
+            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+            Ok(v2::VerifyResponse::valid(verification.payer.to_string()).into())
+        })
     }
 
-    async fn settle(
+    fn settle(
         &self,
         request: &proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::v2::SettleRequest::from_proto(request.clone())?;
-        let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
-        let payer = verification.payer.to_string();
-        let tx_sig = settle_transaction(&self.provider, verification).await?;
-        Ok(v2::SettleResponse::Success {
-            payer,
-            transaction: tx_sig.to_string(),
-            network: self.provider.chain_id().to_string(),
-        }
-        .into())
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v2::SettleRequest::from_proto(request)?;
+            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
+            let payer = verification.payer.to_string();
+            let tx_sig = settle_transaction(&self.provider, verification).await?;
+            Ok(v2::SettleResponse::Success {
+                payer,
+                transaction: tx_sig.to_string(),
+                network: self.provider.chain_id().to_string(),
+            }
+            .into())
+        })
     }
 
-    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
-        let chain_id = self.provider.chain_id();
-        let kinds: Vec<proto::SupportedPaymentKind> = {
-            let fee_payer = self.provider.fee_payer();
-            let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-            vec![proto::SupportedPaymentKind {
-                x402_version: v2::X402Version2.into(),
-                scheme: ExactScheme.to_string(),
-                network: chain_id.to_string(),
-                extra,
-            }]
-        };
-        let signers = {
-            let mut signers = HashMap::with_capacity(1);
-            signers.insert(chain_id, self.provider.signer_addresses());
-            signers
-        };
-        Ok(proto::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            let chain_id = self.provider.chain_id();
+            let kinds: Vec<proto::SupportedPaymentKind> = {
+                let fee_payer = self.provider.fee_payer();
+                let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
+                vec![proto::SupportedPaymentKind {
+                    x402_version: v2::X402Version2.into(),
+                    scheme: ExactScheme.to_string(),
+                    network: chain_id.to_string(),
+                    extra,
+                }]
+            };
+            let signers = {
+                let mut signers = HashMap::with_capacity(1);
+                signers.insert(chain_id, self.provider.signer_addresses());
+                signers
+            };
+            Ok(proto::SupportedResponse {
+                kinds,
+                extensions: Vec::new(),
+                signers,
+            })
         })
     }
 }

@@ -17,7 +17,6 @@ full = ["cli", "telemetry"]
 
 [dependencies]
 alloy-primitives = { workspace = true }
-async-trait = { workspace = true }
 base64 = { workspace = true }
 regex = { workspace = true }
 rust_decimal = { workspace = true }

@@ -4020,7 +4020,6 @@ name = "r402"
 version = "0.4.0"
 dependencies = [
  "alloy-primitives",
- "async-trait",
  "base64 0.22.1",
  "clap",
  "regex",
@@ -4086,7 +4085,6 @@ name = "r402-svm"
 version = "0.4.0"
 dependencies = [
  "alloy-primitives",
- "async-trait",
  "bincode",
  "bs58",
  "futures-util",

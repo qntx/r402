@@ -27,6 +27,8 @@ use r402::scheme::{
 };
 use r402::timestamp::UnixTimestamp;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 #[cfg(feature = "telemetry")]
 use tracing::{Instrument, instrument};
@@ -95,82 +97,91 @@ impl<P> V1Eip155ExactFacilitator<P> {
     }
 }
 
-#[async_trait::async_trait]
 impl<P> X402SchemeFacilitator for V1Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    async fn verify(
+    fn verify(
         &self,
         request: &proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::v1::VerifyRequest::from_proto(request.clone())?;
-        let payload = &request.payment_payload;
-        let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_v1_payment(
-            self.provider.inner(),
-            self.provider.chain(),
-            payload,
-            requirements,
-        )
-        .await?;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v1::VerifyRequest::from_proto(request)?;
+            let payload = &request.payment_payload;
+            let requirements = &request.payment_requirements;
+            let (contract, payment, eip712_domain) = assert_valid_v1_payment(
+                self.provider.inner(),
+                self.provider.chain(),
+                payload,
+                requirements,
+            )
+            .await?;
 
-        let payer =
-            verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
+            let payer =
+                verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
 
-        Ok(v1::VerifyResponse::valid(payer.to_string()).into())
+            Ok(v1::VerifyResponse::valid(payer.to_string()).into())
+        })
     }
 
-    async fn settle(
+    fn settle(
         &self,
         request: &proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::v1::SettleRequest::from_proto(request.clone())?;
-        let payload = &request.payment_payload;
-        let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_v1_payment(
-            self.provider.inner(),
-            self.provider.chain(),
-            payload,
-            requirements,
-        )
-        .await?;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v1::SettleRequest::from_proto(request)?;
+            let payload = &request.payment_payload;
+            let requirements = &request.payment_requirements;
+            let (contract, payment, eip712_domain) = assert_valid_v1_payment(
+                self.provider.inner(),
+                self.provider.chain(),
+                payload,
+                requirements,
+            )
+            .await?;
 
-        let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
-        Ok(v1::SettleResponse::Success {
-            payer: payment.from.to_string(),
-            transaction: tx_hash.to_string(),
-            network: payload.network.clone(),
-        }
-        .into())
+            let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+            Ok(v1::SettleResponse::Success {
+                payer: payment.from.to_string(),
+                transaction: tx_hash.to_string(),
+                network: payload.network.clone(),
+            }
+            .into())
+        })
     }
 
-    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
-        let chain_id = self.provider.chain_id();
-        let kinds = {
-            let mut kinds = Vec::with_capacity(1);
-            let network = chain_id.as_network_name();
-            if let Some(network) = network {
-                kinds.push(proto::SupportedPaymentKind {
-                    x402_version: v1::X402Version1.into(),
-                    scheme: ExactScheme.to_string(),
-                    network: network.to_string(),
-                    extra: None,
-                });
-            }
-            kinds
-        };
-        let signers = {
-            let mut signers = HashMap::with_capacity(1);
-            signers.insert(chain_id, self.provider.signer_addresses());
-            signers
-        };
-        Ok(proto::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            let chain_id = self.provider.chain_id();
+            let kinds = {
+                let mut kinds = Vec::with_capacity(1);
+                let network = chain_id.as_network_name();
+                if let Some(network) = network {
+                    kinds.push(proto::SupportedPaymentKind {
+                        x402_version: v1::X402Version1.into(),
+                        scheme: ExactScheme.to_string(),
+                        network: network.to_string(),
+                        extra: None,
+                    });
+                }
+                kinds
+            };
+            let signers = {
+                let mut signers = HashMap::with_capacity(1);
+                signers.insert(chain_id, self.provider.signer_addresses());
+                signers
+            };
+            Ok(proto::SupportedResponse {
+                kinds,
+                extensions: Vec::new(),
+                signers,
+            })
         })
     }
 }
@@ -198,75 +209,84 @@ impl<P> V2Eip155ExactFacilitator<P> {
     }
 }
 
-#[async_trait::async_trait]
 impl<P> X402SchemeFacilitator for V2Eip155ExactFacilitator<P>
 where
     P: Eip155MetaTransactionProvider + ChainProviderOps + Send + Sync,
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    async fn verify(
+    fn verify(
         &self,
         request: &proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError> {
-        let request = types::v2::VerifyRequest::from_proto(request.clone())?;
-        let payload = &request.payment_payload;
-        let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_v2_payment(
-            self.provider.inner(),
-            self.provider.chain(),
-            payload,
-            requirements,
-        )
-        .await?;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v2::VerifyRequest::from_proto(request)?;
+            let payload = &request.payment_payload;
+            let requirements = &request.payment_requirements;
+            let (contract, payment, eip712_domain) = assert_valid_v2_payment(
+                self.provider.inner(),
+                self.provider.chain(),
+                payload,
+                requirements,
+            )
+            .await?;
 
-        let payer =
-            verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
-        Ok(v2::VerifyResponse::valid(payer.to_string()).into())
+            let payer =
+                verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
+            Ok(v2::VerifyResponse::valid(payer.to_string()).into())
+        })
     }
 
-    async fn settle(
+    fn settle(
         &self,
         request: &proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError> {
-        let request = types::v2::SettleRequest::from_proto(request.clone())?;
-        let payload = &request.payment_payload;
-        let requirements = &request.payment_requirements;
-        let (contract, payment, eip712_domain) = assert_valid_v2_payment(
-            self.provider.inner(),
-            self.provider.chain(),
-            payload,
-            requirements,
-        )
-        .await?;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        let request = request.clone();
+        Box::pin(async move {
+            let request = types::v2::SettleRequest::from_proto(request)?;
+            let payload = &request.payment_payload;
+            let requirements = &request.payment_requirements;
+            let (contract, payment, eip712_domain) = assert_valid_v2_payment(
+                self.provider.inner(),
+                self.provider.chain(),
+                payload,
+                requirements,
+            )
+            .await?;
 
-        let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+            let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
 
-        Ok(v2::SettleResponse::Success {
-            payer: payment.from.to_string(),
-            transaction: tx_hash.to_string(),
-            network: payload.accepted.network.to_string(),
-        }
-        .into())
+            Ok(v2::SettleResponse::Success {
+                payer: payment.from.to_string(),
+                transaction: tx_hash.to_string(),
+                network: payload.accepted.network.to_string(),
+            }
+            .into())
+        })
     }
 
-    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError> {
-        let chain_id = self.provider.chain_id();
-        let kinds = vec![proto::SupportedPaymentKind {
-            x402_version: v2::X402Version2.into(),
-            scheme: ExactScheme.to_string(),
-            network: chain_id.clone().into(),
-            extra: None,
-        }];
-        let signers = {
-            let mut signers = HashMap::with_capacity(1);
-            signers.insert(chain_id, self.provider.signer_addresses());
-            signers
-        };
-        Ok(proto::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+        Box::pin(async move {
+            let chain_id = self.provider.chain_id();
+            let kinds = vec![proto::SupportedPaymentKind {
+                x402_version: v2::X402Version2.into(),
+                scheme: ExactScheme.to_string(),
+                network: chain_id.clone().into(),
+                extra: None,
+            }];
+            let signers = {
+                let mut signers = HashMap::with_capacity(1);
+                signers.insert(chain_id, self.provider.signer_addresses());
+                signers
+            };
+            Ok(proto::SupportedResponse {
+                kinds,
+                extensions: Vec::new(),
+                signers,
+            })
         })
     }
 }

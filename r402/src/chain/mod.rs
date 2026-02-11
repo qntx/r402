@@ -16,6 +16,7 @@ mod chain_id;
 pub use chain_id::*;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 /// Asynchronously constructs an instance of `Self` from a configuration type.
@@ -32,7 +33,6 @@ use std::sync::Arc;
 /// - Configuration validation fails
 /// - Required external connections (RPC, etc.) cannot be established
 /// - Configuration values are invalid or missing
-#[async_trait::async_trait]
 pub trait FromConfig<TConfig>
 where
     Self: Sized,
@@ -42,7 +42,9 @@ where
     /// # Errors
     ///
     /// Returns an error if initialization fails.
-    async fn from_config(config: &TConfig) -> Result<Self, Box<dyn std::error::Error>>;
+    fn from_config(
+        config: &TConfig,
+    ) -> impl Future<Output = Result<Self, Box<dyn std::error::Error>>> + Send;
 }
 
 /// Common operations available on all chain providers.

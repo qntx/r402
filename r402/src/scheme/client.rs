@@ -18,9 +18,10 @@
 //! - [`MaxAmount`] - Only accepts payments up to a maximum amount
 
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
 use alloy_primitives::U256;
-use async_trait::async_trait;
 
 use crate::chain::{ChainId, ChainIdPattern};
 use crate::proto;
@@ -78,7 +79,6 @@ impl PaymentCandidate {
 ///
 /// Implementations examine 402 responses and generate payment candidates
 /// for requirements they can fulfill.
-#[async_trait]
 #[allow(dead_code)] // Public for consumption by downstream crates.
 pub trait X402SchemeClient: X402SchemeId + Send + Sync {
     /// Generates payment candidates for the given payment requirements.
@@ -86,11 +86,10 @@ pub trait X402SchemeClient: X402SchemeId + Send + Sync {
 }
 
 /// Trait for signing payment authorizations.
-#[async_trait]
 #[allow(dead_code)] // Public for consumption by downstream crates.
 pub trait PaymentCandidateSigner {
     /// Signs a payment authorization.
-    async fn sign_payment(&self) -> Result<String, X402Error>;
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>>;
 }
 
 /// Errors that can occur during client-side payment processing.

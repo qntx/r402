@@ -208,7 +208,6 @@ impl SolanaChainProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl FromConfig<SolanaChainConfig> for SolanaChainProvider {
     async fn from_config(config: &SolanaChainConfig) -> Result<Self, Box<dyn std::error::Error>> {
         let rpc_url = config.rpc();

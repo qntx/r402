@@ -12,7 +12,7 @@ all-features = true
 [features]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402/telemetry"]
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:async-trait", "dep:rand"]
+client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:rand"]
 server = []
 facilitator = [
     "dep:alloy-contract",

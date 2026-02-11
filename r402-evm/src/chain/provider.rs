@@ -317,7 +317,6 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
     }
 }
 
-#[async_trait::async_trait]
 impl FromConfig<Eip155ChainConfig> for Eip155ChainProvider {
     async fn from_config(config: &Eip155ChainConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // 1. Signers

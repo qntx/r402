@@ -39,34 +39,37 @@ use crate::proto::{AsPaymentProblem, ErrorReason, PaymentProblem, PaymentVerific
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
+use std::future::Future;
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 /// Trait for scheme handlers that process payment verification and settlement.
 ///
 /// Implementations of this trait handle the core payment processing logic:
 /// verifying that payments are valid and settling them on-chain.
-#[async_trait::async_trait]
 pub trait X402SchemeFacilitator: Send + Sync {
     /// Verifies a payment authorization without settling it.
     ///
     /// This checks that the payment is properly signed, matches the requirements,
     /// and the payer has sufficient funds.
-    async fn verify(
+    fn verify(
         &self,
         request: &proto::VerifyRequest,
-    ) -> Result<proto::VerifyResponse, X402SchemeFacilitatorError>;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>>;
 
     /// Settles a verified payment on-chain.
     ///
     /// This submits the payment transaction to the blockchain and waits
     /// for confirmation.
-    async fn settle(
+    fn settle(
         &self,
         request: &proto::SettleRequest,
-    ) -> Result<proto::SettleResponse, X402SchemeFacilitatorError>;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>>;
 
     /// Returns the payment methods supported by this handler.
-    async fn supported(&self) -> Result<proto::SupportedResponse, X402SchemeFacilitatorError>;
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>>;
 }
 
 /// Marker trait for types that are both identifiable and buildable.

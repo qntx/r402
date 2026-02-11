@@ -18,7 +18,6 @@
 use alloy_primitives::{Address, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolStruct, eip712_domain};
-use async_trait::async_trait;
 use r402::chain::ChainId;
 use r402::proto::PaymentRequired;
 use r402::proto::v1::X402Version1;
@@ -29,6 +28,8 @@ use r402::timestamp::UnixTimestamp;
 use r402::util::Base64Bytes;
 use rand::RngExt;
 use rand::rng;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::chain::Eip155ChainReference;
@@ -54,16 +55,17 @@ use crate::exact::{
 /// let signer = Arc::new(signer);
 /// // Now you can use `signer` anywhere `SignerLike` is expected
 /// ```
-#[async_trait]
-pub trait SignerLike {
+pub trait SignerLike: Send + Sync {
     /// Returns the address of the signer.
     fn address(&self) -> Address;
 
     /// Signs the given hash.
-    async fn sign_hash(&self, hash: &FixedBytes<32>) -> Result<Signature, alloy_signer::Error>;
+    fn sign_hash(
+        &self,
+        hash: &FixedBytes<32>,
+    ) -> impl Future<Output = Result<Signature, alloy_signer::Error>> + Send;
 }
 
-#[async_trait]
 impl SignerLike for PrivateKeySigner {
     fn address(&self) -> Address {
         Self::address(self)
@@ -74,7 +76,6 @@ impl SignerLike for PrivateKeySigner {
     }
 }
 
-#[async_trait]
 impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
     fn address(&self) -> Address {
         (**self).address()
@@ -254,12 +255,12 @@ struct V1PayloadSigner<S> {
     requirements: types::v1::PaymentRequirements,
 }
 
-#[async_trait]
 impl<S> PaymentCandidateSigner for V1PayloadSigner<S>
 where
     S: SignerLike + Sync,
 {
-    async fn sign_payment(&self) -> Result<String, X402Error> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+        Box::pin(async move {
         let params = Eip3009SigningParams {
             chain_id: self.chain_reference.inner(),
             asset_address: self.requirements.asset,
@@ -281,6 +282,7 @@ where
         let b64 = Base64Bytes::encode(&json);
 
         Ok(b64.to_string())
+        })
     }
 }
 
@@ -368,12 +370,12 @@ struct V2PayloadSigner<S> {
     requirements: types::v2::PaymentRequirements,
 }
 
-#[async_trait]
 impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    async fn sign_payment(&self) -> Result<String, X402Error> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+        Box::pin(async move {
         let params = Eip3009SigningParams {
             chain_id: self.chain_reference.inner(),
             asset_address: self.requirements.asset.0,
@@ -395,5 +397,6 @@ where
         let b64 = Base64Bytes::encode(&json);
 
         Ok(b64.to_string())
+        })
     }
 }
