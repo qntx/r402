@@ -122,13 +122,12 @@ impl TryFrom<ChainId> for SolanaChainReference {
     type Error = SolanaChainReferenceFormatError;
 
     fn try_from(value: ChainId) -> Result<Self, Self::Error> {
-        if value.namespace != SOLANA_NAMESPACE {
-            return Err(SolanaChainReferenceFormatError::InvalidNamespace(
-                value.namespace,
-            ));
+        let (namespace, reference) = value.into_parts();
+        if namespace != SOLANA_NAMESPACE {
+            return Err(SolanaChainReferenceFormatError::InvalidNamespace(namespace));
         }
-        let solana_chain_reference = Self::from_str(&value.reference)
-            .map_err(|_| SolanaChainReferenceFormatError::InvalidReference(value.reference))?;
+        let solana_chain_reference = Self::from_str(&reference)
+            .map_err(|_| SolanaChainReferenceFormatError::InvalidReference(reference))?;
         Ok(solana_chain_reference)
     }
 }

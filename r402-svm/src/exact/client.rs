@@ -371,7 +371,7 @@ where
             .filter_map(|v| {
                 let requirements: types::v1::PaymentRequirements = v.as_concrete()?;
                 let chain_id = ChainId::from_network_name(&requirements.network)?;
-                if chain_id.namespace != "solana" {
+                if chain_id.namespace() != "solana" {
                     return None;
                 }
                 let candidate = PaymentCandidate {
@@ -490,7 +490,7 @@ where
             .filter_map(|v| {
                 let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
-                if chain_id.namespace != "solana" {
+                if chain_id.namespace() != "solana" {
                     return None;
                 }
                 let candidate = PaymentCandidate {

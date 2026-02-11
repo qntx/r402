@@ -165,14 +165,13 @@ impl TryFrom<ChainId> for Eip155ChainReference {
     type Error = Eip155ChainReferenceFormatError;
 
     fn try_from(value: ChainId) -> Result<Self, Self::Error> {
-        if value.namespace != EIP155_NAMESPACE {
-            return Err(Eip155ChainReferenceFormatError::InvalidNamespace(
-                value.namespace,
-            ));
+        let (namespace, reference) = value.into_parts();
+        if namespace != EIP155_NAMESPACE {
+            return Err(Eip155ChainReferenceFormatError::InvalidNamespace(namespace));
         }
-        let chain_id: u64 = value.reference.parse().map_err(|_| {
-            Eip155ChainReferenceFormatError::InvalidReference(value.reference.clone())
-        })?;
+        let chain_id: u64 = reference
+            .parse()
+            .map_err(|_| Eip155ChainReferenceFormatError::InvalidReference(reference))?;
         Ok(Self(chain_id))
     }
 }
@@ -181,13 +180,13 @@ impl TryFrom<&ChainId> for Eip155ChainReference {
     type Error = Eip155ChainReferenceFormatError;
 
     fn try_from(value: &ChainId) -> Result<Self, Self::Error> {
-        if value.namespace != EIP155_NAMESPACE {
+        if value.namespace() != EIP155_NAMESPACE {
             return Err(Eip155ChainReferenceFormatError::InvalidNamespace(
-                value.namespace.clone(),
+                value.namespace().to_owned(),
             ));
         }
-        let chain_id: u64 = value.reference.parse().map_err(|_| {
-            Eip155ChainReferenceFormatError::InvalidReference(value.reference.clone())
+        let chain_id: u64 = value.reference().parse().map_err(|_| {
+            Eip155ChainReferenceFormatError::InvalidReference(value.reference().to_owned())
         })?;
         Ok(Self(chain_id))
     }

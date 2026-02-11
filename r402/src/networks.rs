@@ -364,24 +364,24 @@ mod tests {
     #[test]
     fn test_chain_id_from_network_name() {
         let base = chain_id_by_network_name("base").unwrap();
-        assert_eq!(base.namespace, "eip155");
-        assert_eq!(base.reference, "8453");
+        assert_eq!(base.namespace(), "eip155");
+        assert_eq!(base.reference(), "8453");
 
         let base_sepolia = chain_id_by_network_name("base-sepolia").unwrap();
-        assert_eq!(base_sepolia.namespace, "eip155");
-        assert_eq!(base_sepolia.reference, "84532");
+        assert_eq!(base_sepolia.namespace(), "eip155");
+        assert_eq!(base_sepolia.reference(), "84532");
 
         let polygon = chain_id_by_network_name("polygon").unwrap();
-        assert_eq!(polygon.namespace, "eip155");
-        assert_eq!(polygon.reference, "137");
+        assert_eq!(polygon.namespace(), "eip155");
+        assert_eq!(polygon.reference(), "137");
 
         let celo = chain_id_by_network_name("celo").unwrap();
-        assert_eq!(celo.namespace, "eip155");
-        assert_eq!(celo.reference, "42220");
+        assert_eq!(celo.namespace(), "eip155");
+        assert_eq!(celo.reference(), "42220");
 
         let solana = chain_id_by_network_name("solana").unwrap();
-        assert_eq!(solana.namespace, "solana");
-        assert_eq!(solana.reference, "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+        assert_eq!(solana.namespace(), "solana");
+        assert_eq!(solana.reference(), "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
 
         assert!(chain_id_by_network_name("unknown").is_none());
     }

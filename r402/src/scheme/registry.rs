@@ -95,7 +95,10 @@ impl Display for SchemeHandlerSlug {
         write!(
             f,
             "{}:{}:v{}:{}",
-            self.chain_id.namespace, self.chain_id.reference, self.x402_version, self.name
+            self.chain_id.namespace(),
+            self.chain_id.reference(),
+            self.x402_version,
+            self.name
         )
     }
 }

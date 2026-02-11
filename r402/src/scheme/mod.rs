@@ -22,7 +22,7 @@ mod registry;
 
 pub use client::*;
 pub use handler::*;
-pub use hooks::{FacilitatorHooks, HookedSchemeHandler};
+pub use hooks::{HookedSchemeHandler, SchemeHandlerHooks};
 pub use registry::*;
 
 /// Trait for identifying a payment scheme.

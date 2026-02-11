@@ -146,7 +146,7 @@ pub type OnSettleFailureHookFn = dyn Fn(
 /// All hooks are optional. Multiple hooks of the same type execute in
 /// registration order.
 #[derive(Clone, Default)]
-pub struct FacilitatorHooks {
+pub struct SchemeHandlerHooks {
     before_verify: Vec<Arc<BeforeVerifyHookFn>>,
     after_verify: Vec<Arc<AfterVerifyHookFn>>,
     on_verify_failure: Vec<Arc<OnVerifyFailureHookFn>>,
@@ -155,9 +155,9 @@ pub struct FacilitatorHooks {
     on_settle_failure: Vec<Arc<OnSettleFailureHookFn>>,
 }
 
-impl std::fmt::Debug for FacilitatorHooks {
+impl std::fmt::Debug for SchemeHandlerHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FacilitatorHooks")
+        f.debug_struct("SchemeHandlerHooks")
             .field("before_verify", &self.before_verify.len())
             .field("after_verify", &self.after_verify.len())
             .field("on_verify_failure", &self.on_verify_failure.len())
@@ -168,7 +168,7 @@ impl std::fmt::Debug for FacilitatorHooks {
     }
 }
 
-impl FacilitatorHooks {
+impl SchemeHandlerHooks {
     /// Returns `true` if no hooks are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -257,7 +257,7 @@ impl FacilitatorHooks {
     }
 }
 
-/// A [`SchemeHandler`] decorator that executes [`FacilitatorHooks`] around
+/// A [`SchemeHandler`] decorator that executes [`SchemeHandlerHooks`] around
 /// an inner handler's verify and settle operations.
 ///
 /// This is the primary integration point: wrap any scheme handler with hooks
@@ -267,13 +267,13 @@ impl FacilitatorHooks {
 /// # Example
 ///
 /// ```ignore
-/// let hooks = FacilitatorHooks::default()
+/// let hooks = SchemeHandlerHooks::default()
 ///     .on_before_verify(|ctx| async move { Ok(None) });
 /// let hooked = HookedSchemeHandler::new(inner_handler, hooks);
 /// ```
 pub struct HookedSchemeHandler {
     inner: Box<dyn SchemeHandler>,
-    hooks: Arc<FacilitatorHooks>,
+    hooks: Arc<SchemeHandlerHooks>,
 }
 
 impl std::fmt::Debug for HookedSchemeHandler {
@@ -287,7 +287,7 @@ impl std::fmt::Debug for HookedSchemeHandler {
 impl HookedSchemeHandler {
     /// Wraps an inner handler with the given hooks.
     #[must_use]
-    pub fn new(inner: Box<dyn SchemeHandler>, hooks: FacilitatorHooks) -> Self {
+    pub fn new(inner: Box<dyn SchemeHandler>, hooks: SchemeHandlerHooks) -> Self {
         Self {
             inner,
             hooks: Arc::new(hooks),

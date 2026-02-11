@@ -30,10 +30,8 @@ use crate::networks;
 /// Serializes to/from a colon-separated string: `"eip155:8453"`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChainId {
-    /// The blockchain namespace (e.g., `eip155` for EVM chains, `solana` for Solana).
-    pub namespace: String,
-    /// The chain-specific reference (e.g., `8453` for Base, `137` for Polygon).
-    pub reference: String,
+    namespace: String,
+    reference: String,
 }
 
 impl ChainId {
@@ -55,6 +53,12 @@ impl ChainId {
     #[must_use]
     pub fn reference(&self) -> &str {
         &self.reference
+    }
+
+    /// Consumes the chain ID and returns its (namespace, reference) components.
+    #[must_use]
+    pub fn into_parts(self) -> (String, String) {
+        (self.namespace, self.reference)
     }
 
     /// Creates a chain ID from a well-known network name.
@@ -306,7 +310,8 @@ impl<'de> Deserialize<'de> for ChainIdPattern {
 
 impl From<ChainId> for ChainIdPattern {
     fn from(chain_id: ChainId) -> Self {
-        Self::exact(chain_id.namespace, chain_id.reference)
+        let (namespace, reference) = chain_id.into_parts();
+        Self::exact(namespace, reference)
     }
 }
 
