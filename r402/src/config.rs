@@ -175,7 +175,7 @@ where
 /// CLI arguments for the x402 facilitator server.
 #[derive(Debug)]
 #[cfg_attr(feature = "cli", derive(Parser))]
-#[cfg_attr(feature = "cli", command(name = "x402-rs"))]
+#[cfg_attr(feature = "cli", command(name = "r402"))]
 #[cfg_attr(feature = "cli", command(about = "x402 Facilitator HTTP server"))]
 pub struct CliArgs {
     /// Path to the JSON configuration file

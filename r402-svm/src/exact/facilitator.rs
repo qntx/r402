@@ -673,54 +673,32 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     let instruction = tx.instruction(instruction_index)?;
     instruction.assert_not_empty()?;
     let program_id = instruction.program_id();
-    let transfer_checked_instruction = if spl_token::ID.eq(&program_id) {
-        let token_instruction =
-            spl_token::instruction::TokenInstruction::unpack(instruction.data_slice())
-                .map_err(|_| SolanaExactError::InvalidTokenInstruction)?;
-        let spl_token::instruction::TokenInstruction::TransferChecked {
-            amount,
-            decimals: _,
-        } = token_instruction
-        else {
-            return Err(SolanaExactError::InvalidTokenInstruction.into());
-        };
-        let source = instruction.account(0)?;
-        let mint = instruction.account(1)?;
-        let destination = instruction.account(2)?;
-        let authority = instruction.account(3)?;
-        TransferCheckedInstruction {
-            amount,
-            source,
-            mint,
-            destination,
-            authority,
-            token_program: spl_token::ID,
-        }
+    // Both spl_token and spl_token_2022 share the same instruction layout,
+    // so we use spl_token's unpack for both and only differentiate by program ID.
+    let token_program = if spl_token::ID.eq(&program_id) {
+        spl_token::ID
     } else if spl_token_2022::ID.eq(&program_id) {
-        let token_instruction =
-            spl_token_2022::instruction::TokenInstruction::unpack(instruction.data_slice())
-                .map_err(|_| SolanaExactError::InvalidTokenInstruction)?;
-        let spl_token_2022::instruction::TokenInstruction::TransferChecked {
-            amount,
-            decimals: _,
-        } = token_instruction
-        else {
-            return Err(SolanaExactError::InvalidTokenInstruction.into());
-        };
-        let source = instruction.account(0)?;
-        let mint = instruction.account(1)?;
-        let destination = instruction.account(2)?;
-        let authority = instruction.account(3)?;
-        TransferCheckedInstruction {
-            amount,
-            source,
-            mint,
-            destination,
-            authority,
-            token_program: spl_token_2022::ID,
-        }
+        spl_token_2022::ID
     } else {
         return Err(SolanaExactError::InvalidTokenInstruction.into());
+    };
+    let token_instruction =
+        spl_token::instruction::TokenInstruction::unpack(instruction.data_slice())
+            .map_err(|_| SolanaExactError::InvalidTokenInstruction)?;
+    let spl_token::instruction::TokenInstruction::TransferChecked {
+        amount,
+        decimals: _,
+    } = token_instruction
+    else {
+        return Err(SolanaExactError::InvalidTokenInstruction.into());
+    };
+    let transfer_checked_instruction = TransferCheckedInstruction {
+        amount,
+        source: instruction.account(0)?,
+        mint: instruction.account(1)?,
+        destination: instruction.account(2)?,
+        authority: instruction.account(3)?,
+        token_program,
     };
 
     let fee_payer_pubkey = provider.pubkey();

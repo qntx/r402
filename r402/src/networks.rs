@@ -58,7 +58,7 @@
 //! Chain-specific crates define namespace-specific traits that work with this registry:
 //!
 //! - **`KnownNetworkEip155`** (in `r402-evm`) — static methods for EVM networks
-//!   (Base, Polygon, Avalanche, Sei, XDC, XRPL EVM, Peaq, IoTeX, Celo, etc.)
+//!   (Base, Polygon, Avalanche, Sei, XDC, XRPL EVM, Peaq, `IoTeX`, Celo, etc.)
 //! - **`KnownNetworkSolana`** (in `r402-svm`) — static methods for Solana networks
 //!   (mainnet, devnet)
 //!

@@ -316,33 +316,30 @@ impl FacilitatorClient {
 
     /// Attaches custom headers to all future requests.
     #[must_use]
-    pub fn with_headers(&self, headers: HeaderMap) -> Self {
-        let mut this = self.clone();
-        this.headers = headers;
-        this
+    pub fn with_headers(mut self, headers: HeaderMap) -> Self {
+        self.headers = headers;
+        self
     }
 
     /// Sets a timeout for all future requests.
     #[must_use]
-    pub fn with_timeout(&self, timeout: Duration) -> Self {
-        let mut this = self.clone();
-        this.timeout = Some(timeout);
-        this
+    pub const fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
     }
 
     /// Sets the TTL for caching the supported endpoint response.
     ///
     /// Default is 10 minutes. Use [`Self::without_supported_cache()`] to disable caching.
     #[must_use]
-    pub fn with_supported_cache_ttl(&self, ttl: Duration) -> Self {
-        let mut this = self.clone();
-        this.supported_cache = SupportedCache::new(ttl);
-        this
+    pub fn with_supported_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.supported_cache = SupportedCache::new(ttl);
+        self
     }
 
     /// Disables caching for the supported endpoint.
     #[must_use]
-    pub fn without_supported_cache(&self) -> Self {
+    pub fn without_supported_cache(self) -> Self {
         self.with_supported_cache_ttl(Duration::ZERO)
     }
 

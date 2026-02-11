@@ -390,7 +390,13 @@ impl SolanaChainProviderLike for SolanaChainProvider {
                 )))
             }
         } else {
+            // Poll for confirmation with a bounded timeout to prevent infinite loops
+            // when the transaction never lands (e.g. expired blockhash).
+            const MAX_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
+            const POLL_INTERVAL: Duration = Duration::from_millis(200);
+
             self.send(tx).await?;
+            let deadline = tokio::time::Instant::now() + MAX_CONFIRM_TIMEOUT;
             loop {
                 let confirmed = self
                     .rpc_client
@@ -399,7 +405,14 @@ impl SolanaChainProviderLike for SolanaChainProvider {
                 if confirmed.value {
                     return Ok(*tx_sig);
                 }
-                tokio::time::sleep(Duration::from_millis(200)).await;
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(SolanaChainProviderError::Transport(Box::new(
+                        ClientErrorKind::Custom(format!(
+                            "Transaction confirmation timed out after {MAX_CONFIRM_TIMEOUT:?}"
+                        )),
+                    )));
+                }
+                tokio::time::sleep(POLL_INTERVAL).await;
             }
         }
     }

@@ -132,7 +132,8 @@ impl X402Middleware<Arc<FacilitatorClient>> {
     /// to disable caching entirely.
     #[must_use]
     pub fn with_supported_cache_ttl(&self, ttl: Duration) -> Self {
-        let facilitator = Arc::new(self.facilitator.with_supported_cache_ttl(ttl));
+        let inner = Arc::unwrap_or_clone(Arc::clone(&self.facilitator));
+        let facilitator = Arc::new(inner.with_supported_cache_ttl(ttl));
         Self {
             facilitator,
             base_url: self.base_url.clone(),

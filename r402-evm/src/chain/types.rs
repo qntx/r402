@@ -264,7 +264,8 @@ impl Display for Eip155ChainReference {
 /// # Example
 ///
 /// ```ignore
-/// use x402_rs::networks::{KnownNetworkEip155, USDC};
+/// use r402_evm::KnownNetworkEip155;
+/// use r402::networks::USDC;
 ///
 /// // Get USDC deployment on Base
 /// let usdc = USDC::base();
@@ -312,7 +313,8 @@ impl Eip155TokenDeployment {
     /// # Example
     ///
     /// ```ignore
-    /// use x402_rs::networks::{KnownNetworkEip155, USDC};
+    /// use r402_evm::KnownNetworkEip155;
+    /// use r402::networks::USDC;
     ///
     /// let usdc = USDC::base();
     /// let amount = usdc.parse("10.50").unwrap();
