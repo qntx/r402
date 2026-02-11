@@ -115,7 +115,7 @@ impl PaygateProtocol for v1::PriceTag {
                     .body(body)
                     .expect("Fail to construct response")
             }
-            PaygateError::Settlement(err) => settlement_error_response(err),
+            PaygateError::Settlement(ref err) => settlement_error_response(err.as_str()),
         }
     }
 
@@ -185,7 +185,7 @@ impl PaygateProtocol for v2::PriceTag {
                     .body(Body::empty())
                     .expect("Fail to construct response")
             }
-            PaygateError::Settlement(err) => settlement_error_response(err),
+            PaygateError::Settlement(ref err) => settlement_error_response(err.as_str()),
         }
     }
 
@@ -236,7 +236,7 @@ fn validate_verify_response_common(
 }
 
 /// Shared settlement error response for both V1 and V2.
-fn settlement_error_response(err: String) -> Response {
+fn settlement_error_response(err: &str) -> Response {
     let body = Body::from(
         json!({
             "error": "Settlement failed",
