@@ -76,9 +76,7 @@ pub trait Facilitator: Send + Sync {
     /// Returns the payment kinds supported by this facilitator.
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>;
 }
 
 impl<T: Facilitator> Facilitator for Arc<T> {
@@ -100,9 +98,8 @@ impl<T: Facilitator> Facilitator for Arc<T> {
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         self.as_ref().supported()
     }
 }

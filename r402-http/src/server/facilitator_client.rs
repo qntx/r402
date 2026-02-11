@@ -158,9 +158,8 @@ impl Facilitator for FacilitatorClient {
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move {
             Self::supported(self)
                 .await

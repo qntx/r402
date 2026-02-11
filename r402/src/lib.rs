@@ -38,10 +38,19 @@
 
 pub mod amount;
 pub mod chain;
-pub mod encoding;
 pub mod facilitator;
+pub mod helper;
 pub mod hooks;
 pub mod networks;
 pub mod proto;
 pub mod scheme;
-pub mod timestamp;
+
+/// Backward-compatible re-export of [`util::Base64Bytes`].
+pub mod encoding {
+    pub use crate::helper::Base64Bytes;
+}
+
+/// Backward-compatible re-export of [`util::UnixTimestamp`].
+pub mod timestamp {
+    pub use crate::helper::UnixTimestamp;
+}

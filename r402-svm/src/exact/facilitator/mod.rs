@@ -15,9 +15,9 @@ pub use verify::{
 };
 
 use r402::chain::ChainProviderOps;
+use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::scheme::{SchemeHandlerBuilder, X402SchemeId};
 use std::collections::HashMap;
 use std::future::Future;
@@ -119,9 +119,8 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds: Vec<proto::SupportedPaymentKind> = {
@@ -215,9 +214,8 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds: Vec<proto::SupportedPaymentKind> = {

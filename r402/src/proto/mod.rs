@@ -31,58 +31,69 @@ use std::str::FromStr;
 use crate::chain::ChainId;
 use crate::scheme::SchemeHandlerSlug;
 
+mod error;
 pub mod v1;
 pub mod v2;
+mod version;
 
-/// A protocol version marker parameterized by its numeric value.
+pub use error::*;
+pub use version::Version;
+
+/// A version-tagged verify/settle request with typed payload and requirements.
 ///
-/// Serializes as a bare integer (e.g., `1` or `2`) and rejects any other
-/// value on deserialization, providing compile-time version safety.
+/// This generic struct eliminates duplication between V1 and V2 verify requests.
+/// The const parameter `V` selects the protocol version marker ([`Version<V>`]).
 ///
-/// Use the type aliases [`v1::X402Version1`] and [`v2::X402Version2`]
-/// instead of constructing this directly.
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Hash)]
-pub struct Version<const N: u8>;
-
-impl<const N: u8> Version<N> {
-    /// The numeric value of this protocol version.
-    pub const VALUE: u8 = N;
+/// Use [`v1::VerifyRequest`] or [`v2::VerifyRequest`] type aliases instead of
+/// constructing this directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypedVerifyRequest<const V: u8, TPayload, TRequirements> {
+    /// The protocol version marker.
+    pub x402_version: Version<V>,
+    /// The signed payment authorization.
+    pub payment_payload: TPayload,
+    /// The payment requirements to verify against.
+    pub payment_requirements: TRequirements,
 }
 
-impl<const N: u8> PartialEq<u8> for Version<N> {
-    fn eq(&self, other: &u8) -> bool {
-        *other == N
+impl<const V: u8, TPayload, TRequirements> TypedVerifyRequest<V, TPayload, TRequirements>
+where
+    Self: serde::de::DeserializeOwned,
+{
+    /// Deserializes from a protocol-level [`VerifyRequest`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaymentVerificationError`] if deserialization fails.
+    pub fn from_proto(request: VerifyRequest) -> Result<Self, PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
+    }
+
+    /// Deserializes from a protocol-level [`SettleRequest`].
+    ///
+    /// Settlement reuses the same wire format as verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaymentVerificationError`] if deserialization fails.
+    pub fn from_settle(request: SettleRequest) -> Result<Self, PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
     }
 }
 
-impl<const N: u8> From<Version<N>> for u8 {
-    fn from(_: Version<N>) -> Self {
-        N
-    }
-}
-
-impl<const N: u8> std::fmt::Display for Version<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{N}")
-    }
-}
-
-impl<const N: u8> Serialize for Version<N> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(N)
-    }
-}
-
-impl<'de, const N: u8> Deserialize<'de> for Version<N> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let v = u8::deserialize(deserializer)?;
-        if v == N {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected version {N}, got {v}"
-            )))
-        }
+impl<const V: u8, TPayload, TRequirements> TryInto<VerifyRequest>
+    for TypedVerifyRequest<V, TPayload, TRequirements>
+where
+    TPayload: Serialize,
+    TRequirements: Serialize,
+{
+    type Error = serde_json::Error;
+    fn try_into(self) -> Result<VerifyRequest, Self::Error> {
+        let json = serde_json::to_value(self)?;
+        Ok(VerifyRequest(json))
     }
 }
 
@@ -565,157 +576,6 @@ impl<'de> Deserialize<'de> for SettleResponse {
                 network: wire.network,
             })
         }
-    }
-}
-
-/// Errors that can occur during payment verification.
-///
-/// These errors are returned when a payment fails validation checks
-/// performed by the facilitator before settlement.
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum PaymentVerificationError {
-    /// The payment payload format is invalid or malformed.
-    #[error("Invalid format: {0}")]
-    InvalidFormat(String),
-    /// The payment amount doesn't match the requirements.
-    #[error("Payment amount is invalid with respect to the payment requirements")]
-    InvalidPaymentAmount,
-    /// The payment authorization's `validAfter` timestamp is in the future.
-    #[error("Payment authorization is not yet valid")]
-    Early,
-    /// The payment authorization's `validBefore` timestamp has passed.
-    #[error("Payment authorization is expired")]
-    Expired,
-    /// The payment's chain ID doesn't match the requirements.
-    #[error("Payment chain id is invalid with respect to the payment requirements")]
-    ChainIdMismatch,
-    /// The payment recipient doesn't match the requirements.
-    #[error("Payment recipient is invalid with respect to the payment requirements")]
-    RecipientMismatch,
-    /// The payment asset (token) doesn't match the requirements.
-    #[error("Payment asset is invalid with respect to the payment requirements")]
-    AssetMismatch,
-    /// The payer's on-chain balance is insufficient.
-    #[error("Onchain balance is not enough to cover the payment amount")]
-    InsufficientFunds,
-    /// The payment signature is invalid.
-    #[error("{0}")]
-    InvalidSignature(String),
-    /// Transaction simulation failed.
-    #[error("{0}")]
-    TransactionSimulation(String),
-    /// The chain is not supported by this facilitator.
-    #[error("Unsupported chain")]
-    UnsupportedChain,
-    /// The payment scheme is not supported by this facilitator.
-    #[error("Unsupported scheme")]
-    UnsupportedScheme,
-    /// The accepted payment details don't match the requirements.
-    #[error("Accepted does not match payment requirements")]
-    AcceptedRequirementsMismatch,
-}
-
-impl AsPaymentProblem for PaymentVerificationError {
-    fn as_payment_problem(&self) -> PaymentProblem {
-        let error_reason = match self {
-            Self::InvalidFormat(_) => ErrorReason::InvalidFormat,
-            Self::InvalidPaymentAmount => ErrorReason::InvalidPaymentAmount,
-            Self::InsufficientFunds => ErrorReason::InsufficientFunds,
-            Self::Early => ErrorReason::InvalidPaymentEarly,
-            Self::Expired => ErrorReason::InvalidPaymentExpired,
-            Self::ChainIdMismatch => ErrorReason::ChainIdMismatch,
-            Self::RecipientMismatch => ErrorReason::RecipientMismatch,
-            Self::AssetMismatch => ErrorReason::AssetMismatch,
-            Self::InvalidSignature(_) => ErrorReason::InvalidSignature,
-            Self::TransactionSimulation(_) => ErrorReason::TransactionSimulation,
-            Self::UnsupportedChain => ErrorReason::UnsupportedChain,
-            Self::UnsupportedScheme => ErrorReason::UnsupportedScheme,
-            Self::AcceptedRequirementsMismatch => ErrorReason::AcceptedRequirementsMismatch,
-        };
-        PaymentProblem::new(error_reason, self.to_string())
-    }
-}
-
-impl From<serde_json::Error> for PaymentVerificationError {
-    fn from(value: serde_json::Error) -> Self {
-        Self::InvalidFormat(value.to_string())
-    }
-}
-
-/// Machine-readable error reason codes for payment failures.
-///
-/// These codes are used in error responses to allow clients to
-/// programmatically handle different failure scenarios.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ErrorReason {
-    /// The payment payload format is invalid.
-    InvalidFormat,
-    /// The payment amount is incorrect.
-    InvalidPaymentAmount,
-    /// The payment authorization is not yet valid.
-    InvalidPaymentEarly,
-    /// The payment authorization has expired.
-    InvalidPaymentExpired,
-    /// The chain ID doesn't match.
-    ChainIdMismatch,
-    /// The recipient address doesn't match.
-    RecipientMismatch,
-    /// The token asset doesn't match.
-    AssetMismatch,
-    /// The accepted details don't match requirements.
-    AcceptedRequirementsMismatch,
-    /// The signature is invalid.
-    InvalidSignature,
-    /// Transaction simulation failed.
-    TransactionSimulation,
-    /// Insufficient on-chain balance.
-    InsufficientFunds,
-    /// The chain is not supported.
-    UnsupportedChain,
-    /// The scheme is not supported.
-    UnsupportedScheme,
-    /// An unexpected error occurred.
-    UnexpectedError,
-}
-
-/// Trait for converting errors into structured payment problems.
-pub trait AsPaymentProblem {
-    /// Converts this error into a [`PaymentProblem`].
-    fn as_payment_problem(&self) -> PaymentProblem;
-}
-
-/// A structured payment error with reason code and details.
-///
-/// This type is used to return detailed error information to clients
-/// when a payment fails verification or settlement.
-#[derive(Debug)]
-pub struct PaymentProblem {
-    /// The machine-readable error reason.
-    reason: ErrorReason,
-    /// Human-readable error details.
-    details: String,
-}
-
-impl PaymentProblem {
-    /// Creates a new payment problem with the given reason and details.
-    #[must_use]
-    pub const fn new(reason: ErrorReason, details: String) -> Self {
-        Self { reason, details }
-    }
-
-    /// Returns the error reason code.
-    #[must_use]
-    pub const fn reason(&self) -> ErrorReason {
-        self.reason
-    }
-
-    /// Returns the human-readable error details.
-    #[must_use]
-    pub fn details(&self) -> &str {
-        &self.details
     }
 }
 

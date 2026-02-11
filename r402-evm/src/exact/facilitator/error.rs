@@ -2,8 +2,8 @@
 
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;
-use r402::proto::PaymentVerificationError;
 use r402::facilitator::FacilitatorError;
+use r402::proto::PaymentVerificationError;
 
 use super::signature::StructuredSignatureFormatError;
 use crate::chain::MetaTransactionSendError;

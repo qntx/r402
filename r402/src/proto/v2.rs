@@ -67,47 +67,9 @@ pub struct ResourceInfo {
 /// Request to verify a V2 payment.
 ///
 /// Contains the payment payload and requirements for verification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyRequest<TPayload, TRequirements> {
-    /// Protocol version (always 2).
-    pub x402_version: X402Version2,
-    /// The signed payment authorization.
-    pub payment_payload: TPayload,
-    /// The payment requirements to verify against.
-    pub payment_requirements: TRequirements,
-}
-
-impl<TPayload, TRequirements> VerifyRequest<TPayload, TRequirements>
-where
-    Self: DeserializeOwned,
-{
-    /// Deserializes a V2 verify request from a protocol-level request.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
-    pub fn from_proto(
-        request: proto::VerifyRequest,
-    ) -> Result<Self, proto::PaymentVerificationError> {
-        let deserialized: Self = serde_json::from_value(request.into_json())?;
-        Ok(deserialized)
-    }
-
-    /// Deserializes a V2 verify request from a protocol-level settle request.
-    ///
-    /// Settlement reuses the same wire format as verification.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
-    pub fn from_settle(
-        request: proto::SettleRequest,
-    ) -> Result<Self, proto::PaymentVerificationError> {
-        let deserialized: Self = serde_json::from_value(request.into_json())?;
-        Ok(deserialized)
-    }
-}
+/// This is a type alias for [`proto::TypedVerifyRequest`] with version 2.
+pub type VerifyRequest<TPayload, TRequirements> =
+    proto::TypedVerifyRequest<2, TPayload, TRequirements>;
 
 /// A signed payment authorization from the buyer (V2 format).
 ///

@@ -1,6 +1,6 @@
 use r402::chain::{ChainId, ChainProviderOps};
-use r402::proto::PaymentVerificationError;
 use r402::facilitator::FacilitatorError;
+use r402::proto::PaymentVerificationError;
 use solana_account::Account;
 use solana_client::client_error::{ClientError, ClientErrorKind};
 use solana_client::nonblocking::pubsub_client::PubsubClient;

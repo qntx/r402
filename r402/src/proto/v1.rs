@@ -46,60 +46,9 @@ pub type SettleResponse = proto::SettleResponse;
 /// Request to verify a V1 payment.
 ///
 /// Contains the payment payload and requirements for verification.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VerifyRequest<TPayload, TRequirements> {
-    /// Protocol version (always 1).
-    pub x402_version: X402Version1,
-    /// The signed payment authorization.
-    pub payment_payload: TPayload,
-    /// The payment requirements to verify against.
-    pub payment_requirements: TRequirements,
-}
-
-impl<TPayload, TRequirements> VerifyRequest<TPayload, TRequirements>
-where
-    Self: DeserializeOwned,
-{
-    /// Deserializes a V1 verify request from a protocol-level request.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
-    pub fn from_proto(
-        request: proto::VerifyRequest,
-    ) -> Result<Self, proto::PaymentVerificationError> {
-        let deserialized: Self = serde_json::from_value(request.into_json())?;
-        Ok(deserialized)
-    }
-
-    /// Deserializes a V1 verify request from a protocol-level settle request.
-    ///
-    /// Settlement reuses the same wire format as verification.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
-    pub fn from_settle(
-        request: proto::SettleRequest,
-    ) -> Result<Self, proto::PaymentVerificationError> {
-        let deserialized: Self = serde_json::from_value(request.into_json())?;
-        Ok(deserialized)
-    }
-}
-
-impl<TPayload, TRequirements> TryInto<proto::VerifyRequest>
-    for VerifyRequest<TPayload, TRequirements>
-where
-    TPayload: Serialize,
-    TRequirements: Serialize,
-{
-    type Error = serde_json::Error;
-    fn try_into(self) -> Result<proto::VerifyRequest, Self::Error> {
-        let json = serde_json::to_value(self)?;
-        Ok(proto::VerifyRequest(json))
-    }
-}
+/// This is a type alias for [`proto::TypedVerifyRequest`] with version 1.
+pub type VerifyRequest<TPayload, TRequirements> =
+    proto::TypedVerifyRequest<1, TPayload, TRequirements>;
 
 /// A signed payment authorization from the buyer.
 ///

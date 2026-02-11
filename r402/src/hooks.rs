@@ -315,9 +315,8 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move { self.inner.supported().await })
     }
 }

@@ -32,9 +32,9 @@ pub use verify::{
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
 use r402::chain::ChainProviderOps;
+use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::{v1, v2};
-use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::scheme::{SchemeHandlerBuilder, X402SchemeId};
 use r402::timestamp::UnixTimestamp;
 use std::collections::HashMap;
@@ -221,9 +221,8 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = {
@@ -379,9 +378,8 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = vec![proto::SupportedPaymentKind {
