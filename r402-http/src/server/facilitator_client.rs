@@ -403,43 +403,12 @@ impl FacilitatorClient {
         T: serde::Serialize + Sync + ?Sized,
         R: serde::de::DeserializeOwned,
     {
-        let mut req = self.client.post(url.clone()).json(payload);
-        for (key, value) in &self.headers {
-            req = req.header(key, value);
-        }
-        if let Some(timeout) = self.timeout {
-            req = req.timeout(timeout);
-        }
-        let http_response = req
-            .send()
-            .await
-            .map_err(|e| FacilitatorClientError::Http { context, source: e })?;
-
-        let result = if http_response.status() == StatusCode::OK {
-            http_response
-                .json::<R>()
-                .await
-                .map_err(|e| FacilitatorClientError::JsonDeserialization { context, source: e })
-        } else {
-            let status = http_response.status();
-            let body = http_response
-                .text()
-                .await
-                .map_err(|e| FacilitatorClientError::ResponseBodyRead { context, source: e })?;
-            Err(FacilitatorClientError::HttpStatus {
-                context,
-                status,
-                body,
-            })
-        };
-
-        record_result_on_span(&result);
-
-        result
+        let req = self.client.post(url.clone()).json(payload);
+        self.send_and_parse(req, context).await
     }
 
-    /// Generic GET helper that handles JSON serialization, error mapping,
-    /// timeout application, and telemetry integration.
+    /// Generic GET helper that handles error mapping, timeout application,
+    /// and telemetry integration.
     ///
     /// `context` is a human-readable identifier used in tracing and error messages (e.g. `"GET /supported"`).
     async fn get_json<R>(
@@ -450,7 +419,19 @@ impl FacilitatorClient {
     where
         R: serde::de::DeserializeOwned,
     {
-        let mut req = self.client.get(url.clone());
+        let req = self.client.get(url.clone());
+        self.send_and_parse(req, context).await
+    }
+
+    /// Applies headers, timeout, sends the request, and parses the JSON response.
+    async fn send_and_parse<R>(
+        &self,
+        mut req: reqwest::RequestBuilder,
+        context: &'static str,
+    ) -> Result<R, FacilitatorClientError>
+    where
+        R: serde::de::DeserializeOwned,
+    {
         for (key, value) in &self.headers {
             req = req.header(key, value);
         }
