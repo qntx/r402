@@ -6,7 +6,7 @@
 //! and [`v2`] sub-modules.
 
 use alloy_primitives::{Address, B256, Bytes, address};
-use r402::timestamp::UnixTimestamp;
+use r402::proto::UnixTimestamp;
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(feature = "facilitator", feature = "client"))]

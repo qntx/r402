@@ -4,7 +4,7 @@
 //! and payment selection for automatic payment handling.
 
 use http::{Extensions, HeaderMap, StatusCode};
-use r402::encoding::Base64Bytes;
+use r402::proto::Base64Bytes;
 use r402::proto;
 use r402::proto::{v1, v2};
 use r402::scheme::{

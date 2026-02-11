@@ -31,10 +31,15 @@ use std::str::FromStr;
 use crate::chain::ChainId;
 use crate::scheme::SchemeHandlerSlug;
 
+mod encoding;
 mod error;
+mod timestamp;
 pub mod v1;
 pub mod v2;
 mod version;
+
+pub use encoding::Base64Bytes;
+pub use timestamp::UnixTimestamp;
 
 pub use error::*;
 pub use version::Version;

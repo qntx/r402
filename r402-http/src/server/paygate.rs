@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tower::Service;
 use url::Url;
 
-use r402::encoding::Base64Bytes;
+use r402::proto::Base64Bytes;
 #[cfg(feature = "telemetry")]
 use tracing::Instrument;
 #[cfg(feature = "telemetry")]

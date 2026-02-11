@@ -36,7 +36,7 @@ use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::{v1, v2};
 use r402::scheme::{SchemeHandlerBuilder, SchemeId};
-use r402::timestamp::UnixTimestamp;
+use r402::proto::UnixTimestamp;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;

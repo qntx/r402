@@ -17,13 +17,11 @@
 //!
 //! - [`amount`] - Human-readable currency amount parsing
 //! - [`chain`] - Blockchain identifiers and provider abstractions (CAIP-2 chain IDs)
-//! - [`encoding`] - Base64 encoding/decoding utilities
 //! - [`facilitator`] - Core trait for payment verification and settlement
 //! - [`hooks`] - Lifecycle hooks for facilitator verify/settle operations
 //! - [`networks`] - Registry of well-known blockchain networks
-//! - [`proto`] - Wire format types for protocol messages (V1 and V2)
+//! - [`proto`] - Wire format types, encoding utilities, and timestamps
 //! - [`scheme`] - Payment scheme system for extensible payment methods
-//! - [`timestamp`] - Unix timestamp utilities for payment authorization windows
 //!
 //! # Protocol Versions
 //!
@@ -39,18 +37,7 @@
 pub mod amount;
 pub mod chain;
 pub mod facilitator;
-pub mod helper;
 pub mod hooks;
 pub mod networks;
 pub mod proto;
 pub mod scheme;
-
-/// Backward-compatible re-export of [`util::Base64Bytes`].
-pub mod encoding {
-    pub use crate::helper::Base64Bytes;
-}
-
-/// Backward-compatible re-export of [`util::UnixTimestamp`].
-pub mod timestamp {
-    pub use crate::helper::UnixTimestamp;
-}
