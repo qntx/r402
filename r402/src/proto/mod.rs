@@ -477,6 +477,8 @@ pub enum SettleResponse {
         reason: String,
         /// Optional human-readable description of the failure.
         message: Option<String>,
+        /// The payer address, if identifiable.
+        payer: Option<String>,
         /// The network where settlement was attempted.
         network: String,
     },
@@ -528,12 +530,13 @@ impl From<SettleResponse> for SettleResponseWire {
             SettleResponse::Error {
                 reason,
                 message,
+                payer,
                 network,
             } => Self {
                 success: false,
                 error_reason: Some(reason),
                 error_message: message,
-                payer: None,
+                payer,
                 transaction: None,
                 network,
                 extensions: None,
@@ -562,6 +565,7 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
             Ok(Self::Error {
                 reason,
                 message: wire.error_message,
+                payer: wire.payer,
                 network: wire.network,
             })
         }

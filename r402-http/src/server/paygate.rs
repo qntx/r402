@@ -241,7 +241,7 @@ where
             };
 
             let mut res = response;
-            res.headers_mut().insert("X-Payment-Response", header_value);
+            res.headers_mut().insert("Payment-Response", header_value);
             Ok(res.into_response())
         } else {
             #[cfg(feature = "telemetry")]
@@ -281,7 +281,7 @@ where
             let header_value = settlement_to_header(settlement)?;
 
             let mut res = response;
-            res.headers_mut().insert("X-Payment-Response", header_value);
+            res.headers_mut().insert("Payment-Response", header_value);
             Ok(res.into_response())
         }
     }
