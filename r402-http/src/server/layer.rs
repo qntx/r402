@@ -49,12 +49,33 @@ use super::paygate::{
 ///
 /// Create a single instance per application and use it to build payment layers
 /// for protected routes.
-#[derive(Clone, Debug)]
 pub struct X402Middleware<F> {
     facilitator: F,
     base_url: Option<Url>,
     settle_before_execution: bool,
-    hooks: Arc<PaygateHooks>,
+    hooks: Arc<[Arc<dyn PaygateHooks>]>,
+}
+
+impl<F: Clone> Clone for X402Middleware<F> {
+    fn clone(&self) -> Self {
+        Self {
+            facilitator: self.facilitator.clone(),
+            base_url: self.base_url.clone(),
+            settle_before_execution: self.settle_before_execution,
+            hooks: Arc::clone(&self.hooks),
+        }
+    }
+}
+
+impl<F: std::fmt::Debug> std::fmt::Debug for X402Middleware<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("X402Middleware")
+            .field("facilitator", &self.facilitator)
+            .field("base_url", &self.base_url)
+            .field("settle_before_execution", &self.settle_before_execution)
+            .field("hooks", &format!("[{} hooks]", self.hooks.len()))
+            .finish()
+    }
 }
 
 impl<F> X402Middleware<F> {
@@ -77,7 +98,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             facilitator: Arc::new(facilitator),
             base_url: None,
             settle_before_execution: false,
-            hooks: Arc::new(PaygateHooks::default()),
+            hooks: Arc::from([]),
         }
     }
 
@@ -92,7 +113,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             facilitator: Arc::new(facilitator),
             base_url: None,
             settle_before_execution: false,
-            hooks: Arc::new(PaygateHooks::default()),
+            hooks: Arc::from([]),
         })
     }
 
@@ -173,14 +194,18 @@ where
         this
     }
 
-    /// Sets the lifecycle hooks for the payment gate.
+    /// Adds a lifecycle hook for the payment gate.
     ///
     /// Hooks allow intercepting verify and settle operations for logging,
-    /// custom validation, or error recovery.
+    /// custom validation, or error recovery. Multiple hooks are executed
+    /// in registration order.
     #[must_use]
-    pub fn with_hooks(&self, hooks: PaygateHooks) -> Self {
+    pub fn with_hook(&self, hook: impl PaygateHooks + 'static) -> Self {
         let mut this = self.clone();
-        this.hooks = Arc::new(hooks);
+        let mut hooks = (*this.hooks).to_vec();
+        let hook: Arc<dyn PaygateHooks> = Arc::new(hook);
+        hooks.push(hook);
+        this.hooks = Arc::from(hooks);
         this
     }
 }
@@ -244,7 +269,7 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     base_url: Option<Arc<Url>>,
     price_source: TSource,
     resource: Arc<ResourceInfoBuilder>,
-    hooks: Arc<PaygateHooks>,
+    hooks: Arc<[Arc<dyn PaygateHooks>]>,
 }
 
 impl<TPriceTag, TFacilitator> X402LayerBuilder<StaticPriceTags<TPriceTag>, TFacilitator>
@@ -341,7 +366,7 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     /// Resource information
     resource: Arc<ResourceInfoBuilder>,
     /// Lifecycle hooks
-    hooks: Arc<PaygateHooks>,
+    hooks: Arc<[Arc<dyn PaygateHooks>]>,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }

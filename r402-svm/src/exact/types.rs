@@ -194,8 +194,8 @@ impl TransactionInt {
         let bytes =
             bincode::serialize(&self.inner).map_err(|e| TransactionToB64Error(format!("{e}")))?;
         let base64_bytes = Base64Bytes::encode(bytes);
-        let string = String::from_utf8(base64_bytes.0.into_owned())
-            .map_err(|e| TransactionToB64Error(format!("{e}")))?;
+        let string =
+            String::from_utf8(base64_bytes.0).map_err(|e| TransactionToB64Error(format!("{e}")))?;
         Ok(string)
     }
 }

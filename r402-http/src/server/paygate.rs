@@ -33,11 +33,10 @@ use tracing::Instrument;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
+use r402::hooks::{FailureRecovery, HookDecision};
+
 use super::error::{PaygateError, VerificationError};
-use super::hooks::{
-    PaygateHooks, SettleContext, SettleFailureContext, SettleResultContext, VerifyContext,
-    VerifyFailureContext, VerifyResultContext,
-};
+use super::hooks::{PaygateHooks, SettleContext, VerifyContext};
 
 /// Builder for resource information that can be used with both V1 and V2 protocols.
 #[derive(Debug, Clone)]
@@ -366,8 +365,10 @@ pub struct Paygate<TPriceTag, TFacilitator> {
     pub accepts: Arc<Vec<TPriceTag>>,
     /// Resource information for the protected endpoint
     pub resource: v2::ResourceInfo,
-    /// Lifecycle hooks for verify/settle operations
-    pub hooks: Arc<PaygateHooks>,
+    /// Lifecycle hooks for verify/settle operations.
+    ///
+    /// Hooks are executed in order; the first abort or recovery wins.
+    pub hooks: Arc<[Arc<dyn PaygateHooks>]>,
 }
 
 impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {
@@ -496,6 +497,14 @@ where
 
             let settlement = self.settle_payment(verify_request.into()).await?;
 
+            if let proto::SettleResponse::Error {
+                reason, message, ..
+            } = &settlement
+            {
+                let detail = message.as_deref().unwrap_or(reason.as_str());
+                return Err(PaygateError::Settlement(detail.to_owned()));
+            }
+
             let header_value = settlement_to_header(settlement)?;
 
             // Settlement succeeded, now execute the request
@@ -528,6 +537,14 @@ where
 
             let settlement = self.settle_payment(verify_request.into()).await?;
 
+            if let proto::SettleResponse::Error {
+                reason, message, ..
+            } = &settlement
+            {
+                let detail = message.as_deref().unwrap_or(reason.as_str());
+                return Err(PaygateError::Settlement(detail.to_owned()));
+            }
+
             let header_value = settlement_to_header(settlement)?;
 
             let mut res = response;
@@ -545,48 +562,39 @@ where
         &self,
         verify_request: proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, VerificationError> {
-        let hook_ctx = VerifyContext {
+        let ctx = VerifyContext {
             request: verify_request.clone(),
         };
 
-        // Execute before-verify hooks
-        for hook in &self.hooks.before_verify {
-            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
-                && result.abort
-            {
-                return Err(VerificationError::VerificationFailed(result.reason));
+        // Phase 1: Before hooks — first abort wins
+        for hook in self.hooks.iter() {
+            if let HookDecision::Abort { reason, .. } = hook.before_verify(&ctx).await {
+                return Err(VerificationError::VerificationFailed(reason));
             }
         }
 
-        let verify_result = self
+        // Phase 2: Execute inner facilitator
+        match self
             .facilitator
             .verify(verify_request)
             .await
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")));
-
-        match verify_result {
+            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))
+        {
             Ok(response) => {
-                // Execute after-verify hooks (errors logged, not propagated)
-                let result_ctx = VerifyResultContext {
-                    ctx: hook_ctx,
-                    result: response.clone(),
-                };
-                for hook in &self.hooks.after_verify {
-                    let _ = hook(result_ctx.clone()).await;
+                // Phase 3a: After hooks (fire-and-forget)
+                for hook in self.hooks.iter() {
+                    hook.after_verify(&ctx, &response).await;
                 }
                 Ok(response)
             }
             Err(err) => {
-                // Execute on-verify-failure hooks (may recover)
-                let failure_ctx = VerifyFailureContext {
-                    ctx: hook_ctx,
-                    error: err.to_string(),
-                };
-                for hook in &self.hooks.on_verify_failure {
-                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
-                        && result.recovered
+                // Phase 3b: Failure hooks — first recovery wins
+                let err_msg = err.to_string();
+                for hook in self.hooks.iter() {
+                    if let FailureRecovery::Recovered(response) =
+                        hook.on_verify_failure(&ctx, &err_msg).await
                     {
-                        return Ok(result.result);
+                        return Ok(response);
                     }
                 }
                 Err(err)
@@ -603,48 +611,39 @@ where
         &self,
         settle_request: proto::SettleRequest,
     ) -> Result<proto::SettleResponse, PaygateError> {
-        let hook_ctx = SettleContext {
+        let ctx = SettleContext {
             request: settle_request.clone(),
         };
 
-        // Execute before-settle hooks
-        for hook in &self.hooks.before_settle {
-            if let Ok(Some(result)) = hook(hook_ctx.clone()).await
-                && result.abort
-            {
-                return Err(PaygateError::Settlement(result.reason));
+        // Phase 1: Before hooks — first abort wins
+        for hook in self.hooks.iter() {
+            if let HookDecision::Abort { reason, .. } = hook.before_settle(&ctx).await {
+                return Err(PaygateError::Settlement(reason));
             }
         }
 
-        let settle_result = self
+        // Phase 2: Execute inner facilitator
+        match self
             .facilitator
             .settle(settle_request)
             .await
-            .map_err(|e| PaygateError::Settlement(format!("{e}")));
-
-        match settle_result {
+            .map_err(|e| PaygateError::Settlement(format!("{e}")))
+        {
             Ok(response) => {
-                // Execute after-settle hooks (errors logged, not propagated)
-                let result_ctx = SettleResultContext {
-                    ctx: hook_ctx,
-                    result: response.clone(),
-                };
-                for hook in &self.hooks.after_settle {
-                    let _ = hook(result_ctx.clone()).await;
+                // Phase 3a: After hooks (fire-and-forget)
+                for hook in self.hooks.iter() {
+                    hook.after_settle(&ctx, &response).await;
                 }
                 Ok(response)
             }
             Err(err) => {
-                // Execute on-settle-failure hooks (may recover)
-                let failure_ctx = SettleFailureContext {
-                    ctx: hook_ctx,
-                    error: err.to_string(),
-                };
-                for hook in &self.hooks.on_settle_failure {
-                    if let Ok(Some(result)) = hook(failure_ctx.clone()).await
-                        && result.recovered
+                // Phase 3b: Failure hooks — first recovery wins
+                let err_msg = err.to_string();
+                for hook in self.hooks.iter() {
+                    if let FailureRecovery::Recovered(response) =
+                        hook.on_settle_failure(&ctx, &err_msg).await
                     {
-                        return Ok(result.result);
+                        return Ok(response);
                     }
                 }
                 Err(err)

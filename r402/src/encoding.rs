@@ -5,18 +5,16 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
-use std::borrow::Cow;
 use std::fmt::Display;
 
 /// A wrapper for base64-encoded byte data.
 ///
 /// This type holds bytes that represent base64-encoded data and provides
-/// methods for encoding and decoding. It uses copy-on-write semantics
-/// to avoid unnecessary allocations.
+/// methods for encoding and decoding.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Base64Bytes<'a>(pub Cow<'a, [u8]>);
+pub struct Base64Bytes(pub Vec<u8>);
 
-impl Base64Bytes<'_> {
+impl Base64Bytes {
     /// Decodes the base64 string bytes to raw binary data.
     ///
     /// # Errors
@@ -27,26 +25,26 @@ impl Base64Bytes<'_> {
     }
 
     /// Encodes raw binary data into base64 string bytes.
-    pub fn encode<T: AsRef<[u8]>>(input: T) -> Base64Bytes<'static> {
+    pub fn encode<T: AsRef<[u8]>>(input: T) -> Self {
         let encoded = b64.encode(input.as_ref());
-        Base64Bytes(Cow::Owned(encoded.into_bytes()))
+        Self(encoded.into_bytes())
     }
 }
 
-impl AsRef<[u8]> for Base64Bytes<'_> {
+impl AsRef<[u8]> for Base64Bytes {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        &self.0
     }
 }
 
-impl<'a> From<&'a [u8]> for Base64Bytes<'a> {
-    fn from(slice: &'a [u8]) -> Self {
-        Base64Bytes(Cow::Borrowed(slice))
+impl From<&[u8]> for Base64Bytes {
+    fn from(slice: &[u8]) -> Self {
+        Self(slice.to_vec())
     }
 }
 
-impl Display for Base64Bytes<'_> {
+impl Display for Base64Bytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", String::from_utf8_lossy(self.0.as_ref()))
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
     }
 }
