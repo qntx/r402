@@ -52,7 +52,7 @@ pub fn solana_fee_payer_enricher(
         .kinds
         .iter()
         .find(|kind| {
-            v1::X402Version1 == kind.x402_version
+            v1::V1 == kind.x402_version
                 && kind.scheme == ExactScheme.to_string()
                 && kind.network == price_tag.network
         })
@@ -101,7 +101,7 @@ pub fn solana_fee_payer_enricher_v2(
         .kinds
         .iter()
         .find(|kind| {
-            v2::X402Version2 == kind.x402_version
+            v2::V2 == kind.x402_version
                 && kind.scheme == ExactScheme.to_string()
                 && kind.network == price_tag.requirements.network.to_string()
         })

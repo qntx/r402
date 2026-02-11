@@ -230,7 +230,7 @@ where
                 let network = crate::networks::evm_network_registry().name_by_chain_id(&chain_id);
                 if let Some(network) = network {
                     kinds.push(proto::SupportedPaymentKind {
-                        x402_version: v1::X402Version1.into(),
+                        x402_version: v1::V1.into(),
                         scheme: ExactScheme.to_string(),
                         network: network.to_string(),
                         extra: None,
@@ -384,7 +384,7 @@ where
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = vec![proto::SupportedPaymentKind {
-                x402_version: v2::X402Version2.into(),
+                x402_version: v2::V2.into(),
                 scheme: ExactScheme.to_string(),
                 network: chain_id.into(),
                 extra: None,

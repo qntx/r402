@@ -24,65 +24,21 @@ use crate::chain::ChainId;
 use crate::proto;
 use crate::proto::SupportedResponse;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 
 /// Version marker for x402 protocol version 2.
 ///
-/// This type serializes as the integer `2` and is used to identify V2 protocol
-/// messages in the wire format.
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub struct X402Version2;
+/// This is a type alias for [`super::Version<2>`] that serializes as the
+/// integer `2` and rejects other values on deserialization.
+///
+/// Use the [`V2`] constant when constructing V2 protocol messages.
+pub type X402Version2 = super::Version<2>;
 
-impl X402Version2 {
-    /// The numeric value representing protocol version 2.
-    pub const VALUE: u8 = 2;
-}
-
-impl PartialEq<u8> for X402Version2 {
-    fn eq(&self, other: &u8) -> bool {
-        *other == Self::VALUE
-    }
-}
-
-impl From<X402Version2> for u8 {
-    fn from(_: X402Version2) -> Self {
-        X402Version2::VALUE
-    }
-}
-
-impl Serialize for X402Version2 {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(Self::VALUE)
-    }
-}
-
-impl<'de> Deserialize<'de> for X402Version2 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let num = u8::deserialize(deserializer)?;
-        if num == Self::VALUE {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected version {}, got {}",
-                Self::VALUE,
-                num
-            )))
-        }
-    }
-}
-
-impl Display for X402Version2 {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Self::VALUE)
-    }
-}
+/// Convenience constant for constructing V2 protocol messages.
+pub const V2: X402Version2 = super::Version;
 
 /// Response from a V2 payment verification request.
 ///
@@ -281,7 +237,7 @@ pub struct PriceTag {
 }
 
 impl fmt::Debug for PriceTag {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PriceTag")
             .field("requirements", &self.requirements)
             .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))

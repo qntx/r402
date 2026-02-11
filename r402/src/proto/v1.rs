@@ -14,9 +14,8 @@
 //! - [`PriceTag`] - Builder for creating payment requirements
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -25,57 +24,14 @@ use crate::proto::SupportedResponse;
 
 /// Version marker for x402 protocol version 1.
 ///
-/// This type serializes as the integer `1` and is used to identify V1 protocol
-/// messages in the wire format.
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub struct X402Version1;
+/// This is a type alias for [`super::Version<1>`] that serializes as the
+/// integer `1` and rejects other values on deserialization.
+///
+/// Use the [`V1`] constant when constructing V1 protocol messages.
+pub type X402Version1 = super::Version<1>;
 
-impl X402Version1 {
-    /// The numeric value representing protocol version 1.
-    pub const VALUE: u8 = 1;
-}
-
-impl PartialEq<u8> for X402Version1 {
-    fn eq(&self, other: &u8) -> bool {
-        *other == Self::VALUE
-    }
-}
-
-impl From<X402Version1> for u8 {
-    fn from(_: X402Version1) -> Self {
-        X402Version1::VALUE
-    }
-}
-
-impl Serialize for X402Version1 {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u8(Self::VALUE)
-    }
-}
-
-impl<'de> Deserialize<'de> for X402Version1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let num = u8::deserialize(deserializer)?;
-        if num == Self::VALUE {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom(format!(
-                "expected version {}, got {}",
-                Self::VALUE,
-                num
-            )))
-        }
-    }
-}
-
-impl Display for X402Version1 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Self::VALUE)
-    }
-}
+/// Convenience constant for constructing V1 protocol messages.
+pub const V1: X402Version1 = super::Version;
 
 /// Response from a V1 payment verification request.
 ///

@@ -20,7 +20,6 @@
 //! - [`encoding`] - Base64 encoding/decoding utilities
 //! - [`facilitator`] - Core trait for payment verification and settlement
 //! - [`hooks`] - Lifecycle hooks for facilitator verify/settle operations
-//! - [`lit_str`] - Compile-time string literal type generation macro
 //! - [`networks`] - Registry of well-known blockchain networks
 //! - [`proto`] - Wire format types for protocol messages (V1 and V2)
 //! - [`scheme`] - Payment scheme system for extensible payment methods
@@ -42,7 +41,6 @@ pub mod chain;
 pub mod encoding;
 pub mod facilitator;
 pub mod hooks;
-pub mod lit_str;
 pub mod networks;
 pub mod proto;
 pub mod scheme;

@@ -13,8 +13,8 @@
 
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
-use r402::proto::v1::X402Version1;
-use r402::proto::v2::{ResourceInfo, X402Version2};
+use r402::proto::v1;
+use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::X402SchemeId;
 use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
@@ -420,7 +420,7 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1Pay
             .await?;
 
             let payload = types::v1::PaymentPayload {
-                x402_version: X402Version1,
+                x402_version: v1::V1,
                 scheme: ExactScheme,
                 network: self.requirements.network.clone(),
                 payload: ExactSolanaPayload {
@@ -538,7 +538,7 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2Pay
             .await?;
 
             let payload = types::v2::PaymentPayload {
-                x402_version: X402Version2,
+                x402_version: v2::V2,
                 accepted: self.requirements.clone(),
                 resource: Some(self.resource.clone()),
                 payload: ExactSolanaPayload {

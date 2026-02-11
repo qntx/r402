@@ -4,7 +4,6 @@
 //! on Solana, along with version-specific type aliases in the [`v1`] and
 //! [`v2`] sub-modules.
 
-use r402::lit_str;
 use serde::{Deserialize, Serialize};
 use solana_pubkey::{Pubkey, pubkey};
 use std::sync::LazyLock;
@@ -28,7 +27,57 @@ use solana_signer::Signer;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_transaction::versioned::VersionedTransaction;
 
-lit_str!(ExactScheme, "exact");
+/// A unit struct representing the string literal "exact".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExactScheme;
+
+impl ExactScheme {
+    /// The string literal value: `"exact"`.
+    pub const VALUE: &'static str = "exact";
+}
+
+impl AsRef<str> for ExactScheme {
+    fn as_ref(&self) -> &str {
+        Self::VALUE
+    }
+}
+
+impl std::str::FromStr for ExactScheme {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == Self::VALUE {
+            Ok(Self)
+        } else {
+            Err(format!("expected '{}', got '{s}'", Self::VALUE))
+        }
+    }
+}
+
+impl std::fmt::Display for ExactScheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(Self::VALUE)
+    }
+}
+
+impl Serialize for ExactScheme {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(Self::VALUE)
+    }
+}
+
+impl<'de> Deserialize<'de> for ExactScheme {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        if s == Self::VALUE {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected '{}', got '{s}'",
+                Self::VALUE,
+            )))
+        }
+    }
+}
 
 /// Phantom Lighthouse program ID - security program injected by Phantom wallet on mainnet
 /// See: <https://github.com/coinbase/x402/issues/828>

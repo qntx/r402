@@ -9,7 +9,7 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
 use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
-use r402::proto::v1::X402Version1;
+use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::X402SchemeId;
 use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
@@ -322,7 +322,7 @@ where
             let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
 
             let payload = types::v1::PaymentPayload {
-                x402_version: X402Version1,
+                x402_version: v1::V1,
                 scheme: ExactScheme,
                 network: self.requirements.network.clone(),
                 payload: ExactPayload::Eip3009(evm_payload),
@@ -440,7 +440,7 @@ where
             };
 
             let payload = types::v2::PaymentPayload {
-                x402_version: v2::X402Version2,
+                x402_version: v2::V2,
                 accepted: self.requirements.clone(),
                 resource: self.resource_info.clone(),
                 payload: exact_payload,

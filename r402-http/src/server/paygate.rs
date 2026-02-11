@@ -162,7 +162,7 @@ impl PaygateProtocol for v1::PriceTag {
             .ok_or(VerificationError::NoPaymentMatching)?;
 
         let verify_request = v1::VerifyRequest {
-            x402_version: v1::X402Version1,
+            x402_version: v1::V1,
             payment_payload,
             payment_requirements: price_tag_to_v1_requirements_with_resource(selected, resource),
         };
@@ -185,7 +185,7 @@ impl PaygateProtocol for v1::PriceTag {
                         .iter()
                         .map(|pt| price_tag_to_v1_requirements_with_resource(pt, resource))
                         .collect(),
-                    x402_version: v1::X402Version1,
+                    x402_version: v1::V1,
                 };
                 let payment_required_response_bytes =
                     serde_json::to_vec(&payment_required_response).expect("serialization failed");
@@ -276,7 +276,7 @@ impl PaygateProtocol for v2::PriceTag {
 
         // Build the V2 verify request
         let verify_request = v2::VerifyRequest {
-            x402_version: v2::X402Version2,
+            x402_version: v2::V2,
             payment_payload,
             payment_requirements: selected.requirements.clone(),
         };
@@ -297,7 +297,7 @@ impl PaygateProtocol for v2::PriceTag {
                 let payment_required_response = v2::PaymentRequired {
                     error: Some(err.to_string()),
                     accepts: accepts.iter().map(|pt| pt.requirements.clone()).collect(),
-                    x402_version: v2::X402Version2,
+                    x402_version: v2::V2,
                     resource: resource.clone(),
                     extensions: None,
                 };
