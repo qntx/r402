@@ -290,22 +290,59 @@ pub struct ExactEvmPayment {
     pub signature: Bytes,
 }
 
-sol!(
+sol! {
+    /// Minimal ERC-3009 + ERC-20 interface for USDC-style tokens.
+    ///
+    /// Only the functions actually used by the facilitator are declared.
+    /// Overload order matters: bytes-signature variant is `_0`, (v,r,s) variant is `_1`.
+    ///
+    /// References:
+    /// - ERC-3009: <https://eips.ethereum.org/EIPS/eip-3009>
+    /// - USDC `FiatTokenV2_2`: <https://github.com/circlefin/stablecoin-evm>
     #[allow(missing_docs)]
     #[allow(clippy::too_many_arguments)]
     #[derive(Debug)]
     #[sol(rpc)]
-    IEIP3009,
-    "abi/IEIP3009.json"
-);
+    interface IEIP3009 {
+        function name() external view returns (string);
+        function version() external view returns (string);
+        function balanceOf(address account) external view returns (uint256);
+        function transferWithAuthorization(
+            address from,
+            address to,
+            uint256 value,
+            uint256 validAfter,
+            uint256 validBefore,
+            bytes32 nonce,
+            bytes signature
+        ) external;
+        function transferWithAuthorization(
+            address from,
+            address to,
+            uint256 value,
+            uint256 validAfter,
+            uint256 validBefore,
+            bytes32 nonce,
+            uint8 v,
+            bytes32 r,
+            bytes32 s
+        ) external;
+    }
+}
 
 sol! {
+    /// EIP-6492 universal signature validator interface.
+    ///
+    /// Reference: <https://eips.ethereum.org/EIPS/eip-6492>
     #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
     #[derive(Debug)]
     #[sol(rpc)]
-    Validator6492,
-    "abi/Validator6492.json"
+    interface Validator6492 {
+        function isValidSig(address signer, bytes32 hash, bytes calldata signature) external returns (bool);
+        function isValidSigWithSideEffects(address signer, bytes32 hash, bytes calldata signature) external returns (bool);
+        error ERC1271Revert(bytes error);
+        error ERC6492DeployFailed(bytes error);
+    }
 }
 
 /// Runs all V1 preconditions needed for a successful payment.
