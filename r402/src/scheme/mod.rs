@@ -19,16 +19,19 @@
 //!
 //! - [`X402SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
 //! - [`PaymentSelector`] - Chooses the best candidate ([`FirstMatch`], [`PreferChain`], [`MaxAmount`])
+//!
+//! # Hooks
+//!
+//! Use [`crate::hooks::FacilitatorHooks`] and [`crate::hooks::HookedFacilitator`]
+//! to add lifecycle hooks around verify/settle operations.
 
 mod client;
 mod handler;
-pub mod hooks;
 mod registry;
 mod server;
 
 pub use client::*;
 pub use handler::*;
-pub use hooks::{HookedSchemeHandler, SchemeHandlerHooks};
 pub use registry::*;
 pub use server::*;
 
