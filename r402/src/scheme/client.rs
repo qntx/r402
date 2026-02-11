@@ -68,7 +68,9 @@ impl PaymentCandidate {
 /// Trait for signing payment authorizations.
 pub trait PaymentCandidateSigner {
     /// Signs a payment authorization.
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>>;
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>>;
 }
 
 /// Errors that can occur during client-side payment processing.

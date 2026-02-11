@@ -545,7 +545,9 @@ impl From<SettleResponse> for SettleResponseWire {
 impl TryFrom<SettleResponseWire> for SettleResponse {
     type Error = String;
 
-    fn try_from(wire: SettleResponseWire) -> Result<Self, <Self as TryFrom<SettleResponseWire>>::Error> {
+    fn try_from(
+        wire: SettleResponseWire,
+    ) -> Result<Self, <Self as TryFrom<SettleResponseWire>>::Error> {
         if wire.success {
             let payer = wire.payer.ok_or("missing field: payer")?;
             let transaction = wire.transaction.ok_or("missing field: transaction")?;

@@ -40,10 +40,9 @@ use url::Url;
 
 use super::facilitator_client::FacilitatorClient;
 use super::hooks::PaygateHooks;
-use super::paygate::{
-    DynamicPriceTags, Paygate, PaygateProtocol, PriceTagSource, ResourceInfoBuilder,
-    StaticPriceTags,
-};
+use super::paygate::{Paygate, ResourceInfoBuilder};
+use super::price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+use super::protocol::PaygateProtocol;
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
 ///

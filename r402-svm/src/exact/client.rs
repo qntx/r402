@@ -16,7 +16,7 @@ use r402::proto::PaymentRequired;
 use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::SchemeId;
-use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, ClientError, SchemeClient};
+use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -79,10 +79,9 @@ pub async fn fetch_mint<R: RpcClientLike>(
     rpc_client: &R,
 ) -> Result<Mint, ClientError> {
     let mint_pubkey = mint_address.pubkey();
-    let account = rpc_client
-        .get_account(mint_pubkey)
-        .await
-        .map_err(|e| ClientError::SigningError(format!("failed to fetch mint {mint_pubkey}: {e}")))?;
+    let account = rpc_client.get_account(mint_pubkey).await.map_err(|e| {
+        ClientError::SigningError(format!("failed to fetch mint {mint_pubkey}: {e}"))
+    })?;
     if account.owner == spl_token::id() {
         let mint = spl_token::state::Mint::unpack(&account.data).map_err(|e| {
             ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
@@ -398,14 +397,18 @@ struct V1PayloadSigner<S, R> {
 }
 
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1PayloadSigner<S, R> {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
                 .extra
                 .as_ref()
                 .map(|extra| extra.fee_payer)
-                .ok_or_else(|| ClientError::SigningError("missing fee_payer in extra".to_string()))?;
+                .ok_or_else(|| {
+                    ClientError::SigningError("missing fee_payer in extra".to_string())
+                })?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.max_amount_required.inner();
@@ -516,14 +519,18 @@ struct V2PayloadSigner<S, R> {
 }
 
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
                 .extra
                 .as_ref()
                 .map(|extra| extra.fee_payer)
-                .ok_or_else(|| ClientError::SigningError("missing fee_payer in extra".to_string()))?;
+                .ok_or_else(|| {
+                    ClientError::SigningError("missing fee_payer in extra".to_string())
+                })?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.amount.inner();

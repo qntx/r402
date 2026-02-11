@@ -4,11 +4,11 @@
 //! and payment selection for automatic payment handling.
 
 use http::{Extensions, HeaderMap, StatusCode};
-use r402::proto::Base64Bytes;
 use r402::proto;
+use r402::proto::Base64Bytes;
 use r402::proto::{v1, v2};
 use r402::scheme::{
-    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, ClientError, SchemeClient,
+    ClientError, FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
 };
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;

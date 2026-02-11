@@ -9,11 +9,11 @@ use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
 use r402::proto::Base64Bytes;
 use r402::proto::PaymentRequired;
+use r402::proto::UnixTimestamp;
 use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::SchemeId;
-use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, ClientError, SchemeClient};
-use r402::proto::UnixTimestamp;
+use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use rand::RngExt;
 use rand::rng;
 use std::future::Future;
@@ -308,7 +308,9 @@ impl<S> PaymentCandidateSigner for V1PayloadSigner<S>
 where
     S: SignerLike + Sync,
 {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let params = Eip3009SigningParams {
                 chain_id: self.chain_reference.inner(),
@@ -407,7 +409,9 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let use_permit2 = self
                 .requirements

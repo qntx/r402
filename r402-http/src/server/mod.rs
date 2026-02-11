@@ -40,8 +40,11 @@ pub mod facilitator_client;
 pub mod hooks;
 pub mod layer;
 pub mod paygate;
+pub mod price_source;
+pub mod protocol;
 
 pub use error::{PaygateError, VerificationError};
 pub use hooks::{PaygateHooks, SettleContext, VerifyContext};
 pub use layer::{X402LayerBuilder, X402Middleware};
-pub use paygate::{DynamicPriceTags, PaygateProtocol, PriceTagSource, StaticPriceTags};
+pub use price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+pub use protocol::PaygateProtocol;
