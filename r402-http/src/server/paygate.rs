@@ -33,6 +33,8 @@ use tracing::Instrument;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
+use super::error::{PaygateError, VerificationError};
+
 /// Builder for resource information that can be used with both V1 and V2 protocols.
 #[derive(Debug, Clone)]
 pub struct ResourceInfoBuilder {
@@ -87,34 +89,6 @@ impl ResourceInfoBuilder {
             url,
         }
     }
-}
-
-/// Common verification errors shared between protocol versions.
-#[derive(Debug, thiserror::Error)]
-pub enum VerificationError {
-    /// Required payment header is missing.
-    #[error("{0} header is required")]
-    PaymentHeaderRequired(&'static str),
-    /// Payment header is present but malformed.
-    #[error("Invalid or malformed payment header")]
-    InvalidPaymentHeader,
-    /// No matching payment requirements found.
-    #[error("Unable to find matching payment requirements")]
-    NoPaymentMatching,
-    /// Verification with facilitator failed.
-    #[error("Verification failed: {0}")]
-    VerificationFailed(String),
-}
-
-/// Paygate error type that wraps verification and settlement errors.
-#[derive(Debug, thiserror::Error)]
-pub enum PaygateError {
-    /// Payment verification failed.
-    #[error(transparent)]
-    Verification(#[from] VerificationError),
-    /// On-chain settlement failed.
-    #[error("Settlement failed: {0}")]
-    Settlement(String),
 }
 
 /// Trait defining version-specific behavior for the x402 payment gate.

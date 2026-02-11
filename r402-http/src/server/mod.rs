@@ -35,9 +35,11 @@
 //! - **[`X402LayerBuilder::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
 //! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
 
+pub mod error;
 pub mod facilitator_client;
 pub mod layer;
 pub mod paygate;
 
+pub use error::{PaygateError, VerificationError};
 pub use layer::{X402LayerBuilder, X402Middleware};
 pub use paygate::{DynamicPriceTags, PaygateProtocol, PriceTagSource, StaticPriceTags};
