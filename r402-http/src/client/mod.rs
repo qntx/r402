@@ -28,8 +28,7 @@
 //! See [`X402Client::with_selector`] for custom payment selection.
 
 mod builder;
-#[allow(clippy::module_inception)]
-mod client;
+mod middleware;
 
 pub use builder::*;
-pub use client::*;
+pub use middleware::*;
