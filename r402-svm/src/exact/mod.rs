@@ -31,6 +31,9 @@ pub mod facilitator;
 #[cfg(feature = "client")]
 pub mod client;
 
+pub mod error;
+pub use error::*;
+
 pub mod types;
 pub use types::*;
 

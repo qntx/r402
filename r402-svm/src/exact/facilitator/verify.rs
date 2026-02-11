@@ -21,7 +21,8 @@ use super::config::SolanaExactFacilitatorConfig;
 use crate::chain::Address;
 use crate::chain::provider::{SolanaChainProviderError, SolanaChainProviderLike};
 use crate::exact::ATA_PROGRAM_PUBKEY;
-use crate::exact::types::{self, SolanaExactError, TransactionInt};
+use crate::exact::error::SolanaExactError;
+use crate::exact::types::{self, TransactionInt};
 
 /// Result of a successful transfer verification.
 #[derive(Debug)]

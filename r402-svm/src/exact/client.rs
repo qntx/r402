@@ -75,8 +75,7 @@ impl Mint {
 /// # Errors
 ///
 /// Returns [`X402Error`] if the mint account cannot be fetched or parsed.
-#[allow(clippy::future_not_send)]
-pub async fn fetch_mint<R: RpcClientLike>(
+pub async fn fetch_mint<R: RpcClientLike + Sync>(
     mint_address: &Address,
     rpc_client: &R,
 ) -> Result<Mint, X402Error> {
@@ -141,8 +140,7 @@ pub fn build_message_to_simulate(
 /// # Errors
 ///
 /// Returns [`X402Error`] if simulation fails.
-#[allow(clippy::future_not_send)]
-pub async fn estimate_compute_units<S: RpcClientLike>(
+pub async fn estimate_compute_units<S: RpcClientLike + Sync>(
     rpc_client: &S,
     message: &MessageV0,
 ) -> Result<u32, X402Error> {
@@ -176,8 +174,7 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
 /// # Errors
 ///
 /// Returns [`X402Error`] if fee retrieval fails.
-#[allow(clippy::future_not_send)]
-pub async fn get_priority_fee_micro_lamports<S: RpcClientLike>(
+pub async fn get_priority_fee_micro_lamports<S: RpcClientLike + Sync>(
     rpc_client: &S,
     writeable_accounts: &[Pubkey],
 ) -> Result<u64, X402Error> {
@@ -222,8 +219,7 @@ pub fn update_or_append_set_compute_unit_limit(ixs: &mut Vec<Instruction>, units
 /// # Errors
 ///
 /// Returns [`X402Error`] if transaction building or signing fails.
-#[allow(clippy::future_not_send)]
-pub async fn build_signed_transfer_transaction<S: Signer, R: RpcClientLike>(
+pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLike + Sync>(
     signer: &S,
     rpc_client: &R,
     fee_payer: &Pubkey,
@@ -397,7 +393,6 @@ where
     }
 }
 
-#[allow(dead_code, missing_debug_implementations)]
 struct V1PayloadSigner<S, R> {
     signer: S,
     rpc_client: R,
