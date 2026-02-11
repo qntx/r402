@@ -733,3 +733,332 @@ pub fn usdm_evm_deployment(chain: &Eip155ChainReference) -> Option<&'static Eip1
         .iter()
         .find(|d| d.chain_reference == *chain)
 }
+
+/// Ergonomic accessors for USDC token deployments on well-known EVM chains.
+///
+/// Provides named methods for each supported chain, returning a static
+/// reference to the deployment metadata. Combine with
+/// [`Eip155TokenDeployment::amount`] for a fluent pricing API:
+///
+/// ```ignore
+/// use r402_evm::{Eip155Exact, USDC};
+///
+/// let tag = Eip155Exact::price_tag(pay_to, USDC::base().amount(1_000_000u64));
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct USDC;
+
+#[allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+impl USDC {
+    /// Looks up a USDC deployment by chain reference.
+    ///
+    /// Returns `None` if the chain is not in the built-in deployment table.
+    #[must_use]
+    pub fn on(chain: &Eip155ChainReference) -> Option<&'static Eip155TokenDeployment> {
+        usdc_evm_deployment(chain)
+    }
+
+    /// Returns all known USDC deployments.
+    #[must_use]
+    pub fn all() -> &'static [Eip155TokenDeployment] {
+        usdc_evm_deployments()
+    }
+
+    /// USDC on Ethereum mainnet (eip155:1).
+    #[must_use]
+    pub fn ethereum() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(1))
+            .expect("built-in USDC deployment for Ethereum missing")
+    }
+
+    /// USDC on Ethereum Sepolia testnet (eip155:11155111).
+    #[must_use]
+    pub fn ethereum_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(11_155_111))
+            .expect("built-in USDC deployment for Ethereum Sepolia missing")
+    }
+
+    /// USDC on Base mainnet (eip155:8453).
+    #[must_use]
+    pub fn base() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(8453))
+            .expect("built-in USDC deployment for Base missing")
+    }
+
+    /// USDC on Base Sepolia testnet (eip155:84532).
+    #[must_use]
+    pub fn base_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(84532))
+            .expect("built-in USDC deployment for Base Sepolia missing")
+    }
+
+    /// USDC on Arbitrum One (eip155:42161).
+    #[must_use]
+    pub fn arbitrum() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(42161))
+            .expect("built-in USDC deployment for Arbitrum missing")
+    }
+
+    /// USDC on Arbitrum Sepolia testnet (eip155:421614).
+    #[must_use]
+    pub fn arbitrum_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(421_614))
+            .expect("built-in USDC deployment for Arbitrum Sepolia missing")
+    }
+
+    /// USDC on OP Mainnet (eip155:10).
+    #[must_use]
+    pub fn optimism() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(10))
+            .expect("built-in USDC deployment for Optimism missing")
+    }
+
+    /// USDC on OP Sepolia testnet (eip155:11155420).
+    #[must_use]
+    pub fn optimism_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(11_155_420))
+            .expect("built-in USDC deployment for OP Sepolia missing")
+    }
+
+    /// USDC on Polygon PoS (eip155:137).
+    #[must_use]
+    pub fn polygon() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(137))
+            .expect("built-in USDC deployment for Polygon missing")
+    }
+
+    /// USDC on Polygon Amoy testnet (eip155:80002).
+    #[must_use]
+    pub fn polygon_amoy() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(80002))
+            .expect("built-in USDC deployment for Polygon Amoy missing")
+    }
+
+    /// USDC on Avalanche C-Chain (eip155:43114).
+    #[must_use]
+    pub fn avalanche() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(43114))
+            .expect("built-in USDC deployment for Avalanche missing")
+    }
+
+    /// USDC on Avalanche Fuji testnet (eip155:43113).
+    #[must_use]
+    pub fn avalanche_fuji() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(43113))
+            .expect("built-in USDC deployment for Avalanche Fuji missing")
+    }
+
+    /// USDC on Celo (eip155:42220).
+    #[must_use]
+    pub fn celo() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(42220))
+            .expect("built-in USDC deployment for Celo missing")
+    }
+
+    /// USDC on Celo Sepolia testnet (eip155:11142220).
+    #[must_use]
+    pub fn celo_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(11_142_220))
+            .expect("built-in USDC deployment for Celo Sepolia missing")
+    }
+
+    /// USDC on Sonic (eip155:146).
+    #[must_use]
+    pub fn sonic() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(146))
+            .expect("built-in USDC deployment for Sonic missing")
+    }
+
+    /// USDC on Sonic Blaze testnet (eip155:57054).
+    #[must_use]
+    pub fn sonic_blaze() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(57054))
+            .expect("built-in USDC deployment for Sonic Blaze missing")
+    }
+
+    /// USDC on Unichain (eip155:130).
+    #[must_use]
+    pub fn unichain() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(130))
+            .expect("built-in USDC deployment for Unichain missing")
+    }
+
+    /// USDC on Unichain Sepolia testnet (eip155:1301).
+    #[must_use]
+    pub fn unichain_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(1301))
+            .expect("built-in USDC deployment for Unichain Sepolia missing")
+    }
+
+    /// USDC on World Chain (eip155:480).
+    #[must_use]
+    pub fn world_chain() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(480))
+            .expect("built-in USDC deployment for World Chain missing")
+    }
+
+    /// USDC on World Chain Sepolia testnet (eip155:4801).
+    #[must_use]
+    pub fn world_chain_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(4801))
+            .expect("built-in USDC deployment for World Chain Sepolia missing")
+    }
+
+    /// USDC on ZKsync Era (eip155:324).
+    #[must_use]
+    pub fn zksync() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(324))
+            .expect("built-in USDC deployment for ZKsync missing")
+    }
+
+    /// USDC on ZKsync Era Sepolia testnet (eip155:300).
+    #[must_use]
+    pub fn zksync_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(300))
+            .expect("built-in USDC deployment for ZKsync Sepolia missing")
+    }
+
+    /// USDC on Linea (eip155:59144).
+    #[must_use]
+    pub fn linea() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(59144))
+            .expect("built-in USDC deployment for Linea missing")
+    }
+
+    /// USDC on Linea Sepolia testnet (eip155:59141).
+    #[must_use]
+    pub fn linea_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(59141))
+            .expect("built-in USDC deployment for Linea Sepolia missing")
+    }
+
+    /// USDC on Ink (eip155:57073).
+    #[must_use]
+    pub fn ink() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(57073))
+            .expect("built-in USDC deployment for Ink missing")
+    }
+
+    /// USDC on Ink Sepolia testnet (eip155:763373).
+    #[must_use]
+    pub fn ink_sepolia() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(763_373))
+            .expect("built-in USDC deployment for Ink Sepolia missing")
+    }
+
+    /// USDC on Sei (eip155:1329).
+    #[must_use]
+    pub fn sei() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(1329))
+            .expect("built-in USDC deployment for Sei missing")
+    }
+
+    /// USDC on Sei testnet (eip155:1328).
+    #[must_use]
+    pub fn sei_testnet() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(1328))
+            .expect("built-in USDC deployment for Sei testnet missing")
+    }
+
+    /// USDC on HyperEVM (eip155:999).
+    #[must_use]
+    pub fn hyperevm() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(999))
+            .expect("built-in USDC deployment for HyperEVM missing")
+    }
+
+    /// USDC on HyperEVM testnet (eip155:998).
+    #[must_use]
+    pub fn hyperevm_testnet() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(998))
+            .expect("built-in USDC deployment for HyperEVM testnet missing")
+    }
+
+    /// USDC on Monad (eip155:143).
+    #[must_use]
+    pub fn monad() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(143))
+            .expect("built-in USDC deployment for Monad missing")
+    }
+
+    /// USDC on Monad testnet (eip155:10143).
+    #[must_use]
+    pub fn monad_testnet() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(10143))
+            .expect("built-in USDC deployment for Monad testnet missing")
+    }
+
+    /// USDC on Plume (eip155:98866).
+    #[must_use]
+    pub fn plume() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(98866))
+            .expect("built-in USDC deployment for Plume missing")
+    }
+
+    /// USDC on Plume testnet (eip155:98867).
+    #[must_use]
+    pub fn plume_testnet() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(98867))
+            .expect("built-in USDC deployment for Plume testnet missing")
+    }
+
+    /// USDC on Codex (eip155:81224).
+    #[must_use]
+    pub fn codex() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(81224))
+            .expect("built-in USDC deployment for Codex missing")
+    }
+
+    /// USDC on Codex testnet (eip155:812242).
+    #[must_use]
+    pub fn codex_testnet() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(812_242))
+            .expect("built-in USDC deployment for Codex testnet missing")
+    }
+
+    /// USDC on XDC Network (eip155:50).
+    #[must_use]
+    pub fn xdc() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(50))
+            .expect("built-in USDC deployment for XDC missing")
+    }
+
+    /// USDC on XDC Apothem testnet (eip155:51).
+    #[must_use]
+    pub fn xdc_apothem() -> &'static Eip155TokenDeployment {
+        usdc_evm_deployment(&Eip155ChainReference::new(51))
+            .expect("built-in USDC deployment for XDC Apothem missing")
+    }
+}
+
+/// Ergonomic accessors for USDM (`MegaUSD`) token deployments on EVM chains.
+///
+/// ```ignore
+/// use r402_evm::{Eip155Exact, USDM};
+///
+/// let tag = Eip155Exact::price_tag(pay_to, USDM::megaeth().amount(1_000_000_000_000_000_000u128));
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct USDM;
+
+#[allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+impl USDM {
+    /// Looks up a USDM deployment by chain reference.
+    #[must_use]
+    pub fn on(chain: &Eip155ChainReference) -> Option<&'static Eip155TokenDeployment> {
+        usdm_evm_deployment(chain)
+    }
+
+    /// Returns all known USDM deployments.
+    #[must_use]
+    pub fn all() -> &'static [Eip155TokenDeployment] {
+        usdm_evm_deployments()
+    }
+
+    /// USDM (MegaUSD) on MegaETH (eip155:4326).
+    #[must_use]
+    pub fn megaeth() -> &'static Eip155TokenDeployment {
+        usdm_evm_deployment(&Eip155ChainReference::new(4326))
+            .expect("built-in USDM deployment for MegaETH missing")
+    }
+}
