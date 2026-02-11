@@ -8,7 +8,7 @@ use r402::encoding::Base64Bytes;
 use r402::proto;
 use r402::proto::{v1, v2};
 use r402::scheme::{
-    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, X402Error, X402SchemeClient,
+    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, ClientError, SchemeClient,
 };
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
@@ -72,7 +72,7 @@ impl<TSelector> X402Client<TSelector> {
     #[must_use]
     pub fn register<S>(mut self, scheme: S) -> Self
     where
-        S: X402SchemeClient + 'static,
+        S: SchemeClient + 'static,
     {
         self.schemes.push(scheme);
         self
@@ -136,8 +136,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`X402Error::ParseError`] if the response cannot be parsed.
-    /// Returns [`X402Error::NoMatchingPaymentOption`] if no registered scheme
+    /// Returns [`ClientError::ParseError`] if the response cannot be parsed.
+    /// Returns [`ClientError::NoMatchingPaymentOption`] if no registered scheme
     /// can handle the payment requirements.
     ///
     /// # Panics
@@ -147,10 +147,10 @@ where
         feature = "telemetry",
         instrument(name = "x402.reqwest.make_payment_headers", skip_all, err)
     )]
-    pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, X402Error> {
+    pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, ClientError> {
         let payment_required = parse_payment_required(res)
             .await
-            .ok_or_else(|| X402Error::ParseError("Invalid 402 response".to_string()))?;
+            .ok_or_else(|| ClientError::ParseError("Invalid 402 response".to_string()))?;
 
         let hook_ctx = PaymentCreationContext {
             payment_required: payment_required.clone(),
@@ -161,7 +161,7 @@ where
             if let HookDecision::Abort { reason, .. } =
                 hook.before_payment_creation(&hook_ctx).await
             {
-                return Err(X402Error::ParseError(reason));
+                return Err(ClientError::ParseError(reason));
             }
         }
 
@@ -194,7 +194,7 @@ where
     async fn create_payment_headers_inner(
         &self,
         payment_required: &proto::PaymentRequired,
-    ) -> Result<HeaderMap, X402Error> {
+    ) -> Result<HeaderMap, ClientError> {
         let candidates = self.schemes.candidates(payment_required);
 
         // Apply policies to filter candidates
@@ -202,7 +202,7 @@ where
         for policy in &self.policies {
             filtered = policy.apply(filtered);
             if filtered.is_empty() {
-                return Err(X402Error::NoMatchingPaymentOption);
+                return Err(ClientError::NoMatchingPaymentOption);
             }
         }
 
@@ -210,7 +210,7 @@ where
         let selected = self
             .selector
             .select(&filtered)
-            .ok_or(X402Error::NoMatchingPaymentOption)?;
+            .ok_or(ClientError::NoMatchingPaymentOption)?;
 
         #[cfg(feature = "telemetry")]
         debug!(
@@ -242,11 +242,11 @@ where
 /// Internal collection of registered scheme clients.
 #[derive(Default)]
 #[allow(missing_debug_implementations)] // dyn trait objects do not implement Debug
-pub struct ClientSchemes(Vec<Arc<dyn X402SchemeClient>>);
+pub struct ClientSchemes(Vec<Arc<dyn SchemeClient>>);
 
 impl ClientSchemes {
     /// Adds a scheme client to the collection.
-    pub fn push<T: X402SchemeClient + 'static>(&mut self, client: T) {
+    pub fn push<T: SchemeClient + 'static>(&mut self, client: T) {
         self.0.push(Arc::new(client));
     }
 
@@ -315,7 +315,7 @@ where
 
         // Retry with payment
         let mut retry = retry_req.ok_or(rqm::Error::Middleware(
-            X402Error::RequestNotCloneable.into(),
+            ClientError::RequestNotCloneable.into(),
         ))?;
         retry.headers_mut().extend(headers);
 

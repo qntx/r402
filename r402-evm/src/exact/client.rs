@@ -11,8 +11,8 @@ use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
-use r402::scheme::X402SchemeId;
-use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
+use r402::scheme::SchemeId;
+use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, ClientError, SchemeClient};
 use r402::timestamp::UnixTimestamp;
 use rand::RngExt;
 use rand::rng;
@@ -92,11 +92,11 @@ pub struct Eip3009SigningParams {
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if EIP-712 signing fails.
+/// Returns [`ClientError`] if EIP-712 signing fails.
 pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     signer: &S,
     params: &Eip3009SigningParams,
-) -> Result<Eip3009Payload, X402Error> {
+) -> Result<Eip3009Payload, ClientError> {
     let (name, version) = params.extra.as_ref().map_or_else(
         || (String::new(), String::new()),
         |extra| (extra.name.clone(), extra.version.clone()),
@@ -142,7 +142,7 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     let signature = signer
         .sign_hash(&eip712_hash)
         .await
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
 
     Ok(Eip3009Payload {
         signature: signature.as_bytes().into(),
@@ -173,11 +173,11 @@ pub struct Permit2SigningParams {
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if EIP-712 signing fails.
+/// Returns [`ClientError`] if EIP-712 signing fails.
 pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
     signer: &S,
     params: &Permit2SigningParams,
-) -> Result<Permit2Payload, X402Error> {
+) -> Result<Permit2Payload, ClientError> {
     let domain = eip712_domain! {
         name: "Permit2",
         chain_id: params.chain_id,
@@ -211,7 +211,7 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
     let signature = signer
         .sign_hash(&eip712_hash)
         .await
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
 
     let authorization = Permit2Authorization {
         from: signer.address(),
@@ -252,7 +252,7 @@ impl<S> V1Eip155ExactClient<S> {
     }
 }
 
-impl<S> X402SchemeId for V1Eip155ExactClient<S> {
+impl<S> SchemeId for V1Eip155ExactClient<S> {
     fn namespace(&self) -> &str {
         V1Eip155Exact.namespace()
     }
@@ -262,7 +262,7 @@ impl<S> X402SchemeId for V1Eip155ExactClient<S> {
     }
 }
 
-impl<S> X402SchemeClient for V1Eip155ExactClient<S>
+impl<S> SchemeClient for V1Eip155ExactClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
 {
@@ -308,7 +308,7 @@ impl<S> PaymentCandidateSigner for V1PayloadSigner<S>
 where
     S: SignerLike + Sync,
 {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let params = Eip3009SigningParams {
                 chain_id: self.chain_reference.inner(),
@@ -352,7 +352,7 @@ impl<S> V2Eip155ExactClient<S> {
     }
 }
 
-impl<S> X402SchemeId for V2Eip155ExactClient<S> {
+impl<S> SchemeId for V2Eip155ExactClient<S> {
     fn namespace(&self) -> &str {
         V2Eip155Exact.namespace()
     }
@@ -362,7 +362,7 @@ impl<S> X402SchemeId for V2Eip155ExactClient<S> {
     }
 }
 
-impl<S> X402SchemeClient for V2Eip155ExactClient<S>
+impl<S> SchemeClient for V2Eip155ExactClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
 {
@@ -407,7 +407,7 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let use_permit2 = self
                 .requirements

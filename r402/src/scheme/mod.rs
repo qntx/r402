@@ -17,7 +17,7 @@
 //!
 //! # Client-Side
 //!
-//! - [`X402SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
+//! - [`SchemeClient`] - Generates [`PaymentCandidate`]s from 402 responses
 //! - [`PaymentSelector`] - Chooses the best candidate ([`FirstMatch`], [`PreferChain`], [`MaxAmount`])
 //!
 //! # Hooks
@@ -39,7 +39,7 @@ pub use server::*;
 ///
 /// Each scheme has a unique identifier composed of the protocol version,
 /// chain namespace, and scheme name.
-pub trait X402SchemeId {
+pub trait SchemeId {
     /// Returns the x402 protocol version (1 or 2).
     fn x402_version(&self) -> u8 {
         2

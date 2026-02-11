@@ -20,7 +20,7 @@
 //! - Index 1: `SetComputeUnitPrice` instruction
 //! - Index 2: `TransferChecked` instruction (SPL Token or Token-2022)
 //! - Index 3+: Additional instructions (if allowed by configuration)
-use r402::scheme::X402SchemeId;
+use r402::scheme::SchemeId;
 
 #[cfg(feature = "server")]
 pub mod server;
@@ -43,7 +43,7 @@ pub use types::*;
 #[derive(Debug, Clone, Copy)]
 pub struct V1SolanaExact;
 
-impl X402SchemeId for V1SolanaExact {
+impl SchemeId for V1SolanaExact {
     fn x402_version(&self) -> u8 {
         1
     }
@@ -64,7 +64,7 @@ impl X402SchemeId for V1SolanaExact {
 #[derive(Debug, Clone, Copy)]
 pub struct V2SolanaExact;
 
-impl X402SchemeId for V2SolanaExact {
+impl SchemeId for V2SolanaExact {
     fn namespace(&self) -> &'static str {
         "solana"
     }

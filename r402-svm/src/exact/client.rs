@@ -15,8 +15,8 @@ use r402::encoding::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
-use r402::scheme::X402SchemeId;
-use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
+use r402::scheme::SchemeId;
+use r402::scheme::{PaymentCandidate, PaymentCandidateSigner, ClientError, SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -73,19 +73,19 @@ impl Mint {
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if the mint account cannot be fetched or parsed.
+/// Returns [`ClientError`] if the mint account cannot be fetched or parsed.
 pub async fn fetch_mint<R: RpcClientLike>(
     mint_address: &Address,
     rpc_client: &R,
-) -> Result<Mint, X402Error> {
+) -> Result<Mint, ClientError> {
     let mint_pubkey = mint_address.pubkey();
     let account = rpc_client
         .get_account(mint_pubkey)
         .await
-        .map_err(|e| X402Error::SigningError(format!("failed to fetch mint {mint_pubkey}: {e}")))?;
+        .map_err(|e| ClientError::SigningError(format!("failed to fetch mint {mint_pubkey}: {e}")))?;
     if account.owner == spl_token::id() {
         let mint = spl_token::state::Mint::unpack(&account.data).map_err(|e| {
-            X402Error::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
+            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
         })?;
         Ok(Mint::Token {
             decimals: mint.decimals,
@@ -93,14 +93,14 @@ pub async fn fetch_mint<R: RpcClientLike>(
         })
     } else if account.owner == spl_token_2022::id() {
         let mint = spl_token_2022::state::Mint::unpack(&account.data).map_err(|e| {
-            X402Error::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}",))
+            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}",))
         })?;
         Ok(Mint::Token2022 {
             decimals: mint.decimals,
             token_program: spl_token_2022::id(),
         })
     } else {
-        Err(X402Error::SigningError(format!(
+        Err(ClientError::SigningError(format!(
             "failed to unpack mint {mint_pubkey}: unknown owner"
         )))
     }
@@ -110,13 +110,13 @@ pub async fn fetch_mint<R: RpcClientLike>(
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if message compilation fails.
+/// Returns [`ClientError`] if message compilation fails.
 pub fn build_message_to_simulate(
     fee_payer: Pubkey,
     transfer_instructions: &[Instruction],
     priority_micro_lamports: u64,
     recent_blockhash: Hash,
-) -> Result<(MessageV0, Vec<Instruction>), X402Error> {
+) -> Result<(MessageV0, Vec<Instruction>), ClientError> {
     let set_price = ComputeBudgetInstruction::set_compute_unit_price(priority_micro_lamports);
 
     let mut ixs = Vec::with_capacity(1 + transfer_instructions.len());
@@ -130,7 +130,7 @@ pub fn build_message_to_simulate(
         ixs_mod
     };
     let message = MessageV0::try_compile(&fee_payer, &with_cu_limit, &[], recent_blockhash)
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
     Ok((message, ixs))
 }
 
@@ -138,11 +138,11 @@ pub fn build_message_to_simulate(
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if simulation fails.
+/// Returns [`ClientError`] if simulation fails.
 pub async fn estimate_compute_units<S: RpcClientLike>(
     rpc_client: &S,
     message: &MessageV0,
-) -> Result<u32, X402Error> {
+) -> Result<u32, ClientError> {
     let message = VersionedMessage::V0(message.clone());
     let num_required_signatures = message.header().num_required_signatures;
     let tx = VersionedTransaction {
@@ -160,9 +160,9 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
             },
         )
         .await
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
     let units = sim.value.units_consumed.ok_or_else(|| {
-        X402Error::SigningError("simulation returned no units_consumed".to_string())
+        ClientError::SigningError("simulation returned no units_consumed".to_string())
     })?;
     #[allow(clippy::cast_possible_truncation)]
     Ok(units as u32)
@@ -172,15 +172,15 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if fee retrieval fails.
+/// Returns [`ClientError`] if fee retrieval fails.
 pub async fn get_priority_fee_micro_lamports<S: RpcClientLike>(
     rpc_client: &S,
     writeable_accounts: &[Pubkey],
-) -> Result<u64, X402Error> {
+) -> Result<u64, ClientError> {
     let recent_fees = rpc_client
         .get_recent_prioritization_fees(writeable_accounts)
         .await
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
     let fee = recent_fees
         .iter()
         .filter_map(|e| {
@@ -217,7 +217,7 @@ pub fn update_or_append_set_compute_unit_limit(ixs: &mut Vec<Instruction>, units
 ///
 /// # Errors
 ///
-/// Returns [`X402Error`] if transaction building or signing fails.
+/// Returns [`ClientError`] if transaction building or signing fails.
 pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLike>(
     signer: &S,
     rpc_client: &R,
@@ -225,7 +225,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
     pay_to: &Address,
     asset: &Address,
     amount: u64,
-) -> Result<String, X402Error> {
+) -> Result<String, ClientError> {
     let mint = fetch_mint(asset, rpc_client).await?;
 
     let (ata, _) = Pubkey::find_program_address(
@@ -262,7 +262,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
             amount,
             decimals,
         )
-        .map_err(|e| X402Error::SigningError(format!("{e}")))?,
+        .map_err(|e| ClientError::SigningError(format!("{e}")))?,
         Mint::Token2022 {
             decimals,
             token_program,
@@ -276,13 +276,13 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
             amount,
             decimals,
         )
-        .map_err(|e| X402Error::SigningError(format!("{e}")))?,
+        .map_err(|e| ClientError::SigningError(format!("{e}")))?,
     };
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .await
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
 
     let fee =
         get_priority_fee_micro_lamports(rpc_client, &[*fee_payer, destination_ata, source_ata])
@@ -299,7 +299,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
         final_instructions.push(cu_ix);
         final_instructions.extend(instructions);
         MessageV0::try_compile(fee_payer, &final_instructions, &[], recent_blockhash)
-            .map_err(|e| X402Error::SigningError(format!("{e:?}")))?
+            .map_err(|e| ClientError::SigningError(format!("{e:?}")))?
     };
 
     let tx = VersionedTransaction {
@@ -310,10 +310,10 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
     let tx = TransactionInt::new(tx);
     let signed = tx
         .sign_with_keypair(signer)
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
     let tx_b64 = signed
         .as_base64()
-        .map_err(|e| X402Error::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
 
     Ok(tx_b64)
 }
@@ -338,7 +338,7 @@ impl<S, R> V1SolanaExactClient<S, R> {
     }
 }
 
-impl<S, R> X402SchemeId for V1SolanaExactClient<S, R> {
+impl<S, R> SchemeId for V1SolanaExactClient<S, R> {
     fn x402_version(&self) -> u8 {
         V1SolanaExact.x402_version()
     }
@@ -352,7 +352,7 @@ impl<S, R> X402SchemeId for V1SolanaExactClient<S, R> {
     }
 }
 
-impl<S, R> X402SchemeClient for V1SolanaExactClient<S, R>
+impl<S, R> SchemeClient for V1SolanaExactClient<S, R>
 where
     S: Signer + Send + Sync + Clone + 'static,
     R: RpcClientLike + Send + Sync + Clone + 'static,
@@ -398,14 +398,14 @@ struct V1PayloadSigner<S, R> {
 }
 
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V1PayloadSigner<S, R> {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
                 .extra
                 .as_ref()
                 .map(|extra| extra.fee_payer)
-                .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
+                .ok_or_else(|| ClientError::SigningError("missing fee_payer in extra".to_string()))?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.max_amount_required.inner();
@@ -456,7 +456,7 @@ impl<S, R> V2SolanaExactClient<S, R> {
     }
 }
 
-impl<S, R> X402SchemeId for V2SolanaExactClient<S, R> {
+impl<S, R> SchemeId for V2SolanaExactClient<S, R> {
     fn x402_version(&self) -> u8 {
         V2SolanaExact.x402_version()
     }
@@ -470,7 +470,7 @@ impl<S, R> X402SchemeId for V2SolanaExactClient<S, R> {
     }
 }
 
-impl<S, R> X402SchemeClient for V2SolanaExactClient<S, R>
+impl<S, R> SchemeClient for V2SolanaExactClient<S, R>
 where
     S: Signer + Send + Sync + Clone + 'static,
     R: RpcClientLike + Send + Sync + Clone + 'static,
@@ -516,14 +516,14 @@ struct V2PayloadSigner<S, R> {
 }
 
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
                 .extra
                 .as_ref()
                 .map(|extra| extra.fee_payer)
-                .ok_or_else(|| X402Error::SigningError("missing fee_payer in extra".to_string()))?;
+                .ok_or_else(|| ClientError::SigningError("missing fee_payer in extra".to_string()))?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.amount.inner();

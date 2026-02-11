@@ -28,7 +28,7 @@
 //!
 //! - **EIP-6492 signatures**: Detected by the 32-byte magic suffix and validated via
 //!   the universal EIP-6492 validator contract before settlement.
-use r402::scheme::X402SchemeId;
+use r402::scheme::SchemeId;
 
 #[cfg(feature = "server")]
 pub mod server;
@@ -48,7 +48,7 @@ pub use types::*;
 #[derive(Debug, Clone, Copy)]
 pub struct V1Eip155Exact;
 
-impl X402SchemeId for V1Eip155Exact {
+impl SchemeId for V1Eip155Exact {
     fn x402_version(&self) -> u8 {
         1
     }
@@ -67,7 +67,7 @@ impl X402SchemeId for V1Eip155Exact {
 #[derive(Debug, Clone, Copy)]
 pub struct V2Eip155Exact;
 
-impl X402SchemeId for V2Eip155Exact {
+impl SchemeId for V2Eip155Exact {
     fn namespace(&self) -> &'static str {
         "eip155"
     }

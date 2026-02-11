@@ -14,7 +14,7 @@ use std::pin::Pin;
 ///
 /// Implementations examine 402 responses and generate payment candidates
 /// for requirements they can fulfill.
-pub trait X402SchemeClient: super::X402SchemeId + Send + Sync {
+pub trait SchemeClient: super::SchemeId + Send + Sync {
     /// Generates payment candidates for the given payment requirements.
     fn accept(&self, payment_required: &proto::PaymentRequired) -> Vec<PaymentCandidate>;
 }
@@ -59,8 +59,8 @@ impl PaymentCandidate {
     ///
     /// # Errors
     ///
-    /// Returns [`X402Error`] if signing fails.
-    pub async fn sign(&self) -> Result<String, X402Error> {
+    /// Returns [`ClientError`] if signing fails.
+    pub async fn sign(&self) -> Result<String, ClientError> {
         self.signer.sign_payment().await
     }
 }
@@ -68,13 +68,13 @@ impl PaymentCandidate {
 /// Trait for signing payment authorizations.
 pub trait PaymentCandidateSigner {
     /// Signs a payment authorization.
-    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>>;
+    fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>>;
 }
 
 /// Errors that can occur during client-side payment processing.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum X402Error {
+pub enum ClientError {
     /// No payment option matched the client's capabilities.
     #[error("No matching payment option found")]
     NoMatchingPaymentOption,

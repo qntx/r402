@@ -26,10 +26,10 @@ pub struct AssetAmount {
 ///
 /// # Relationship to Other Traits
 ///
-/// - [`super::SchemeHandler`] — Facilitator-side: verify and settle payments
-/// - [`super::X402SchemeClient`] — Client-side: generate payment candidates
+/// - [`crate::Facilitator`] — Facilitator-side: verify and settle payments
+/// - [`super::SchemeClient`] — Client-side: generate payment candidates
 /// - **`SchemeServer`** — Server-side: build payment requirements
-pub trait SchemeServer: super::X402SchemeId + Send + Sync {
+pub trait SchemeServer: super::SchemeId + Send + Sync {
     /// Converts a human-readable price into a token amount for the given network.
     ///
     /// For example, converts `"0.01"` on `eip155:8453` into

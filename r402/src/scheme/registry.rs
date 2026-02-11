@@ -11,15 +11,15 @@ use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 
-use super::X402SchemeId;
+use super::SchemeId;
 use super::handler::SchemeHandlerBuilder;
 
 /// Marker trait for types that are both identifiable and buildable.
 ///
-/// This combines [`X402SchemeId`] and [`SchemeHandlerBuilder`] for
+/// This combines [`SchemeId`] and [`SchemeHandlerBuilder`] for
 /// use in the blueprint registry.
-pub trait SchemeBlueprint<P>: X402SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
-impl<T, P> SchemeBlueprint<P> for T where T: X402SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
+pub trait SchemeBlueprint<P>: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
+impl<T, P> SchemeBlueprint<P> for T where T: SchemeId + for<'a> SchemeHandlerBuilder<&'a P> {}
 
 /// Registry of scheme blueprints (factories).
 ///
