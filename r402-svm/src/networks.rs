@@ -66,6 +66,10 @@ pub fn usdc_solana_deployments() -> &'static [SolanaTokenDeployment] {
 
 /// Returns the USDC deployment for a specific Solana chain, if known.
 #[must_use]
-pub fn usdc_solana_deployment(chain: &SolanaChainReference) -> Option<&'static SolanaTokenDeployment> {
-    USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == *chain)
+pub fn usdc_solana_deployment(
+    chain: &SolanaChainReference,
+) -> Option<&'static SolanaTokenDeployment> {
+    USDC_DEPLOYMENTS
+        .iter()
+        .find(|d| d.chain_reference == *chain)
 }

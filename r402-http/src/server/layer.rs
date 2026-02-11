@@ -39,11 +39,11 @@ use tower::{Layer, Service};
 use url::Url;
 
 use r402::hooks::FacilitatorHooks;
+use r402::proto::v2;
 
 use super::facilitator_client::FacilitatorClient;
 use super::paygate::{Paygate, ResourceInfoBuilder};
 use super::price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
-use super::protocol::PaygateProtocol;
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
 ///
@@ -219,10 +219,10 @@ where
     /// Creates a layer builder that can be further configured with additional
     /// price tags and resource information.
     #[must_use]
-    pub fn with_price_tag<TPriceTag>(
+    pub fn with_price_tag(
         &self,
-        price_tag: TPriceTag,
-    ) -> X402LayerBuilder<StaticPriceTags<TPriceTag>, TFacilitator> {
+        price_tag: v2::PriceTag,
+    ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
         X402LayerBuilder {
             facilitator: self.facilitator.clone(),
             price_source: StaticPriceTags::new(vec![price_tag]),
@@ -236,15 +236,15 @@ where
     /// Sets a dynamic price source for the protected route.
     ///
     /// The `callback` receives request headers, URI, and base URL, and returns
-    /// a vector of price tags.
+    /// a vector of V2 price tags.
     #[must_use]
-    pub fn with_dynamic_price<F, Fut, TPriceTag>(
+    pub fn with_dynamic_price<F, Fut>(
         &self,
         callback: F,
-    ) -> X402LayerBuilder<DynamicPriceTags<TPriceTag>, TFacilitator>
+    ) -> X402LayerBuilder<DynamicPriceTags, TFacilitator>
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Vec<TPriceTag>> + Send + 'static,
+        Fut: Future<Output = Vec<v2::PriceTag>> + Send + 'static,
     {
         X402LayerBuilder {
             facilitator: self.facilitator.clone(),
@@ -272,17 +272,14 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
-impl<TPriceTag, TFacilitator> X402LayerBuilder<StaticPriceTags<TPriceTag>, TFacilitator>
-where
-    TPriceTag: Clone,
-{
+impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
     /// Adds another payment option.
     ///
     /// Allows specifying multiple accepted payment methods (e.g., different networks).
     ///
     /// Note: This method is only available for static price tag sources.
     #[must_use]
-    pub fn with_price_tag(mut self, price_tag: TPriceTag) -> Self {
+    pub fn with_price_tag(mut self, price_tag: v2::PriceTag) -> Self {
         self.price_source = self.price_source.with_price_tag(price_tag);
         self
     }
@@ -374,7 +371,6 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
 impl<TSource, TFacilitator> Service<Request> for X402MiddlewareService<TSource, TFacilitator>
 where
     TSource: PriceTagSource + Clone + Send + 'static,
-    TSource::PriceTag: PaygateProtocol,
     TFacilitator: Facilitator + Clone + Send + Sync + 'static,
 {
     type Response = Response;

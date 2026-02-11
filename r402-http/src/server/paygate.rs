@@ -1,25 +1,23 @@
-//! Core payment gate logic for enforcing x402 payments.
+//! Core payment gate logic for enforcing x402 payments (V2-only).
 //!
 //! The [`Paygate`] struct handles the full payment lifecycle:
 //! extracting headers, verifying with the facilitator, settling on-chain,
 //! and returning 402 responses when payment is required.
-//!
-//! Protocol-specific behavior is provided by [`PaygateProtocol`] (see
-//! [`super::protocol`]), and pricing strategies by [`PriceTagSource`]
-//! (see [`super::price_source`]).
 
+use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
-use http::{HeaderMap, HeaderValue};
+use http::{HeaderMap, HeaderValue, StatusCode};
 use r402::facilitator::Facilitator;
 use r402::proto;
+use r402::proto::Base64Bytes;
 use r402::proto::v2;
+use serde_json::json;
 use std::convert::Infallible;
 use std::sync::Arc;
 use tower::Service;
 use url::Url;
 
-use r402::proto::Base64Bytes;
 #[cfg(feature = "telemetry")]
 use tracing::Instrument;
 #[cfg(feature = "telemetry")]
@@ -30,7 +28,6 @@ use r402::hooks::{FailureRecovery, HookDecision};
 use r402::hooks::{FacilitatorHooks, SettleContext, VerifyContext};
 
 use super::error::{PaygateError, VerificationError};
-use super::protocol::PaygateProtocol;
 
 /// Builder for resource information that can be used with both V1 and V2 protocols.
 #[derive(Debug, Clone)]
@@ -88,19 +85,18 @@ impl ResourceInfoBuilder {
     }
 }
 
-/// Unified payment gate that works with both V1 and V2 protocols.
+/// V2-only payment gate for enforcing x402 payments.
 ///
-/// The protocol version is determined by the price tag type parameter `P`, which must
-/// implement [`PaygateProtocol`]. Use `V1PriceTag` for V1 protocol or `V2PriceTag`
-/// (alias for `v2::PaymentRequirements`) for V2 protocol.
-#[allow(missing_debug_implementations)] // generic types may not implement Debug
-pub struct Paygate<TPriceTag, TFacilitator> {
+/// Handles the full payment lifecycle: header extraction, verification,
+/// settlement, and 402 response generation using the V2 wire format.
+#[allow(missing_debug_implementations)]
+pub struct Paygate<TFacilitator> {
     /// The facilitator for verifying and settling payments
     pub facilitator: TFacilitator,
     /// Whether to settle before or after request execution
     pub settle_before_execution: bool,
-    /// Accepted payment requirements
-    pub accepts: Arc<Vec<TPriceTag>>,
+    /// Accepted V2 payment requirements
+    pub accepts: Arc<Vec<v2::PriceTag>>,
     /// Resource information for the protected endpoint
     pub resource: v2::ResourceInfo,
     /// Lifecycle hooks for verify/settle operations.
@@ -109,7 +105,13 @@ pub struct Paygate<TPriceTag, TFacilitator> {
     pub hooks: Arc<[Arc<dyn FacilitatorHooks>]>,
 }
 
-impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {
+/// The V2 payment header name.
+const PAYMENT_HEADER_NAME: &str = "Payment-Signature";
+
+/// The V2 payment payload type.
+type V2PaymentPayload = v2::PaymentPayload<v2::PaymentRequirements, serde_json::Value>;
+
+impl<TFacilitator> Paygate<TFacilitator> {
     /// Calls the inner service with proper telemetry instrumentation.
     async fn call_inner<
         ReqBody,
@@ -136,9 +138,8 @@ impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator> {
     }
 }
 
-impl<TPriceTag, TFacilitator> Paygate<TPriceTag, TFacilitator>
+impl<TFacilitator> Paygate<TFacilitator>
 where
-    TPriceTag: PaygateProtocol,
     TFacilitator: Facilitator + Sync,
 {
     /// Handles an incoming request, processing payment if required.
@@ -169,15 +170,11 @@ where
     {
         match self.handle_request_fallible(inner, req).await {
             Ok(response) => Ok(response),
-            Err(err) => Ok(TPriceTag::error_into_response(
-                err,
-                &self.accepts,
-                &self.resource,
-            )),
+            Err(err) => Ok(error_into_response(err, &self.accepts, &self.resource)),
         }
     }
 
-    /// Gets enriched price tags with facilitator capabilities.
+    /// Enriches price tags with facilitator capabilities (e.g., fee payer address).
     pub async fn enrich_accepts(&mut self) {
         let capabilities = self.facilitator.supported().await.unwrap_or_default();
 
@@ -185,7 +182,7 @@ where
             .clone()
             .into_iter()
             .map(|mut pt| {
-                pt.enrich_with_capabilities(&capabilities);
+                pt.enrich(&capabilities);
                 pt
             })
             .collect::<Vec<_>>();
@@ -214,14 +211,13 @@ where
         S::Error: IntoResponse,
         S::Future: Send,
     {
-        let header = extract_payment_header(req.headers(), TPriceTag::PAYMENT_HEADER_NAME).ok_or(
-            VerificationError::PaymentHeaderRequired(TPriceTag::PAYMENT_HEADER_NAME),
+        let header = extract_payment_header(req.headers(), PAYMENT_HEADER_NAME).ok_or(
+            VerificationError::PaymentHeaderRequired(PAYMENT_HEADER_NAME),
         )?;
-        let payment_payload = extract_payment_payload::<TPriceTag::PaymentPayload>(header)
+        let payment_payload = extract_payment_payload::<V2PaymentPayload>(header)
             .ok_or(VerificationError::InvalidPaymentHeader)?;
 
-        let verify_request =
-            TPriceTag::make_verify_request(payment_payload, &self.accepts, &self.resource)?;
+        let verify_request = make_verify_request(payment_payload, &self.accepts)?;
 
         if self.settle_before_execution {
             #[cfg(feature = "telemetry")]
@@ -253,7 +249,7 @@ where
 
             let verify_response = self.verify_payment(verify_request.clone()).await?;
 
-            TPriceTag::validate_verify_response(verify_response)?;
+            validate_verify_response(verify_response)?;
 
             let response = match Self::call_inner(inner, req).await {
                 Ok(response) => response,
@@ -398,4 +394,87 @@ fn settlement_to_header(settlement: proto::SettleResponse) -> Result<HeaderValue
     let payment_header = Base64Bytes::encode(json);
     HeaderValue::from_bytes(payment_header.as_ref())
         .map_err(|err| PaygateError::Settlement(err.to_string()))
+}
+
+/// Constructs a V2 verify request from the payment payload and accepted requirements.
+fn make_verify_request(
+    payment_payload: V2PaymentPayload,
+    accepts: &[v2::PriceTag],
+) -> Result<proto::VerifyRequest, VerificationError> {
+    let accepted = &payment_payload.accepted;
+
+    let selected = accepts
+        .iter()
+        .find(|price_tag| **price_tag == *accepted)
+        .ok_or(VerificationError::NoPaymentMatching)?;
+
+    let verify_request = v2::VerifyRequest {
+        x402_version: v2::V2,
+        payment_payload,
+        payment_requirements: selected.requirements.clone(),
+    };
+
+    let json = serde_json::to_value(&verify_request)
+        .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
+
+    Ok(proto::VerifyRequest::from(json))
+}
+
+/// Validates a verify response, rejecting invalid or unknown variants.
+fn validate_verify_response(
+    verify_response: proto::VerifyResponse,
+) -> Result<(), VerificationError> {
+    match verify_response {
+        proto::VerifyResponse::Valid { .. } => Ok(()),
+        proto::VerifyResponse::Invalid { reason, .. } => {
+            Err(VerificationError::VerificationFailed(reason))
+        }
+        _ => Err(VerificationError::VerificationFailed(
+            "unknown verify response variant".into(),
+        )),
+    }
+}
+
+/// Converts a [`PaygateError`] into a V2 402 Payment Required HTTP response.
+fn error_into_response(
+    err: PaygateError,
+    accepts: &[v2::PriceTag],
+    resource: &v2::ResourceInfo,
+) -> Response {
+    match err {
+        PaygateError::Verification(err) => {
+            let payment_required_response = v2::PaymentRequired {
+                error: Some(err.to_string()),
+                accepts: accepts.iter().map(|pt| pt.requirements.clone()).collect(),
+                x402_version: v2::V2,
+                resource: resource.clone(),
+                extensions: None,
+            };
+            let payment_required_bytes =
+                serde_json::to_vec(&payment_required_response).expect("serialization failed");
+            let payment_required_header = Base64Bytes::encode(&payment_required_bytes);
+            let header_value = HeaderValue::from_bytes(payment_required_header.as_ref())
+                .expect("Failed to create header value");
+
+            Response::builder()
+                .status(StatusCode::PAYMENT_REQUIRED)
+                .header("Payment-Required", header_value)
+                .body(Body::empty())
+                .expect("Fail to construct response")
+        }
+        PaygateError::Settlement(ref err) => {
+            let body = Body::from(
+                json!({
+                    "error": "Settlement failed",
+                    "details": err
+                })
+                .to_string(),
+            );
+            Response::builder()
+                .status(StatusCode::PAYMENT_REQUIRED)
+                .header("Content-Type", "application/json")
+                .body(body)
+                .expect("Fail to construct response")
+        }
+    }
 }
