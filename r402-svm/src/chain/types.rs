@@ -5,8 +5,6 @@ use solana_pubkey::Pubkey;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-use crate::networks::KnownNetworkSolana;
-
 /// The CAIP-2 namespace for Solana chains.
 pub const SOLANA_NAMESPACE: &str = "solana";
 
@@ -24,6 +22,12 @@ pub const SOLANA_NAMESPACE: &str = "solana";
 pub struct SolanaChainReference([u8; 32]);
 
 impl SolanaChainReference {
+    /// Solana mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`).
+    pub const SOLANA: Self = Self::new(*b"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+
+    /// Solana devnet (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`).
+    pub const SOLANA_DEVNET: Self = Self::new(*b"EtWTRABZaYq6iMfeYKouRu166VU2xqa1");
+
     /// Creates a new [`SolanaChainReference`] from a 32-byte ASCII array.
     ///
     /// # Panics
@@ -51,16 +55,6 @@ impl SolanaChainReference {
     pub fn as_str(&self) -> &str {
         // Safe because we validate ASCII on construction
         std::str::from_utf8(&self.0).expect("SolanaChainReference contains valid ASCII")
-    }
-}
-
-impl KnownNetworkSolana<Self> for SolanaChainReference {
-    fn solana() -> Self {
-        Self::new(*b"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp")
-    }
-
-    fn solana_devnet() -> Self {
-        Self::new(*b"EtWTRABZaYq6iMfeYKouRu166VU2xqa1")
     }
 }
 
@@ -303,7 +297,7 @@ mod tests {
     use super::*;
 
     fn create_test_deployment(decimals: u8) -> SolanaTokenDeployment {
-        let chain_ref = SolanaChainReference::solana();
+        let chain_ref = SolanaChainReference::SOLANA;
         // Use a well-known test address (USDC on Solana devnet)
         let address = Address::from_str("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZ5nc4pb").unwrap();
         SolanaTokenDeployment::new(chain_ref, address, decimals)
