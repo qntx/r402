@@ -84,19 +84,106 @@ impl ResourceInfoBuilder {
 /// Handles the full payment lifecycle: header extraction, verification,
 /// settlement, and 402 response generation using the V2 wire format.
 ///
+/// Construct via [`PaygateBuilder`] (obtained from [`Paygate::builder`]).
+///
 /// To add lifecycle hooks (before/after verify and settle), wrap your
 /// facilitator with [`HookedFacilitator`](r402::hooks::HookedFacilitator)
 /// before passing it to the payment gate.
 #[allow(missing_debug_implementations)]
 pub struct Paygate<TFacilitator> {
-    /// The facilitator for verifying and settling payments
-    pub facilitator: TFacilitator,
-    /// Whether to settle before or after request execution
-    pub settle_before_execution: bool,
-    /// Accepted V2 payment requirements
-    pub accepts: Arc<Vec<v2::PriceTag>>,
-    /// Resource information for the protected endpoint
-    pub resource: v2::ResourceInfo,
+    pub(crate) facilitator: TFacilitator,
+    pub(crate) settle_before_execution: bool,
+    pub(crate) accepts: Arc<Vec<v2::PriceTag>>,
+    pub(crate) resource: v2::ResourceInfo,
+}
+
+/// Builder for constructing a [`Paygate`] with validated configuration.
+///
+/// # Example
+///
+/// ```ignore
+/// let gate = Paygate::builder(facilitator)
+///     .accept(price_tag)
+///     .resource(resource_info)
+///     .settle_before_execution(true)
+///     .build();
+/// ```
+#[allow(missing_debug_implementations)]
+pub struct PaygateBuilder<TFacilitator> {
+    facilitator: TFacilitator,
+    settle_before_execution: bool,
+    accepts: Vec<v2::PriceTag>,
+    resource: Option<v2::ResourceInfo>,
+}
+
+impl<TFacilitator> Paygate<TFacilitator> {
+    /// Returns a new builder seeded with the given facilitator.
+    pub const fn builder(facilitator: TFacilitator) -> PaygateBuilder<TFacilitator> {
+        PaygateBuilder {
+            facilitator,
+            settle_before_execution: false,
+            accepts: Vec::new(),
+            resource: None,
+        }
+    }
+
+    /// Returns a reference to the accepted price tags.
+    pub fn accepts(&self) -> &[v2::PriceTag] {
+        &self.accepts
+    }
+
+    /// Returns a reference to the resource information.
+    pub const fn resource(&self) -> &v2::ResourceInfo {
+        &self.resource
+    }
+}
+
+impl<TFacilitator> PaygateBuilder<TFacilitator> {
+    /// Adds a single accepted payment option.
+    #[must_use]
+    pub fn accept(mut self, price_tag: v2::PriceTag) -> Self {
+        self.accepts.push(price_tag);
+        self
+    }
+
+    /// Adds multiple accepted payment options.
+    #[must_use]
+    pub fn accepts(mut self, price_tags: impl IntoIterator<Item = v2::PriceTag>) -> Self {
+        self.accepts.extend(price_tags);
+        self
+    }
+
+    /// Sets the resource metadata returned in 402 responses.
+    #[must_use]
+    pub fn resource(mut self, resource: v2::ResourceInfo) -> Self {
+        self.resource = Some(resource);
+        self
+    }
+
+    /// Enables or disables settlement before request execution.
+    ///
+    /// Default is `false` (settle after execution).
+    #[must_use]
+    pub const fn settle_before_execution(mut self, enabled: bool) -> Self {
+        self.settle_before_execution = enabled;
+        self
+    }
+
+    /// Consumes the builder and produces a configured [`Paygate`].
+    ///
+    /// Uses empty resource info if none was provided.
+    pub fn build(self) -> Paygate<TFacilitator> {
+        Paygate {
+            facilitator: self.facilitator,
+            settle_before_execution: self.settle_before_execution,
+            accepts: Arc::new(self.accepts),
+            resource: self.resource.unwrap_or_else(|| v2::ResourceInfo {
+                description: String::new(),
+                mime_type: "application/json".to_owned(),
+                url: String::new(),
+            }),
+        }
+    }
 }
 
 /// The V2 payment header name.
@@ -379,15 +466,13 @@ fn error_into_response(
                 .expect("Fail to construct response")
         }
         PaygateError::Settlement(ref err) => {
+            #[cfg(feature = "telemetry")]
+            tracing::error!(details = %err, "Settlement failed");
             let body = Body::from(
-                json!({
-                    "error": "Settlement failed",
-                    "details": err
-                })
-                .to_string(),
+                json!({ "error": "Settlement failed" }).to_string(),
             );
             Response::builder()
-                .status(StatusCode::PAYMENT_REQUIRED)
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header("Content-Type", "application/json")
                 .body(body)
                 .expect("Fail to construct response")

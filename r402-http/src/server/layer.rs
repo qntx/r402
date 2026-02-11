@@ -377,12 +377,11 @@ where
             let resource = resource_builder.as_resource_info(base_url.as_deref(), &req);
 
             let gate = {
-                let mut gate = Paygate {
-                    facilitator,
-                    settle_before_execution,
-                    accepts: Arc::new(accepts),
-                    resource,
-                };
+                let mut gate = Paygate::builder(facilitator)
+                    .accepts(accepts)
+                    .resource(resource)
+                    .settle_before_execution(settle_before_execution)
+                    .build();
                 gate.enrich_accepts().await;
                 gate
             };

@@ -281,6 +281,10 @@ where
     /// 1. Extracts payment requirements from the response
     /// 2. Signs a payment using registered scheme clients
     /// 3. Retries the request with the payment header
+    ///
+    /// If the request body is not cloneable (e.g. streaming), the middleware
+    /// cannot auto-retry after a 402. In that case the original 402 response
+    /// is returned as-is so the caller can handle it manually.
     #[cfg_attr(
         feature = "telemetry",
         instrument(name = "x402.reqwest.handle", skip_all, err)
@@ -303,15 +307,19 @@ where
         #[cfg(feature = "telemetry")]
         info!(url = ?res.url(), "Received 402 Payment Required, processing payment");
 
+        // If the original request is not cloneable (streaming body), we cannot
+        // auto-retry. Return the 402 response for manual handling by the caller.
+        let Some(mut retry) = retry_req else {
+            #[cfg(feature = "telemetry")]
+            tracing::warn!("Cannot auto-retry 402: request body not cloneable, returning raw 402");
+            return Ok(res);
+        };
+
         let headers = self
             .make_payment_headers(res)
             .await
             .map_err(|e| rqm::Error::Middleware(e.into()))?;
 
-        // Retry with payment
-        let mut retry = retry_req.ok_or(rqm::Error::Middleware(
-            ClientError::RequestNotCloneable.into(),
-        ))?;
         retry.headers_mut().extend(headers);
 
         #[cfg(feature = "telemetry")]
