@@ -547,9 +547,5 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
 /// A payment required response.
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub enum PaymentRequired {
-    /// The current x402 protocol wire format.
-    Current(v2::PaymentRequired),
-}
+/// Currently aliases to the V2 wire format.
+pub type PaymentRequired = v2::PaymentRequired;

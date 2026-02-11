@@ -348,9 +348,6 @@ where
     R: RpcClientLike + Send + Sync + Clone + 'static,
 {
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let PaymentRequired::Current(payment_required) = payment_required else {
-            return vec![];
-        };
         payment_required
             .accepts
             .iter()

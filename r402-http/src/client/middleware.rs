@@ -338,7 +338,7 @@ pub async fn parse_payment_required(response: Response) -> Option<proto::Payment
     if let Some(v2_payment_required) = v2_payment_required {
         #[cfg(feature = "telemetry")]
         debug!("Parsed V2 payment required from header");
-        return Some(proto::PaymentRequired::Current(v2_payment_required));
+        return Some(v2_payment_required);
     }
 
     #[cfg(feature = "telemetry")]
