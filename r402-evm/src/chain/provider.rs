@@ -1,5 +1,5 @@
 use alloy_network::{Ethereum as AlloyEthereum, EthereumWallet, NetworkWallet, TransactionBuilder};
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{Address, Bytes};
 use alloy_provider::fillers::{
     BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller, WalletFiller,
 };
@@ -8,21 +8,19 @@ use alloy_provider::{
 };
 use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt, TransactionRequest};
-use alloy_signer::Signer;
-use alloy_signer_local::PrivateKeySigner;
 use alloy_transport::TransportError;
 use alloy_transport::layers::{FallbackLayer, ThrottleLayer};
 use alloy_transport_http::Http;
-use r402::chain::{ChainId, ChainProviderOps, FromConfig};
+use r402::chain::{ChainId, ChainProviderOps};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tower::ServiceBuilder;
+use url::Url;
 
 #[cfg(feature = "telemetry")]
 use tracing::Instrument;
 
-use crate::chain::config::{Eip155ChainConfig, RpcConfig};
 use crate::chain::pending_nonce_manager::PendingNonceManager;
 use crate::chain::types::Eip155ChainReference;
 
@@ -76,31 +74,31 @@ pub struct Eip155ChainProvider {
 }
 
 impl Eip155ChainProvider {
-    /// Creates an RPC client from the given chain configuration.
+    /// Creates an RPC client from HTTP endpoint URLs with optional per-endpoint rate limits.
     ///
-    /// Initializes transports for the given RPC URLs and configures rate limiting.
+    /// Each entry in `endpoints` is a `(url, optional_rate_limit)` pair.
+    /// Non-HTTP(S) URLs are silently skipped.
     ///
     /// # Panics
     ///
-    /// Panics if no valid HTTP transports are configured.
-    #[allow(unused_variables)] // chain_id is needed for tracing only here
+    /// Panics if no valid HTTP transports remain after filtering.
+    #[allow(unused_variables)] // chain_id is needed for tracing only
     #[must_use]
-    pub fn rpc_client(chain_id: &ChainId, rpc: &[RpcConfig]) -> RpcClient {
-        let transports = rpc
+    pub fn rpc_client(chain_id: &ChainId, endpoints: &[(Url, Option<u32>)]) -> RpcClient {
+        let transports = endpoints
             .iter()
-            .filter_map(|provider_config| {
-                let scheme = provider_config.http.scheme();
+            .filter_map(|(url, rate_limit)| {
+                let scheme = url.scheme();
                 let is_http = scheme == "http" || scheme == "https";
                 if !is_http {
                     return None;
                 }
-                let rpc_url = provider_config.http.clone();
                 #[cfg(feature = "telemetry")]
-                tracing::info!(chain=%chain_id, rpc_url=%rpc_url, rate_limit=?provider_config.rate_limit, "Using HTTP transport");
-                let rate_limit = provider_config.rate_limit.unwrap_or(u32::MAX);
+                tracing::info!(chain=%chain_id, rpc_url=%url, rate_limit=?rate_limit, "Using HTTP transport");
+                let limit = rate_limit.unwrap_or(u32::MAX);
                 let service = ServiceBuilder::new()
-                    .layer(ThrottleLayer::new(rate_limit))
-                    .service(Http::new(rpc_url));
+                    .layer(ThrottleLayer::new(limit))
+                    .service(Http::new(url.clone()));
                 Some(service)
             })
             .collect::<Vec<_>>();
@@ -113,6 +111,70 @@ impl Eip155ChainProvider {
             )
             .service(transports);
         RpcClient::new(fallback, false)
+    }
+
+    /// Creates a new EVM chain provider.
+    ///
+    /// # Parameters
+    ///
+    /// - `chain`: The numeric chain reference (e.g., 8453 for Base)
+    /// - `wallet`: A pre-built Ethereum wallet containing one or more signers
+    /// - `rpc_endpoints`: HTTP RPC endpoints as `(url, optional_rate_limit)` pairs
+    /// - `eip1559`: Whether the chain supports EIP-1559 gas pricing
+    /// - `flashblocks`: Whether the chain supports flashblocks
+    /// - `receipt_timeout_secs`: How long to wait for a transaction receipt
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the wallet has no signers.
+    pub fn new(
+        chain: Eip155ChainReference,
+        wallet: EthereumWallet,
+        rpc_endpoints: &[(Url, Option<u32>)],
+        eip1559: bool,
+        flashblocks: bool,
+        receipt_timeout_secs: u64,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let signer_addresses =
+            NetworkWallet::<AlloyEthereum>::signer_addresses(&wallet).collect::<Vec<_>>();
+        if signer_addresses.is_empty() {
+            return Err("at least one signer must be provided".into());
+        }
+        let signer_addresses = Arc::new(signer_addresses);
+        let signer_cursor = Arc::new(AtomicUsize::new(0));
+
+        let chain_id: ChainId = chain.into();
+        let client = Self::rpc_client(&chain_id, rpc_endpoints);
+
+        let nonce_manager = PendingNonceManager::default();
+        let filler = JoinFill::new(
+            GasFiller,
+            JoinFill::new(
+                BlobGasFiller::default(),
+                JoinFill::new(
+                    NonceFiller::new(nonce_manager.clone()),
+                    ChainIdFiller::default(),
+                ),
+            ),
+        );
+        let inner: InnerProvider = ProviderBuilder::default()
+            .filler(filler)
+            .wallet(wallet)
+            .connect_client(client);
+
+        #[cfg(feature = "telemetry")]
+        tracing::info!(chain=%chain_id, signers=?signer_addresses, "Using EVM provider");
+
+        Ok(Self {
+            chain,
+            eip1559,
+            flashblocks,
+            receipt_timeout_secs,
+            inner,
+            signer_addresses,
+            signer_cursor,
+            nonce_manager,
+        })
     }
 
     /// Round-robin selection of next signer from wallet.
@@ -316,73 +378,3 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
     }
 }
 
-impl FromConfig<Eip155ChainConfig> for Eip155ChainProvider {
-    async fn from_config(config: &Eip155ChainConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        // 1. Signers
-        let signers = config
-            .signers()
-            .iter()
-            .map(|s| B256::from_slice(s.inner().as_bytes()))
-            .map(|b| {
-                PrivateKeySigner::from_bytes(&b)
-                    .map(|s| s.with_chain_id(Some(config.chain_reference().inner())))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        if signers.is_empty() {
-            return Err("at least one signer should be provided".into());
-        }
-        let wallet = {
-            let mut iter = signers.into_iter();
-            let first_signer = iter
-                .next()
-                .expect("iterator contains at least one element by construction");
-            let mut wallet = EthereumWallet::from(first_signer);
-            for signer in iter {
-                wallet.register_signer(signer);
-            }
-            wallet
-        };
-        let signer_addresses =
-            NetworkWallet::<AlloyEthereum>::signer_addresses(&wallet).collect::<Vec<_>>();
-        let signer_addresses = Arc::new(signer_addresses);
-        let signer_cursor = Arc::new(AtomicUsize::new(0));
-
-        // 2. Transports
-        let chain_id = config.chain_id();
-        let client = Self::rpc_client(&chain_id, config.rpc());
-
-        // 3. Provider
-        // Create nonce manager explicitly so we can store a reference for error handling
-        let nonce_manager = PendingNonceManager::default();
-        // Build the filler stack: Gas -> BlobGas -> Nonce -> ChainId
-        // This mirrors the InnerFiller type but with our custom nonce manager
-        let filler = JoinFill::new(
-            GasFiller,
-            JoinFill::new(
-                BlobGasFiller::default(),
-                JoinFill::new(
-                    NonceFiller::new(nonce_manager.clone()),
-                    ChainIdFiller::default(),
-                ),
-            ),
-        );
-        let inner: InnerProvider = ProviderBuilder::default()
-            .filler(filler)
-            .wallet(wallet)
-            .connect_client(client);
-
-        #[cfg(feature = "telemetry")]
-        tracing::info!(chain=%config.chain_id(), signers=?signer_addresses, "Using EVM provider");
-
-        Ok(Self {
-            chain: config.chain_reference(),
-            eip1559: config.eip1559(),
-            flashblocks: config.flashblocks(),
-            receipt_timeout_secs: config.receipt_timeout_secs(),
-            inner,
-            signer_addresses,
-            signer_cursor,
-            nonce_manager,
-        })
-    }
-}

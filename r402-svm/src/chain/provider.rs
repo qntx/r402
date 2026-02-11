@@ -1,4 +1,4 @@
-use r402::chain::{ChainId, ChainProviderOps, FromConfig};
+use r402::chain::{ChainId, ChainProviderOps};
 use r402::proto::PaymentVerificationError;
 use r402::scheme::X402SchemeFacilitatorError;
 use solana_account::Account;
@@ -22,7 +22,6 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::chain::config::SolanaChainConfig;
 use crate::chain::types::{Address, SolanaChainReference};
 
 /// Errors that can occur when interacting with a Solana chain provider.
@@ -80,10 +79,14 @@ impl From<SolanaChainProviderError> for PaymentVerificationError {
 /// # Example
 ///
 /// ```ignore
-/// use r402_svm::chain::SolanaChainProvider;
-/// use r402_svm::chain::SolanaChainConfig;
+/// use r402_svm::chain::{SolanaChainProvider, SolanaChainReference};
+/// use solana_keypair::Keypair;
 ///
-/// let provider = SolanaChainProvider::from_config(&config).await?;
+/// let keypair = Keypair::new();
+/// let provider = SolanaChainProvider::new(
+///     keypair, "https://api.devnet.solana.com".into(),
+///     None, SolanaChainReference::devnet(), 400_000, 1_000_000,
+/// ).await?;
 /// println!("Fee payer: {}", provider.fee_payer());
 /// ```
 pub struct SolanaChainProvider {
@@ -202,27 +205,6 @@ impl SolanaChainProvider {
             )
             .await?;
         Ok(signature)
-    }
-}
-
-impl FromConfig<SolanaChainConfig> for SolanaChainProvider {
-    async fn from_config(config: &SolanaChainConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        let rpc_url = config.rpc();
-        let pubsub_url = config.pubsub().clone().map(|url| url.to_string());
-        let keypair = Keypair::from_base58_string(&config.signer().to_string());
-        let max_compute_unit_limit = config.max_compute_unit_limit();
-        let max_compute_unit_price = config.max_compute_unit_price();
-        let chain = config.chain_reference();
-        let provider = Self::new(
-            keypair,
-            rpc_url.to_string(),
-            pubsub_url,
-            chain,
-            max_compute_unit_limit,
-            max_compute_unit_price,
-        )
-        .await?;
-        Ok(provider)
     }
 }
 

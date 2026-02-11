@@ -36,10 +36,6 @@
 pub mod types;
 pub use types::*;
 
-/// Facilitator configuration for Solana chains.
-#[cfg(feature = "facilitator")]
-pub mod config;
-
 /// Solana chain provider implementation.
 #[cfg(feature = "facilitator")]
 pub mod provider;

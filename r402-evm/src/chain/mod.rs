@@ -40,9 +40,6 @@
 
 pub mod types;
 
-/// EVM chain configuration types.
-#[cfg(feature = "facilitator")]
-pub mod config;
 /// Pending nonce management for EVM transactions.
 #[cfg(feature = "facilitator")]
 pub mod pending_nonce_manager;

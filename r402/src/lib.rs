@@ -17,7 +17,6 @@
 //!
 //! - [`amount`] - Human-readable currency amount parsing
 //! - [`chain`] - Blockchain identifiers and provider abstractions (CAIP-2 chain IDs)
-//! - [`config`] - Server configuration, RPC config, and environment variable resolution
 //! - [`encoding`] - Base64 encoding/decoding utilities
 //! - [`facilitator`] - Core trait for payment verification and settlement
 //! - [`lit_str`] - Compile-time string literal type generation macro
@@ -39,7 +38,6 @@
 
 pub mod amount;
 pub mod chain;
-pub mod config;
 pub mod encoding;
 pub mod facilitator;
 pub mod lit_str;

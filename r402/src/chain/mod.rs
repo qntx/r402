@@ -16,36 +16,7 @@ mod chain_id;
 pub use chain_id::*;
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::Arc;
-
-/// Asynchronously constructs an instance of `Self` from a configuration type.
-///
-/// This trait provides a generic mechanism for initializing structs from their
-/// corresponding configuration types. It is used throughout the r402 ecosystem
-/// to build providers, registries, and other components from configuration.
-///
-/// # Type Parameters
-///
-/// - `TConfig` - The configuration type that `Self` can be constructed from
-///
-/// Return an error if:
-/// - Configuration validation fails
-/// - Required external connections (RPC, etc.) cannot be established
-/// - Configuration values are invalid or missing
-pub trait FromConfig<TConfig>
-where
-    Self: Sized,
-{
-    /// Creates a new instance from the given configuration.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if initialization fails.
-    fn from_config(
-        config: &TConfig,
-    ) -> impl Future<Output = Result<Self, Box<dyn std::error::Error>>> + Send;
-}
 
 /// Common operations available on all chain providers.
 ///
