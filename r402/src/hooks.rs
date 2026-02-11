@@ -27,6 +27,7 @@ use crate::proto;
 ///
 /// Mirrors the official x402 `BeforeHookResult` / `FacilitatorBeforeHookResult`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum HookDecision {
     /// Allow the operation to proceed normally.
     Continue,
@@ -43,6 +44,7 @@ pub enum HookDecision {
 ///
 /// Mirrors the official x402 `VerifyFailureHookResult` / `SettleFailureHookResult`.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum FailureRecovery<T> {
     /// The error was not recovered; propagate the original error.
     Propagate,
@@ -172,6 +174,7 @@ pub trait FacilitatorHooks: Send + Sync {
 /// Error type for [`HookedFacilitator`] that wraps inner facilitator errors
 /// and adds hook-triggered abort errors.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HookedFacilitatorError<E> {
     /// The inner facilitator returned an error.
     #[error(transparent)]

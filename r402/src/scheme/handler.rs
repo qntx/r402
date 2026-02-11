@@ -58,6 +58,7 @@ pub trait SchemeHandlerBuilder<P> {
 
 /// Errors that can occur during scheme operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SchemeHandlerError {
     /// Payment verification failed.
     #[error(transparent)]

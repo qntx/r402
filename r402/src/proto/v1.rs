@@ -116,6 +116,20 @@ where
         let deserialized: Self = serde_json::from_value(request.into_json())?;
         Ok(deserialized)
     }
+
+    /// Deserializes a V1 verify request from a protocol-level settle request.
+    ///
+    /// Settlement reuses the same wire format as verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
+    pub fn from_settle(
+        request: proto::SettleRequest,
+    ) -> Result<Self, proto::PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
+    }
 }
 
 impl<TPayload, TRequirements> TryInto<proto::VerifyRequest>

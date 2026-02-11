@@ -226,7 +226,7 @@ where
         let signed_payload = selected.sign().await?;
         let header_name = match payment_required {
             proto::PaymentRequired::V1(_) => "X-Payment",
-            proto::PaymentRequired::V2(_) => "Payment-Signature",
+            _ => "Payment-Signature",
         };
         let headers = {
             let mut headers = HeaderMap::new();

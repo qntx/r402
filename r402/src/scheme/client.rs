@@ -73,6 +73,7 @@ pub trait PaymentCandidateSigner {
 
 /// Errors that can occur during client-side payment processing.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum X402Error {
     /// No payment option matched the client's capabilities.
     #[error("No matching payment option found")]

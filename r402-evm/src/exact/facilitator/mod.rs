@@ -187,7 +187,7 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
     {
         Box::pin(async move {
-            let request = types::v1::SettleRequest::from_proto(request)?;
+            let request = types::v1::SettleRequest::from_settle(request)?;
             let payload = &request.payment_payload;
             let requirements = &request.payment_requirements;
             let eip3009 = match &payload.payload {
@@ -331,7 +331,7 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
     {
         Box::pin(async move {
-            let request = types::v2::SettleRequest::from_proto(request)?;
+            let request = types::v2::SettleRequest::from_settle(request)?;
             let payload = &request.payment_payload;
             let requirements = &request.payment_requirements;
             match &payload.payload {

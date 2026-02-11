@@ -358,11 +358,8 @@ where
     R: RpcClientLike + Send + Sync + Clone + 'static,
 {
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let payment_required = match payment_required {
-            PaymentRequired::V1(payment_required) => payment_required,
-            PaymentRequired::V2(_) => {
-                return vec![];
-            }
+        let PaymentRequired::V1(payment_required) = payment_required else {
+            return vec![];
         };
         payment_required
             .accepts
@@ -479,11 +476,8 @@ where
     R: RpcClientLike + Send + Sync + Clone + 'static,
 {
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let payment_required = match payment_required {
-            PaymentRequired::V2(payment_required) => payment_required,
-            PaymentRequired::V1(_) => {
-                return vec![];
-            }
+        let PaymentRequired::V2(payment_required) = payment_required else {
+            return vec![];
         };
         payment_required
             .accepts

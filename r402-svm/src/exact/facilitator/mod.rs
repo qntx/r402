@@ -103,7 +103,7 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
     {
         Box::pin(async move {
-            let request = types::v1::SettleRequest::from_proto(request)?;
+            let request = types::v1::SettleRequest::from_settle(request)?;
             let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
             let payer = verification.payer.to_string();
             let tx_sig = settle_transaction(&self.provider, verification).await?;
@@ -199,7 +199,7 @@ where
     ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
     {
         Box::pin(async move {
-            let request = types::v2::SettleRequest::from_proto(request)?;
+            let request = types::v2::SettleRequest::from_settle(request)?;
             let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
             let payer = verification.payer.to_string();
             let tx_sig = settle_transaction(&self.provider, verification).await?;

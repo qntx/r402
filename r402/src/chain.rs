@@ -129,6 +129,7 @@ impl<'de> Deserialize<'de> for ChainId {
 /// - Exact: `"eip155:8453"`
 /// - Set: `"eip155:{1,8453,137}"`
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ChainIdPattern {
     /// Matches any chain within the specified namespace.
     Wildcard {
@@ -293,18 +294,6 @@ impl From<ChainId> for ChainIdPattern {
     fn from(chain_id: ChainId) -> Self {
         let (namespace, reference) = chain_id.into_parts();
         Self::exact(namespace, reference)
-    }
-}
-
-impl From<ChainIdPattern> for Vec<ChainIdPattern> {
-    fn from(value: ChainIdPattern) -> Self {
-        vec![value]
-    }
-}
-
-impl From<ChainId> for Vec<ChainId> {
-    fn from(value: ChainId) -> Self {
-        vec![value]
     }
 }
 

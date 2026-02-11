@@ -167,9 +167,46 @@ pub struct VerifyRequest(serde_json::Value);
 
 /// Request to settle a verified payment on-chain.
 ///
-/// This is the same structure as [`VerifyRequest`], containing the payment
-/// payload that was previously verified.
-pub type SettleRequest = VerifyRequest;
+/// Structurally identical to [`VerifyRequest`] on the wire, but represented as a
+/// distinct type so the compiler can prevent accidental misuse (e.g., passing a
+/// verify request where a settle request is expected).
+///
+/// Use `From<VerifyRequest>` to convert a verified request into a settle request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettleRequest(serde_json::Value);
+
+impl SettleRequest {
+    /// Consumes the request and returns the inner JSON value.
+    #[must_use]
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
+    }
+
+    /// Extracts the scheme handler slug from the request.
+    ///
+    /// Delegates to the same logic as [`VerifyRequest::scheme_handler_slug`].
+    #[must_use]
+    pub fn scheme_handler_slug(
+        &self,
+        registry: &crate::networks::NetworkRegistry,
+    ) -> Option<SchemeHandlerSlug> {
+        // Reuse VerifyRequest's implementation via a temporary reference-based parse.
+        let tmp = VerifyRequest(self.0.clone());
+        tmp.scheme_handler_slug(registry)
+    }
+}
+
+impl From<serde_json::Value> for SettleRequest {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+impl From<VerifyRequest> for SettleRequest {
+    fn from(request: VerifyRequest) -> Self {
+        Self(request.into_json())
+    }
+}
 
 impl From<serde_json::Value> for VerifyRequest {
     fn from(value: serde_json::Value) -> Self {
@@ -236,6 +273,7 @@ impl VerifyRequest {
 /// the payer. If invalid, it includes a reason describing why verification failed
 /// (e.g., wrong network, invalid scheme, insufficient funds).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum VerifyResponse {
     /// The payload matches the requirements and passes all checks.
     Valid {
@@ -359,6 +397,7 @@ impl<'de> Deserialize<'de> for VerifyResponse {
 /// Indicates whether the payment was successfully settled on-chain,
 /// including the transaction hash and payer address on success.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum SettleResponse {
     /// Settlement succeeded.
     Success {
@@ -482,6 +521,7 @@ impl<'de> Deserialize<'de> for SettleResponse {
 /// These errors are returned when a payment fails validation checks
 /// performed by the facilitator before settlement.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PaymentVerificationError {
     /// The payment payload format is invalid or malformed.
     #[error("Invalid format: {0}")]
@@ -557,6 +597,7 @@ impl From<serde_json::Error> for PaymentVerificationError {
 /// programmatically handle different failure scenarios.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum ErrorReason {
     /// The payment payload format is invalid.
     InvalidFormat,
@@ -630,6 +671,7 @@ impl PaymentProblem {
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum PaymentRequired {
     /// Protocol version 1 variant.
     V1(v1::PaymentRequired),

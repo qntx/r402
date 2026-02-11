@@ -222,6 +222,9 @@ impl PaygateProtocol for v1::PriceTag {
             proto::VerifyResponse::Invalid { reason, .. } => {
                 Err(VerificationError::VerificationFailed(reason))
             }
+            _ => Err(VerificationError::VerificationFailed(
+                "unknown verify response variant".into(),
+            )),
         }
     }
 
@@ -337,6 +340,9 @@ impl PaygateProtocol for v2::PriceTag {
             proto::VerifyResponse::Invalid { reason, .. } => {
                 Err(VerificationError::VerificationFailed(reason))
             }
+            _ => Err(VerificationError::VerificationFailed(
+                "unknown verify response variant".into(),
+            )),
         }
     }
 
@@ -488,7 +494,7 @@ where
             #[cfg(feature = "telemetry")]
             tracing::debug!("Settling payment before request execution");
 
-            let settlement = self.settle_payment(verify_request).await?;
+            let settlement = self.settle_payment(verify_request.into()).await?;
 
             let header_value = settlement_to_header(settlement)?;
 
@@ -520,7 +526,7 @@ where
                 return Ok(response.into_response());
             }
 
-            let settlement = self.settle_payment(verify_request).await?;
+            let settlement = self.settle_payment(verify_request.into()).await?;
 
             let header_value = settlement_to_header(settlement)?;
 

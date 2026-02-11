@@ -10,17 +10,19 @@
 //! - With currency symbols: `"$10.50"`, `"€20"`
 //! - With thousand separators: `"1,000"`, `"1,000,000.50"`
 
-use regex::Regex;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
-use std::sync::LazyLock;
 
-/// Regex for stripping non-numeric characters from monetary strings.
-static MONEY_STRIP_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[^\d\.\-]+").expect("valid regex"));
+/// Strips all characters except digits, dots, and minus signs from a monetary string.
+fn strip_non_numeric(input: &str) -> String {
+    input
+        .chars()
+        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect()
+}
 
 /// A parsed monetary amount with decimal precision.
 ///
@@ -57,6 +59,7 @@ impl MoneyAmount {
 
 /// Errors that can occur when parsing a monetary amount.
 #[derive(Debug, Clone, Copy, thiserror::Error)]
+#[non_exhaustive]
 pub enum MoneyAmountParseError {
     /// The input string could not be parsed as a number.
     #[error("Invalid number format")]
@@ -108,7 +111,7 @@ impl MoneyAmount {
     /// - The value is negative
     /// - The value is outside the allowed range
     pub fn parse(input: &str) -> Result<Self, MoneyAmountParseError> {
-        let cleaned = MONEY_STRIP_RE.replace_all(input, "").to_string();
+        let cleaned = strip_non_numeric(input);
 
         let parsed =
             Decimal::from_str(&cleaned).map_err(|_| MoneyAmountParseError::InvalidFormat)?;

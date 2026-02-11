@@ -137,6 +137,20 @@ where
         let deserialized: Self = serde_json::from_value(request.into_json())?;
         Ok(deserialized)
     }
+
+    /// Deserializes a V2 verify request from a protocol-level settle request.
+    ///
+    /// Settlement reuses the same wire format as verification.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`proto::PaymentVerificationError`] if deserialization fails.
+    pub fn from_settle(
+        request: proto::SettleRequest,
+    ) -> Result<Self, proto::PaymentVerificationError> {
+        let deserialized: Self = serde_json::from_value(request.into_json())?;
+        Ok(deserialized)
+    }
 }
 
 /// A signed payment authorization from the buyer (V2 format).
