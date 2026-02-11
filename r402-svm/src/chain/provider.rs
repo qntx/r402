@@ -314,7 +314,6 @@ impl SolanaChainProviderLike for SolanaChainProvider {
         if tx.signatures.len() < num_required {
             tx.signatures.resize(num_required, Signature::default());
         }
-        // tx.signatures.push(signature);
         tx.signatures[pos] = signature;
         Ok(tx)
     }
