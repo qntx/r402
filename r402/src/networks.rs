@@ -28,21 +28,3 @@ impl NetworkInfo {
     }
 }
 
-/// Marker struct for the USDC stablecoin.
-///
-/// Chain-specific crates provide per-network deployment data via data-driven
-/// lookup functions:
-///
-/// - `r402-evm`: [`usdc_evm_deployment()`] / [`usdc_evm_deployments()`]
-/// - `r402-svm`: [`usdc_solana_deployment()`] / [`usdc_solana_deployments()`]
-#[derive(Debug, Clone, Copy)]
-#[allow(clippy::upper_case_acronyms)]
-pub struct USDC;
-
-/// Marker struct for the USDM (`MegaUSD`) stablecoin.
-///
-/// `MegaETH` uses USDM as its default stablecoin instead of USDC.
-/// See `r402-evm`: [`usdm_evm_deployment()`] / [`usdm_evm_deployments()`].
-#[derive(Debug, Clone, Copy)]
-#[allow(clippy::upper_case_acronyms)]
-pub struct USDM;
