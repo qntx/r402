@@ -1,15 +1,11 @@
-//! Facilitator-side payment verification and settlement for Solana exact scheme.
+//! Payment verification and settlement logic for the Solana exact scheme.
 //!
-//! This module implements the facilitator logic for verifying and settling SPL Token
-//! payments on Solana. It handles both V1 (network names) and V2 (CAIP-2 chain IDs)
-//! protocol versions through shared core logic.
+//! Contains compute budget checks, instruction validation, transfer verification,
+//! and the settlement function.
 
 use r402::chain::{ChainId, ChainProviderOps};
 use r402::encoding::Base64Bytes;
-use r402::proto;
-use r402::proto::{PaymentVerificationError, v1, v2};
-use r402::scheme::{SchemeHandler, SchemeHandlerBuilder, SchemeHandlerError};
-use serde::{Deserialize, Serialize};
+use r402::proto::PaymentVerificationError;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_response::{TransactionError, UiTransactionError};
 use solana_commitment_config::CommitmentConfig;
@@ -17,322 +13,15 @@ use solana_compute_budget_interface::ID as ComputeBudgetInstructionId;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
+use super::config::SolanaExactFacilitatorConfig;
 use crate::chain::Address;
 use crate::chain::provider::{SolanaChainProviderError, SolanaChainProviderLike};
+use crate::exact::ATA_PROGRAM_PUBKEY;
 use crate::exact::types::{self, SolanaExactError, TransactionInt};
-use crate::exact::{
-    ATA_PROGRAM_PUBKEY, ExactScheme, PHANTOM_LIGHTHOUSE_PROGRAM, SupportedPaymentKindExtra,
-    V1SolanaExact, V2SolanaExact,
-};
-
-/// Configuration for Solana Exact Facilitator (shared by V1 and V2).
-///
-/// Controls transaction verification behavior, including support for
-/// additional instructions from third-party wallets like Phantom.
-///
-/// By default, the Phantom Lighthouse program is allowed to support
-/// Phantom wallet users on mainnet.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SolanaExactFacilitatorConfig {
-    /// Allow additional instructions beyond the required ones.
-    /// Default: true (to support Phantom Lighthouse)
-    #[serde(default = "default_allow_additional_instructions")]
-    pub allow_additional_instructions: bool,
-
-    /// Maximum number of instructions allowed in a transaction.
-    /// Default: 10
-    #[serde(default = "default_max_instruction_count")]
-    pub max_instruction_count: usize,
-
-    /// Explicitly allowed program IDs for additional instructions.
-    /// Only checked if `allow_additional_instructions` is true.
-    ///
-    /// Default: [Phantom Lighthouse program]
-    ///
-    /// SECURITY: If this list is empty and `allow_additional_instructions` is true,
-    /// ALL additional instructions will be rejected. You must explicitly whitelist
-    /// the programs you want to allow.
-    #[serde(default = "default_allowed_program_ids")]
-    pub allowed_program_ids: Vec<Address>,
-
-    /// Blocked program IDs (always rejected, takes precedence over allowed).
-    #[serde(default)]
-    pub blocked_program_ids: Vec<Address>,
-
-    /// SECURITY: Require fee payer is NOT present in any instruction's accounts.
-    /// Default: true - strongly recommended to keep this enabled
-    #[serde(default = "default_require_fee_payer_not_in_instructions")]
-    pub require_fee_payer_not_in_instructions: bool,
-}
-
-const fn default_allow_additional_instructions() -> bool {
-    true
-}
-
-const fn default_max_instruction_count() -> usize {
-    10
-}
-
-fn default_allowed_program_ids() -> Vec<Address> {
-    vec![Address::new(*PHANTOM_LIGHTHOUSE_PROGRAM)]
-}
-
-const fn default_require_fee_payer_not_in_instructions() -> bool {
-    true
-}
-
-impl Default for SolanaExactFacilitatorConfig {
-    fn default() -> Self {
-        Self {
-            allow_additional_instructions: default_allow_additional_instructions(),
-            max_instruction_count: default_max_instruction_count(),
-            allowed_program_ids: default_allowed_program_ids(),
-            blocked_program_ids: Vec::new(),
-            require_fee_payer_not_in_instructions: default_require_fee_payer_not_in_instructions(),
-        }
-    }
-}
-
-impl SolanaExactFacilitatorConfig {
-    /// Check if a program ID is in the blocked list.
-    #[must_use]
-    pub fn is_blocked(&self, program_id: &Pubkey) -> bool {
-        self.blocked_program_ids
-            .iter()
-            .any(|addr| addr.pubkey() == program_id)
-    }
-
-    /// Check if a program ID is in the allowed list.
-    ///
-    /// SECURITY: If the allowed list is empty, NO programs are allowed.
-    #[must_use]
-    pub fn is_allowed(&self, program_id: &Pubkey) -> bool {
-        self.allowed_program_ids
-            .iter()
-            .any(|addr| addr.pubkey() == program_id)
-    }
-}
-
-impl<P> SchemeHandlerBuilder<P> for V1SolanaExact
-where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
-{
-    fn build(
-        &self,
-        provider: P,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
-        let config = config
-            .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Box::new(V1SolanaExactFacilitator::new(provider, config)))
-    }
-}
-
-impl<P> SchemeHandlerBuilder<P> for V2SolanaExact
-where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync + 'static,
-{
-    fn build(
-        &self,
-        provider: P,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn SchemeHandler>, Box<dyn std::error::Error>> {
-        let config = config
-            .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Box::new(V2SolanaExactFacilitator::new(provider, config)))
-    }
-}
-
-/// Facilitator for V1 Solana exact scheme payments.
-pub struct V1SolanaExactFacilitator<P> {
-    provider: P,
-    config: SolanaExactFacilitatorConfig,
-}
-
-impl<P> std::fmt::Debug for V1SolanaExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V1SolanaExactFacilitator")
-            .field("config", &self.config)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> V1SolanaExactFacilitator<P> {
-    /// Creates a new V1 Solana exact facilitator.
-    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
-        Self { provider, config }
-    }
-}
-
-impl<P> SchemeHandler for V1SolanaExactFacilitator<P>
-where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
-{
-    fn verify(
-        &self,
-        request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v1::VerifyRequest::from_proto(request)?;
-            let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v1::VerifyResponse::valid(verification.payer.to_string()).into())
-        })
-    }
-
-    fn settle(
-        &self,
-        request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v1::SettleRequest::from_proto(request)?;
-            let verification = verify_v1_transfer(&self.provider, &request, &self.config).await?;
-            let payer = verification.payer.to_string();
-            let tx_sig = settle_transaction(&self.provider, verification).await?;
-            Ok(v1::SettleResponse::Success {
-                payer,
-                transaction: tx_sig.to_string(),
-                network: self.provider.chain_id().to_string(),
-            }
-            .into())
-        })
-    }
-
-    fn supported(
-        &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
-    > {
-        Box::pin(async move {
-            let chain_id = self.provider.chain_id();
-            let kinds: Vec<proto::SupportedPaymentKind> = {
-                let mut kinds = Vec::with_capacity(1);
-                let fee_payer = self.provider.fee_payer();
-                let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-                let network = chain_id.as_network_name();
-                if let Some(network) = network {
-                    kinds.push(proto::SupportedPaymentKind {
-                        x402_version: v1::X402Version1.into(),
-                        scheme: ExactScheme.to_string(),
-                        network: network.to_string(),
-                        extra,
-                    });
-                }
-                kinds
-            };
-            let signers = {
-                let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
-                signers
-            };
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
-        })
-    }
-}
-
-/// Facilitator for V2 Solana exact scheme payments.
-pub struct V2SolanaExactFacilitator<P> {
-    provider: P,
-    config: SolanaExactFacilitatorConfig,
-}
-
-impl<P> std::fmt::Debug for V2SolanaExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V2SolanaExactFacilitator")
-            .field("config", &self.config)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> V2SolanaExactFacilitator<P> {
-    /// Creates a new V2 Solana exact facilitator.
-    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
-        Self { provider, config }
-    }
-}
-
-impl<P> SchemeHandler for V2SolanaExactFacilitator<P>
-where
-    P: SolanaChainProviderLike + ChainProviderOps + Send + Sync,
-{
-    fn verify(
-        &self,
-        request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, SchemeHandlerError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v2::VerifyRequest::from_proto(request)?;
-            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v2::VerifyResponse::valid(verification.payer.to_string()).into())
-        })
-    }
-
-    fn settle(
-        &self,
-        request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, SchemeHandlerError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v2::SettleRequest::from_proto(request)?;
-            let verification = verify_v2_transfer(&self.provider, &request, &self.config).await?;
-            let payer = verification.payer.to_string();
-            let tx_sig = settle_transaction(&self.provider, verification).await?;
-            Ok(v2::SettleResponse::Success {
-                payer,
-                transaction: tx_sig.to_string(),
-                network: self.provider.chain_id().to_string(),
-            }
-            .into())
-        })
-    }
-
-    fn supported(
-        &self,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<proto::SupportedResponse, SchemeHandlerError>> + Send + '_>,
-    > {
-        Box::pin(async move {
-            let chain_id = self.provider.chain_id();
-            let kinds: Vec<proto::SupportedPaymentKind> = {
-                let fee_payer = self.provider.fee_payer();
-                let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-                vec![proto::SupportedPaymentKind {
-                    x402_version: v2::X402Version2.into(),
-                    scheme: ExactScheme.to_string(),
-                    network: chain_id.to_string(),
-                    extra,
-                }]
-            };
-            let signers = {
-                let mut signers = HashMap::with_capacity(1);
-                signers.insert(chain_id, self.provider.signer_addresses());
-                signers
-            };
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
-        })
-    }
-}
 
 /// Result of a successful transfer verification.
 #[derive(Debug)]
@@ -358,6 +47,17 @@ pub struct TransferCheckedInstruction {
     pub authority: Pubkey,
     /// SPL Token program ID (Token or Token-2022).
     pub token_program: Pubkey,
+}
+
+/// Required fields for validating a transfer.
+#[derive(Debug)]
+pub struct TransferRequirement<'a> {
+    /// Expected asset (mint) address.
+    pub asset: &'a Address,
+    /// Expected recipient address.
+    pub pay_to: &'a Address,
+    /// Expected transfer amount in base units.
+    pub amount: u64,
 }
 
 /// Verifies the compute unit limit instruction at the given index.
@@ -470,17 +170,6 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
     let instruction = transaction.message.instructions().get(index)?;
     let account_keys = transaction.message.static_account_keys();
     Some(*instruction.program_id(account_keys))
-}
-
-/// Required fields for validating a transfer.
-#[derive(Debug)]
-pub struct TransferRequirement<'a> {
-    /// Expected asset (mint) address.
-    pub asset: &'a Address,
-    /// Expected recipient address.
-    pub pay_to: &'a Address,
-    /// Expected transfer amount in base units.
-    pub amount: u64,
 }
 
 /// Verifies a V1 transfer request against on-chain state.
