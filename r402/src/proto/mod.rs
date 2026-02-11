@@ -340,7 +340,8 @@ impl VerifyRequest {
 /// This response indicates whether the payment authorization is valid and identifies
 /// the payer. If invalid, it includes a reason describing why verification failed
 /// (e.g., wrong network, invalid scheme, insufficient funds).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "VerifyResponseWire", try_from = "VerifyResponseWire")]
 #[non_exhaustive]
 pub enum VerifyResponse {
     /// The payload matches the requirements and passes all checks.
@@ -397,60 +398,51 @@ impl VerifyResponse {
     }
 }
 
+/// Wire format for [`VerifyResponse`], using a flat boolean discriminator.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VerifyResponseWire {
     is_valid: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     payer: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     invalid_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     invalid_message: Option<String>,
 }
 
-impl Serialize for VerifyResponse {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let wire = match self {
-            Self::Valid { payer } => VerifyResponseWire {
+impl From<VerifyResponse> for VerifyResponseWire {
+    fn from(resp: VerifyResponse) -> Self {
+        match resp {
+            VerifyResponse::Valid { payer } => Self {
                 is_valid: true,
-                payer: Some(payer.clone()),
+                payer: Some(payer),
                 invalid_reason: None,
                 invalid_message: None,
             },
-            Self::Invalid {
+            VerifyResponse::Invalid {
                 reason,
                 message,
                 payer,
-            } => VerifyResponseWire {
+            } => Self {
                 is_valid: false,
-                payer: payer.clone(),
-                invalid_reason: Some(reason.clone()),
-                invalid_message: message.clone(),
+                payer,
+                invalid_reason: Some(reason),
+                invalid_message: message,
             },
-        };
-        wire.serialize(serializer)
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for VerifyResponse {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = VerifyResponseWire::deserialize(deserializer)?;
+impl TryFrom<VerifyResponseWire> for VerifyResponse {
+    type Error = String;
+
+    fn try_from(wire: VerifyResponseWire) -> Result<Self, Self::Error> {
         if wire.is_valid {
-            let payer = wire
-                .payer
-                .ok_or_else(|| serde::de::Error::missing_field("payer"))?;
+            let payer = wire.payer.ok_or("missing field: payer")?;
             Ok(Self::Valid { payer })
         } else {
-            let reason = wire
-                .invalid_reason
-                .ok_or_else(|| serde::de::Error::missing_field("invalidReason"))?;
+            let reason = wire.invalid_reason.ok_or("missing field: invalidReason")?;
             Ok(Self::Invalid {
                 reason,
                 message: wire.invalid_message,
@@ -464,7 +456,8 @@ impl<'de> Deserialize<'de> for VerifyResponse {
 ///
 /// Indicates whether the payment was successfully settled on-chain,
 /// including the transaction hash and payer address on success.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(into = "SettleResponseWire", try_from = "SettleResponseWire")]
 #[non_exhaustive]
 pub enum SettleResponse {
     /// Settlement succeeded.
@@ -497,74 +490,65 @@ impl SettleResponse {
     }
 }
 
+/// Wire format for [`SettleResponse`], using a flat boolean discriminator.
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SettleResponseWire {
-    pub success: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error_reason: Option<String>,
+    success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error_message: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transaction: Option<String>,
-    pub network: String,
+    error_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extensions: Option<Extensions>,
+    error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    payer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    transaction: Option<String>,
+    network: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extensions: Option<Extensions>,
 }
 
-impl Serialize for SettleResponse {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let wire = match self {
-            Self::Success {
+impl From<SettleResponse> for SettleResponseWire {
+    fn from(resp: SettleResponse) -> Self {
+        match resp {
+            SettleResponse::Success {
                 payer,
                 transaction,
                 network,
                 extensions,
-            } => SettleResponseWire {
+            } => Self {
                 success: true,
                 error_reason: None,
                 error_message: None,
-                payer: Some(payer.clone()),
-                transaction: Some(transaction.clone()),
-                network: network.clone(),
-                extensions: extensions.clone(),
+                payer: Some(payer),
+                transaction: Some(transaction),
+                network,
+                extensions,
             },
-            Self::Error {
+            SettleResponse::Error {
                 reason,
                 message,
                 network,
-            } => SettleResponseWire {
+            } => Self {
                 success: false,
-                error_reason: Some(reason.clone()),
-                error_message: message.clone(),
+                error_reason: Some(reason),
+                error_message: message,
                 payer: None,
                 transaction: None,
-                network: network.clone(),
+                network,
                 extensions: None,
             },
-        };
-        wire.serialize(serializer)
+        }
     }
 }
 
-impl<'de> Deserialize<'de> for SettleResponse {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let wire = SettleResponseWire::deserialize(deserializer)?;
+impl TryFrom<SettleResponseWire> for SettleResponse {
+    type Error = String;
+
+    fn try_from(wire: SettleResponseWire) -> Result<Self, <Self as TryFrom<SettleResponseWire>>::Error> {
         if wire.success {
-            let payer = wire
-                .payer
-                .ok_or_else(|| serde::de::Error::missing_field("payer"))?;
-            let transaction = wire
-                .transaction
-                .ok_or_else(|| serde::de::Error::missing_field("transaction"))?;
+            let payer = wire.payer.ok_or("missing field: payer")?;
+            let transaction = wire.transaction.ok_or("missing field: transaction")?;
             Ok(Self::Success {
                 payer,
                 transaction,
@@ -572,9 +556,7 @@ impl<'de> Deserialize<'de> for SettleResponse {
                 extensions: wire.extensions,
             })
         } else {
-            let reason = wire
-                .error_reason
-                .ok_or_else(|| serde::de::Error::missing_field("errorReason"))?;
+            let reason = wire.error_reason.ok_or("missing field: errorReason")?;
             Ok(Self::Error {
                 reason,
                 message: wire.error_message,
