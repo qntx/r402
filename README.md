@@ -13,22 +13,31 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 is a comprehensive restructuring of [x402-rs], fully aligned with the [official Go SDK][go-sdk] feature set — adding Permit2 transfers, lifecycle hooks, and 44 built-in chain deployments. For the upstream community implementation, see [x402-rs].
+r402 is a comprehensive restructuring of [x402-rs], fully aligned with the [official][x402-sdk] feature set — adding Permit2 transfers, lifecycle hooks, and 44 built-in chain deployments. For the upstream community implementation, see [x402-rs].
 
 [x402-rs]: https://github.com/x402-rs/x402-rs
-[go-sdk]: https://github.com/coinbase/x402
+[x402-sdk]: https://github.com/coinbase/x402
 
 > [!WARNING]
 > This software has **not** been audited. See [Security](#security) before using in production.
 
 ## Crates
 
-| Crate | Description |
-| --- | --- |
-| **[`r402`](r402/)** | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
-| **[`r402-evm`](r402-evm/)** | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
-| **[`r402-svm`](r402-svm/)** | Solana (SVM) — SPL token transfers, program-derived addressing |
-| **[`r402-http`](r402-http/)** | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
+| Crate | | Description |
+| --- | --- | --- |
+| **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
+| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
+| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
+| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
+
+[r402-crate]: https://img.shields.io/crates/v/r402.svg
+[r402-crate-url]: https://crates.io/crates/r402
+[r402-evm-crate]: https://img.shields.io/crates/v/r402-evm.svg
+[r402-evm-crate-url]: https://crates.io/crates/r402-evm
+[r402-svm-crate]: https://img.shields.io/crates/v/r402-svm.svg
+[r402-svm-crate-url]: https://crates.io/crates/r402-svm
+[r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
+[r402-http-crate-url]: https://crates.io/crates/r402-http
 
 See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
 
