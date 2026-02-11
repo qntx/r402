@@ -350,7 +350,7 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         return Err(PaymentVerificationError::RecipientMismatch);
     }
     let instruction_amount = transfer_checked_instruction.amount;
-    if instruction_amount != transfer_requirement.amount {
+    if instruction_amount < transfer_requirement.amount {
         return Err(PaymentVerificationError::InvalidPaymentAmount);
     }
     Ok(transfer_checked_instruction)

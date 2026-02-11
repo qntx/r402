@@ -28,7 +28,7 @@ use crate::exact::PermitWitnessTransferFrom;
 use crate::exact::types;
 use crate::exact::types::TokenPermissions as SolTokenPermissions;
 use crate::exact::types::Witness as SolWitness;
-use crate::exact::{PERMIT2_ADDRESS, PERMIT2_DEADLINE_BUFFER, X402_EXACT_PERMIT2_PROXY};
+use crate::exact::{PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY};
 
 /// Awaits a future, optionally instrumenting it with a tracing span.
 macro_rules! traced {
@@ -53,6 +53,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     eip3009: &Eip3009Payload,
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    clock_skew_tolerance: u64,
 ) -> Result<(IEIP3009::IEIP3009Instance<P>, Eip3009Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
     if accepted != requirements {
@@ -70,7 +71,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     }
     let valid_after = authorization.valid_after;
     let valid_before = authorization.valid_before;
-    assert_time(valid_after, valid_before)?;
+    assert_time(valid_after, valid_before, clock_skew_tolerance)?;
     let asset_address = accepted.asset;
     let contract = IEIP3009::new(asset_address.into(), provider);
 
@@ -95,7 +96,8 @@ pub(super) async fn assert_valid_payment<P: Provider>(
 
 /// Validates that the current time is within the `validAfter` and `validBefore` bounds.
 ///
-/// Adds a 6-second grace buffer when checking expiration to account for latency.
+/// Applies `clock_skew_tolerance` seconds of grace when checking both expiration
+/// and early-arrival to account for clock drift between nodes.
 ///
 /// # Errors
 ///
@@ -104,12 +106,13 @@ pub(super) async fn assert_valid_payment<P: Provider>(
 pub fn assert_time(
     valid_after: UnixTimestamp,
     valid_before: UnixTimestamp,
+    clock_skew_tolerance: u64,
 ) -> Result<(), PaymentVerificationError> {
     let now = UnixTimestamp::now();
-    if valid_before < now + 6 {
+    if valid_before < now + clock_skew_tolerance {
         return Err(PaymentVerificationError::Expired);
     }
-    if valid_after > now {
+    if valid_after > now + clock_skew_tolerance {
         return Err(PaymentVerificationError::Early);
     }
     Ok(())
@@ -327,6 +330,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     permit2: &crate::exact::Permit2Payload,
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    clock_skew_tolerance: u64,
 ) -> Result<(IERC20::IERC20Instance<P>, Permit2Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
     if accepted != requirements {
@@ -353,17 +357,17 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         return Err(PaymentVerificationError::RecipientMismatch.into());
     }
 
-    // Parse and verify deadline not expired (with buffer for block time)
+    // Parse and verify deadline not expired (with clock skew tolerance)
     let now = UnixTimestamp::now();
     let deadline_u64: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
-    let deadline_threshold = now.as_secs() + PERMIT2_DEADLINE_BUFFER;
+    let deadline_threshold = now.as_secs() + clock_skew_tolerance;
     if deadline_u64 < deadline_threshold {
         return Err(PaymentVerificationError::Expired.into());
     }
 
-    // Parse and verify validAfter is not in the future
+    // Parse and verify validAfter is not in the future (with clock skew tolerance)
     let valid_after_u64: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
-    if valid_after_u64 > now.as_secs() {
+    if valid_after_u64 > now.as_secs() + clock_skew_tolerance {
         return Err(PaymentVerificationError::Early.into());
     }
 

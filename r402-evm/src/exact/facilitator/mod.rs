@@ -107,12 +107,22 @@ where
     }
 }
 
+/// Default clock skew tolerance in seconds for time validation.
+///
+/// Applied as a grace buffer when checking `validBefore` / `deadline` expiration
+/// and `validAfter` early-arrival, to account for clock drift between the
+/// facilitator host and the blockchain network.
+const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = 30;
+
 /// Facilitator for EIP-155 exact scheme payments.
 ///
 /// Supports both EIP-3009 and Permit2 transfer methods. The transfer method
 /// is determined by the [`ExactPayload`] variant in the payment payload.
 pub struct Eip155ExactFacilitator<P> {
     provider: P,
+    /// Grace period (in seconds) applied to time-window checks to tolerate
+    /// clock drift between the facilitator and the blockchain network.
+    clock_skew_tolerance: u64,
 }
 
 impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
@@ -124,8 +134,23 @@ impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
 
 impl<P> Eip155ExactFacilitator<P> {
     /// Creates a new EIP-155 exact scheme facilitator with the given provider.
+    ///
+    /// Uses [`DEFAULT_CLOCK_SKEW_TOLERANCE`] (30 s) for time-window validation.
     pub const fn new(provider: P) -> Self {
-        Self { provider }
+        Self {
+            provider,
+            clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+        }
+    }
+
+    /// Sets a custom clock-skew tolerance (in seconds) for time-window checks.
+    ///
+    /// A larger value is more lenient toward clock drift between the facilitator
+    /// and the chain; a value of `0` enforces exact-time boundaries.
+    #[must_use]
+    pub const fn with_clock_skew_tolerance(mut self, seconds: u64) -> Self {
+        self.clock_skew_tolerance = seconds;
+        self
     }
 }
 
@@ -152,6 +177,7 @@ where
                         eip3009,
                         payload,
                         requirements,
+                        self.clock_skew_tolerance,
                     )
                     .await?;
                     let payer =
@@ -166,6 +192,7 @@ where
                         permit2,
                         payload,
                         requirements,
+                        self.clock_skew_tolerance,
                     )
                     .await?;
                     let payer =
@@ -194,6 +221,7 @@ where
                         eip3009,
                         payload,
                         requirements,
+                        self.clock_skew_tolerance,
                     )
                     .await?;
                     let tx_hash =
@@ -213,6 +241,7 @@ where
                         permit2,
                         payload,
                         requirements,
+                        self.clock_skew_tolerance,
                     )
                     .await?;
                     let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
