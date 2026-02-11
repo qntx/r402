@@ -1,8 +1,9 @@
 //! Base64 encoding utilities for x402 wire format.
 
+use std::fmt::{self, Display, Formatter};
+
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as b64;
-use std::fmt::{self, Display, Formatter};
 
 /// A wrapper for base64-encoded byte data.
 ///

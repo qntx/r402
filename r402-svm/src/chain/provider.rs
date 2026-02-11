@@ -1,3 +1,7 @@
+use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
+use std::time::Duration;
+
 use r402::chain::{ChainId, ChainProvider};
 use r402::facilitator::FacilitatorError;
 use r402::proto::PaymentVerificationError;
@@ -18,9 +22,6 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use solana_transaction::versioned::VersionedTransaction;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use std::time::Duration;
 
 use crate::chain::types::{Address, SolanaChainReference};
 

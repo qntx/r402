@@ -34,5 +34,4 @@ pub mod provider;
 pub use pending_nonce_manager::*;
 #[cfg(feature = "facilitator")]
 pub use provider::*;
-
 pub use types::*;

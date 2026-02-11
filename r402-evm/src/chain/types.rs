@@ -3,13 +3,14 @@
 //! This module provides types that handle serialization and deserialization
 //! of EVM-specific values in the x402 protocol wire format.
 
+use std::fmt::{Display, Formatter};
+use std::ops::Mul;
+use std::str::FromStr;
+
 use alloy_primitives::{Address, U256, hex};
 use r402::amount::{MoneyAmount, MoneyAmountParseError};
 use r402::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt::{Display, Formatter};
-use std::ops::Mul;
-use std::str::FromStr;
 
 /// An Ethereum address that serializes with EIP-55 checksum encoding.
 ///

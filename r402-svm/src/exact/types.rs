@@ -3,29 +3,28 @@
 //! This module defines shared wire format types for SPL Token based payments
 //! on Solana. Wire format type aliases live in the [`v2`] sub-module.
 
-pub use r402::scheme::ExactScheme;
-use serde::{Deserialize, Serialize};
-use solana_pubkey::{Pubkey, pubkey};
 use std::sync::LazyLock;
-
-use super::error::{SolanaExactError, TransactionSignError, TransactionToB64Error};
-
-use crate::chain::Address;
-#[cfg(feature = "facilitator")]
-use crate::chain::{SolanaChainProviderError, SolanaChainProviderLike};
 
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use r402::proto::Base64Bytes;
+pub use r402::scheme::ExactScheme;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "facilitator")]
 use solana_commitment_config::CommitmentConfig;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_message::compiled_instruction::CompiledInstruction;
+use solana_pubkey::{Pubkey, pubkey};
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_signature::Signature;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_signer::Signer;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_transaction::versioned::VersionedTransaction;
+
+use super::error::{SolanaExactError, TransactionSignError, TransactionToB64Error};
+use crate::chain::Address;
+#[cfg(feature = "facilitator")]
+use crate::chain::{SolanaChainProviderError, SolanaChainProviderLike};
 
 /// Phantom Lighthouse program ID - security program injected by Phantom wallet on mainnet
 /// See: <https://github.com/coinbase/x402/issues/828>

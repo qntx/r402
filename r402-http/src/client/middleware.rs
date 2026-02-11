@@ -3,7 +3,10 @@
 //! This module provides the [`X402Client`] which orchestrates scheme clients
 //! and payment selection for automatic payment handling.
 
+use std::sync::Arc;
+
 use http::{Extensions, HeaderMap, StatusCode};
+use r402::hooks::{FailureRecovery, HookDecision};
 use r402::proto;
 use r402::proto::Base64Bytes;
 use r402::proto::v2;
@@ -12,14 +15,10 @@ use r402::scheme::{
 };
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
-use std::sync::Arc;
-
-use r402::hooks::{FailureRecovery, HookDecision};
-
-use super::hooks::{ClientHooks, PaymentCreationContext};
-
 #[cfg(feature = "telemetry")]
 use tracing::{debug, info, instrument, trace};
+
+use super::hooks::{ClientHooks, PaymentCreationContext};
 
 /// The main x402 client that orchestrates scheme clients and selection.
 ///

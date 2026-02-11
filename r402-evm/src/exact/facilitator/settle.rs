@@ -9,7 +9,6 @@ use alloy_provider::bindings::IMulticall3;
 use alloy_provider::{MULTICALL3_ADDRESS, MulticallItem, Provider};
 use alloy_sol_types::{Eip712Domain, SolCall};
 use alloy_transport::TransportError;
-
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 

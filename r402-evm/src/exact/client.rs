@@ -3,6 +3,10 @@
 //! This module provides [`Eip155ExactClient`] for signing ERC-3009
 //! `transferWithAuthorization` payments on EVM chains.
 
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
@@ -14,9 +18,6 @@ use r402::scheme::SchemeId;
 use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use rand::RngExt;
 use rand::rng;
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
 
 use crate::chain::Eip155ChainReference;
 use crate::chain::TokenAmount;

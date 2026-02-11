@@ -1,9 +1,10 @@
+use std::fmt::{Debug, Display, Formatter};
+use std::str::FromStr;
+
 use r402::amount::{MoneyAmount, MoneyAmountParseError};
 use r402::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solana_pubkey::Pubkey;
-use std::fmt::{Debug, Display, Formatter};
-use std::str::FromStr;
 
 /// The CAIP-2 namespace for Solana chains.
 pub const SOLANA_NAMESPACE: &str = "solana";

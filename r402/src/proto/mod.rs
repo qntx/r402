@@ -17,10 +17,11 @@
 //! All types serialize to JSON using camelCase field names. The protocol version
 //! is indicated by the `x402Version` field in payment payloads.
 
-use serde::{Deserialize, Serialize};
-use serde_with::{VecSkipError, serde_as};
 use std::collections::HashMap;
 use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+use serde_with::{VecSkipError, serde_as};
 
 use crate::chain::ChainId;
 use crate::scheme::SchemeSlug;
@@ -32,9 +33,8 @@ pub mod v2;
 mod version;
 
 pub use encoding::Base64Bytes;
-pub use timestamp::UnixTimestamp;
-
 pub use error::*;
+pub use timestamp::UnixTimestamp;
 pub use version::Version;
 
 /// A version-tagged verify/settle request with typed payload and requirements.

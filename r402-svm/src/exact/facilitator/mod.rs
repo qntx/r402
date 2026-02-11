@@ -6,21 +6,21 @@
 mod config;
 mod verify;
 
-pub use config::SolanaExactFacilitatorConfig;
-pub use verify::{
-    TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
-    validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
-    verify_transaction, verify_transfer, verify_transfer_instruction,
-};
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
+pub use config::SolanaExactFacilitatorConfig;
 use r402::chain::ChainProvider;
 use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::v2;
 use r402::scheme::{SchemeBuilder, SchemeId};
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
+pub use verify::{
+    TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
+    validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
+    verify_transaction, verify_transfer, verify_transfer_instruction,
+};
 
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;

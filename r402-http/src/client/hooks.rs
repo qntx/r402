@@ -17,11 +17,12 @@
 //! Implement [`ClientHooks`] with only the hooks you need — all methods
 //! have default no-op implementations.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use http::HeaderMap;
 use r402::hooks::{FailureRecovery, HookDecision};
 use r402::proto;
-use std::future::Future;
-use std::pin::Pin;
 
 /// Context passed to client payment creation lifecycle hooks.
 #[derive(Debug, Clone)]

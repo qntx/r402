@@ -31,9 +31,7 @@ pub mod chain;
 pub mod exact;
 
 mod networks;
-pub use networks::*;
-
 pub use exact::Eip155Exact;
-
 #[cfg(feature = "client")]
 pub use exact::client::Eip155ExactClient;
+pub use networks::*;

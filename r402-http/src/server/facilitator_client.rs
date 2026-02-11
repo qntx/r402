@@ -19,21 +19,21 @@
 //! - Unexpected HTTP status responses
 //!
 
+use std::fmt::Display;
+use std::future::Future;
+use std::pin::Pin;
+use std::time::Duration;
+
 use http::{HeaderMap, StatusCode};
 use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use reqwest::Client;
-use std::fmt::Display;
-use std::future::Future;
-use std::pin::Pin;
-use std::time::Duration;
 use tokio::sync::RwLock;
-use url::Url;
-
 #[cfg(feature = "telemetry")]
 use tracing::{Instrument, Span, instrument};
+use url::Url;
 
 /// TTL cache for [`SupportedResponse`].
 #[derive(Clone, Debug)]
@@ -521,11 +521,13 @@ fn with_span<F: Future>(fut: F, span: Span) -> impl Future<Output = F::Output> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use r402::proto::SupportedPaymentKind;
     use std::collections::HashMap;
+
+    use r402::proto::SupportedPaymentKind;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
 
     fn create_test_supported_response() -> SupportedResponse {
         SupportedResponse {

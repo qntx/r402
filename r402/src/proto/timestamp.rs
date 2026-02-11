@@ -1,9 +1,10 @@
 //! Unix timestamp utilities for x402 payment authorization windows.
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{self, Display, Formatter};
 use std::ops::Add;
 use std::time::SystemTime;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// A Unix timestamp representing seconds since the Unix epoch (1970-01-01T00:00:00Z).
 ///

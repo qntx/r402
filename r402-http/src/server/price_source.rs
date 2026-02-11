@@ -4,11 +4,12 @@
 //! [`PriceTagSource`] trait. All sources produce [`v2::PriceTag`] values
 //! (V2-only server layer).
 
-use http::{HeaderMap, Uri};
-use r402::proto::v2;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+use http::{HeaderMap, Uri};
+use r402::proto::v2;
 use url::Url;
 
 /// Trait for types that can provide V2 price tags for a request.

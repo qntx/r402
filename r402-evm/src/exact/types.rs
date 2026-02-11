@@ -5,12 +5,11 @@
 //! transfer methods. Wire format type aliases live in the [`v2`] sub-module.
 
 use alloy_primitives::{Address, B256, Bytes, address};
+#[cfg(any(feature = "facilitator", feature = "client"))]
+use alloy_sol_types::sol;
 use r402::proto::UnixTimestamp;
 pub use r402::scheme::ExactScheme;
 use serde::{Deserialize, Serialize};
-
-#[cfg(any(feature = "facilitator", feature = "client"))]
-use alloy_sol_types::sol;
 
 use crate::chain::TokenAmount;
 

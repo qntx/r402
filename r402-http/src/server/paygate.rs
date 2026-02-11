@@ -4,6 +4,9 @@
 //! extracting headers, verifying with the facilitator, settling on-chain,
 //! and returning 402 responses when payment is required.
 
+use std::convert::Infallible;
+use std::sync::Arc;
+
 use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
@@ -13,15 +16,10 @@ use r402::proto;
 use r402::proto::Base64Bytes;
 use r402::proto::v2;
 use serde_json::json;
-use std::convert::Infallible;
-use std::sync::Arc;
 use tower::Service;
+#[cfg(feature = "telemetry")]
+use tracing::{Instrument, instrument};
 use url::Url;
-
-#[cfg(feature = "telemetry")]
-use tracing::Instrument;
-#[cfg(feature = "telemetry")]
-use tracing::instrument;
 
 use super::error::{PaygateError, VerificationError};
 

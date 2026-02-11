@@ -6,14 +6,13 @@
 //!
 //! [`SchemeRegistry`] holds the active handler instances keyed by chain+scheme.
 
-use crate::chain::{ChainId, ChainProvider};
-use crate::facilitator::Facilitator;
-
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 
 use super::SchemeId;
+use crate::chain::{ChainId, ChainProvider};
+use crate::facilitator::Facilitator;
 
 /// Trait for building facilitator instances from chain providers.
 ///

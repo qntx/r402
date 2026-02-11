@@ -17,8 +17,20 @@ mod settle;
 mod signature;
 mod verify;
 
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+
+use alloy_primitives::{Address, B256, Bytes, U256, address};
+use alloy_provider::Provider;
 pub use contract::{IEIP3009, IX402Permit2Proxy, Validator6492};
 pub use error::Eip155ExactError;
+use r402::chain::ChainProvider;
+use r402::facilitator::{Facilitator, FacilitatorError};
+use r402::proto;
+use r402::proto::UnixTimestamp;
+use r402::proto::v2;
+use r402::scheme::{SchemeBuilder, SchemeId};
 pub use settle::{
     TransferWithAuthorization0Call, TransferWithAuthorization1Call, TransferWithAuthorizationCall,
     settle_payment, settle_permit2_payment,
@@ -28,18 +40,6 @@ pub use verify::{
     assert_domain, assert_enough_balance, assert_enough_value, assert_time, verify_payment,
     verify_permit2_payment,
 };
-
-use alloy_primitives::{Address, B256, Bytes, U256, address};
-use alloy_provider::Provider;
-use r402::chain::ChainProvider;
-use r402::facilitator::{Facilitator, FacilitatorError};
-use r402::proto;
-use r402::proto::UnixTimestamp;
-use r402::proto::v2;
-use r402::scheme::{SchemeBuilder, SchemeId};
-use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;

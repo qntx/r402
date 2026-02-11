@@ -32,9 +32,7 @@ pub mod chain;
 pub mod exact;
 
 mod networks;
-pub use networks::*;
-
 pub use exact::SolanaExact;
-
 #[cfg(feature = "client")]
 pub use exact::client::SolanaExactClient;
+pub use networks::*;

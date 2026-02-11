@@ -3,10 +3,11 @@
 //! This module provides functionality for servers to create price tags
 //! that clients can use to generate payment authorizations.
 
+use std::sync::Arc;
+
 use r402::chain::{ChainId, DeployedTokenAmount};
 use r402::proto;
 use r402::proto::v2;
-use std::sync::Arc;
 
 use crate::chain::{Address, SolanaTokenDeployment};
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};

@@ -10,11 +10,12 @@
 //! - With currency symbols: `"$10.50"`, `"€20"`
 //! - With thousand separators: `"1,000"`, `"1,000,000.50"`
 
-use rust_decimal::Decimal;
-use rust_decimal::prelude::FromPrimitive;
 use std::fmt;
 use std::fmt::Display;
 use std::str::FromStr;
+
+use rust_decimal::Decimal;
+use rust_decimal::prelude::FromPrimitive;
 
 /// Strips all characters except digits, dots, and minus signs from a monetary string.
 fn strip_non_numeric(input: &str) -> String {
@@ -85,8 +86,9 @@ pub enum MoneyAmountParseError {
 }
 
 mod constants {
-    use super::{Decimal, FromStr};
     use std::sync::LazyLock;
+
+    use super::{Decimal, FromStr};
 
     pub const MIN_STR: &str = "0.000000001";
     pub const MAX_STR: &str = "999999999";

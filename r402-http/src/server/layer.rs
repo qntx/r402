@@ -24,21 +24,21 @@
 //! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
 //!
 
-use axum_core::extract::Request;
-use axum_core::response::Response;
-use http::{HeaderMap, Uri};
-use r402::facilitator::Facilitator;
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
+
+use axum_core::extract::Request;
+use axum_core::response::Response;
+use http::{HeaderMap, Uri};
+use r402::facilitator::Facilitator;
+use r402::proto::v2;
 use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
-
-use r402::proto::v2;
 
 use super::facilitator_client::FacilitatorClient;
 use super::paygate::{Paygate, ResourceInfoBuilder};

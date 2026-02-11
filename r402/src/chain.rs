@@ -9,11 +9,12 @@
 //! - [`ChainProvider`] - Common operations on chain providers
 //! - [`DeployedTokenAmount`] - Token amount paired with deployment info
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 /// A CAIP-2 compliant blockchain identifier.
 ///

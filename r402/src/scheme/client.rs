@@ -3,12 +3,12 @@
 //! This module provides the traits and types needed by payment clients to
 //! examine 402 responses, generate payment candidates, and sign payments.
 
-use crate::chain::{ChainId, ChainIdPattern};
-use crate::proto;
-
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::pin::Pin;
+
+use crate::chain::{ChainId, ChainIdPattern};
+use crate::proto;
 
 /// Trait for scheme clients that can process payment requirements.
 ///

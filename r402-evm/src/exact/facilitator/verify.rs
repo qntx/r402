@@ -6,15 +6,13 @@
 
 use alloy_primitives::{Address, U256};
 use alloy_provider::Provider;
+use alloy_sol_types::SolStruct;
 use alloy_sol_types::{Eip712Domain, eip712_domain};
 use r402::chain::ChainId;
 use r402::proto::PaymentVerificationError;
 use r402::proto::UnixTimestamp;
-
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
-
-use alloy_sol_types::SolStruct;
 
 use super::Eip3009Payment;
 use super::Permit2Payment;
