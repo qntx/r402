@@ -25,8 +25,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use x402_rs::chain::eip155::{Eip155ChainReference, Eip155TokenDeployment};
-//! use x402_rs::networks::{KnownNetworkEip155, USDC};
+//! use r402_evm::chain::{Eip155ChainReference, Eip155TokenDeployment};
+//! use r402_evm::KnownNetworkEip155;
+//! use r402::networks::USDC;
 //!
 //! // Get USDC deployment on Base
 //! let usdc = USDC::base();

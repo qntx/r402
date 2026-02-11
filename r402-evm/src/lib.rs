@@ -70,10 +70,10 @@
 //! let facilitator = V1Eip155Exact.build(provider, None)?;
 //!
 //! // Verify payment
-//! let verify_response = facilitator.verify(&verify_request).await?;
+//! let verify_response = facilitator.verify(verify_request).await?;
 //!
 //! // Settle payment
-//! let settle_response = facilitator.settle(&settle_request).await?;
+//! let settle_response = facilitator.settle(settle_request).await?;
 //! ```
 
 pub mod chain;

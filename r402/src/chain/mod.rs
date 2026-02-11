@@ -22,8 +22,8 @@ use std::sync::Arc;
 /// Asynchronously constructs an instance of `Self` from a configuration type.
 ///
 /// This trait provides a generic mechanism for initializing structs from their
-/// corresponding configuration types. It is used throughout the x402-rs crate
-/// to build providers, registries, and other components from configuration files.
+/// corresponding configuration types. It is used throughout the r402 ecosystem
+/// to build providers, registries, and other components from configuration.
 ///
 /// # Type Parameters
 ///
@@ -78,21 +78,17 @@ impl<T: ChainProviderOps> ChainProviderOps for Arc<T> {
 ///
 /// # Type Parameters
 ///
-/// - `P` - The chain provider type (e.g., [`ChainProvider`] or a custom provider type)
+/// - `P` - The chain provider type (e.g., `Eip155ChainProvider` or `SolanaChainProvider`)
 ///
 /// # Example
 ///
 /// ```ignore
-/// use x402_rs::chain::{ChainRegistry, ChainIdPattern, ChainProvider};
-/// use x402_rs::config::Config;
-///
-/// let config = Config::load()?;
-/// let registry = ChainRegistry::from_config(config.chains()).await?;
+/// use r402::chain::{ChainRegistry, ChainIdPattern, ChainId};
 ///
 /// // Find provider for a specific chain
-/// let base_provider = registry.by_chain_id(ChainId::new("eip155", "8453"));
+/// let base_provider = registry.by_chain_id(&ChainId::new("eip155", "8453"));
 ///
-/// // Find provider matching a pattern
+/// // Find providers matching a pattern
 /// let any_evm = registry.by_chain_id_pattern(&ChainIdPattern::wildcard("eip155"));
 /// ```
 #[derive(Debug)]
@@ -130,11 +126,7 @@ impl<P> ChainRegistry<P> {
     /// # Example
     ///
     /// ```ignore
-    /// use x402_rs::chain::{ChainRegistry, ChainIdPattern};
-    /// use x402_rs::config::Config;
-    ///
-    /// let config = Config::load()?;
-    /// let registry = ChainRegistry::from_config(config.chains()).await?;
+    /// use r402::chain::{ChainRegistry, ChainIdPattern};
     ///
     /// // Find all EVM chain providers
     /// let evm_providers = registry.by_chain_id_pattern(&ChainIdPattern::wildcard("eip155"));
@@ -163,7 +155,6 @@ impl<P> ChainRegistry<P> {
 /// - `TAmount` - The numeric type for the amount (e.g., `U256` for EVM, `u64` for Solana)
 /// - `TToken` - The token deployment type containing chain and address information
 #[derive(Debug, Clone)]
-
 pub struct DeployedTokenAmount<TAmount, TToken> {
     /// The token amount in the token's smallest unit (e.g., wei for ETH, lamports for SOL).
     pub amount: TAmount,

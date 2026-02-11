@@ -48,30 +48,19 @@
 //! # Module Contents
 //!
 //! - [`NetworkInfo`]: A struct representing a known network with its name, namespace, and reference
-//! - [`KnownNetworkEip155`]: Trait for convenient access to EVM networks (eip155 namespace)
-//! - [`KnownNetworkSolana`]: Trait for convenient access to Solana networks
 //! - [`KNOWN_NETWORKS`]: A static array of all well-known networks
 //! - [`chain_id_by_network_name`]: Lookup function to get `ChainId` by network name
 //! - [`network_name_by_chain_id`]: Reverse lookup function to get network name by `ChainId`
 //! - [`USDC`]: Marker struct used for token deployment implementations
 //!
-//! # Namespace-Specific Traits
+//! # Namespace-Specific Traits (in downstream crates)
 //!
-//! The module provides two namespace-specific traits for better organization and flexibility:
+//! Chain-specific crates define namespace-specific traits that work with this registry:
 //!
-//! ## `KnownNetworkEip155`
-//! Provides convenient static methods for all EVM networks (eip155 namespace):
-//! - Base, Base Sepolia
-//! - Polygon, Polygon Amoy
-//! - Avalanche, Avalanche Fuji
-//! - Sei, Sei Testnet
-//! - XDC, XRPL EVM, Peaq, `IoTeX`
-//! - Celo, Celo Sepolia
-//!
-//! ## `KnownNetworkSolana`
-//! Provides convenient static methods for Solana networks:
-//! - Solana mainnet
-//! - Solana devnet
+//! - **`KnownNetworkEip155`** (in `r402-evm`) — static methods for EVM networks
+//!   (Base, Polygon, Avalanche, Sei, XDC, XRPL EVM, Peaq, IoTeX, Celo, etc.)
+//! - **`KnownNetworkSolana`** (in `r402-svm`) — static methods for Solana networks
+//!   (mainnet, devnet)
 //!
 //! # Supported Networks
 //!

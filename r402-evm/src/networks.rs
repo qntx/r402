@@ -19,8 +19,8 @@ use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentE
 /// # Examples
 ///
 /// ```ignore
-/// use x402_rs::chain::ChainId;
-/// use x402_rs::known::KnownNetworkEip155;
+/// use r402::chain::ChainId;
+/// use r402_evm::KnownNetworkEip155;
 ///
 /// // Get Base mainnet chain ID
 /// let base = ChainId::base();
@@ -31,10 +31,6 @@ use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentE
 /// let polygon = ChainId::polygon();
 /// assert_eq!(polygon.namespace, "eip155");
 /// assert_eq!(polygon.reference, "137");
-///
-/// // Can also be implemented for other types like token addresses
-/// // let usdc_base = UsdcAddress::base();
-/// // let usdc_polygon = UsdcAddress::polygon();
 /// ```
 pub trait KnownNetworkEip155<A> {
     /// Returns the instance for Base mainnet (eip155:8453)

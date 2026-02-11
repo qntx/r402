@@ -396,9 +396,8 @@ pub struct PaymentRequirements<
 impl PaymentRequirements {
     /// Converts the payment requirements to a concrete type.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if any of the type conversions fail.
+    /// Returns `None` if any of the type conversions fail (e.g., parsing scheme,
+    /// amount, or address strings into their typed equivalents).
     #[must_use]
     pub fn as_concrete<
         TScheme: FromStr,

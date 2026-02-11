@@ -218,9 +218,10 @@ pub fn update_or_append_set_compute_unit_limit(ixs: &mut Vec<Instruction>, units
     let target_program = solana_compute_budget_interface::ID;
     let new_ix = ComputeBudgetInstruction::set_compute_unit_limit(units);
 
+    // SetComputeUnitLimit discriminator byte is 2
     let ix = ixs
         .iter_mut()
-        .find(|ix| ix.program_id == target_program && ix.data.is_empty());
+        .find(|ix| ix.program_id == target_program && ix.data.first().copied() == Some(2));
     if let Some(ix) = ix {
         *ix = new_ix;
     } else {

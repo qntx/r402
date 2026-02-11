@@ -20,8 +20,8 @@ use crate::chain::{SolanaChainReference, SolanaTokenDeployment};
 /// # Examples
 ///
 /// ```ignore
-/// use x402_rs::chain::ChainId;
-/// use x402_rs::known::KnownNetworkSolana;
+/// use r402::chain::ChainId;
+/// use r402_svm::KnownNetworkSolana;
 ///
 /// // Get Solana mainnet chain ID
 /// let solana = ChainId::solana();

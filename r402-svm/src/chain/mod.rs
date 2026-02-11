@@ -19,8 +19,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use x402_rs::chain::solana::{SolanaChainReference, SolanaTokenDeployment};
-//! use x402_rs::networks::{KnownNetworkSolana, USDC};
+//! use r402_svm::chain::{SolanaChainReference, SolanaTokenDeployment};
+//! use r402_svm::KnownNetworkSolana;
+//! use r402::networks::USDC;
 //!
 //! // Get USDC deployment on Solana mainnet
 //! let usdc = USDC::solana();

@@ -256,8 +256,6 @@ impl<TChainsConfig> Config<TChainsConfig> {
     }
 
     /// Get the host value as an `IpAddr`.
-    ///
-    /// Returns an error if the host string cannot be parsed as an IP address.
     pub const fn host(&self) -> IpAddr {
         self.host
     }
