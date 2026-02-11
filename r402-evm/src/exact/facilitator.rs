@@ -105,9 +105,14 @@ where
 {
     fn verify(
         &self,
-        request: &proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
-        let request = request.clone();
+        request: proto::VerifyRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let request = types::v1::VerifyRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -129,9 +134,14 @@ where
 
     fn settle(
         &self,
-        request: &proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
-        let request = request.clone();
+        request: proto::SettleRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let request = types::v1::SettleRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -144,7 +154,8 @@ where
             )
             .await?;
 
-            let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+            let tx_hash =
+                settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
             Ok(v1::SettleResponse::Success {
                 payer: payment.from.to_string(),
                 transaction: tx_hash.to_string(),
@@ -156,7 +167,13 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = {
@@ -217,9 +234,14 @@ where
 {
     fn verify(
         &self,
-        request: &proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>> {
-        let request = request.clone();
+        request: proto::VerifyRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -240,9 +262,14 @@ where
 
     fn settle(
         &self,
-        request: &proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>> {
-        let request = request.clone();
+        request: proto::SettleRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -255,7 +282,8 @@ where
             )
             .await?;
 
-            let tx_hash = settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+            let tx_hash =
+                settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
 
             Ok(v2::SettleResponse::Success {
                 payer: payment.from.to_string(),
@@ -268,7 +296,13 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>> {
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    > {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = vec![proto::SupportedPaymentKind {

@@ -134,10 +134,10 @@ impl Facilitator for FacilitatorClient {
     #[cfg(feature = "telemetry")]
     async fn verify(
         &self,
-        request: &VerifyRequest,
+        request: VerifyRequest,
     ) -> Result<VerifyResponse, FacilitatorClientError> {
         with_span(
-            Self::verify(self, request),
+            Self::verify(self, &request),
             tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
         )
         .await
@@ -147,19 +147,19 @@ impl Facilitator for FacilitatorClient {
     #[cfg(not(feature = "telemetry"))]
     async fn verify(
         &self,
-        request: &VerifyRequest,
+        request: VerifyRequest,
     ) -> Result<VerifyResponse, FacilitatorClientError> {
-        FacilitatorClient::verify(self, request).await
+        FacilitatorClient::verify(self, &request).await
     }
 
     /// Settles a verified payment with the facilitator.
     #[cfg(feature = "telemetry")]
     async fn settle(
         &self,
-        request: &SettleRequest,
+        request: SettleRequest,
     ) -> Result<SettleResponse, FacilitatorClientError> {
         with_span(
-            Self::settle(self, request),
+            Self::settle(self, &request),
             tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
         )
         .await
@@ -169,9 +169,9 @@ impl Facilitator for FacilitatorClient {
     #[cfg(not(feature = "telemetry"))]
     async fn settle(
         &self,
-        request: &SettleRequest,
+        request: SettleRequest,
     ) -> Result<SettleResponse, FacilitatorClientError> {
-        FacilitatorClient::settle(self, request).await
+        FacilitatorClient::settle(self, &request).await
     }
 
     /// Retrieves the supported payment kinds from the facilitator.

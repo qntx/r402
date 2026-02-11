@@ -32,8 +32,6 @@ use r402::proto::v2::{ResourceInfo, X402Version2};
 use r402::scheme::X402SchemeId;
 use r402::scheme::client::{PaymentCandidate, PaymentCandidateSigner, X402Error, X402SchemeClient};
 use r402::util::Base64Bytes;
-use std::future::Future;
-use std::pin::Pin;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -44,6 +42,8 @@ use solana_signer::Signer;
 use solana_transaction::Instruction;
 use solana_transaction::versioned::VersionedTransaction;
 use spl_token::solana_program::program_pack::Pack;
+use std::future::Future;
+use std::pin::Pin;
 
 use crate::chain::Address;
 use crate::chain::rpc::RpcClientLike;

@@ -534,7 +534,7 @@ where
             #[cfg(feature = "telemetry")]
             tracing::debug!("Settling payment before request execution");
 
-            let settlement = self.settle_payment(&verify_request).await?;
+            let settlement = self.settle_payment(verify_request).await?;
 
             let header_value = settlement_to_header(settlement)?;
 
@@ -553,7 +553,7 @@ where
             #[cfg(feature = "telemetry")]
             tracing::debug!("Settling payment after request execution");
 
-            let verify_response = self.verify_payment(&verify_request).await?;
+            let verify_response = self.verify_payment(verify_request.clone()).await?;
 
             TPriceTag::validate_verify_response(verify_response)?;
 
@@ -566,7 +566,7 @@ where
                 return Ok(response.into_response());
             }
 
-            let settlement = self.settle_payment(&verify_request).await?;
+            let settlement = self.settle_payment(verify_request).await?;
 
             let header_value = settlement_to_header(settlement)?;
 
@@ -584,7 +584,7 @@ where
     #[allow(clippy::future_not_send)]
     pub async fn verify_payment(
         &self,
-        verify_request: &proto::VerifyRequest,
+        verify_request: proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, VerificationError> {
         let verify_response = self
             .facilitator
@@ -602,7 +602,7 @@ where
     #[allow(clippy::future_not_send)]
     pub async fn settle_payment(
         &self,
-        settle_request: &proto::SettleRequest,
+        settle_request: proto::SettleRequest,
     ) -> Result<proto::SettleResponse, PaygateError> {
         let settle_response = self
             .facilitator

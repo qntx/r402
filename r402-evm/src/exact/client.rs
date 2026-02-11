@@ -261,27 +261,27 @@ where
 {
     fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
         Box::pin(async move {
-        let params = Eip3009SigningParams {
-            chain_id: self.chain_reference.inner(),
-            asset_address: self.requirements.asset,
-            pay_to: self.requirements.pay_to,
-            amount: self.requirements.max_amount_required,
-            max_timeout_seconds: self.requirements.max_timeout_seconds,
-            extra: self.requirements.extra.clone(),
-        };
+            let params = Eip3009SigningParams {
+                chain_id: self.chain_reference.inner(),
+                asset_address: self.requirements.asset,
+                pay_to: self.requirements.pay_to,
+                amount: self.requirements.max_amount_required,
+                max_timeout_seconds: self.requirements.max_timeout_seconds,
+                extra: self.requirements.extra.clone(),
+            };
 
-        let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
+            let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
 
-        let payload = types::v1::PaymentPayload {
-            x402_version: X402Version1,
-            scheme: ExactScheme,
-            network: self.requirements.network.clone(),
-            payload: evm_payload,
-        };
-        let json = serde_json::to_vec(&payload)?;
-        let b64 = Base64Bytes::encode(&json);
+            let payload = types::v1::PaymentPayload {
+                x402_version: X402Version1,
+                scheme: ExactScheme,
+                network: self.requirements.network.clone(),
+                payload: evm_payload,
+            };
+            let json = serde_json::to_vec(&payload)?;
+            let b64 = Base64Bytes::encode(&json);
 
-        Ok(b64.to_string())
+            Ok(b64.to_string())
         })
     }
 }
@@ -376,27 +376,27 @@ where
 {
     fn sign_payment(&self) -> Pin<Box<dyn Future<Output = Result<String, X402Error>> + Send + '_>> {
         Box::pin(async move {
-        let params = Eip3009SigningParams {
-            chain_id: self.chain_reference.inner(),
-            asset_address: self.requirements.asset.0,
-            pay_to: self.requirements.pay_to.into(),
-            amount: self.requirements.amount.into(),
-            max_timeout_seconds: self.requirements.max_timeout_seconds,
-            extra: self.requirements.extra.clone(),
-        };
+            let params = Eip3009SigningParams {
+                chain_id: self.chain_reference.inner(),
+                asset_address: self.requirements.asset.0,
+                pay_to: self.requirements.pay_to.into(),
+                amount: self.requirements.amount.into(),
+                max_timeout_seconds: self.requirements.max_timeout_seconds,
+                extra: self.requirements.extra.clone(),
+            };
 
-        let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
+            let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
 
-        let payload = types::v2::PaymentPayload {
-            x402_version: v2::X402Version2,
-            accepted: self.requirements.clone(),
-            resource: self.resource_info.clone(),
-            payload: evm_payload,
-        };
-        let json = serde_json::to_vec(&payload)?;
-        let b64 = Base64Bytes::encode(&json);
+            let payload = types::v2::PaymentPayload {
+                x402_version: v2::X402Version2,
+                accepted: self.requirements.clone(),
+                resource: self.resource_info.clone(),
+                payload: evm_payload,
+            };
+            let json = serde_json::to_vec(&payload)?;
+            let b64 = Base64Bytes::encode(&json);
 
-        Ok(b64.to_string())
+            Ok(b64.to_string())
         })
     }
 }

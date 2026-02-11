@@ -31,7 +31,7 @@ pub trait Facilitator {
     /// Returns [`Self::Error`] if any validation step fails.
     fn verify(
         &self,
-        request: &proto::VerifyRequest,
+        request: proto::VerifyRequest,
     ) -> impl Future<Output = Result<proto::VerifyResponse, Self::Error>> + Send;
 
     /// Executes an on-chain x402 settlement for a valid [`proto::SettleRequest`].
@@ -49,7 +49,7 @@ pub trait Facilitator {
     /// Returns [`Self::Error`] if verification or settlement fails.
     fn settle(
         &self,
-        request: &proto::SettleRequest,
+        request: proto::SettleRequest,
     ) -> impl Future<Output = Result<proto::SettleResponse, Self::Error>> + Send;
 
     /// Returns the payment kinds supported by this facilitator.
@@ -64,14 +64,14 @@ impl<T: Facilitator> Facilitator for Arc<T> {
 
     fn verify(
         &self,
-        request: &proto::VerifyRequest,
+        request: proto::VerifyRequest,
     ) -> impl Future<Output = Result<proto::VerifyResponse, Self::Error>> + Send {
         self.as_ref().verify(request)
     }
 
     fn settle(
         &self,
-        request: &proto::SettleRequest,
+        request: proto::SettleRequest,
     ) -> impl Future<Output = Result<proto::SettleResponse, Self::Error>> + Send {
         self.as_ref().settle(request)
     }

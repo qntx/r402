@@ -53,8 +53,14 @@ pub trait X402SchemeFacilitator: Send + Sync {
     /// and the payer has sufficient funds.
     fn verify(
         &self,
-        request: &proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>> + Send + '_>>;
+        request: proto::VerifyRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::VerifyResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    >;
 
     /// Settles a verified payment on-chain.
     ///
@@ -62,13 +68,25 @@ pub trait X402SchemeFacilitator: Send + Sync {
     /// for confirmation.
     fn settle(
         &self,
-        request: &proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>> + Send + '_>>;
+        request: proto::SettleRequest,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SettleResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    >;
 
     /// Returns the payment methods supported by this handler.
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>> + Send + '_>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<proto::SupportedResponse, X402SchemeFacilitatorError>>
+                + Send
+                + '_,
+        >,
+    >;
 }
 
 /// Marker trait for types that are both identifiable and buildable.
