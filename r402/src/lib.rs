@@ -23,13 +23,6 @@
 //! - [`proto`] - Wire format types, encoding utilities, and timestamps
 //! - [`scheme`] - Payment scheme system for extensible payment methods
 //!
-//! # Protocol Versions
-//!
-//! The crate supports two protocol versions:
-//!
-//! - **V1** ([`proto::v1`]): Original protocol using network names (e.g., "base-sepolia")
-//! - **V2** ([`proto::v2`]): Enhanced protocol using CAIP-2 chain IDs (e.g., "eip155:84532")
-//!
 //! # Feature Flags
 //!
 //! - `telemetry` - Enables tracing instrumentation for debugging and monitoring

@@ -47,66 +47,7 @@ macro_rules! traced {
     }};
 }
 
-/// Runs all V1 preconditions needed for a successful EIP-3009 payment.
-#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub(super) async fn assert_valid_v1_payment<'a, P: Provider>(
-    provider: &'a P,
-    chain: &Eip155ChainReference,
-    eip3009: &Eip3009Payload,
-    payload: &types::v1::PaymentPayload,
-    requirements: &types::v1::PaymentRequirements,
-) -> Result<
-    (
-        IEIP3009::IEIP3009Instance<&'a P>,
-        Eip3009Payment,
-        Eip712Domain,
-    ),
-    Eip155ExactError,
-> {
-    let registry = crate::networks::evm_network_registry();
-    let chain_id: ChainId = chain.into();
-    let payload_chain_id = registry
-        .chain_id_by_name(&payload.network)
-        .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if *payload_chain_id != chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch.into());
-    }
-    let requirements_chain_id = registry
-        .chain_id_by_name(&requirements.network)
-        .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if *requirements_chain_id != chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch.into());
-    }
-    let authorization = &eip3009.authorization;
-    if authorization.to != requirements.pay_to {
-        return Err(PaymentVerificationError::RecipientMismatch.into());
-    }
-    let valid_after = authorization.valid_after;
-    let valid_before = authorization.valid_before;
-    assert_time(valid_after, valid_before)?;
-    let asset_address = requirements.asset;
-    let contract = IEIP3009::new(asset_address, provider);
-
-    let domain = assert_domain(chain, &contract, &asset_address, &requirements.extra).await?;
-
-    let amount_required = requirements.max_amount_required;
-    assert_enough_balance(&contract, &authorization.from, amount_required).await?;
-    assert_enough_value(&authorization.value.into(), &amount_required)?;
-
-    let payment = Eip3009Payment {
-        from: authorization.from,
-        to: authorization.to,
-        value: authorization.value.into(),
-        valid_after: authorization.valid_after,
-        valid_before: authorization.valid_before,
-        nonce: authorization.nonce,
-        signature: eip3009.signature.clone(),
-    };
-
-    Ok((contract, payment, domain))
-}
-
-/// Runs all V2 preconditions needed for a successful EIP-3009 payment.
+/// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) async fn assert_valid_v2_payment<P: Provider>(
     provider: P,

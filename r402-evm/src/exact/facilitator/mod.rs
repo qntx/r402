@@ -35,7 +35,7 @@ use r402::chain::ChainProvider;
 use r402::facilitator::{Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::UnixTimestamp;
-use r402::proto::{v1, v2};
+use r402::proto::v2;
 use r402::scheme::{SchemeBuilder, SchemeId};
 use std::collections::HashMap;
 use std::future::Future;
@@ -43,7 +43,7 @@ use std::pin::Pin;
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
-use crate::exact::{ExactPayload, ExactScheme, V1Eip155Exact, V2Eip155Exact};
+use crate::exact::{ExactPayload, ExactScheme, V2Eip155Exact};
 
 /// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
@@ -93,20 +93,6 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-impl<P> SchemeBuilder<P> for V1Eip155Exact
-where
-    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
-    Eip155ExactError: From<P::Error>,
-{
-    fn build(
-        &self,
-        provider: P,
-        _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
-        Ok(Box::new(V1Eip155ExactFacilitator::new(provider)))
-    }
-}
-
 impl<P> SchemeBuilder<P> for V2Eip155Exact
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
@@ -121,143 +107,9 @@ where
     }
 }
 
-/// Facilitator for V1 EIP-155 exact scheme payments.
+/// Facilitator for EIP-155 exact scheme payments.
 ///
-/// V1 only supports EIP-3009 (`transferWithAuthorization`). Permit2 payloads
-/// are rejected with [`PaymentVerificationError::UnsupportedScheme`].
-pub struct V1Eip155ExactFacilitator<P> {
-    provider: P,
-}
-
-impl<P> std::fmt::Debug for V1Eip155ExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("V1Eip155ExactFacilitator")
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> V1Eip155ExactFacilitator<P> {
-    /// Creates a new V1 EIP-155 exact scheme facilitator with the given provider.
-    pub const fn new(provider: P) -> Self {
-        Self { provider }
-    }
-}
-
-impl<P> Facilitator for V1Eip155ExactFacilitator<P>
-where
-    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
-    P::Inner: Provider,
-    Eip155ExactError: From<P::Error>,
-{
-    fn verify(
-        &self,
-        request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v1::VerifyRequest::from_proto(request)?;
-            let payload = &request.payment_payload;
-            let requirements = &request.payment_requirements;
-            let eip3009 = match &payload.payload {
-                ExactPayload::Eip3009(p) => p,
-                ExactPayload::Permit2(_) => {
-                    return Err(FacilitatorError::PaymentVerification(
-                        proto::PaymentVerificationError::UnsupportedScheme,
-                    ));
-                }
-            };
-            let (contract, payment, eip712_domain) = verify::assert_valid_v1_payment(
-                self.provider.inner(),
-                self.provider.chain(),
-                eip3009,
-                payload,
-                requirements,
-            )
-            .await?;
-
-            let payer =
-                verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain).await?;
-
-            Ok(v1::VerifyResponse::valid(payer.to_string()))
-        })
-    }
-
-    fn settle(
-        &self,
-        request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let request = types::v1::SettleRequest::from_settle(request)?;
-            let payload = &request.payment_payload;
-            let requirements = &request.payment_requirements;
-            let eip3009 = match &payload.payload {
-                ExactPayload::Eip3009(p) => p,
-                ExactPayload::Permit2(_) => {
-                    return Err(FacilitatorError::PaymentVerification(
-                        proto::PaymentVerificationError::UnsupportedScheme,
-                    ));
-                }
-            };
-            let (contract, payment, eip712_domain) = verify::assert_valid_v1_payment(
-                self.provider.inner(),
-                self.provider.chain(),
-                eip3009,
-                payload,
-                requirements,
-            )
-            .await?;
-
-            let tx_hash =
-                settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
-            Ok(v1::SettleResponse::Success {
-                payer: payment.from.to_string(),
-                transaction: tx_hash.to_string(),
-                network: payload.network.clone(),
-                extensions: None,
-            })
-        })
-    }
-
-    fn supported(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
-        Box::pin(async move {
-            let chain_id = self.provider.chain_id();
-            let kinds = {
-                let mut kinds = Vec::with_capacity(1);
-                let network = crate::networks::evm_network_registry().name_by_chain_id(&chain_id);
-                if let Some(network) = network {
-                    kinds.push(proto::SupportedPaymentKind {
-                        x402_version: v1::V1.into(),
-                        scheme: ExactScheme.to_string(),
-                        network: network.to_string(),
-                        extra: None,
-                    });
-                }
-                kinds
-            };
-            let signers = {
-                let mut signers = HashMap::with_capacity(1);
-                signers.insert(
-                    V1Eip155Exact.caip_family(),
-                    self.provider.signer_addresses(),
-                );
-                signers
-            };
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
-        })
-    }
-}
-
-/// Facilitator for V2 EIP-155 exact scheme payments.
-///
-/// V2 supports both EIP-3009 and Permit2 transfer methods. The transfer method
+/// Supports both EIP-3009 and Permit2 transfer methods. The transfer method
 /// is determined by the [`ExactPayload`] variant in the payment payload.
 pub struct V2Eip155ExactFacilitator<P> {
     provider: P,

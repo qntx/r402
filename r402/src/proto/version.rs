@@ -10,8 +10,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// Serializes as a bare integer (e.g., `1` or `2`) and rejects any other
 /// value on deserialization, providing compile-time version safety.
 ///
-/// Use the type aliases [`super::v1::X402Version1`] and [`super::v2::X402Version2`]
-/// instead of constructing this directly.
+/// Use the type alias [`super::v2::X402Version2`] instead of constructing this directly.
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Version<const N: u8>;
 

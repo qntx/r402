@@ -2,8 +2,6 @@
 //!
 //! This module implements the "exact" payment scheme for EVM chains using
 //! ERC-3009 `transferWithAuthorization` for gasless token transfers.
-//! Both V1 (network names) and V2 (CAIP-2 chain IDs) protocol versions
-//! are supported through a unified codebase.
 //!
 //! # Features
 //!
@@ -42,27 +40,9 @@ pub mod client;
 pub mod types;
 pub use types::*;
 
-/// V1 EIP-155 exact payment scheme identifier.
+/// EIP-155 exact payment scheme identifier.
 ///
-/// V1 uses network names (e.g., "base-sepolia") for chain identification.
-#[derive(Debug, Clone, Copy)]
-pub struct V1Eip155Exact;
-
-impl SchemeId for V1Eip155Exact {
-    fn x402_version(&self) -> u8 {
-        1
-    }
-    fn namespace(&self) -> &'static str {
-        "eip155"
-    }
-    fn scheme(&self) -> &str {
-        ExactScheme.as_ref()
-    }
-}
-
-/// V2 EIP-155 exact payment scheme identifier.
-///
-/// V2 uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
+/// Uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
 /// and embeds requirements directly in the payload.
 #[derive(Debug, Clone, Copy)]
 pub struct V2Eip155Exact;

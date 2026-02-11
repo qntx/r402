@@ -308,33 +308,9 @@ impl InstructionInt {
     }
 }
 
-/// V1-specific wire format type aliases for Solana exact scheme.
+/// Wire format type aliases for Solana exact scheme.
 ///
-/// V1 uses network names (e.g., "solana-mainnet") for chain identification.
-pub mod v1 {
-    use r402::proto::U64String;
-    use r402::proto::v1 as proto_v1;
-
-    use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
-    use crate::chain::Address;
-
-    /// Type alias for V1 verify requests using the exact Solana payment scheme.
-    pub type VerifyRequest = proto_v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for V1 settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
-    /// Type alias for V1 payment payloads with Solana-specific data.
-    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactSolanaPayload>;
-
-    /// Type alias for V1 payment requirements with Solana-specific types.
-    pub type PaymentRequirements =
-        proto_v1::PaymentRequirements<ExactScheme, U64String, Address, SupportedPaymentKindExtra>;
-}
-
-/// V2-specific wire format type aliases for Solana exact scheme.
-///
-/// V2 uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
+/// Uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
 /// for chain identification and embeds requirements directly in the payload.
 pub mod v2 {
     use r402::proto::U64String;

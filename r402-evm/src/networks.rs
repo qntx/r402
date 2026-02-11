@@ -1,14 +1,10 @@
 use std::sync::LazyLock;
 
-use r402::networks::{NetworkInfo, NetworkRegistry};
+use r402::networks::NetworkInfo;
 
 use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentEip712};
 
-/// Well-known EVM (EIP-155) networks with their V1 names and CAIP-2 identifiers.
-///
-/// This is the **single source of truth** for EVM network name ↔ chain ID mappings.
-/// Use [`evm_network_registry()`] for convenient lookups, or pass this slice to
-/// [`NetworkRegistry::from_networks()`] to build a combined cross-chain registry.
+/// Well-known EVM (EIP-155) networks with their names and CAIP-2 identifiers.
 ///
 /// Source: <https://developers.circle.com/stablecoins/usdc-contract-addresses>
 pub static EVM_NETWORKS: &[NetworkInfo] = &[
@@ -223,18 +219,6 @@ pub static EVM_NETWORKS: &[NetworkInfo] = &[
         reference: "4326",
     },
 ];
-
-static EVM_REGISTRY: LazyLock<NetworkRegistry> =
-    LazyLock::new(|| NetworkRegistry::from_networks(EVM_NETWORKS));
-
-/// Returns a lazily-initialized [`NetworkRegistry`] containing all known EVM networks.
-///
-/// This is a convenience accessor for V1 code paths within the `r402-evm` crate.
-/// For cross-chain registries, build your own [`NetworkRegistry`] from [`EVM_NETWORKS`].
-#[must_use]
-pub fn evm_network_registry() -> &'static NetworkRegistry {
-    &EVM_REGISTRY
-}
 
 /// Well-known USDC token deployments on EVM (EIP-155) networks.
 ///

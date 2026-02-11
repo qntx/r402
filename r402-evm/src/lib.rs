@@ -2,14 +2,12 @@
 
 //! EIP-155 (EVM) chain support for the x402 payment protocol.
 //!
-//! This crate provides implementations of the x402 payment protocol for EVM-compatible
-//! blockchains using the EIP-155 chain ID standard. It supports both V1 and V2 protocol
-//! versions with the "exact" payment scheme based on ERC-3009 `transferWithAuthorization`.
+//! This crate provides implementations of the x402 V2 payment protocol for EVM chains
+//! with the "exact" payment scheme based on ERC-3009 `transferWithAuthorization`.
 //!
 //! # Features
 //!
-//! - **V1 and V2 Protocol Support**: Implements both protocol versions with network name
-//!   (V1) and CAIP-2 chain ID (V2) addressing
+//! - **V2 Protocol Support**: Implements the protocol version with CAIP-2 chain ID addressing
 //! - **ERC-3009 Payments**: Gasless token transfers using `transferWithAuthorization`
 //! - **Smart Wallet Support**: EIP-1271 for deployed wallets, EIP-6492 for counterfactual wallets
 //! - **Multiple Signers**: Round-robin signer selection for load distribution
@@ -20,7 +18,7 @@
 //! The crate is organized into several modules:
 //!
 //! - [`chain`] - Core EVM chain types, providers, and configuration
-//! - [`exact`] - EIP-155 "exact" payment scheme (V1 + V2)
+//! - [`exact`] - EIP-155 "exact" payment scheme
 //!
 //! # Feature Flags
 //!
@@ -35,7 +33,7 @@ pub mod exact;
 mod networks;
 pub use networks::*;
 
-pub use exact::{V1Eip155Exact, V2Eip155Exact};
+pub use exact::V2Eip155Exact;
 
 #[cfg(feature = "client")]
-pub use exact::client::{V1Eip155ExactClient, V2Eip155ExactClient};
+pub use exact::client::V2Eip155ExactClient;

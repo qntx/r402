@@ -6,7 +6,7 @@
 use http::{Extensions, HeaderMap, StatusCode};
 use r402::proto;
 use r402::proto::Base64Bytes;
-use r402::proto::{v1, v2};
+use r402::proto::v2;
 use r402::scheme::{
     ClientError, FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
 };
@@ -220,14 +220,10 @@ where
         );
 
         let signed_payload = selected.sign().await?;
-        let header_name = match payment_required {
-            proto::PaymentRequired::V1(_) => "X-Payment",
-            _ => "Payment-Signature",
-        };
         let headers = {
             let mut headers = HeaderMap::new();
             headers.insert(
-                header_name,
+                "Payment-Signature",
                 signed_payload
                     .parse()
                     .expect("signed payload is valid header value"),
@@ -328,13 +324,12 @@ where
 
 /// Parses a 402 Payment Required response into a [`proto::PaymentRequired`].
 ///
-/// Supports both V1 (JSON body) and V2 (base64-encoded header) formats.
+/// Extracts V2 payment requirements from the `Payment-Required` header (base64-encoded JSON).
 #[cfg_attr(
     feature = "telemetry",
     instrument(name = "x402.reqwest.parse_payment_required", skip(response))
 )]
 pub async fn parse_payment_required(response: Response) -> Option<proto::PaymentRequired> {
-    // Try V2 format first (header-based)
     let headers = response.headers();
     let v2_payment_required = headers
         .get("Payment-Required")
@@ -344,18 +339,6 @@ pub async fn parse_payment_required(response: Response) -> Option<proto::Payment
         #[cfg(feature = "telemetry")]
         debug!("Parsed V2 payment required from header");
         return Some(proto::PaymentRequired::V2(v2_payment_required));
-    }
-
-    // Fall back to V1 format (body-based)
-    let v1_payment_required = response
-        .bytes()
-        .await
-        .ok()
-        .and_then(|b| serde_json::from_slice::<v1::PaymentRequired>(&b).ok());
-    if let Some(v1_payment_required) = v1_payment_required {
-        #[cfg(feature = "telemetry")]
-        debug!("Parsed V1 payment required from body");
-        return Some(proto::PaymentRequired::V1(v1_payment_required));
     }
 
     #[cfg(feature = "telemetry")]

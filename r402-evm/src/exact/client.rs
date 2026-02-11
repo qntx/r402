@@ -1,8 +1,7 @@
 //! Client-side payment signing for the EIP-155 "exact" scheme.
 //!
-//! This module provides [`V1Eip155ExactClient`] and [`V2Eip155ExactClient`] for
-//! signing ERC-3009 `transferWithAuthorization` payments on EVM chains.
-//! Both share the core signing logic via [`sign_erc3009_authorization`].
+//! This module provides [`V2Eip155ExactClient`] for signing ERC-3009
+//! `transferWithAuthorization` payments on EVM chains.
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
@@ -10,7 +9,6 @@ use alloy_sol_types::{SolCall, SolStruct, eip712_domain, sol};
 use r402::proto::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::UnixTimestamp;
-use r402::proto::v1;
 use r402::proto::v2::{self, ResourceInfo};
 use r402::scheme::SchemeId;
 use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
@@ -25,10 +23,10 @@ use crate::chain::TokenAmount;
 use crate::exact::types;
 use crate::exact::types::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
-    AssetTransferMethod, Eip3009Authorization, Eip3009Payload, ExactPayload, ExactScheme,
-    PERMIT2_ADDRESS, PaymentRequirementsExtra, Permit2Authorization, Permit2Payload,
-    Permit2TokenPermissions, Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization,
-    V1Eip155Exact, V2Eip155Exact, X402_EXACT_PERMIT2_PROXY,
+    AssetTransferMethod, Eip3009Authorization, Eip3009Payload, ExactPayload, PERMIT2_ADDRESS,
+    PaymentRequirementsExtra, Permit2Authorization, Permit2Payload, Permit2TokenPermissions,
+    Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization, V2Eip155Exact,
+    X402_EXACT_PERMIT2_PROXY,
 };
 
 /// A trait that abstracts signing operations, allowing both owned signers and Arc-wrapped signers.
@@ -67,7 +65,6 @@ impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
 }
 
 /// Shared EIP-712 signing parameters for ERC-3009 authorization.
-/// Used by both V1 and V2 EIP-155 exact scheme clients.
 #[derive(Debug, Clone)]
 pub struct Eip3009SigningParams {
     /// The EIP-155 chain ID (numeric)
@@ -85,8 +82,6 @@ pub struct Eip3009SigningParams {
 }
 
 /// Signs an ERC-3009 `TransferWithAuthorization` using EIP-712.
-///
-/// This is the shared signing logic used by both V1 and V2 EIP-155 exact scheme clients.
 /// It constructs the EIP-712 domain, builds the authorization struct with appropriate
 /// timing parameters, and signs the resulting hash.
 ///
@@ -235,113 +230,11 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
     })
 }
 
-/// Client for signing V1 EIP-155 exact scheme payments.
+/// Client for signing EIP-155 exact scheme payments.
 ///
 /// This client handles the creation and signing of ERC-3009 `transferWithAuthorization`
-/// payments for EVM chains. It accepts payment requirements from servers and produces
-/// signed payment payloads that can be verified and settled by facilitators.
-#[derive(Debug)]
-pub struct V1Eip155ExactClient<S> {
-    signer: S,
-}
-
-impl<S> V1Eip155ExactClient<S> {
-    /// Creates a new V1 EIP-155 exact scheme client with the given signer.
-    pub const fn new(signer: S) -> Self {
-        Self { signer }
-    }
-}
-
-impl<S> SchemeId for V1Eip155ExactClient<S> {
-    fn namespace(&self) -> &str {
-        V1Eip155Exact.namespace()
-    }
-
-    fn scheme(&self) -> &str {
-        V1Eip155Exact.scheme()
-    }
-}
-
-impl<S> SchemeClient for V1Eip155ExactClient<S>
-where
-    S: SignerLike + Clone + Send + Sync + 'static,
-{
-    fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let PaymentRequired::V1(payment_required) = payment_required else {
-            return vec![];
-        };
-        payment_required
-            .accepts
-            .iter()
-            .filter_map(|v| {
-                let requirements: types::v1::PaymentRequirements = v.as_concrete()?;
-                let chain_id = crate::networks::evm_network_registry()
-                    .chain_id_by_name(&requirements.network)?
-                    .clone();
-                let chain_reference = Eip155ChainReference::try_from(chain_id.clone()).ok()?;
-                let candidate = PaymentCandidate {
-                    chain_id,
-                    asset: requirements.asset.to_string(),
-                    amount: requirements.max_amount_required.to_string(),
-                    scheme: self.scheme().to_string(),
-                    x402_version: self.x402_version(),
-                    pay_to: requirements.pay_to.to_string(),
-                    signer: Box::new(V1PayloadSigner {
-                        signer: self.signer.clone(),
-                        chain_reference,
-                        requirements,
-                    }),
-                };
-                Some(candidate)
-            })
-            .collect::<Vec<_>>()
-    }
-}
-
-struct V1PayloadSigner<S> {
-    signer: S,
-    chain_reference: Eip155ChainReference,
-    requirements: types::v1::PaymentRequirements,
-}
-
-impl<S> PaymentCandidateSigner for V1PayloadSigner<S>
-where
-    S: SignerLike + Sync,
-{
-    fn sign_payment(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
-        Box::pin(async move {
-            let params = Eip3009SigningParams {
-                chain_id: self.chain_reference.inner(),
-                asset_address: self.requirements.asset,
-                pay_to: self.requirements.pay_to,
-                amount: self.requirements.max_amount_required,
-                max_timeout_seconds: self.requirements.max_timeout_seconds,
-                extra: self.requirements.extra.clone(),
-            };
-
-            let evm_payload = sign_erc3009_authorization(&self.signer, &params).await?;
-
-            let payload = types::v1::PaymentPayload {
-                x402_version: v1::V1,
-                scheme: ExactScheme,
-                network: self.requirements.network.clone(),
-                payload: ExactPayload::Eip3009(evm_payload),
-            };
-            let json = serde_json::to_vec(&payload)?;
-            let b64 = Base64Bytes::encode(&json);
-
-            Ok(b64.to_string())
-        })
-    }
-}
-
-/// Client for signing V2 EIP-155 exact scheme payments.
-///
-/// This client handles the creation and signing of ERC-3009 `transferWithAuthorization`
-/// payments for EVM chains using the V2 protocol. Unlike V1, V2 uses CAIP-2 chain IDs
-/// and embeds the accepted requirements directly in the payment payload.
+/// payments for EVM chains. Uses CAIP-2 chain IDs and embeds the accepted requirements
+/// directly in the payment payload.
 #[derive(Debug)]
 pub struct V2Eip155ExactClient<S> {
     signer: S,

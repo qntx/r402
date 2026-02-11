@@ -315,32 +315,9 @@ sol!(
     }
 );
 
-/// V1-specific wire format type aliases for EIP-155 exact scheme.
+/// Wire format type aliases for EIP-155 exact scheme.
 ///
-/// V1 uses network names (e.g., "base-sepolia") for chain identification.
-pub mod v1 {
-    use alloy_primitives::{Address, U256};
-    use r402::proto::v1 as proto_v1;
-
-    use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
-
-    /// Type alias for V1 verify requests using the exact EVM payment scheme.
-    pub type VerifyRequest = proto_v1::VerifyRequest<PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for V1 settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
-    /// Type alias for V1 payment payloads with EVM-specific data.
-    pub type PaymentPayload = proto_v1::PaymentPayload<ExactScheme, ExactPayload>;
-
-    /// Type alias for V1 payment requirements with EVM-specific types.
-    pub type PaymentRequirements =
-        proto_v1::PaymentRequirements<ExactScheme, U256, Address, PaymentRequirementsExtra>;
-}
-
-/// V2-specific wire format type aliases for EIP-155 exact scheme.
-///
-/// V2 uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
+/// Uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
 /// and embeds requirements directly in the payload.
 pub mod v2 {
     use r402::proto::v2 as proto_v2;

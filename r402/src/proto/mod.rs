@@ -1,13 +1,7 @@
 //! Protocol types for x402 payment messages.
 //!
-//! This module defines the wire format types used in the x402 protocol for
-//! communication between buyers, sellers, and facilitators. It supports both
-//! protocol version 1 (V1) and version 2 (V2).
-//!
-//! # Protocol Versions
-//!
-//! - **V1** ([`v1`]): Original protocol with network names and simpler structure
-//! - **V2** ([`v2`]): Enhanced protocol with CAIP-2 chain IDs and richer metadata
+//! This module defines the wire format types used in the x402 V2 protocol for
+//! communication between buyers, sellers, and facilitators.
 //!
 //! # Key Types
 //!
@@ -34,7 +28,6 @@ use crate::scheme::SchemeSlug;
 mod encoding;
 mod error;
 mod timestamp;
-pub mod v1;
 pub mod v2;
 mod version;
 
@@ -46,11 +39,9 @@ pub use version::Version;
 
 /// A version-tagged verify/settle request with typed payload and requirements.
 ///
-/// This generic struct eliminates duplication between V1 and V2 verify requests.
 /// The const parameter `V` selects the protocol version marker ([`Version<V>`]).
 ///
-/// Use [`v1::VerifyRequest`] or [`v2::VerifyRequest`] type aliases instead of
-/// constructing this directly.
+/// Use [`v2::VerifyRequest`] type alias instead of constructing this directly.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TypedVerifyRequest<const V: u8, TPayload, TRequirements> {
@@ -254,13 +245,9 @@ impl SettleRequest {
     ///
     /// Delegates to the same logic as [`VerifyRequest::scheme_slug`].
     #[must_use]
-    pub fn scheme_slug(
-        &self,
-        registry: &crate::networks::NetworkRegistry,
-    ) -> Option<SchemeSlug> {
-        // Reuse VerifyRequest's implementation via a temporary reference-based parse.
+    pub fn scheme_slug(&self) -> Option<SchemeSlug> {
         let tmp = VerifyRequest(self.0.clone());
-        tmp.scheme_slug(registry)
+        tmp.scheme_slug()
     }
 }
 
@@ -294,43 +281,28 @@ impl VerifyRequest {
     /// This determines which scheme handler should process this payment
     /// based on the protocol version, chain ID, and scheme name.
     ///
-    /// For V1 requests, a [`NetworkRegistry`](crate::networks::NetworkRegistry) is
-    /// required to resolve human-readable network names to CAIP-2 chain IDs.
-    ///
     /// Returns `None` if the request format is invalid or the scheme is unknown.
     #[must_use]
-    pub fn scheme_slug(
-        &self,
-        registry: &crate::networks::NetworkRegistry,
-    ) -> Option<SchemeSlug> {
+    pub fn scheme_slug(&self) -> Option<SchemeSlug> {
         let x402_version: u8 = self.0.get("x402Version")?.as_u64()?.try_into().ok()?;
-        match x402_version {
-            v1::X402Version1::VALUE => {
-                let network_name = self.0.get("paymentPayload")?.get("network")?.as_str()?;
-                let chain_id = registry.chain_id_by_name(network_name)?;
-                let scheme = self.0.get("paymentPayload")?.get("scheme")?.as_str()?;
-                let slug = SchemeSlug::new(chain_id.clone(), 1, scheme.into());
-                Some(slug)
-            }
-            v2::X402Version2::VALUE => {
-                let chain_id_string = self
-                    .0
-                    .get("paymentPayload")?
-                    .get("accepted")?
-                    .get("network")?
-                    .as_str()?;
-                let chain_id = ChainId::from_str(chain_id_string).ok()?;
-                let scheme = self
-                    .0
-                    .get("paymentPayload")?
-                    .get("accepted")?
-                    .get("scheme")?
-                    .as_str()?;
-                let slug = SchemeSlug::new(chain_id, 2, scheme.into());
-                Some(slug)
-            }
-            _ => None,
+        if x402_version != v2::X402Version2::VALUE {
+            return None;
         }
+        let chain_id_string = self
+            .0
+            .get("paymentPayload")?
+            .get("accepted")?
+            .get("network")?
+            .as_str()?;
+        let chain_id = ChainId::from_str(chain_id_string).ok()?;
+        let scheme = self
+            .0
+            .get("paymentPayload")?
+            .get("accepted")?
+            .get("scheme")?
+            .as_str()?;
+        let slug = SchemeSlug::new(chain_id, 2, scheme.into());
+        Some(slug)
     }
 }
 
@@ -466,7 +438,7 @@ pub enum SettleResponse {
         payer: String,
         /// The on-chain transaction hash.
         transaction: String,
-        /// The network where settlement occurred (CAIP-2 chain ID or network name).
+        /// The network where settlement occurred (CAIP-2 chain ID).
         network: String,
         /// Optional protocol extensions returned by the facilitator.
         extensions: Option<Extensions>,
@@ -572,14 +544,12 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
     }
 }
 
-/// A payment required response that can be either V1 or V2.
+/// A payment required response (V2 only).
 ///
 /// This is returned with HTTP 402 status to indicate that payment is required.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum PaymentRequired {
-    /// Protocol version 1 variant.
-    V1(v1::PaymentRequired),
     /// Protocol version 2 variant.
     V2(v2::PaymentRequired),
 }

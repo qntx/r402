@@ -1,15 +1,11 @@
 use std::sync::LazyLock;
 
-use r402::networks::{NetworkInfo, NetworkRegistry};
+use r402::networks::NetworkInfo;
 use solana_pubkey::pubkey;
 
 use crate::chain::{SolanaChainReference, SolanaTokenDeployment};
 
-/// Well-known Solana networks with their V1 names and CAIP-2 identifiers.
-///
-/// This is the **single source of truth** for Solana network name ↔ chain ID mappings.
-/// Use [`solana_network_registry()`] for convenient lookups, or pass this slice to
-/// [`NetworkRegistry::from_networks()`] to build a combined cross-chain registry.
+/// Well-known Solana networks with their names and CAIP-2 identifiers.
 pub static SOLANA_NETWORKS: &[NetworkInfo] = &[
     NetworkInfo {
         name: "solana",
@@ -22,18 +18,6 @@ pub static SOLANA_NETWORKS: &[NetworkInfo] = &[
         reference: "EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
     },
 ];
-
-static SOLANA_REGISTRY: LazyLock<NetworkRegistry> =
-    LazyLock::new(|| NetworkRegistry::from_networks(SOLANA_NETWORKS));
-
-/// Returns a lazily-initialized [`NetworkRegistry`] containing all known Solana networks.
-///
-/// This is a convenience accessor for V1 code paths within the `r402-svm` crate.
-/// For cross-chain registries, build your own [`NetworkRegistry`] from [`SOLANA_NETWORKS`].
-#[must_use]
-pub fn solana_network_registry() -> &'static NetworkRegistry {
-    &SOLANA_REGISTRY
-}
 
 /// Well-known USDC token deployments on Solana networks.
 ///

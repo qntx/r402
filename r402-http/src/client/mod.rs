@@ -12,10 +12,8 @@
 //! The [`X402Client`] uses a plugin architecture for supporting different payment schemes.
 //! Register scheme clients for each chain/network you want to support:
 //!
-//! - **[`V1Eip155ExactClient`]** - EIP-155 chains, x402 V1 protocol, "exact" payment scheme
-//! - **[`V2Eip155ExactClient`]** - EIP-155 chains, x402 V2 protocol, "exact" payment scheme
-//! - **[`V1SolanaExactClient`]** - Solana chains, x402 V1 protocol, "exact" payment scheme
-//! - **[`V2SolanaExactClient`]** - Solana chains, x402 V2 protocol, "exact" payment scheme
+//! - **[`V2Eip155ExactClient`]** - EIP-155 chains, "exact" payment scheme
+//! - **[`V2SolanaExactClient`]** - Solana chains, "exact" payment scheme
 //!
 //! See [`X402Client::register`] for more details on registering scheme clients.
 //!

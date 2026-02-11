@@ -173,49 +173,7 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
     Some(*instruction.program_id(account_keys))
 }
 
-/// Verifies a V1 transfer request against on-chain state.
-///
-/// # Errors
-///
-/// Returns [`PaymentVerificationError`] if the transfer is invalid.
-pub async fn verify_v1_transfer<P: SolanaChainProviderLike + ChainProvider>(
-    provider: &P,
-    request: &types::v1::VerifyRequest,
-    config: &SolanaExactFacilitatorConfig,
-) -> Result<VerifyTransferResult, PaymentVerificationError> {
-    let payload = &request.payment_payload;
-    let requirements = &request.payment_requirements;
-
-    let registry = crate::networks::solana_network_registry();
-    let chain_id = provider.chain_id();
-    let payload_chain_id = registry
-        .chain_id_by_name(&payload.network)
-        .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if *payload_chain_id != chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch);
-    }
-    let requirements_chain_id = registry
-        .chain_id_by_name(&requirements.network)
-        .ok_or(PaymentVerificationError::UnsupportedChain)?;
-    if *requirements_chain_id != chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch);
-    }
-    let transaction_b64_string = payload.payload.transaction.clone();
-    let transfer_requirement = TransferRequirement {
-        pay_to: &requirements.pay_to,
-        asset: &requirements.asset,
-        amount: requirements.max_amount_required.inner(),
-    };
-    verify_transaction(
-        provider,
-        transaction_b64_string,
-        &transfer_requirement,
-        config,
-    )
-    .await
-}
-
-/// Verifies a V2 transfer request against on-chain state.
+/// Verifies a transfer request against on-chain state.
 ///
 /// # Errors
 ///

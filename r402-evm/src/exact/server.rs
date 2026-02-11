@@ -1,67 +1,21 @@
 //! Server-side price tag generation for the EIP-155 exact scheme.
 //!
-//! This module provides functionality for servers to create V1 and V2 price tags
+//! This module provides functionality for servers to create price tags
 //! that clients can use to generate payment authorizations.
 
 use alloy_primitives::U256;
 use r402::chain::{ChainId, DeployedTokenAmount};
-use r402::proto::{v1, v2};
+use r402::proto::v2;
 
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
-use crate::exact::{ExactScheme, V1Eip155Exact, V2Eip155Exact};
-
-impl V1Eip155Exact {
-    /// Creates a V1 price tag for an ERC-3009 payment on an EVM chain.
-    ///
-    /// This function generates a price tag that specifies the payment requirements
-    /// for a resource. The price tag includes the recipient address, token details,
-    /// and amount required.
-    ///
-    /// # Parameters
-    ///
-    /// - `pay_to`: The recipient address (can be any type convertible to [`ChecksummedAddress`])
-    /// - `asset`: The token deployment and amount required
-    ///
-    /// # Returns
-    ///
-    /// A [`v1::PriceTag`] that can be included in a `PaymentRequired` response.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the chain ID cannot be converted to a network name. This should
-    /// only happen for unsupported or custom chains without registered network names.
-    #[allow(clippy::panic)]
-    pub fn price_tag<A: Into<ChecksummedAddress>>(
-        pay_to: A,
-        asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
-    ) -> v1::PriceTag {
-        let chain_id: ChainId = asset.token.chain_reference.into();
-        let network = crate::networks::evm_network_registry()
-            .name_by_chain_id(&chain_id)
-            .unwrap_or_else(|| panic!("Can not get network name for chain id {chain_id}"));
-        let extra = asset
-            .token
-            .eip712
-            .and_then(|eip712| serde_json::to_value(&eip712).ok());
-        v1::PriceTag {
-            scheme: ExactScheme.to_string(),
-            pay_to: pay_to.into().to_string(),
-            asset: asset.token.address.to_string(),
-            network: network.to_string(),
-            amount: asset.amount.to_string(),
-            max_timeout_seconds: 300,
-            extra,
-            enricher: None,
-        }
-    }
-}
+use crate::exact::{ExactScheme, V2Eip155Exact};
 
 impl V2Eip155Exact {
-    /// Creates a V2 price tag for an ERC-3009 payment on an EVM chain.
+    /// Creates a price tag for an ERC-3009 payment on an EVM chain.
     ///
-    /// This function generates a V2 price tag that specifies the payment requirements
-    /// for a resource. Unlike V1, V2 uses CAIP-2 chain IDs (e.g., `eip155:8453`) instead
-    /// of network names, and embeds the requirements directly in the price tag.
+    /// This function generates a price tag that specifies the payment requirements
+    /// for a resource. Uses CAIP-2 chain IDs (e.g., `eip155:8453`) and embeds
+    /// the requirements directly in the price tag.
     ///
     /// # Parameters
     ///
