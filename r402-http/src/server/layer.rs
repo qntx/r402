@@ -328,7 +328,7 @@ where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
     TFacilitator: Facilitator + Clone,
-    TSource: PriceTagSource + Clone,
+    TSource: PriceTagSource,
 {
     type Service = X402MiddlewareService<TSource, TFacilitator>;
 
@@ -370,7 +370,7 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
 
 impl<TSource, TFacilitator> Service<Request> for X402MiddlewareService<TSource, TFacilitator>
 where
-    TSource: PriceTagSource + Clone + Send + 'static,
+    TSource: PriceTagSource,
     TFacilitator: Facilitator + Clone + Send + Sync + 'static,
 {
     type Response = Response;

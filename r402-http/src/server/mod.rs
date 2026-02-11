@@ -1,6 +1,6 @@
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
-//! Axum middleware for enforcing [x402](https://www.x402.org) payments on protected routes.
+//! Axum middleware for enforcing [x402](https://www.x402.org) payments on protected routes (V2-only).
 //!
 //! This middleware validates incoming payment headers using a configured x402 facilitator,
 //! and settles valid payments either before or after request execution (configurable).
@@ -9,11 +9,6 @@
 //!
 //! See [`X402Middleware`] for full configuration options.
 //! For low-level interaction with the facilitator, see [`facilitator_client::FacilitatorClient`].
-//!
-//! ## Protocol Support
-//!
-//! Supports both V1 and V2 x402 protocols through the [`PaygateProtocol`] trait.
-//! The protocol version is determined by the price tag type used.
 //!
 //! ## Settlement Timing
 //!
@@ -40,12 +35,10 @@ pub mod facilitator_client;
 pub mod layer;
 pub mod paygate;
 pub mod price_source;
-pub mod protocol;
 
 pub use error::{PaygateError, VerificationError};
 pub use layer::{X402LayerBuilder, X402Middleware};
 pub use price_source::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
-pub use protocol::PaygateProtocol;
 
 // Re-export hook types from r402 core for convenience.
 pub use r402::hooks::{FacilitatorHooks, SettleContext, VerifyContext};
