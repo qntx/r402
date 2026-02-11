@@ -21,19 +21,8 @@ use r402::proto;
 use std::future::Future;
 use std::pin::Pin;
 
-/// Context passed to verify lifecycle hooks.
-#[derive(Debug, Clone)]
-pub struct VerifyContext {
-    /// The verify request about to be (or already) sent to the facilitator.
-    pub request: proto::VerifyRequest,
-}
-
-/// Context passed to settle lifecycle hooks.
-#[derive(Debug, Clone)]
-pub struct SettleContext {
-    /// The settle request about to be (or already) sent to the facilitator.
-    pub request: proto::SettleRequest,
-}
+// Re-export context types from r402::hooks for convenience.
+pub use r402::hooks::{SettleContext, VerifyContext};
 
 /// Lifecycle hooks for payment gate verify and settle operations.
 ///

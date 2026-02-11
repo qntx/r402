@@ -57,16 +57,15 @@ pub enum FailureRecovery<T> {
 /// Provides access to the raw verify request. The request contains the full
 /// JSON payload and requirements, allowing hooks to inspect any field regardless
 /// of protocol version.
-///
-/// Mirrors the official x402 `FacilitatorVerifyContext`.
-pub struct VerifyHookContext {
+#[derive(Clone)]
+pub struct VerifyContext {
     /// The raw verify request (contains payload + requirements as JSON).
     pub request: proto::VerifyRequest,
 }
 
-impl Debug for VerifyHookContext {
+impl Debug for VerifyContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("VerifyHookContext")
+        f.debug_struct("VerifyContext")
             .field("request", &"<VerifyRequest>")
             .finish()
     }
@@ -75,16 +74,15 @@ impl Debug for VerifyHookContext {
 /// Context passed to settle lifecycle hooks.
 ///
 /// Provides access to the raw settle request.
-///
-/// Mirrors the official x402 `FacilitatorSettleContext`.
-pub struct SettleHookContext {
+#[derive(Clone)]
+pub struct SettleContext {
     /// The raw settle request (same structure as verify request).
     pub request: proto::SettleRequest,
 }
 
-impl Debug for SettleHookContext {
+impl Debug for SettleContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SettleHookContext")
+        f.debug_struct("SettleContext")
             .field("request", &"<SettleRequest>")
             .finish()
     }
@@ -108,7 +106,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// an invalid `VerifyResponse` is returned with the provided reason.
     fn before_verify<'a>(
         &'a self,
-        _ctx: &'a VerifyHookContext,
+        _ctx: &'a VerifyContext,
     ) -> Pin<Box<dyn Future<Output = HookDecision> + Send + 'a>> {
         Box::pin(async { HookDecision::Continue })
     }
@@ -118,7 +116,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// Any error returned will be logged but will not affect the verification result.
     fn after_verify<'a>(
         &'a self,
-        _ctx: &'a VerifyHookContext,
+        _ctx: &'a VerifyContext,
         _result: &'a proto::VerifyResponse,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async {})
@@ -130,7 +128,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// is returned instead of the error.
     fn on_verify_failure<'a>(
         &'a self,
-        _ctx: &'a VerifyHookContext,
+        _ctx: &'a VerifyContext,
         _error: &'a (dyn std::error::Error + Send + Sync),
     ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::VerifyResponse>> + Send + 'a>> {
         Box::pin(async { FailureRecovery::Propagate })
@@ -142,7 +140,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// an error is returned with the provided reason.
     fn before_settle<'a>(
         &'a self,
-        _ctx: &'a SettleHookContext,
+        _ctx: &'a SettleContext,
     ) -> Pin<Box<dyn Future<Output = HookDecision> + Send + 'a>> {
         Box::pin(async { HookDecision::Continue })
     }
@@ -152,7 +150,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// Any error returned will be logged but will not affect the settlement result.
     fn after_settle<'a>(
         &'a self,
-        _ctx: &'a SettleHookContext,
+        _ctx: &'a SettleContext,
         _result: &'a proto::SettleResponse,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async {})
@@ -164,7 +162,7 @@ pub trait FacilitatorHooks: Send + Sync {
     /// is returned instead of the error.
     fn on_settle_failure<'a>(
         &'a self,
-        _ctx: &'a SettleHookContext,
+        _ctx: &'a SettleContext,
         _error: &'a (dyn std::error::Error + Send + Sync),
     ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::SettleResponse>> + Send + 'a>> {
         Box::pin(async { FailureRecovery::Propagate })
@@ -258,7 +256,7 @@ where
         &self,
         request: proto::VerifyRequest,
     ) -> Result<proto::VerifyResponse, Self::Error> {
-        let ctx = VerifyHookContext {
+        let ctx = VerifyContext {
             request: request.clone(),
         };
 
@@ -296,7 +294,7 @@ where
         &self,
         request: proto::SettleRequest,
     ) -> Result<proto::SettleResponse, Self::Error> {
-        let ctx = SettleHookContext {
+        let ctx = SettleContext {
             request: request.clone(),
         };
 
