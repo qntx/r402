@@ -62,3 +62,48 @@ pub fn usdc_solana_deployment(
         .iter()
         .find(|d| d.chain_reference == *chain)
 }
+
+/// Ergonomic accessors for USDC token deployments on well-known Solana chains.
+///
+/// Provides named methods for each supported chain, returning a static
+/// reference to the deployment metadata. Combine with
+/// [`SolanaTokenDeployment::amount`] for a fluent pricing API:
+///
+/// ```ignore
+/// use r402_svm::{SolanaExact, USDC};
+///
+/// let tag = SolanaExact::price_tag(pay_to, USDC::solana().amount(1_000_000u64));
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct USDC;
+
+#[allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+impl USDC {
+    /// Looks up a USDC deployment by chain reference.
+    ///
+    /// Returns `None` if the chain is not in the built-in deployment table.
+    #[must_use]
+    pub fn on(chain: &SolanaChainReference) -> Option<&'static SolanaTokenDeployment> {
+        usdc_solana_deployment(chain)
+    }
+
+    /// Returns all known USDC deployments on Solana chains.
+    #[must_use]
+    pub fn all() -> &'static [SolanaTokenDeployment] {
+        usdc_solana_deployments()
+    }
+
+    /// USDC on Solana mainnet (solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp).
+    #[must_use]
+    pub fn solana() -> &'static SolanaTokenDeployment {
+        usdc_solana_deployment(&SolanaChainReference::SOLANA)
+            .expect("built-in USDC deployment for Solana mainnet missing")
+    }
+
+    /// USDC on Solana devnet (solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1).
+    #[must_use]
+    pub fn solana_devnet() -> &'static SolanaTokenDeployment {
+        usdc_solana_deployment(&SolanaChainReference::SOLANA_DEVNET)
+            .expect("built-in USDC deployment for Solana devnet missing")
+    }
+}
