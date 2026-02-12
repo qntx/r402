@@ -18,8 +18,7 @@ r402 is a comprehensive restructuring of [x402-rs], fully aligned with the [offi
 [x402-rs]: https://github.com/x402-rs/x402-rs
 [x402-sdk]: https://github.com/coinbase/x402
 
-> [!WARNING]
-> This software has **not** been audited. See [Security](#security) before using in production.
+See [Security](SECURITY.md) before using in production.
 
 ## Crates
 
@@ -108,18 +107,7 @@ Each chain and transport crate uses feature flags to minimize compile-time depen
 
 ## Security
 
-> [!CAUTION]
-> **This software has NOT been audited by any independent security firm.**
-
-This library interacts with blockchain networks and processes real financial transactions. Bugs or vulnerabilities **may result in irreversible loss of funds**.
-
-- **No warranty.** Provided "AS IS" without warranty of any kind, express or implied, including but not limited to merchantability, fitness for a particular purpose, and non-infringement.
-- **Unaudited.** The codebase has not undergone a formal security audit. Undiscovered vulnerabilities may exist despite extensive testing and strict linting.
-- **Use at your own risk.** The authors and contributors accept no responsibility for financial losses, damages, or other liabilities arising from the use of this software.
-- **Testnet first.** Always validate on testnets before deploying to mainnet.
-- **Key management.** Users are solely responsible for the secure handling of private keys and signing credentials.
-
-To report a vulnerability, please open a [GitHub Security Advisory](https://github.com/qntx/r402/security/advisories/new) — do not file a public issue.
+See [`SECURITY.md`](SECURITY.md) for disclaimers, supported versions, and vulnerability reporting.
 
 ## Acknowledgments
 
