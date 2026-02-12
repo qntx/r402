@@ -75,3 +75,11 @@ pub const PAYMENT_RESPONSE_META_KEY: &str = "x402/payment-response";
 
 /// JSON-RPC error code for payment required (x402).
 pub const PAYMENT_REQUIRED_CODE: i32 = 402;
+
+/// MCP error envelope key for x402 payment errors (TS SDK compatibility).
+///
+/// The `@x402/mcp` TS SDK wraps 402 errors as:
+/// ```json
+/// { "x402/error": { "code": 402, "data": { /* PaymentRequired */ } } }
+/// ```
+pub const PAYMENT_ERROR_KEY: &str = "x402/error";

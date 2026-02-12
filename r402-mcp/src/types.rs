@@ -117,6 +117,15 @@ pub struct PaymentRequiredContext {
     pub payment_required: proto::PaymentRequired,
 }
 
+/// Context provided to client-side before-payment hooks.
+#[derive(Debug, Clone)]
+pub struct BeforePaymentContext {
+    /// The tool name that requires payment.
+    pub tool_name: String,
+    /// The payment requirements from the server.
+    pub payment_required: proto::PaymentRequired,
+}
+
 /// Context provided to client-side after-payment hooks.
 #[derive(Debug, Clone)]
 pub struct AfterPaymentContext {
@@ -168,6 +177,16 @@ pub trait ClientHooks: Send + Sync {
         _ctx: &PaymentRequiredContext,
     ) -> BoxFuture<'_, Result<bool, McpPaymentError>> {
         Box::pin(async { Ok(true) })
+    }
+
+    /// Called before a payment payload is created and signed.
+    ///
+    /// Use this for logging, metrics, or pre-flight checks.
+    fn on_before_payment(
+        &self,
+        _ctx: &BeforePaymentContext,
+    ) -> BoxFuture<'_, Result<(), McpPaymentError>> {
+        Box::pin(async { Ok(()) })
     }
 
     /// Called after a payment is submitted and the tool returns a result.

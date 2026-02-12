@@ -7,7 +7,7 @@ use r402::proto;
 use serde_json::Value;
 
 use crate::types::{CallToolResult, ContentItem};
-use crate::{PAYMENT_META_KEY, PAYMENT_RESPONSE_META_KEY};
+use crate::{PAYMENT_ERROR_KEY, PAYMENT_META_KEY, PAYMENT_REQUIRED_CODE, PAYMENT_RESPONSE_META_KEY};
 
 /// Extracts an x402 payment payload from an MCP request's `_meta` field.
 ///
@@ -86,11 +86,14 @@ pub fn extract_payment_required_from_result(
         return None;
     }
 
-    // Preferred path: structuredContent
-    if let Some(sc) = &result.structured_content
-        && let Some(pr) = try_parse_payment_required_from_value(sc)
-    {
-        return Some(pr);
+    // Preferred path: structuredContent (try x402/error envelope first, then direct)
+    if let Some(sc) = &result.structured_content {
+        if let Some(pr) = unwrap_x402_error_envelope(sc) {
+            return Some(pr);
+        }
+        if let Some(pr) = try_parse_payment_required_from_value(sc) {
+            return Some(pr);
+        }
     }
 
     // Fallback: parse content[0].text as JSON
@@ -146,7 +149,50 @@ fn try_parse_payment_required_from_value(value: &Value) -> Option<proto::Payment
 }
 
 /// Attempts to parse a [`proto::PaymentRequired`] from a JSON text string.
+///
+/// Supports both the TS `x402/error` envelope format and direct `PaymentRequired` JSON.
 fn try_parse_payment_required_from_text(text: &str) -> Option<proto::PaymentRequired> {
     let value: Value = serde_json::from_str(text).ok()?;
-    try_parse_payment_required_from_value(&value)
+    unwrap_x402_error_envelope(&value)
+        .or_else(|| try_parse_payment_required_from_value(&value))
+}
+
+/// Unwraps the TS-compatible `x402/error` envelope format.
+///
+/// The TS `@x402/mcp` SDK encodes 402 errors as:
+/// ```json
+/// { "x402/error": { "code": 402, "data": { /* PaymentRequired */ } } }
+/// ```
+///
+/// This function extracts the inner `PaymentRequired` from that envelope.
+fn unwrap_x402_error_envelope(value: &Value) -> Option<proto::PaymentRequired> {
+    let obj = value.as_object()?;
+    let error_envelope = obj.get(PAYMENT_ERROR_KEY)?.as_object()?;
+
+    let code = error_envelope.get("code")?.as_i64()?;
+    if code != i64::from(PAYMENT_REQUIRED_CODE) {
+        return None;
+    }
+
+    let data = error_envelope.get("data")?;
+    try_parse_payment_required_from_value(data)
+}
+
+/// Wraps a [`proto::PaymentRequired`] in the TS-compatible `x402/error` envelope.
+///
+/// Produces:
+/// ```json
+/// { "x402/error": { "code": 402, "data": { /* PaymentRequired */ } } }
+/// ```
+///
+/// Returns `None` if serialization fails.
+#[must_use]
+pub fn wrap_x402_error_envelope(pr: &proto::PaymentRequired) -> Option<Value> {
+    let data = serde_json::to_value(pr).ok()?;
+    Some(serde_json::json!({
+        PAYMENT_ERROR_KEY: {
+            "code": PAYMENT_REQUIRED_CODE,
+            "data": data
+        }
+    }))
 }

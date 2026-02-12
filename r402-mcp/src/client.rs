@@ -22,8 +22,8 @@ use crate::PAYMENT_META_KEY;
 use crate::error::{McpPaymentError, PaymentRequiredError};
 use crate::extract;
 use crate::types::{
-    AfterPaymentContext, CallToolParams, CallToolResult, ClientHooks, ClientOptions, NoClientHooks,
-    PaidToolCallResult, PaymentRequiredContext,
+    AfterPaymentContext, BeforePaymentContext, CallToolParams, CallToolResult, ClientHooks,
+    ClientOptions, NoClientHooks, PaidToolCallResult, PaymentRequiredContext,
 };
 
 /// Trait abstracting MCP tool call capability.
@@ -166,6 +166,13 @@ impl X402McpClient {
                 PaymentRequiredError::new("Payment denied by hook", payment_required),
             )));
         }
+
+        // on_before_payment hook
+        let before_ctx = BeforePaymentContext {
+            tool_name: name.to_owned(),
+            payment_required: payment_required.clone(),
+        };
+        self.hooks.on_before_payment(&before_ctx).await?;
 
         // Create payment using scheme clients
         let payload = self.create_payment(&payment_required).await?;

@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::PAYMENT_RESPONSE_META_KEY;
 use crate::error::McpPaymentError;
-use crate::extract;
+use crate::extract::{self, wrap_x402_error_envelope};
 use crate::types::{
     AfterExecutionContext, CallToolParams, CallToolResult, ContentItem, NoServerHooks,
     PaymentWrapperConfig, ServerHookContext, ServerHooks, SettlementContext,
@@ -215,8 +215,9 @@ impl PaymentWrapper {
 
     /// Creates a 402 payment required error result.
     ///
-    /// Per the MCP x402 spec, sets both `structuredContent` and `content[0].text`
-    /// with `isError: true`.
+    /// Uses the TS-compatible `x402/error` envelope format for cross-language
+    /// interoperability. The envelope is placed in both `content[0].text` and
+    /// `structuredContent`, with `isError: true`.
     fn payment_required_result(&self, error_msg: &str) -> CallToolResult {
         let resource = self
             .config
@@ -240,14 +241,14 @@ impl PaymentWrapper {
                 .map(|ext| ext.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         };
 
-        let data = serde_json::to_value(&pr).unwrap_or_default();
-        let text = serde_json::to_string(&pr).unwrap_or_default();
+        let envelope = wrap_x402_error_envelope(&pr).unwrap_or_default();
+        let text = serde_json::to_string(&envelope).unwrap_or_default();
 
         CallToolResult {
             content: vec![ContentItem::text(text)],
             is_error: true,
             meta: None,
-            structured_content: Some(data),
+            structured_content: Some(envelope),
         }
     }
 
