@@ -17,10 +17,8 @@
 //! Implement [`ClientHooks`] with only the hooks you need — all methods
 //! have default no-op implementations.
 
-use std::future::Future;
-use std::pin::Pin;
-
 use http::HeaderMap;
+use r402::facilitator::BoxFuture;
 use r402::hooks::{FailureRecovery, HookDecision};
 use r402::proto;
 
@@ -50,7 +48,7 @@ pub trait ClientHooks: Send + Sync {
     fn before_payment_creation<'a>(
         &'a self,
         _ctx: &'a PaymentCreationContext,
-    ) -> Pin<Box<dyn Future<Output = HookDecision> + Send + 'a>> {
+    ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async { HookDecision::Continue })
     }
 
@@ -61,7 +59,7 @@ pub trait ClientHooks: Send + Sync {
         &'a self,
         _ctx: &'a PaymentCreationContext,
         _headers: &'a HeaderMap,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    ) -> BoxFuture<'a, ()> {
         Box::pin(async {})
     }
 
@@ -73,7 +71,7 @@ pub trait ClientHooks: Send + Sync {
         &'a self,
         _ctx: &'a PaymentCreationContext,
         _error: &'a str,
-    ) -> Pin<Box<dyn Future<Output = FailureRecovery<HeaderMap>> + Send + 'a>> {
+    ) -> BoxFuture<'a, FailureRecovery<HeaderMap>> {
         Box::pin(async { FailureRecovery::Propagate })
     }
 }

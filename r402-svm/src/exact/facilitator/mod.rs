@@ -7,12 +7,10 @@ mod config;
 mod verify;
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 pub use config::SolanaExactFacilitatorConfig;
 use r402::chain::ChainProvider;
-use r402::facilitator::{Facilitator, FacilitatorError};
+use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::v2;
 use r402::scheme::{SchemeBuilder, SchemeId};
@@ -71,8 +69,7 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
@@ -83,8 +80,7 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_settle(request)?;
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
@@ -101,8 +97,7 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds: Vec<proto::SupportedPaymentKind> = {

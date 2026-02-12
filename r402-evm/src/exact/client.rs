@@ -3,8 +3,6 @@
 //! This module provides [`Eip155ExactClient`] for signing ERC-3009
 //! `transferWithAuthorization` payments on EVM chains.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
@@ -299,9 +297,7 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    fn sign_payment(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(&self) -> r402::facilitator::BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
             let use_permit2 = self
                 .requirements

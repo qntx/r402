@@ -4,10 +4,9 @@
 //! examine 402 responses, generate payment candidates, and sign payments.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
-use std::pin::Pin;
 
 use crate::chain::{ChainId, ChainIdPattern};
+use crate::facilitator::BoxFuture;
 use crate::proto;
 
 /// Trait for scheme clients that can process payment requirements.
@@ -65,9 +64,7 @@ impl PaymentCandidate {
 /// Trait for signing payment authorizations.
 pub trait PaymentCandidateSigner {
     /// Signs a payment authorization.
-    fn sign_payment(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>>;
+    fn sign_payment(&self) -> BoxFuture<'_, Result<String, ClientError>>;
 }
 
 /// Errors that can occur during client-side payment processing.

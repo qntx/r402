@@ -18,15 +18,13 @@ mod signature;
 mod verify;
 
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
 pub use contract::{IEIP3009, IX402Permit2Proxy, Validator6492};
 pub use error::Eip155ExactError;
 use r402::chain::ChainProvider;
-use r402::facilitator::{Facilitator, FacilitatorError};
+use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::UnixTimestamp;
 use r402::proto::v2;
@@ -163,8 +161,7 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let payload = &request.payment_payload;
@@ -207,8 +204,7 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
         Box::pin(async move {
             let request = types::v2::SettleRequest::from_settle(request)?;
             let payload = &request.payment_payload;
@@ -258,8 +254,7 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = vec![proto::SupportedPaymentKind {

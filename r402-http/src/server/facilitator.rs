@@ -20,12 +20,10 @@
 //!
 
 use std::fmt::Display;
-use std::future::Future;
-use std::pin::Pin;
 use std::time::Duration;
 
 use http::{HeaderMap, StatusCode};
-use r402::facilitator::{Facilitator, FacilitatorError};
+use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use r402::proto::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
@@ -125,7 +123,7 @@ impl Facilitator for FacilitatorClient {
     fn verify(
         &self,
         request: VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<VerifyResponse, FacilitatorError>> + Send + '_>> {
+    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>> {
         Box::pin(async move {
             #[cfg(feature = "telemetry")]
             let result = with_span(
@@ -142,7 +140,7 @@ impl Facilitator for FacilitatorClient {
     fn settle(
         &self,
         request: SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<SettleResponse, FacilitatorError>> + Send + '_>> {
+    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>> {
         Box::pin(async move {
             #[cfg(feature = "telemetry")]
             let result = with_span(
@@ -158,8 +156,7 @@ impl Facilitator for FacilitatorClient {
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             Self::supported(self)
                 .await

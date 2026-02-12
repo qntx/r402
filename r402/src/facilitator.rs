@@ -13,6 +13,13 @@ use std::sync::Arc;
 use crate::proto;
 use crate::proto::{AsPaymentProblem, ErrorReason, PaymentProblem, PaymentVerificationError};
 
+/// Boxed future type alias for dyn-compatible async trait methods.
+///
+/// Eliminates the verbose `Pin<Box<dyn Future<Output = T> + Send + 'a>>` pattern
+/// throughout the codebase. All [`Facilitator`] and [`FacilitatorHooks`](crate::hooks::FacilitatorHooks)
+/// methods use this alias.
+pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
 /// Errors that can occur during facilitator operations.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -62,7 +69,7 @@ pub trait Facilitator: Send + Sync {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>;
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>>;
 
     /// Executes an on-chain x402 settlement for a valid [`proto::SettleRequest`].
     ///
@@ -71,35 +78,32 @@ pub trait Facilitator: Send + Sync {
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>;
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>>;
 
     /// Returns the payment kinds supported by this facilitator.
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>;
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>>;
 }
 
 impl<T: Facilitator> Facilitator for Arc<T> {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
         self.as_ref().verify(request)
     }
 
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
         self.as_ref().settle(request)
     }
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         self.as_ref().supported()
     }
 }

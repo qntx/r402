@@ -10,8 +10,6 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
-use std::future::Future;
-use std::pin::Pin;
 
 use r402::proto::Base64Bytes;
 use r402::proto::PaymentRequired;
@@ -385,9 +383,7 @@ struct V2PayloadSigner<S, R> {
 }
 
 impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
-    fn sign_payment(
-        &self,
-    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
+    fn sign_payment(&self) -> r402::facilitator::BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements

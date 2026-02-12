@@ -9,12 +9,10 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
-use std::future::Future;
-use std::pin::Pin;
 
 use super::SchemeId;
 use crate::chain::{ChainId, ChainProvider};
-use crate::facilitator::{Facilitator, FacilitatorError};
+use crate::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use crate::proto;
 
 /// Trait for building facilitator instances from chain providers.
@@ -190,8 +188,7 @@ impl Facilitator for SchemeRegistry {
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
         Box::pin(async move {
             let handler = self.require_handler(request.scheme_slug())?;
             handler.verify(request).await
@@ -201,8 +198,7 @@ impl Facilitator for SchemeRegistry {
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
         Box::pin(async move {
             let handler = self.require_handler(request.scheme_slug())?;
             handler.settle(request).await
@@ -211,8 +207,7 @@ impl Facilitator for SchemeRegistry {
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             let mut kinds = Vec::new();
             let mut signers: HashMap<String, Vec<String>> = HashMap::new();

@@ -17,10 +17,8 @@
 //! lifecycle pattern as the official x402 Go SDK.
 
 use std::fmt::{self, Debug};
-use std::future::Future;
-use std::pin::Pin;
 
-use crate::facilitator::{Facilitator, FacilitatorError};
+use crate::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use crate::proto;
 
 /// Decision returned by "before" hooks to control whether an operation proceeds.
@@ -107,7 +105,7 @@ pub trait FacilitatorHooks: Send + Sync {
     fn before_verify<'a>(
         &'a self,
         _ctx: &'a VerifyContext,
-    ) -> Pin<Box<dyn Future<Output = HookDecision> + Send + 'a>> {
+    ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async { HookDecision::Continue })
     }
 
@@ -118,7 +116,7 @@ pub trait FacilitatorHooks: Send + Sync {
         &'a self,
         _ctx: &'a VerifyContext,
         _result: &'a proto::VerifyResponse,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    ) -> BoxFuture<'a, ()> {
         Box::pin(async {})
     }
 
@@ -129,8 +127,8 @@ pub trait FacilitatorHooks: Send + Sync {
     fn on_verify_failure<'a>(
         &'a self,
         _ctx: &'a VerifyContext,
-        _error: &'a str,
-    ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::VerifyResponse>> + Send + 'a>> {
+        _error: &'a FacilitatorError,
+    ) -> BoxFuture<'a, FailureRecovery<proto::VerifyResponse>> {
         Box::pin(async { FailureRecovery::Propagate })
     }
 
@@ -141,7 +139,7 @@ pub trait FacilitatorHooks: Send + Sync {
     fn before_settle<'a>(
         &'a self,
         _ctx: &'a SettleContext,
-    ) -> Pin<Box<dyn Future<Output = HookDecision> + Send + 'a>> {
+    ) -> BoxFuture<'a, HookDecision> {
         Box::pin(async { HookDecision::Continue })
     }
 
@@ -152,7 +150,7 @@ pub trait FacilitatorHooks: Send + Sync {
         &'a self,
         _ctx: &'a SettleContext,
         _result: &'a proto::SettleResponse,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+    ) -> BoxFuture<'a, ()> {
         Box::pin(async {})
     }
 
@@ -163,8 +161,8 @@ pub trait FacilitatorHooks: Send + Sync {
     fn on_settle_failure<'a>(
         &'a self,
         _ctx: &'a SettleContext,
-        _error: &'a str,
-    ) -> Pin<Box<dyn Future<Output = FailureRecovery<proto::SettleResponse>> + Send + 'a>> {
+        _error: &'a FacilitatorError,
+    ) -> BoxFuture<'a, FailureRecovery<proto::SettleResponse>> {
         Box::pin(async { FailureRecovery::Propagate })
     }
 }
@@ -234,35 +232,27 @@ where
     fn verify(
         &self,
         request: proto::VerifyRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
         Box::pin(async move {
             let ctx = VerifyContext {
                 request: request.clone(),
             };
-
-            // Phase 1: Before hooks — first abort wins
             for hook in &self.hooks {
                 if let HookDecision::Abort { reason, message } = hook.before_verify(&ctx).await {
                     return Err(FacilitatorError::Aborted { reason, message });
                 }
             }
-
-            // Phase 2: Execute inner facilitator
             match self.inner.verify(request).await {
                 Ok(response) => {
-                    // Phase 3a: After hooks (fire-and-forget)
                     for hook in &self.hooks {
                         hook.after_verify(&ctx, &response).await;
                     }
                     Ok(response)
                 }
                 Err(e) => {
-                    // Phase 3b: Failure hooks — first recovery wins
-                    let err_msg = e.to_string();
                     for hook in &self.hooks {
                         if let FailureRecovery::Recovered(response) =
-                            hook.on_verify_failure(&ctx, &err_msg).await
+                            hook.on_verify_failure(&ctx, &e).await
                         {
                             return Ok(response);
                         }
@@ -276,35 +266,27 @@ where
     fn settle(
         &self,
         request: proto::SettleRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
         Box::pin(async move {
             let ctx = SettleContext {
                 request: request.clone(),
             };
-
-            // Phase 1: Before hooks — first abort wins
             for hook in &self.hooks {
                 if let HookDecision::Abort { reason, message } = hook.before_settle(&ctx).await {
                     return Err(FacilitatorError::Aborted { reason, message });
                 }
             }
-
-            // Phase 2: Execute inner facilitator
             match self.inner.settle(request).await {
                 Ok(response) => {
-                    // Phase 3a: After hooks (fire-and-forget)
                     for hook in &self.hooks {
                         hook.after_settle(&ctx, &response).await;
                     }
                     Ok(response)
                 }
                 Err(e) => {
-                    // Phase 3b: Failure hooks — first recovery wins
-                    let err_msg = e.to_string();
                     for hook in &self.hooks {
                         if let FailureRecovery::Recovered(response) =
-                            hook.on_settle_failure(&ctx, &err_msg).await
+                            hook.on_settle_failure(&ctx, &e).await
                         {
                             return Ok(response);
                         }
@@ -317,8 +299,7 @@ where
 
     fn supported(
         &self,
-    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
-    {
+    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move { self.inner.supported().await })
     }
 }
