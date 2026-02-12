@@ -135,7 +135,7 @@ impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
 impl<P> Eip155ExactFacilitator<P> {
     /// Creates a new EIP-155 exact scheme facilitator with the given provider.
     ///
-    /// Uses [`DEFAULT_CLOCK_SKEW_TOLERANCE`] (30 s) for time-window validation.
+    /// Uses `DEFAULT_CLOCK_SKEW_TOLERANCE` (30 s) for time-window validation.
     pub const fn new(provider: P) -> Self {
         Self {
             provider,

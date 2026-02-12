@@ -13,7 +13,7 @@
 //!
 //! # Submodules
 //!
-//! - [`types`] - Wire format types like [`ChecksummedAddress`](types::ChecksummedAddress) and [`TokenAmount`](types::TokenAmount)
+//! - [`types`] - Wire format types like [`ChecksummedAddress`] and [`TokenAmount`]
 //! - [`nonce`] - Nonce management for concurrent transaction submission
 //!
 //! # ERC-3009 Support

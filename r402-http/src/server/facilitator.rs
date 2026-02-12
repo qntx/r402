@@ -367,7 +367,7 @@ impl FacilitatorClient {
 
     /// Sends a `GET /supported` request to the facilitator.
     /// Results are cached with a configurable TTL (default: 10 minutes).
-    /// Use [`Self::supported_inner()`] to bypass the cache.
+    /// Use `supported_inner()` to bypass the cache.
     ///
     /// # Errors
     ///

@@ -12,7 +12,7 @@
 //! Hooks are defined via the [`FacilitatorHooks`] trait, which has default no-op
 //! implementations for all methods. Implement only the hooks you need.
 //!
-//! The [`HookedFacilitator`] decorator wraps any [`Facilitator`](crate::Facilitator)
+//! The [`HookedFacilitator`] decorator wraps any [`Facilitator`]
 //! and applies registered hooks around its verify/settle calls, following the same
 //! lifecycle pattern as the official x402 Go SDK.
 

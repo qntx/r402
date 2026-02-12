@@ -24,10 +24,10 @@ See [Security](SECURITY.md) before using in production.
 
 | Crate | | Description |
 | --- | --- | --- |
-| **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
-| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
-| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
-| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
+| **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
+| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
+| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
+| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
@@ -37,6 +37,14 @@ See [Security](SECURITY.md) before using in production.
 [r402-svm-crate-url]: https://crates.io/crates/r402-svm
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
+[r402-doc]: https://img.shields.io/docsrs/r402.svg
+[r402-doc-url]: https://docs.rs/r402
+[r402-evm-doc]: https://img.shields.io/docsrs/r402-evm.svg
+[r402-evm-doc-url]: https://docs.rs/r402-evm
+[r402-svm-doc]: https://img.shields.io/docsrs/r402-svm.svg
+[r402-svm-doc-url]: https://docs.rs/r402-svm
+[r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
+[r402-http-doc-url]: https://docs.rs/r402-http
 
 See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
 

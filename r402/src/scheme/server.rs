@@ -26,7 +26,7 @@ pub struct AssetAmount {
 ///
 /// # Relationship to Other Traits
 ///
-/// - [`crate::Facilitator`] — Facilitator-side: verify and settle payments
+/// - [`Facilitator`](crate::facilitator::Facilitator) — Facilitator-side: verify and settle payments
 /// - [`super::SchemeClient`] — Client-side: generate payment candidates
 /// - **`SchemeServer`** — Server-side: build payment requirements
 pub trait SchemeServer: super::SchemeId + Send + Sync {

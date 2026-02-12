@@ -4,8 +4,8 @@
 //!
 //! Concrete network data lives in chain-specific crates:
 //!
-//! - `r402-evm` provides [`EVM_NETWORKS`](r402_evm::EVM_NETWORKS) for EIP-155 chains
-//! - `r402-svm` provides [`SOLANA_NETWORKS`](r402_svm::SOLANA_NETWORKS) for Solana chains
+//! - `r402-evm` provides `EVM_NETWORKS` for EIP-155 chains
+//! - `r402-svm` provides `SOLANA_NETWORKS` for Solana chains
 
 use crate::chain::ChainId;
 

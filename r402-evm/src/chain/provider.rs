@@ -312,7 +312,7 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
     ///
     /// # Errors
     ///
-    /// Returns [`FacilitatorLocalError::ContractCall`] if:
+    /// Returns `FacilitatorLocalError::ContractCall` if:
     /// - Gas price fetching fails (on legacy networks)
     /// - Transaction sending fails
     /// - Receipt retrieval fails or times out
