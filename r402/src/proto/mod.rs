@@ -230,6 +230,18 @@ impl SettleRequest {
     pub fn scheme_slug(&self) -> Option<SchemeSlug> {
         scheme_slug_from_json(&self.0)
     }
+
+    /// Returns the CAIP-2 network identifier from `paymentRequirements.network`.
+    ///
+    /// Returns an empty string if the field is absent or not a string.
+    #[must_use]
+    pub fn network(&self) -> &str {
+        self.0
+            .get("paymentRequirements")
+            .and_then(|r| r.get("network"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    }
 }
 
 impl From<serde_json::Value> for SettleRequest {
@@ -346,6 +358,21 @@ impl VerifyResponse {
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })
     }
+
+    /// Converts a [`FacilitatorError`] into an invalid verification response,
+    /// preserving the structured reason code and message from the error.
+    ///
+    /// This is the canonical conversion for HTTP boundaries that need to return
+    /// a wire-compatible `VerifyResponse` instead of propagating errors.
+    #[must_use]
+    pub fn from_facilitator_error(error: &crate::facilitator::FacilitatorError) -> Self {
+        let problem = error.as_payment_problem();
+        Self::Invalid {
+            reason: problem.reason().to_string(),
+            message: Some(problem.details().to_owned()),
+            payer: None,
+        }
+    }
 }
 
 /// Wire format for [`VerifyResponse`], using a flat boolean discriminator.
@@ -440,6 +467,25 @@ impl SettleResponse {
     pub const fn is_success(&self) -> bool {
         matches!(self, Self::Success { .. })
     }
+
+    /// Converts a [`FacilitatorError`] into a settlement error response,
+    /// preserving the structured reason code and message from the error.
+    ///
+    /// `network` should be the CAIP-2 chain identifier from the original request
+    /// (e.g., obtained via [`SettleRequest::network()`]).
+    #[must_use]
+    pub fn from_facilitator_error(
+        error: &crate::facilitator::FacilitatorError,
+        network: String,
+    ) -> Self {
+        let problem = error.as_payment_problem();
+        Self::Error {
+            reason: problem.reason().to_string(),
+            message: Some(problem.details().to_owned()),
+            payer: None,
+            network,
+        }
+    }
 }
 
 /// Wire format for [`SettleResponse`], using a flat boolean discriminator.
@@ -453,8 +499,8 @@ struct SettleResponseWire {
     error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     payer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    transaction: Option<String>,
+    #[serde(default)]
+    transaction: String,
     network: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     extensions: Option<Extensions>,
@@ -473,7 +519,7 @@ impl From<SettleResponse> for SettleResponseWire {
                 error_reason: None,
                 error_message: None,
                 payer: Some(payer),
-                transaction: Some(transaction),
+                transaction,
                 network,
                 extensions,
             },
@@ -487,7 +533,7 @@ impl From<SettleResponse> for SettleResponseWire {
                 error_reason: Some(reason),
                 error_message: message,
                 payer,
-                transaction: None,
+                transaction: String::new(),
                 network,
                 extensions: None,
             },
@@ -503,10 +549,12 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
     ) -> Result<Self, <Self as TryFrom<SettleResponseWire>>::Error> {
         if wire.success {
             let payer = wire.payer.ok_or("missing field: payer")?;
-            let transaction = wire.transaction.ok_or("missing field: transaction")?;
+            if wire.transaction.is_empty() {
+                return Err("missing field: transaction".to_owned());
+            }
             Ok(Self::Success {
                 payer,
-                transaction,
+                transaction: wire.transaction,
                 network: wire.network,
                 extensions: wire.extensions,
             })

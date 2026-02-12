@@ -234,12 +234,19 @@ impl PriceTag {
     }
 }
 
-/// Compares a [`PriceTag`] with [`PaymentRequirements`].
+/// Compares a [`PriceTag`] with [`PaymentRequirements`] on the five
+/// protocol-critical fields only: scheme, network, amount, asset, and `pay_to`.
 ///
-/// This allows checking if a price tag matches specific requirements.
+/// This mirrors the Go SDK's `FindMatchingRequirements` which deliberately
+/// ignores `max_timeout_seconds` and `extra` to avoid false-negative rejections
+/// when facilitator enrichment adds scheme-specific metadata.
 impl PartialEq<PaymentRequirements> for PriceTag {
     fn eq(&self, b: &PaymentRequirements) -> bool {
         let a = &self.requirements;
-        a == b
+        a.scheme == b.scheme
+            && a.network == b.network
+            && a.amount == b.amount
+            && a.asset == b.asset
+            && a.pay_to == b.pay_to
     }
 }

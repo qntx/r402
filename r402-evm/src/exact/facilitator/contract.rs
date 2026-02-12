@@ -26,6 +26,7 @@ sol! {
         function name() external view returns (string);
         function version() external view returns (string);
         function balanceOf(address account) external view returns (uint256);
+        function authorizationState(address authorizer, bytes32 nonce) external view returns (bool);
         function transferWithAuthorization(
             address from,
             address to,

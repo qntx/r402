@@ -331,21 +331,34 @@ where
 
 /// Parses a 402 Payment Required response into a [`proto::PaymentRequired`].
 ///
-/// Extracts V2 payment requirements from the `Payment-Required` header (base64-encoded JSON).
+/// Tries to extract V2 payment requirements from the `Payment-Required` header
+/// (base64-encoded JSON) first, then falls back to parsing the response body as
+/// plain JSON. This matches the Go SDK's `handleV2Payment` which also tries
+/// header first then body.
 #[cfg_attr(
     feature = "telemetry",
     instrument(name = "x402.reqwest.parse_payment_required", skip(response))
 )]
 pub async fn parse_payment_required(response: Response) -> Option<proto::PaymentRequired> {
-    let headers = response.headers();
-    let v2_payment_required = headers
+    let v2_from_header = response
+        .headers()
         .get("Payment-Required")
         .and_then(|h| Base64Bytes::from(h.as_bytes()).decode().ok())
         .and_then(|b| serde_json::from_slice::<v2::PaymentRequired>(&b).ok());
-    if let Some(v2_payment_required) = v2_payment_required {
+
+    if let Some(v2_payment_required) = v2_from_header {
         #[cfg(feature = "telemetry")]
         debug!("Parsed V2 payment required from header");
         return Some(v2_payment_required);
+    }
+
+    // Fall back to body (some servers send PaymentRequired as JSON body)
+    if let Ok(body_bytes) = response.bytes().await
+        && let Ok(v2_from_body) = serde_json::from_slice::<v2::PaymentRequired>(&body_bytes)
+    {
+        #[cfg(feature = "telemetry")]
+        debug!("Parsed V2 payment required from response body");
+        return Some(v2_from_body);
     }
 
     #[cfg(feature = "telemetry")]

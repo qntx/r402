@@ -1,21 +1,13 @@
 //! Axum middleware for enforcing [x402](https://www.x402.org) payments on protected routes (V2-only).
 //!
 //! This middleware validates incoming payment headers using a configured x402 facilitator,
-//! and settles valid payments either before or after request execution (configurable).
+//! verifies the payment, executes the request, and settles valid payments after successful
+//! execution. If the handler returns an error (4xx/5xx), settlement is skipped.
 //!
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
 //!
 //! See [`X402Middleware`] for full configuration options.
 //! For low-level interaction with the facilitator, see [`facilitator::FacilitatorClient`].
-//!
-//! ## Settlement Timing
-//!
-//! By default, settlement occurs **after** the request is processed. You can change this behavior:
-//!
-//! - **[`X402Middleware::settle_before_execution`]** - Settle payment **before** request execution.
-//!   This prevents issues where failed settlements need retry or authorization expires.
-//! - **[`X402Middleware::settle_after_execution`]** - Settle payment **after** request execution (default).
-//!   This allows processing the request before committing the payment on-chain.
 //!
 //! ## Configuration Notes
 //!

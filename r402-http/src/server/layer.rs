@@ -1,17 +1,10 @@
 //! Axum middleware for enforcing [x402](https://www.x402.org) payments on protected routes.
 //!
 //! This middleware validates incoming payment headers using a configured x402 facilitator,
-//! and settles valid payments either before or after request execution (configurable).
+//! verifies the payment, executes the request, and settles valid payments after successful
+//! execution. If the handler returns an error (4xx/5xx), settlement is skipped.
 //!
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
-//!
-//! ## Settlement Timing
-//!
-//! By default, settlement occurs **after** the request is processed. You can change this behavior:
-//!
-//! - **[`X402Middleware::settle_before_execution`]** - Settle payment **before** request execution.
-//! - **[`X402Middleware::settle_after_execution`]** - Settle payment **after** request execution (default).
-//!   This allows processing the request before committing the payment on-chain.
 //!
 //! ## Configuration Notes
 //!
@@ -51,7 +44,6 @@ use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub struct X402Middleware<F> {
     facilitator: F,
     base_url: Option<Url>,
-    settle_before_execution: bool,
 }
 
 impl<F: Clone> Clone for X402Middleware<F> {
@@ -59,7 +51,6 @@ impl<F: Clone> Clone for X402Middleware<F> {
         Self {
             facilitator: self.facilitator.clone(),
             base_url: self.base_url.clone(),
-            settle_before_execution: self.settle_before_execution,
         }
     }
 }
@@ -69,7 +60,6 @@ impl<F: std::fmt::Debug> std::fmt::Debug for X402Middleware<F> {
         f.debug_struct("X402Middleware")
             .field("facilitator", &self.facilitator)
             .field("base_url", &self.base_url)
-            .field("settle_before_execution", &self.settle_before_execution)
             .finish()
     }
 }
@@ -93,7 +83,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
         Self {
             facilitator: Arc::new(facilitator),
             base_url: None,
-            settle_before_execution: false,
         }
     }
 
@@ -107,7 +96,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
         Ok(Self {
             facilitator: Arc::new(facilitator),
             base_url: None,
-            settle_before_execution: false,
         })
     }
 
@@ -128,7 +116,6 @@ impl X402Middleware<Arc<FacilitatorClient>> {
         Self {
             facilitator,
             base_url: self.base_url.clone(),
-            settle_before_execution: self.settle_before_execution,
         }
     }
 }
@@ -165,27 +152,6 @@ where
         this.base_url = Some(base_url);
         this
     }
-
-    /// Enables settlement prior to request execution.
-    /// When disabled (default), settlement occurs after successful request execution.
-    #[must_use]
-    pub fn settle_before_execution(&self) -> Self {
-        let mut this = self.clone();
-        this.settle_before_execution = true;
-        this
-    }
-
-    /// Disables settlement prior to request execution (default behavior).
-    ///
-    /// When disabled, settlement occurs after successful request execution.
-    /// This is the default behavior and allows the application to process
-    /// the request before committing the payment on-chain.
-    #[must_use]
-    pub fn settle_after_execution(&self) -> Self {
-        let mut this = self.clone();
-        this.settle_before_execution = false;
-        this
-    }
 }
 
 impl<TFacilitator> X402Middleware<TFacilitator>
@@ -206,7 +172,6 @@ where
             price_source: StaticPriceTags::new(vec![price_tag]),
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceInfoBuilder::default()),
-            settle_before_execution: self.settle_before_execution,
         }
     }
 
@@ -228,7 +193,6 @@ where
             price_source: DynamicPriceTags::new(callback),
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceInfoBuilder::default()),
-            settle_before_execution: self.settle_before_execution,
         }
     }
 }
@@ -241,7 +205,6 @@ where
 #[allow(missing_debug_implementations)] // generic types may not implement Debug
 pub struct X402LayerBuilder<TSource, TFacilitator> {
     facilitator: TFacilitator,
-    settle_before_execution: bool,
     base_url: Option<Arc<Url>>,
     price_source: TSource,
     resource: Arc<ResourceInfoBuilder>,
@@ -310,7 +273,6 @@ where
     fn layer(&self, inner: S) -> Self::Service {
         X402MiddlewareService {
             facilitator: self.facilitator.clone(),
-            settle_before_execution: self.settle_before_execution,
             base_url: self.base_url.clone(),
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
@@ -330,8 +292,6 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     facilitator: TFacilitator,
     /// Base URL for constructing resource URLs
     base_url: Option<Arc<Url>>,
-    /// Whether to settle payment before executing the request (true) or after (false)
-    settle_before_execution: bool,
     /// Price tag source - can be static or dynamic
     price_source: TSource,
     /// Resource information
@@ -360,7 +320,6 @@ where
         let facilitator = self.facilitator.clone();
         let base_url = self.base_url.clone();
         let resource_builder = Arc::clone(&self.resource);
-        let settle_before_execution = self.settle_before_execution;
         let mut inner = self.inner.clone();
 
         Box::pin(async move {
@@ -380,7 +339,6 @@ where
                 let mut gate = Paygate::builder(facilitator)
                     .accepts(accepts)
                     .resource(resource)
-                    .settle_before_execution(settle_before_execution)
                     .build();
                 gate.enrich_accepts().await;
                 gate

@@ -37,8 +37,8 @@ pub use settle::{
 };
 pub use signature::StructuredSignatureFormatError;
 pub use verify::{
-    assert_domain, assert_enough_balance, assert_enough_value, assert_time, verify_payment,
-    verify_permit2_payment,
+    assert_domain, assert_enough_balance, assert_enough_value, assert_nonce_unused,
+    assert_requirements_match, assert_time, verify_payment, verify_permit2_payment,
 };
 
 use crate::chain::Eip155MetaTransactionProvider;

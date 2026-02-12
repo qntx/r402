@@ -186,7 +186,12 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
     let requirements = &request.payment_requirements;
 
     let accepted = &payload.accepted;
-    if accepted != requirements {
+    if !(accepted.scheme == requirements.scheme
+        && accepted.network == requirements.network
+        && accepted.amount == requirements.amount
+        && accepted.asset == requirements.asset
+        && accepted.pay_to == requirements.pay_to)
+    {
         return Err(PaymentVerificationError::AcceptedRequirementsMismatch);
     }
 

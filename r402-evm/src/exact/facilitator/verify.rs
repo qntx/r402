@@ -4,7 +4,7 @@
 //! composite [`verify_payment`] function that ties signature verification
 //! to an on-chain simulation.
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolStruct;
 use alloy_sol_types::{Eip712Domain, eip712_domain};
@@ -56,9 +56,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     clock_skew_tolerance: u64,
 ) -> Result<(IEIP3009::IEIP3009Instance<P>, Eip3009Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
-    if accepted != requirements {
-        return Err(PaymentVerificationError::AcceptedRequirementsMismatch.into());
-    }
+    assert_requirements_match(accepted, requirements)?;
 
     let chain_id: ChainId = chain.into();
     let payload_chain_id = &accepted.network;
@@ -78,6 +76,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     let domain = assert_domain(chain, &contract, &asset_address.into(), &accepted.extra).await?;
 
     let amount_required = accepted.amount;
+    assert_nonce_unused(&contract, &authorization.from, &authorization.nonce).await?;
     assert_enough_balance(&contract, &authorization.from, amount_required.into()).await?;
     assert_enough_value(&authorization.value.into(), &amount_required.into())?;
 
@@ -92,6 +91,61 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     };
 
     Ok((contract, payment, domain))
+}
+
+/// Validates that the accepted requirements match the server-side requirements
+/// on the five core fields: scheme, network, amount, asset, and `pay_to`.
+///
+/// This mirrors the Go SDK's `FindMatchingRequirements` which only compares
+/// these protocol-critical fields, deliberately ignoring `max_timeout_seconds`
+/// and `extra` to avoid false-negative rejections.
+///
+/// # Errors
+///
+/// Returns [`PaymentVerificationError::AcceptedRequirementsMismatch`] on mismatch.
+pub fn assert_requirements_match(
+    accepted: &types::v2::PaymentRequirements,
+    requirements: &types::v2::PaymentRequirements,
+) -> Result<(), PaymentVerificationError> {
+    if accepted.scheme == requirements.scheme
+        && accepted.network == requirements.network
+        && accepted.amount == requirements.amount
+        && accepted.asset == requirements.asset
+        && accepted.pay_to == requirements.pay_to
+    {
+        Ok(())
+    } else {
+        Err(PaymentVerificationError::AcceptedRequirementsMismatch)
+    }
+}
+
+/// Checks whether the EIP-3009 authorization nonce has already been used on-chain.
+///
+/// Calls `authorizationState(address, bytes32)` on the token contract. If the
+/// nonce is already consumed, the payment is a replay and must be rejected.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if the RPC call fails or the nonce is already used.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
+    from = %authorizer,
+    nonce = %nonce
+)))]
+pub async fn assert_nonce_unused<P: Provider>(
+    contract: &IEIP3009::IEIP3009Instance<P>,
+    authorizer: &Address,
+    nonce: &B256,
+) -> Result<(), Eip155ExactError> {
+    let call = contract.authorizationState(*authorizer, *nonce);
+    let used_fut = call.call().into_future();
+    let used = traced!(
+        used_fut,
+        tracing::info_span!("check_authorization_state", otel.kind = "client")
+    )?;
+    if used {
+        return Err(PaymentVerificationError::NonceAlreadyUsed.into());
+    }
+    Ok(())
 }
 
 /// Validates that the current time is within the `validAfter` and `validBefore` bounds.
@@ -333,9 +387,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     clock_skew_tolerance: u64,
 ) -> Result<(IERC20::IERC20Instance<P>, Permit2Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
-    if accepted != requirements {
-        return Err(PaymentVerificationError::AcceptedRequirementsMismatch.into());
-    }
+    assert_requirements_match(accepted, requirements)?;
 
     let chain_id: ChainId = chain.into();
     if accepted.network != chain_id {
@@ -378,7 +430,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
 
     // Verify token matches
     if auth.permitted.token != Address::from(accepted.asset) {
-        return Err(PaymentVerificationError::InvalidPaymentAmount.into());
+        return Err(PaymentVerificationError::AssetMismatch.into());
     }
 
     let token_address: Address = accepted.asset.into();
@@ -389,7 +441,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     if let Ok(allowance) = allowance_result
         && allowance < required_amount
     {
-        return Err(PaymentVerificationError::InsufficientFunds.into());
+        return Err(PaymentVerificationError::Permit2AllowanceInsufficient.into());
     }
 
     // Check balance

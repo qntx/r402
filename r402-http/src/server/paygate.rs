@@ -92,7 +92,6 @@ impl ResourceInfoBuilder {
 #[allow(missing_debug_implementations)]
 pub struct Paygate<TFacilitator> {
     pub(crate) facilitator: TFacilitator,
-    pub(crate) settle_before_execution: bool,
     pub(crate) accepts: Arc<Vec<v2::PriceTag>>,
     pub(crate) resource: v2::ResourceInfo,
 }
@@ -105,13 +104,11 @@ pub struct Paygate<TFacilitator> {
 /// let gate = Paygate::builder(facilitator)
 ///     .accept(price_tag)
 ///     .resource(resource_info)
-///     .settle_before_execution(true)
 ///     .build();
 /// ```
 #[allow(missing_debug_implementations)]
 pub struct PaygateBuilder<TFacilitator> {
     facilitator: TFacilitator,
-    settle_before_execution: bool,
     accepts: Vec<v2::PriceTag>,
     resource: Option<v2::ResourceInfo>,
 }
@@ -121,7 +118,6 @@ impl<TFacilitator> Paygate<TFacilitator> {
     pub const fn builder(facilitator: TFacilitator) -> PaygateBuilder<TFacilitator> {
         PaygateBuilder {
             facilitator,
-            settle_before_execution: false,
             accepts: Vec::new(),
             resource: None,
         }
@@ -160,22 +156,12 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         self
     }
 
-    /// Enables or disables settlement before request execution.
-    ///
-    /// Default is `false` (settle after execution).
-    #[must_use]
-    pub const fn settle_before_execution(mut self, enabled: bool) -> Self {
-        self.settle_before_execution = enabled;
-        self
-    }
-
     /// Consumes the builder and produces a configured [`Paygate`].
     ///
     /// Uses empty resource info if none was provided.
     pub fn build(self) -> Paygate<TFacilitator> {
         Paygate {
             facilitator: self.facilitator,
-            settle_before_execution: self.settle_before_execution,
             accepts: Arc::new(self.accepts),
             resource: self.resource.unwrap_or_else(|| v2::ResourceInfo {
                 description: String::new(),
@@ -300,75 +286,46 @@ where
 
         let verify_request = make_verify_request(payment_payload, &self.accepts)?;
 
-        if self.settle_before_execution {
-            #[cfg(feature = "telemetry")]
-            tracing::debug!("Settling payment before request execution");
+        // Step 1: Verify the payment before executing the request.
+        let verify_response = self
+            .facilitator
+            .verify(verify_request.clone())
+            .await
+            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
-            let settlement = self
-                .facilitator
-                .settle(verify_request.into())
-                .await
-                .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
+        validate_verify_response(verify_response)?;
 
-            if let proto::SettleResponse::Error {
-                reason, message, ..
-            } = &settlement
-            {
-                let detail = message.as_deref().unwrap_or(reason.as_str());
-                return Err(PaygateError::Settlement(detail.to_owned()));
-            }
+        // Step 2: Execute the inner handler.
+        let response = match Self::call_inner(inner, req).await {
+            Ok(response) => response,
+            Err(err) => return Ok(err.into_response()),
+        };
 
-            let header_value = settlement_to_header(settlement)?;
-
-            let response = match Self::call_inner(inner, req).await {
-                Ok(response) => response,
-                Err(err) => return Ok(err.into_response()),
-            };
-
-            let mut res = response;
-            res.headers_mut().insert("Payment-Response", header_value);
-            Ok(res.into_response())
-        } else {
-            #[cfg(feature = "telemetry")]
-            tracing::debug!("Settling payment after request execution");
-
-            let verify_response = self
-                .facilitator
-                .verify(verify_request.clone())
-                .await
-                .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-
-            validate_verify_response(verify_response)?;
-
-            let response = match Self::call_inner(inner, req).await {
-                Ok(response) => response,
-                Err(err) => return Ok(err.into_response()),
-            };
-
-            if response.status().is_client_error() || response.status().is_server_error() {
-                return Ok(response.into_response());
-            }
-
-            let settlement = self
-                .facilitator
-                .settle(verify_request.into())
-                .await
-                .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
-
-            if let proto::SettleResponse::Error {
-                reason, message, ..
-            } = &settlement
-            {
-                let detail = message.as_deref().unwrap_or(reason.as_str());
-                return Err(PaygateError::Settlement(detail.to_owned()));
-            }
-
-            let header_value = settlement_to_header(settlement)?;
-
-            let mut res = response;
-            res.headers_mut().insert("Payment-Response", header_value);
-            Ok(res.into_response())
+        // Step 3: Skip settlement if the handler returned an error response.
+        if response.status().is_client_error() || response.status().is_server_error() {
+            return Ok(response.into_response());
         }
+
+        // Step 4: Settle the payment on-chain.
+        let settlement = self
+            .facilitator
+            .settle(verify_request.into())
+            .await
+            .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
+
+        if let proto::SettleResponse::Error {
+            reason, message, ..
+        } = &settlement
+        {
+            let detail = message.as_deref().unwrap_or(reason.as_str());
+            return Err(PaygateError::Settlement(detail.to_owned()));
+        }
+
+        let header_value = settlement_to_header(settlement)?;
+
+        let mut res = response;
+        res.headers_mut().insert("Payment-Response", header_value);
+        Ok(res.into_response())
     }
 }
 
@@ -462,17 +419,18 @@ fn error_into_response(
             Response::builder()
                 .status(StatusCode::PAYMENT_REQUIRED)
                 .header("Payment-Required", header_value)
-                .body(Body::empty())
+                .header("Content-Type", "application/json")
+                .body(Body::from(payment_required_bytes))
                 .expect("Fail to construct response")
         }
         PaygateError::Settlement(ref err) => {
             #[cfg(feature = "telemetry")]
             tracing::error!(details = %err, "Settlement failed");
             let body = Body::from(
-                json!({ "error": "Settlement failed" }).to_string(),
+                json!({ "error": "Settlement failed", "details": err.clone() }).to_string(),
             );
             Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .status(StatusCode::PAYMENT_REQUIRED)
                 .header("Content-Type", "application/json")
                 .body(body)
                 .expect("Fail to construct response")

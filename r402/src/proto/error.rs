@@ -36,6 +36,9 @@ pub enum PaymentVerificationError {
     /// The payer's on-chain balance is insufficient.
     #[error("Onchain balance is not enough to cover the payment amount")]
     InsufficientFunds,
+    /// The payer's Permit2 allowance is insufficient.
+    #[error("Permit2 allowance is not enough to cover the payment amount")]
+    Permit2AllowanceInsufficient,
     /// The payment signature is invalid.
     #[error("{0}")]
     InvalidSignature(String),
@@ -51,6 +54,9 @@ pub enum PaymentVerificationError {
     /// The accepted payment details don't match the requirements.
     #[error("Accepted does not match payment requirements")]
     AcceptedRequirementsMismatch,
+    /// The EIP-3009 authorization nonce has already been consumed on-chain.
+    #[error("Authorization nonce already used")]
+    NonceAlreadyUsed,
 }
 
 impl AsPaymentProblem for PaymentVerificationError {
@@ -59,6 +65,7 @@ impl AsPaymentProblem for PaymentVerificationError {
             Self::InvalidFormat(_) => ErrorReason::InvalidFormat,
             Self::InvalidPaymentAmount => ErrorReason::InvalidPaymentAmount,
             Self::InsufficientFunds => ErrorReason::InsufficientFunds,
+            Self::Permit2AllowanceInsufficient => ErrorReason::Permit2AllowanceInsufficient,
             Self::Early => ErrorReason::InvalidPaymentEarly,
             Self::Expired => ErrorReason::InvalidPaymentExpired,
             Self::ChainIdMismatch => ErrorReason::ChainIdMismatch,
@@ -69,6 +76,7 @@ impl AsPaymentProblem for PaymentVerificationError {
             Self::UnsupportedChain => ErrorReason::UnsupportedChain,
             Self::UnsupportedScheme => ErrorReason::UnsupportedScheme,
             Self::AcceptedRequirementsMismatch => ErrorReason::AcceptedRequirementsMismatch,
+            Self::NonceAlreadyUsed => ErrorReason::NonceAlreadyUsed,
         };
         PaymentProblem::new(error_reason, self.to_string())
     }
@@ -110,12 +118,47 @@ pub enum ErrorReason {
     TransactionSimulation,
     /// Insufficient on-chain balance.
     InsufficientFunds,
+    /// Insufficient Permit2 allowance (payer needs to approve Permit2 contract).
+    Permit2AllowanceInsufficient,
     /// The chain is not supported.
     UnsupportedChain,
     /// The scheme is not supported.
     UnsupportedScheme,
+    /// The authorization nonce has already been used.
+    NonceAlreadyUsed,
     /// An unexpected error occurred.
     UnexpectedError,
+}
+
+impl ErrorReason {
+    /// Returns the `snake_case` string representation matching the wire format.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::InvalidFormat => "invalid_format",
+            Self::InvalidPaymentAmount => "invalid_payment_amount",
+            Self::InvalidPaymentEarly => "invalid_payment_early",
+            Self::InvalidPaymentExpired => "invalid_payment_expired",
+            Self::ChainIdMismatch => "chain_id_mismatch",
+            Self::RecipientMismatch => "recipient_mismatch",
+            Self::AssetMismatch => "asset_mismatch",
+            Self::AcceptedRequirementsMismatch => "accepted_requirements_mismatch",
+            Self::InvalidSignature => "invalid_signature",
+            Self::TransactionSimulation => "transaction_simulation",
+            Self::InsufficientFunds => "insufficient_funds",
+            Self::Permit2AllowanceInsufficient => "permit2_allowance_insufficient",
+            Self::UnsupportedChain => "unsupported_chain",
+            Self::UnsupportedScheme => "unsupported_scheme",
+            Self::NonceAlreadyUsed => "nonce_already_used",
+            Self::UnexpectedError => "unexpected_error",
+        }
+    }
+}
+
+impl core::fmt::Display for ErrorReason {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Trait for converting errors into structured payment problems.

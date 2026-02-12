@@ -9,10 +9,13 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
+use std::future::Future;
+use std::pin::Pin;
 
 use super::SchemeId;
 use crate::chain::{ChainId, ChainProvider};
-use crate::facilitator::Facilitator;
+use crate::facilitator::{Facilitator, FacilitatorError};
+use crate::proto;
 
 /// Trait for building facilitator instances from chain providers.
 ///
@@ -168,5 +171,68 @@ impl SchemeRegistry {
     /// Returns an iterator over all registered handlers.
     pub fn values(&self) -> impl Iterator<Item = &dyn Facilitator> {
         self.0.values().map(|v| &**v)
+    }
+
+    /// Looks up a handler by slug, returning an `Aborted` error if not found.
+    fn require_handler(
+        &self,
+        slug: Option<SchemeSlug>,
+    ) -> Result<&dyn Facilitator, FacilitatorError> {
+        slug.and_then(|s| self.by_slug(&s))
+            .ok_or_else(|| FacilitatorError::Aborted {
+                reason: "no_facilitator_for_network".into(),
+                message: "no handler registered for this payment scheme".into(),
+            })
+    }
+}
+
+impl Facilitator for SchemeRegistry {
+    fn verify(
+        &self,
+        request: proto::VerifyRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::VerifyResponse, FacilitatorError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let handler = self.require_handler(request.scheme_slug())?;
+            handler.verify(request).await
+        })
+    }
+
+    fn settle(
+        &self,
+        request: proto::SettleRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SettleResponse, FacilitatorError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let handler = self.require_handler(request.scheme_slug())?;
+            handler.settle(request).await
+        })
+    }
+
+    fn supported(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<proto::SupportedResponse, FacilitatorError>> + Send + '_>>
+    {
+        Box::pin(async move {
+            let mut kinds = Vec::new();
+            let mut signers: HashMap<String, Vec<String>> = HashMap::new();
+            for handler in self.values() {
+                if let Ok(mut resp) = handler.supported().await {
+                    kinds.append(&mut resp.kinds);
+                    for (family, addrs) in resp.signers {
+                        signers.entry(family).or_default().extend(addrs);
+                    }
+                }
+            }
+            for addrs in signers.values_mut() {
+                addrs.sort_unstable();
+                addrs.dedup();
+            }
+            Ok(proto::SupportedResponse {
+                kinds,
+                extensions: Vec::new(),
+                signers,
+            })
+        })
     }
 }

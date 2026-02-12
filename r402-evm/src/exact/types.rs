@@ -23,7 +23,6 @@ pub const X402_EXACT_PERMIT2_PROXY: Address =
 /// x402 upto payment Permit2 proxy contract address.
 pub const X402_UPTO_PERMIT2_PROXY: Address = address!("0x4020633461b2895a48930Ff97eE8fCdE8E520002");
 
-
 /// Determines which on-chain mechanism is used for token transfers.
 ///
 /// - `Eip3009`: Uses `transferWithAuthorization` (USDC, etc.) — recommended for compatible tokens
