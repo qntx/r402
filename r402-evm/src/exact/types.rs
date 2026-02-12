@@ -203,6 +203,46 @@ pub struct PaymentRequirementsExtra {
     pub asset_transfer_method: Option<AssetTransferMethod>,
 }
 
+impl PaymentRequirementsExtra {
+    /// Builds the serialized `extra` JSON from EIP-712 deployment data and
+    /// an optional transfer method.
+    ///
+    /// Returns `None` when both `eip712` and `method` are absent (pure default).
+    #[must_use]
+    pub fn from_deployment(
+        eip712: Option<crate::chain::TokenDeploymentEip712>,
+        method: Option<AssetTransferMethod>,
+    ) -> Option<serde_json::Value> {
+        let extra = match (eip712, method) {
+            (Some(eip712), method) => Self::from(eip712).with_transfer_method(method),
+            (None, Some(m)) => Self {
+                name: String::new(),
+                version: String::new(),
+                asset_transfer_method: Some(m),
+            },
+            (None, None) => return None,
+        };
+        serde_json::to_value(extra).ok()
+    }
+
+    /// Sets the asset transfer method, consuming and returning `self`.
+    #[must_use]
+    pub const fn with_transfer_method(mut self, method: Option<AssetTransferMethod>) -> Self {
+        self.asset_transfer_method = method;
+        self
+    }
+}
+
+impl From<crate::chain::TokenDeploymentEip712> for PaymentRequirementsExtra {
+    fn from(eip712: crate::chain::TokenDeploymentEip712) -> Self {
+        Self {
+            name: eip712.name,
+            version: eip712.version,
+            asset_transfer_method: None,
+        }
+    }
+}
+
 #[cfg(any(feature = "facilitator", feature = "client"))]
 sol!(
     /// Solidity-compatible struct definition for ERC-3009 `transferWithAuthorization`.

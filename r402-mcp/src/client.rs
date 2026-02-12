@@ -66,8 +66,8 @@ pub trait McpCaller: Send + Sync {
 /// 3. Applies policies and selects the best candidate
 /// 4. Signs the payment and retries with payment in `_meta`
 /// 5. Extracts settlement response from the result
-pub struct X402McpClient<C: McpCaller> {
-    caller: C,
+pub struct X402McpClient {
+    caller: Box<dyn McpCaller>,
     scheme_clients: Vec<Box<dyn SchemeClient>>,
     selector: Box<dyn PaymentSelector>,
     policies: Vec<Box<dyn PaymentPolicy>>,
@@ -75,7 +75,7 @@ pub struct X402McpClient<C: McpCaller> {
     hooks: Box<dyn ClientHooks>,
 }
 
-impl<C: McpCaller> std::fmt::Debug for X402McpClient<C> {
+impl std::fmt::Debug for X402McpClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("X402McpClient")
             .field("scheme_clients", &self.scheme_clients.len())
@@ -84,11 +84,11 @@ impl<C: McpCaller> std::fmt::Debug for X402McpClient<C> {
     }
 }
 
-impl<C: McpCaller> X402McpClient<C> {
+impl X402McpClient {
     /// Creates a builder for configuring an [`X402McpClient`].
-    pub fn builder(caller: C) -> X402McpClientBuilder<C> {
+    pub fn builder(caller: impl McpCaller + 'static) -> X402McpClientBuilder {
         X402McpClientBuilder {
-            caller,
+            caller: Box::new(caller),
             scheme_clients: Vec::new(),
             selector: None,
             policies: Vec::new(),
@@ -98,8 +98,9 @@ impl<C: McpCaller> X402McpClient<C> {
     }
 
     /// Returns a reference to the underlying MCP caller.
-    pub const fn caller(&self) -> &C {
-        &self.caller
+    #[must_use]
+    pub fn caller(&self) -> &dyn McpCaller {
+        &*self.caller
     }
 
     /// Calls a tool with automatic x402 payment handling.
@@ -283,8 +284,8 @@ impl<C: McpCaller> X402McpClient<C> {
 }
 
 /// Builder for configuring an [`X402McpClient`].
-pub struct X402McpClientBuilder<C: McpCaller> {
-    caller: C,
+pub struct X402McpClientBuilder {
+    caller: Box<dyn McpCaller>,
     scheme_clients: Vec<Box<dyn SchemeClient>>,
     selector: Option<Box<dyn PaymentSelector>>,
     policies: Vec<Box<dyn PaymentPolicy>>,
@@ -292,7 +293,7 @@ pub struct X402McpClientBuilder<C: McpCaller> {
     hooks: Option<Box<dyn ClientHooks>>,
 }
 
-impl<C: McpCaller> std::fmt::Debug for X402McpClientBuilder<C> {
+impl std::fmt::Debug for X402McpClientBuilder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("X402McpClientBuilder")
             .field("scheme_clients", &self.scheme_clients.len())
@@ -301,7 +302,7 @@ impl<C: McpCaller> std::fmt::Debug for X402McpClientBuilder<C> {
     }
 }
 
-impl<C: McpCaller> X402McpClientBuilder<C> {
+impl X402McpClientBuilder {
     /// Registers a payment scheme client.
     #[must_use]
     pub fn scheme_client(mut self, client: Box<dyn SchemeClient>) -> Self {
@@ -352,7 +353,7 @@ impl<C: McpCaller> X402McpClientBuilder<C> {
     ///
     /// Panics if no scheme clients have been registered.
     #[must_use]
-    pub fn build(self) -> X402McpClient<C> {
+    pub fn build(self) -> X402McpClient {
         assert!(
             !self.scheme_clients.is_empty(),
             "at least one scheme client must be registered"

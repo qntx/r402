@@ -36,10 +36,6 @@ use crate::types::{
 /// The wrapper intercepts tool call requests, enforces payment, and
 /// manages the full verify → execute → settle lifecycle.
 ///
-/// # Type Parameters
-///
-/// - `F` — The [`Facilitator`] implementation used for verify/settle operations.
-///
 /// # Examples
 ///
 /// ```rust,ignore
@@ -53,12 +49,12 @@ use crate::types::{
 ///     Ok(CallToolResult { content: vec![ContentItem::text("ok")], ..Default::default() })
 /// }).await;
 /// ```
-pub struct PaymentWrapper<F: Facilitator> {
-    facilitator: Arc<F>,
+pub struct PaymentWrapper {
+    facilitator: Arc<dyn Facilitator>,
     config: PaymentWrapperConfig,
 }
 
-impl<F: Facilitator> std::fmt::Debug for PaymentWrapper<F> {
+impl std::fmt::Debug for PaymentWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PaymentWrapper")
             .field("config", &self.config)
@@ -66,13 +62,13 @@ impl<F: Facilitator> std::fmt::Debug for PaymentWrapper<F> {
     }
 }
 
-impl<F: Facilitator + 'static> PaymentWrapper<F> {
+impl PaymentWrapper {
     /// Creates a new payment wrapper.
     ///
     /// # Panics
     ///
     /// Panics if `config.accepts` is empty.
-    pub fn new(facilitator: Arc<F>, config: PaymentWrapperConfig) -> Self {
+    pub fn new(facilitator: Arc<dyn Facilitator>, config: PaymentWrapperConfig) -> Self {
         assert!(
             !config.accepts.is_empty(),
             "PaymentWrapperConfig.accepts must have at least one payment requirement"

@@ -743,7 +743,7 @@ pub fn usdm_evm_deployment(chain: &Eip155ChainReference) -> Option<&'static Eip1
 /// ```ignore
 /// use r402_evm::{Eip155Exact, USDC};
 ///
-/// let tag = Eip155Exact::price_tag(pay_to, USDC::base().amount(1_000_000u64));
+/// let tag = Eip155Exact::price_tag(pay_to, USDC::base().amount(1_000_000u64), None);
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct USDC;
@@ -1036,7 +1036,7 @@ impl USDC {
 /// ```ignore
 /// use r402_evm::{Eip155Exact, USDM};
 ///
-/// let tag = Eip155Exact::price_tag(pay_to, USDM::megaeth().amount(1_000_000_000_000_000_000u128));
+/// let tag = Eip155Exact::price_tag(pay_to, USDM::megaeth().amount(1_000_000_000_000_000_000u128), None);
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct USDM;

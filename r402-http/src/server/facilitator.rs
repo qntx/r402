@@ -506,7 +506,7 @@ fn record_result_on_span<R, E: Display>(result: &Result<R, E>) {
 /// Records the outcome of a request on a tracing span, including status and errors.
 /// Noop if telemetry feature is off.
 #[cfg(not(feature = "telemetry"))]
-fn record_result_on_span<R, E: Display>(_result: &Result<R, E>) {}
+const fn record_result_on_span<R, E: Display>(_result: &Result<R, E>) {}
 
 /// Instruments a future with a given tracing span.
 #[cfg(feature = "telemetry")]

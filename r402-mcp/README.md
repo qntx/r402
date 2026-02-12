@@ -92,9 +92,10 @@ let pr = extract::extract_payment_required_from_result(&result);
 
 ## Feature Flags
 
-| Feature | Description |
-|---------|-------------|
-| `telemetry` | Enables `tracing` instrumentation |
+| Feature     | Description                                                               |
+| ----------- | ------------------------------------------------------------------------- |
+| `rmcp`      | Built-in integration with the official [`rmcp`](https://docs.rs/rmcp) SDK |
+| `telemetry` | Enables `tracing` instrumentation                                         |
 
 ## License
 

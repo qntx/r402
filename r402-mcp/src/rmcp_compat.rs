@@ -34,7 +34,7 @@
 use std::borrow::Cow;
 use std::future::Future;
 
-use r402::facilitator::{BoxFuture, Facilitator};
+use r402::facilitator::BoxFuture;
 use rmcp::model as mcp;
 use rmcp::service::{Peer, RoleClient};
 
@@ -169,7 +169,7 @@ pub trait PaymentWrapperRmcpExt {
         Fut: Future<Output = Result<CallToolResult, McpPaymentError>> + Send;
 }
 
-impl<F: Facilitator + 'static> PaymentWrapperRmcpExt for crate::server::PaymentWrapper<F> {
+impl PaymentWrapperRmcpExt for crate::server::PaymentWrapper {
     #[allow(clippy::manual_async_fn)]
     fn process_rmcp<H, Fut>(
         &self,
