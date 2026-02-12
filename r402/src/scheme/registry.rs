@@ -205,9 +205,7 @@ impl Facilitator for SchemeRegistry {
         })
     }
 
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             let mut kinds = Vec::new();
             let mut signers: HashMap<String, Vec<String>> = HashMap::new();

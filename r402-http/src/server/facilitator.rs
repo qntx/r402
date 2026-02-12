@@ -154,9 +154,7 @@ impl Facilitator for FacilitatorClient {
         })
     }
 
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             Self::supported(self)
                 .await

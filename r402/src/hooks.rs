@@ -102,10 +102,7 @@ pub trait FacilitatorHooks: Send + Sync {
     ///
     /// If any hook returns [`HookDecision::Abort`], verification is skipped and
     /// an invalid `VerifyResponse` is returned with the provided reason.
-    fn before_verify<'a>(
-        &'a self,
-        _ctx: &'a VerifyContext,
-    ) -> BoxFuture<'a, HookDecision> {
+    fn before_verify<'a>(&'a self, _ctx: &'a VerifyContext) -> BoxFuture<'a, HookDecision> {
         Box::pin(async { HookDecision::Continue })
     }
 
@@ -136,10 +133,7 @@ pub trait FacilitatorHooks: Send + Sync {
     ///
     /// If any hook returns [`HookDecision::Abort`], settlement is skipped and
     /// an error is returned with the provided reason.
-    fn before_settle<'a>(
-        &'a self,
-        _ctx: &'a SettleContext,
-    ) -> BoxFuture<'a, HookDecision> {
+    fn before_settle<'a>(&'a self, _ctx: &'a SettleContext) -> BoxFuture<'a, HookDecision> {
         Box::pin(async { HookDecision::Continue })
     }
 
@@ -297,9 +291,7 @@ where
         })
     }
 
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move { self.inner.supported().await })
     }
 }

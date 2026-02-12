@@ -81,9 +81,7 @@ pub trait Facilitator: Send + Sync {
     ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>>;
 
     /// Returns the payment kinds supported by this facilitator.
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>>;
+    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>>;
 }
 
 impl<T: Facilitator> Facilitator for Arc<T> {
@@ -101,9 +99,7 @@ impl<T: Facilitator> Facilitator for Arc<T> {
         self.as_ref().settle(request)
     }
 
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         self.as_ref().supported()
     }
 }

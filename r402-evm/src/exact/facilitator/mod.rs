@@ -252,9 +252,7 @@ where
         })
     }
 
-    fn supported(
-        &self,
-    ) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
         Box::pin(async move {
             let chain_id = self.provider.chain_id();
             let kinds = vec![proto::SupportedPaymentKind {

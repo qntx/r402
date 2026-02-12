@@ -10,7 +10,6 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
-
 use r402::proto::Base64Bytes;
 use r402::proto::PaymentRequired;
 use r402::proto::v2::{self, ResourceInfo};
