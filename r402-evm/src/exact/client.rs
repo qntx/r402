@@ -481,6 +481,40 @@ impl<S> Eip155ExactClientBuilder<S> {
         self
     }
 
+    /// Attaches an Alloy [`Provider`](alloy_provider::Provider) for automatic
+    /// Permit2 allowance management.
+    ///
+    /// This is the **recommended, batteries-included** way to enable Permit2
+    /// auto-approve. The provider must have a wallet/signer configured that
+    /// matches the payment signer, so it can send `approve` transactions.
+    ///
+    /// Internally creates a built-in [`Permit2Approver`] — no trait
+    /// implementation required from the caller.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let provider = ProviderBuilder::new()
+    ///     .wallet(EthereumWallet::new(signer.clone()))
+    ///     .connect_http(rpc_url);
+    ///
+    /// let client = Eip155ExactClient::builder(signer)
+    ///     .provider(provider)
+    ///     .build();
+    /// ```
+    ///
+    /// # Feature
+    ///
+    /// Requires the **`client-provider`** feature flag.
+    #[cfg(feature = "client-provider")]
+    #[must_use]
+    pub fn provider<P: alloy_provider::Provider + Send + Sync + 'static>(
+        self,
+        provider: P,
+    ) -> Self {
+        self.approver(BuiltinPermit2Approver { provider })
+    }
+
     /// Builds the configured [`Eip155ExactClient`].
     pub fn build(self) -> Eip155ExactClient<S> {
         Eip155ExactClient {
@@ -488,6 +522,79 @@ impl<S> Eip155ExactClientBuilder<S> {
             approver: self.approver,
             auto_approve: self.auto_approve,
         }
+    }
+}
+
+/// Built-in [`Permit2Approver`] backed by an Alloy provider.
+///
+/// Created automatically when calling
+/// [`Eip155ExactClientBuilder::provider`]. Users never need to interact
+/// with this type directly.
+#[cfg(feature = "client-provider")]
+struct BuiltinPermit2Approver<P> {
+    provider: P,
+}
+
+#[cfg(feature = "client-provider")]
+impl<P> Permit2Approver for BuiltinPermit2Approver<P>
+where
+    P: alloy_provider::Provider + Send + Sync,
+{
+    fn check_permit2_allowance(
+        &self,
+        token: Address,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+        Box::pin(async move {
+            let (_addr, calldata) = permit2_allowance_calldata(token, owner);
+            let tx = alloy_rpc_types_eth::TransactionRequest::default()
+                .to(token)
+                .input(calldata.into());
+            let result = self
+                .provider
+                .call(tx)
+                .await
+                .map_err(|e| ClientError::PreConditionFailed(format!(
+                    "Permit2 allowance check failed: {e}"
+                )))?;
+            Ok(U256::from_be_slice(&result))
+        })
+    }
+
+    fn approve_permit2(
+        &self,
+        token: Address,
+        _owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>> {
+        Box::pin(async move {
+            let calldata = IPermit2Approval::approveCall {
+                spender: PERMIT2_ADDRESS,
+                amount: U256::MAX,
+            }
+            .abi_encode();
+            let tx = alloy_rpc_types_eth::TransactionRequest::default()
+                .to(token)
+                .input(calldata.into());
+            let pending = self
+                .provider
+                .send_transaction(tx)
+                .await
+                .map_err(|e| ClientError::PreConditionFailed(format!(
+                    "Permit2 approve tx failed: {e}"
+                )))?;
+            let receipt = pending
+                .get_receipt()
+                .await
+                .map_err(|e| ClientError::PreConditionFailed(format!(
+                    "Permit2 approve receipt failed: {e}"
+                )))?;
+            if !receipt.status() {
+                return Err(ClientError::PreConditionFailed(
+                    "Permit2 approve transaction reverted".into(),
+                ));
+            }
+            Ok(())
+        })
     }
 }
 

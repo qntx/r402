@@ -13,6 +13,7 @@ all-features = true
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402/telemetry"]
 client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:rand"]
+client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
 server = []
 facilitator = [
     "dep:alloy-contract",
@@ -30,7 +31,7 @@ facilitator = [
     "dep:tower",
     "dep:url",
 ]
-full = ["telemetry", "client", "server", "facilitator"]
+full = ["telemetry", "client", "client-provider", "server", "facilitator"]
 
 [dependencies]
 alloy-primitives = { workspace = true }
