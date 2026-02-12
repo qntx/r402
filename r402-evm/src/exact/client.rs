@@ -1,8 +1,32 @@
 //! Client-side payment signing for the EIP-155 "exact" scheme.
 //!
-//! This module provides [`Eip155ExactClient`] for signing ERC-3009
-//! `transferWithAuthorization` payments on EVM chains.
+//! This module provides [`Eip155ExactClient`] for signing EVM payments,
+//! supporting both EIP-3009 (`transferWithAuthorization`) and Permit2
+//! transfer methods. The transfer method is selected automatically based
+//! on the server's `PaymentRequirements.extra.assetTransferMethod`.
+//!
+//! # Permit2 Auto-Approve
+//!
+//! Permit2 payments require a one-time ERC-20 `approve(Permit2, MAX)` before
+//! the first payment. By default, the client does **not** manage this — users
+//! must approve manually, or the facilitator will reject with
+//! `Permit2AllowanceInsufficient`.
+//!
+//! To enable automatic approval, construct the client with a [`Permit2Approver`]
+//! via [`Eip155ExactClientBuilder`]:
+//!
+//! ```ignore
+//! let client = Eip155ExactClient::builder(signer)
+//!     .approver(my_provider)
+//!     .build();
+//! ```
+//!
+//! When an approver is set, the client checks allowances before each Permit2
+//! payment and sends an `approve` transaction if needed, making the experience
+//! as seamless as EIP-3009.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
@@ -61,6 +85,83 @@ impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
     async fn sign_hash(&self, hash: &FixedBytes<32>) -> Result<Signature, alloy_signer::Error> {
         (**self).sign_hash(hash).await
     }
+}
+
+/// Abstraction for on-chain interactions needed by the Permit2 auto-approve flow.
+///
+/// Implement this trait to enable automatic Permit2 allowance management
+/// in [`Eip155ExactClient`]. When an approver is provided via
+/// [`Eip155ExactClientBuilder::approver`], the client will:
+///
+/// 1. **Before each Permit2 payment**, call [`check_permit2_allowance`](Self::check_permit2_allowance)
+///    to query the current ERC-20 allowance granted to the canonical Permit2 contract.
+/// 2. **If the allowance is insufficient**, call [`approve_permit2`](Self::approve_permit2)
+///    to send an on-chain `approve(Permit2, MAX_UINT256)` transaction.
+/// 3. **Proceed with normal Permit2 EIP-712 signing** once allowance is confirmed.
+///
+/// This eliminates the manual approve step that Permit2 otherwise requires,
+/// giving users the same zero-friction experience as EIP-3009 tokens (like USDC).
+///
+/// # Gas Costs
+///
+/// The `approve` transaction costs approximately 46,000 gas (~$0.01–0.10
+/// depending on the chain). This cost is borne by the token owner (the
+/// signing wallet) and only occurs **once per token** — subsequent payments
+/// reuse the existing unlimited allowance.
+///
+/// # Calldata Helpers
+///
+/// If you are building a custom implementation, the helper functions
+/// [`permit2_allowance_calldata`] and [`permit2_approval_calldata`] generate
+/// the raw ABI-encoded calldata for the underlying `eth_call` / `eth_sendTransaction`.
+///
+/// # Example
+///
+/// ```ignore
+/// use r402_evm::exact::client::{Eip155ExactClient, Permit2Approver};
+///
+/// struct MyProvider { /* RPC + signer */ }
+///
+/// impl Permit2Approver for MyProvider {
+///     fn check_permit2_allowance(&self, token: Address, owner: Address)
+///         -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>>
+///     {
+///         Box::pin(async move { /* eth_call: token.allowance(owner, PERMIT2) */ todo!() })
+///     }
+///
+///     fn approve_permit2(&self, token: Address, owner: Address)
+///         -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>>
+///     {
+///         Box::pin(async move { /* send tx: token.approve(PERMIT2, MAX) */ todo!() })
+///     }
+/// }
+///
+/// let client = Eip155ExactClient::builder(signer)
+///     .approver(MyProvider { /* ... */ })
+///     .build();
+/// ```
+pub trait Permit2Approver: Send + Sync {
+    /// Queries the current ERC-20 allowance that `owner` has granted to the
+    /// canonical Permit2 contract for the given `token`.
+    ///
+    /// Equivalent to `token.allowance(owner, PERMIT2_ADDRESS)` via `eth_call`
+    /// (read-only, no gas cost).
+    fn check_permit2_allowance(
+        &self,
+        token: Address,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>>;
+
+    /// Sends an ERC-20 `approve(PERMIT2_ADDRESS, MAX_UINT256)` transaction
+    /// for `token` on behalf of `owner`, and waits for on-chain confirmation.
+    ///
+    /// This is a **write** operation that costs gas. Implementations should
+    /// ensure the transaction is sent from the `owner` address.
+    fn approve_permit2(
+        &self,
+        token: Address,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>>;
 }
 
 /// Shared EIP-712 signing parameters for ERC-3009 authorization.
@@ -231,18 +332,162 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
 
 /// Client for signing EIP-155 exact scheme payments.
 ///
-/// This client handles the creation and signing of ERC-3009 `transferWithAuthorization`
-/// payments for EVM chains. Uses CAIP-2 chain IDs and embeds the accepted requirements
-/// directly in the payment payload.
-#[derive(Debug)]
+/// Supports both EIP-3009 (`transferWithAuthorization`) and Permit2 transfer
+/// methods on EVM chains. The transfer method is determined automatically
+/// based on the server's `PaymentRequirements.extra.assetTransferMethod`.
+///
+/// # Construction
+///
+/// - [`new`](Self::new) — Minimal client for EIP-3009 payments (no provider needed).
+/// - [`builder`](Self::builder) — Fluent builder for advanced configuration including
+///   Permit2 auto-approve via a [`Permit2Approver`].
+///
+/// # Permit2 Auto-Approve
+///
+/// When constructed with a [`Permit2Approver`], the client automatically manages
+/// Permit2 ERC-20 allowances:
+///
+/// - **Without approver** (default): Permit2 payments require the user to have
+///   previously called `token.approve(Permit2, MAX)`. If the allowance is
+///   insufficient, the facilitator rejects with `Permit2AllowanceInsufficient`.
+///
+/// - **With approver**: The client checks allowance before each Permit2 payment
+///   and automatically sends an `approve` transaction if needed (one-time,
+///   ~46k gas). This makes Permit2 as frictionless as EIP-3009.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Simple: EIP-3009 only, no provider needed
+/// let client = Eip155ExactClient::new(signer);
+///
+/// // With Permit2 auto-approve
+/// let client = Eip155ExactClient::builder(signer)
+///     .approver(my_provider)
+///     .build();
+/// ```
 pub struct Eip155ExactClient<S> {
     signer: S,
+    approver: Option<Arc<dyn Permit2Approver>>,
+    auto_approve: bool,
+}
+
+impl<S: std::fmt::Debug> std::fmt::Debug for Eip155ExactClient<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Eip155ExactClient")
+            .field("signer", &self.signer)
+            .field("has_approver", &self.approver.is_some())
+            .field("auto_approve", &self.auto_approve)
+            .finish()
+    }
 }
 
 impl<S> Eip155ExactClient<S> {
     /// Creates a new EIP-155 exact scheme client with the given signer.
+    ///
+    /// This is the simplest construction path. EIP-3009 payments work
+    /// immediately; Permit2 payments require the user to have approved
+    /// the Permit2 contract manually beforehand.
+    ///
+    /// For automatic Permit2 approval, use [`builder`](Self::builder) instead.
     pub const fn new(signer: S) -> Self {
-        Self { signer }
+        Self {
+            signer,
+            approver: None,
+            auto_approve: false,
+        }
+    }
+
+    /// Returns a builder for advanced client configuration.
+    ///
+    /// Use the builder to attach a [`Permit2Approver`] for automatic
+    /// allowance management:
+    ///
+    /// ```ignore
+    /// let client = Eip155ExactClient::builder(signer)
+    ///     .approver(my_provider)
+    ///     .build();
+    /// ```
+    pub fn builder(signer: S) -> Eip155ExactClientBuilder<S> {
+        Eip155ExactClientBuilder {
+            signer,
+            approver: None,
+            auto_approve: true,
+        }
+    }
+}
+
+/// Builder for constructing an [`Eip155ExactClient`] with optional Permit2
+/// auto-approve capabilities.
+///
+/// Created via [`Eip155ExactClient::builder`].
+///
+/// # Examples
+///
+/// ```ignore
+/// // Minimal (equivalent to Eip155ExactClient::new(signer))
+/// let client = Eip155ExactClient::builder(signer).build();
+///
+/// // With Permit2 auto-approve (recommended for AI agents)
+/// let client = Eip155ExactClient::builder(signer)
+///     .approver(my_provider)
+///     .build();
+///
+/// // Check-only mode: detect insufficient allowance without auto-approving
+/// let client = Eip155ExactClient::builder(signer)
+///     .approver(my_provider)
+///     .auto_approve(false)
+///     .build();
+/// ```
+pub struct Eip155ExactClientBuilder<S> {
+    signer: S,
+    approver: Option<Arc<dyn Permit2Approver>>,
+    auto_approve: bool,
+}
+
+impl<S: std::fmt::Debug> std::fmt::Debug for Eip155ExactClientBuilder<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Eip155ExactClientBuilder")
+            .field("signer", &self.signer)
+            .field("has_approver", &self.approver.is_some())
+            .field("auto_approve", &self.auto_approve)
+            .finish()
+    }
+}
+
+impl<S> Eip155ExactClientBuilder<S> {
+    /// Sets the [`Permit2Approver`] for automatic allowance management.
+    ///
+    /// When set, the client will check Permit2 allowances before signing
+    /// and, if [`auto_approve`](Self::auto_approve) is `true` (the default),
+    /// automatically send an `approve(Permit2, MAX)` transaction when needed.
+    #[must_use]
+    pub fn approver<A: Permit2Approver + 'static>(mut self, approver: A) -> Self {
+        self.approver = Some(Arc::new(approver));
+        self
+    }
+
+    /// Controls whether the client automatically sends `approve` transactions
+    /// when Permit2 allowance is insufficient.
+    ///
+    /// - `true` (default): Automatically approve — seamless experience.
+    /// - `false`: Return [`ClientError::PreConditionFailed`] with a descriptive
+    ///   message, giving callers a chance to handle the approval themselves.
+    ///
+    /// Has no effect if no [`approver`](Self::approver) is set.
+    #[must_use]
+    pub const fn auto_approve(mut self, auto_approve: bool) -> Self {
+        self.auto_approve = auto_approve;
+        self
+    }
+
+    /// Builds the configured [`Eip155ExactClient`].
+    pub fn build(self) -> Eip155ExactClient<S> {
+        Eip155ExactClient {
+            signer: self.signer,
+            approver: self.approver,
+            auto_approve: self.auto_approve,
+        }
     }
 }
 
@@ -278,6 +523,8 @@ where
                         signer: self.signer.clone(),
                         chain_reference,
                         requirements,
+                        approver: self.approver.clone(),
+                        auto_approve: self.auto_approve,
                     }),
                 };
                 Some(candidate)
@@ -291,6 +538,8 @@ struct V2PayloadSigner<S> {
     resource_info: Option<ResourceInfo>,
     chain_reference: Eip155ChainReference,
     requirements: types::v2::PaymentRequirements,
+    approver: Option<Arc<dyn Permit2Approver>>,
+    auto_approve: bool,
 }
 
 impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
@@ -307,6 +556,31 @@ where
                 == Some(AssetTransferMethod::Permit2);
 
             let exact_payload = if use_permit2 {
+                // Auto-approve: ensure Permit2 has sufficient ERC-20 allowance
+                // before signing, if a Permit2Approver was provided.
+                if let Some(approver) = &self.approver {
+                    let token = self.requirements.asset.0;
+                    let owner = self.signer.address();
+                    let required: U256 = self.requirements.amount.into();
+
+                    let allowance = approver
+                        .check_permit2_allowance(token, owner)
+                        .await?;
+
+                    if allowance < required {
+                        if self.auto_approve {
+                            approver.approve_permit2(token, owner).await?;
+                        } else {
+                            return Err(ClientError::PreConditionFailed(format!(
+                                "Permit2 allowance insufficient for token {token}: \
+                                 have {allowance}, need {required}. \
+                                 Call approve({PERMIT2_ADDRESS}, MAX) on the token contract, \
+                                 or enable auto_approve in the client builder."
+                            )));
+                        }
+                    }
+                }
+
                 let params = Permit2SigningParams {
                     chain_id: self.chain_reference.inner(),
                     asset_address: self.requirements.asset.0,
@@ -359,6 +633,12 @@ sol! {
 /// provider's `eth_call` to check whether `owner` has approved the canonical
 /// Permit2 contract to spend their tokens.
 ///
+/// # Automatic Alternative
+///
+/// If you use [`Eip155ExactClient::builder`] with a [`Permit2Approver`],
+/// allowance checks and approvals are handled automatically. This function
+/// is primarily useful for custom [`Permit2Approver`] implementations.
+///
 /// Mirrors Go SDK's `GetPermit2AllowanceReadParams`.
 #[must_use]
 pub fn permit2_allowance_calldata(token: Address, owner: Address) -> (Address, Bytes) {
@@ -374,6 +654,12 @@ pub fn permit2_allowance_calldata(token: Address, owner: Address) -> (Address, B
 ///
 /// The returned tuple `(token_address, calldata)` represents a transaction
 /// the user must send (paying gas) before using the Permit2 payment flow.
+///
+/// # Automatic Alternative
+///
+/// If you use [`Eip155ExactClient::builder`] with a [`Permit2Approver`],
+/// this approval is sent automatically when needed. This function is
+/// primarily useful for custom [`Permit2Approver`] implementations.
 ///
 /// Mirrors Go SDK's `CreatePermit2ApprovalTxData`.
 #[must_use]

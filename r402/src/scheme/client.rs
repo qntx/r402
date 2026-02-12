@@ -90,6 +90,15 @@ pub enum ClientError {
     /// JSON serialization/deserialization error.
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
+
+    /// A pre-condition for payment signing was not met.
+    ///
+    /// Returned when the client detects that an on-chain condition required
+    /// before signing (such as a token allowance) is not satisfied.
+    /// This allows callers to handle the condition explicitly rather than
+    /// having the payment silently fail at the facilitator.
+    #[error("Payment pre-condition not met: {0}")]
+    PreConditionFailed(String),
 }
 
 /// Trait for selecting the best payment candidate from available options.

@@ -33,5 +33,5 @@ pub mod exact;
 mod networks;
 pub use exact::Eip155Exact;
 #[cfg(feature = "client")]
-pub use exact::client::Eip155ExactClient;
+pub use exact::client::{Eip155ExactClient, Eip155ExactClientBuilder, Permit2Approver};
 pub use networks::*;
