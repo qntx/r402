@@ -20,6 +20,7 @@
 //!
 
 use std::fmt::Display;
+use std::sync::Arc;
 use std::time::Duration;
 
 use http::{HeaderMap, StatusCode};
@@ -44,13 +45,15 @@ struct SupportedCacheState {
 
 /// An encapsulated TTL cache for the `/supported` endpoint response.
 ///
-/// Each clone has an independent cache state.
-#[derive(Debug)]
+/// Clones share the same cache state via `Arc`, so cached responses are
+/// visible across all clones (e.g. when the middleware clones the
+/// facilitator per-request).
+#[derive(Debug, Clone)]
 pub struct SupportedCache {
     /// TTL for the cache
     ttl: Duration,
-    /// Cache state (`RwLock` for read-heavy workload)
-    state: RwLock<Option<SupportedCacheState>>,
+    /// Shared cache state (`Arc<RwLock>` so clones hit the same cache)
+    state: Arc<RwLock<Option<SupportedCacheState>>>,
 }
 
 impl SupportedCache {
@@ -59,7 +62,7 @@ impl SupportedCache {
     pub fn new(ttl: Duration) -> Self {
         Self {
             ttl,
-            state: RwLock::new(None),
+            state: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -87,12 +90,6 @@ impl SupportedCache {
     pub async fn clear(&self) {
         let mut guard = self.state.write().await;
         *guard = None;
-    }
-}
-
-impl Clone for SupportedCache {
-    fn clone(&self) -> Self {
-        Self::new(self.ttl)
     }
 }
 
@@ -219,36 +216,43 @@ impl FacilitatorClient {
     pub const DEFAULT_SUPPORTED_CACHE_TTL: Duration = Duration::from_mins(10);
 
     /// Returns the base URL used by this client.
+    #[must_use] 
     pub const fn base_url(&self) -> &Url {
         &self.base_url
     }
 
     /// Returns the computed `./verify` URL relative to [`FacilitatorClient::base_url`].
+    #[must_use] 
     pub const fn verify_url(&self) -> &Url {
         &self.verify_url
     }
 
     /// Returns the computed `./settle` URL relative to [`FacilitatorClient::base_url`].
+    #[must_use] 
     pub const fn settle_url(&self) -> &Url {
         &self.settle_url
     }
 
     /// Returns the computed `./supported` URL relative to [`FacilitatorClient::base_url`].
+    #[must_use] 
     pub const fn supported_url(&self) -> &Url {
         &self.supported_url
     }
 
     /// Returns any custom headers configured on the client.
+    #[must_use] 
     pub const fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Returns the configured timeout, if any.
+    #[must_use] 
     pub const fn timeout(&self) -> &Option<Duration> {
         &self.timeout
     }
 
     /// Returns a reference to the supported cache.
+    #[must_use] 
     pub const fn supported_cache(&self) -> &SupportedCache {
         &self.supported_cache
     }
@@ -618,28 +622,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_supported_cache_clones_independently() {
+    async fn test_supported_cache_shared_across_clones() {
         let mock_server = MockServer::start().await;
         let test_response = create_test_supported_response();
 
-        // Mock the supported endpoint
+        // Mock the supported endpoint — expect exactly 1 request
         Mock::given(method("GET"))
             .and(path("/supported"))
             .respond_with(ResponseTemplate::new(200).set_body_json(&test_response))
+            .expect(1)
             .mount(&mock_server)
             .await;
 
         let client = FacilitatorClient::try_new(mock_server.uri().parse::<Url>().unwrap()).unwrap();
 
-        // Clone the client
+        // Clone the client — clones share the same cache
         let client2 = client.clone();
 
         // Populate cache on first client
-        let _ = client.supported().await.unwrap();
+        let result1 = client.supported().await.unwrap();
+        assert_eq!(result1.kinds.len(), 1);
 
-        // Clone should have independent cache (will make its own request)
-        // Note: Since both clones point to same server, the mock will count 2 requests
-        let _ = client2.supported().await.unwrap();
+        // Clone should hit the shared cache (no extra HTTP request)
+        let result2 = client2.supported().await.unwrap();
+        assert_eq!(result2.kinds.len(), 1);
+        assert_eq!(result1.kinds[0].scheme, result2.kinds[0].scheme);
     }
 
     #[tokio::test]

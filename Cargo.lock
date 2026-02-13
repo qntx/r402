@@ -3917,7 +3917,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "r402"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "base64 0.22.1",
  "rust_decimal",
@@ -3930,7 +3930,7 @@ dependencies = [
 
 [[package]]
 name = "r402-evm"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "alloy-contract",
  "alloy-network",
@@ -3959,7 +3959,7 @@ dependencies = [
 
 [[package]]
 name = "r402-http"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -3979,7 +3979,7 @@ dependencies = [
 
 [[package]]
 name = "r402-mcp"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "r402",
  "rmcp",
@@ -3991,7 +3991,7 @@ dependencies = [
 
 [[package]]
 name = "r402-svm"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "alloy-primitives",
  "bincode",

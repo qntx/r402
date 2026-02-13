@@ -27,10 +27,7 @@ impl Eip155Exact {
         transfer_method: Option<AssetTransferMethod>,
     ) -> v2::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let extra = PaymentRequirementsExtra::from_deployment(
-            asset.token.eip712,
-            transfer_method,
-        );
+        let extra = PaymentRequirementsExtra::from_deployment(asset.token.eip712, transfer_method);
         let requirements = v2::PaymentRequirements {
             scheme: ExactScheme.to_string(),
             pay_to: pay_to.into().to_string(),

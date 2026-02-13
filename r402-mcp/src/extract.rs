@@ -7,7 +7,9 @@ use r402::proto;
 use serde_json::Value;
 
 use crate::types::{CallToolResult, ContentItem};
-use crate::{PAYMENT_ERROR_KEY, PAYMENT_META_KEY, PAYMENT_REQUIRED_CODE, PAYMENT_RESPONSE_META_KEY};
+use crate::{
+    PAYMENT_ERROR_KEY, PAYMENT_META_KEY, PAYMENT_REQUIRED_CODE, PAYMENT_RESPONSE_META_KEY,
+};
 
 /// Extracts an x402 payment payload from an MCP request's `_meta` field.
 ///
@@ -153,8 +155,7 @@ fn try_parse_payment_required_from_value(value: &Value) -> Option<proto::Payment
 /// Supports both the TS `x402/error` envelope format and direct `PaymentRequired` JSON.
 fn try_parse_payment_required_from_text(text: &str) -> Option<proto::PaymentRequired> {
     let value: Value = serde_json::from_str(text).ok()?;
-    unwrap_x402_error_envelope(&value)
-        .or_else(|| try_parse_payment_required_from_value(&value))
+    unwrap_x402_error_envelope(&value).or_else(|| try_parse_payment_required_from_value(&value))
 }
 
 /// Unwraps the TS-compatible `x402/error` envelope format.

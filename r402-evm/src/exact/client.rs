@@ -550,13 +550,9 @@ where
             let tx = alloy_rpc_types_eth::TransactionRequest::default()
                 .to(token)
                 .input(calldata.into());
-            let result = self
-                .provider
-                .call(tx)
-                .await
-                .map_err(|e| ClientError::PreConditionFailed(format!(
-                    "Permit2 allowance check failed: {e}"
-                )))?;
+            let result = self.provider.call(tx).await.map_err(|e| {
+                ClientError::PreConditionFailed(format!("Permit2 allowance check failed: {e}"))
+            })?;
             Ok(U256::from_be_slice(&result))
         })
     }
@@ -575,19 +571,12 @@ where
             let tx = alloy_rpc_types_eth::TransactionRequest::default()
                 .to(token)
                 .input(calldata.into());
-            let pending = self
-                .provider
-                .send_transaction(tx)
-                .await
-                .map_err(|e| ClientError::PreConditionFailed(format!(
-                    "Permit2 approve tx failed: {e}"
-                )))?;
-            let receipt = pending
-                .get_receipt()
-                .await
-                .map_err(|e| ClientError::PreConditionFailed(format!(
-                    "Permit2 approve receipt failed: {e}"
-                )))?;
+            let pending = self.provider.send_transaction(tx).await.map_err(|e| {
+                ClientError::PreConditionFailed(format!("Permit2 approve tx failed: {e}"))
+            })?;
+            let receipt = pending.get_receipt().await.map_err(|e| {
+                ClientError::PreConditionFailed(format!("Permit2 approve receipt failed: {e}"))
+            })?;
             if !receipt.status() {
                 return Err(ClientError::PreConditionFailed(
                     "Permit2 approve transaction reverted".into(),
@@ -670,9 +659,7 @@ where
                     let owner = self.signer.address();
                     let required: U256 = self.requirements.amount.into();
 
-                    let allowance = approver
-                        .check_permit2_allowance(token, owner)
-                        .await?;
+                    let allowance = approver.check_permit2_allowance(token, owner).await?;
 
                     if allowance < required {
                         if self.auto_approve {

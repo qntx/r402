@@ -73,11 +73,15 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     let asset_address = accepted.asset;
     let contract = IEIP3009::new(asset_address.into(), provider);
 
-    let domain = assert_domain(chain, &contract, &asset_address.into(), &accepted.extra).await?;
-
     let amount_required = accepted.amount;
-    assert_nonce_unused(&contract, &authorization.from, &authorization.nonce).await?;
-    assert_enough_balance(&contract, &authorization.from, amount_required.into()).await?;
+
+    // Run independent RPC checks in parallel to reduce latency from ~3 RTTs to ~1 RTT.
+    let asset_addr: Address = asset_address.into();
+    let (domain, (), ()) = tokio::try_join!(
+        assert_domain(chain, &contract, &asset_addr, &accepted.extra),
+        assert_nonce_unused(&contract, &authorization.from, &authorization.nonce),
+        assert_enough_balance(&contract, &authorization.from, amount_required.into()),
+    )?;
     assert_enough_value(&authorization.value.into(), &amount_required.into())?;
 
     let payment = Eip3009Payment {
@@ -436,8 +440,15 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     let token_address: Address = accepted.asset.into();
     let erc20 = IERC20::new(token_address, provider);
 
+    // Run independent RPC checks in parallel to reduce latency from ~2 RTTs to ~1 RTT.
+    let allowance_call = erc20.allowance(auth.from, PERMIT2_ADDRESS);
+    let balance_call = erc20.balanceOf(auth.from);
+    let (allowance_result, balance_result) = tokio::join!(
+        allowance_call.call(),
+        balance_call.call(),
+    );
+
     // Check Permit2 allowance (non-fatal if RPC fails, matching Go SDK behavior)
-    let allowance_result = erc20.allowance(auth.from, PERMIT2_ADDRESS).call().await;
     if let Ok(allowance) = allowance_result
         && allowance < required_amount
     {
@@ -445,7 +456,6 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     }
 
     // Check balance
-    let balance_result = erc20.balanceOf(auth.from).call().await;
     if let Ok(balance) = balance_result
         && balance < required_amount
     {
