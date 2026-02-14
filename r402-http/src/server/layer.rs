@@ -118,6 +118,23 @@ impl X402Middleware<Arc<FacilitatorClient>> {
             base_url: self.base_url.clone(),
         }
     }
+
+    /// Sets a per-request timeout for all facilitator HTTP calls (verify, settle, supported).
+    ///
+    /// Without this, the underlying `reqwest::Client` uses no timeout by default,
+    /// which can cause requests to hang indefinitely if the facilitator is slow
+    /// or unreachable, eventually triggering OS-level TCP timeouts (typically 2–5 minutes).
+    ///
+    /// A reasonable production value is 30 seconds.
+    #[must_use]
+    pub fn with_facilitator_timeout(&self, timeout: Duration) -> Self {
+        let inner = Arc::unwrap_or_clone(Arc::clone(&self.facilitator));
+        let facilitator = Arc::new(inner.with_timeout(timeout));
+        Self {
+            facilitator,
+            base_url: self.base_url.clone(),
+        }
+    }
 }
 
 impl TryFrom<&str> for X402Middleware<Arc<FacilitatorClient>> {

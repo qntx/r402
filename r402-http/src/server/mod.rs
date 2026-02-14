@@ -16,6 +16,7 @@
 //! - **[`X402Middleware::with_base_url`]** sets the base URL for computing full resource URLs.
 //!   If not set, defaults to `http://localhost/` (avoid in production).
 //! - **[`X402Middleware::with_supported_cache_ttl`]** configures the TTL for caching facilitator capabilities.
+//! - **[`X402Middleware::with_facilitator_timeout`]** sets a per-request timeout for facilitator HTTP calls.
 //! - **[`X402LayerBuilder::with_description`]** is optional but helps the payer understand what is being paid for.
 //! - **[`X402LayerBuilder::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
 //! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
