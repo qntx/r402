@@ -216,43 +216,43 @@ impl FacilitatorClient {
     pub const DEFAULT_SUPPORTED_CACHE_TTL: Duration = Duration::from_mins(10);
 
     /// Returns the base URL used by this client.
-    #[must_use] 
+    #[must_use]
     pub const fn base_url(&self) -> &Url {
         &self.base_url
     }
 
     /// Returns the computed `./verify` URL relative to [`FacilitatorClient::base_url`].
-    #[must_use] 
+    #[must_use]
     pub const fn verify_url(&self) -> &Url {
         &self.verify_url
     }
 
     /// Returns the computed `./settle` URL relative to [`FacilitatorClient::base_url`].
-    #[must_use] 
+    #[must_use]
     pub const fn settle_url(&self) -> &Url {
         &self.settle_url
     }
 
     /// Returns the computed `./supported` URL relative to [`FacilitatorClient::base_url`].
-    #[must_use] 
+    #[must_use]
     pub const fn supported_url(&self) -> &Url {
         &self.supported_url
     }
 
     /// Returns any custom headers configured on the client.
-    #[must_use] 
+    #[must_use]
     pub const fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
     /// Returns the configured timeout, if any.
-    #[must_use] 
+    #[must_use]
     pub const fn timeout(&self) -> &Option<Duration> {
         &self.timeout
     }
 
     /// Returns a reference to the supported cache.
-    #[must_use] 
+    #[must_use]
     pub const fn supported_cache(&self) -> &SupportedCache {
         &self.supported_cache
     }

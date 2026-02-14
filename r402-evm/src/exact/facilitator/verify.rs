@@ -443,10 +443,8 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     // Run independent RPC checks in parallel to reduce latency from ~2 RTTs to ~1 RTT.
     let allowance_call = erc20.allowance(auth.from, PERMIT2_ADDRESS);
     let balance_call = erc20.balanceOf(auth.from);
-    let (allowance_result, balance_result) = tokio::join!(
-        allowance_call.call(),
-        balance_call.call(),
-    );
+    let (allowance_result, balance_result) =
+        tokio::join!(allowance_call.call(), balance_call.call(),);
 
     // Check Permit2 allowance (non-fatal if RPC fails, matching Go SDK behavior)
     if let Ok(allowance) = allowance_result
