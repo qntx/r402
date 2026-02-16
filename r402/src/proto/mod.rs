@@ -468,6 +468,23 @@ impl SettleResponse {
         matches!(self, Self::Success { .. })
     }
 
+    /// Encode a **successful** settlement into base64 bytes suitable for the
+    /// `Payment-Response` HTTP header.
+    ///
+    /// Returns `None` if this is an [`Error`](Self::Error) variant, preventing
+    /// accidental encoding of failed settlements into response headers.
+    ///
+    /// The output bytes are standard base64 (RFC 4648) of the JSON-serialised
+    /// [`SettleResponse`] and can be placed directly into a header value.
+    #[must_use]
+    pub fn encode_base64(&self) -> Option<Base64Bytes> {
+        if !self.is_success() {
+            return None;
+        }
+        let json = serde_json::to_vec(self).ok()?;
+        Some(Base64Bytes::encode(json))
+    }
+
     /// Converts a [`FacilitatorError`] into a settlement error response,
     /// preserving the structured reason code and message from the error.
     ///

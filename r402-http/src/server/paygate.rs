@@ -123,6 +123,11 @@ impl<TFacilitator> Paygate<TFacilitator> {
         }
     }
 
+    /// Returns a reference to the underlying facilitator.
+    pub const fn facilitator(&self) -> &TFacilitator {
+        &self.facilitator
+    }
+
     /// Returns a reference to the accepted price tags.
     pub fn accepts(&self) -> &[v2::PriceTag] {
         &self.accepts
@@ -131,6 +136,17 @@ impl<TFacilitator> Paygate<TFacilitator> {
     /// Returns a reference to the resource information.
     pub const fn resource(&self) -> &v2::ResourceInfo {
         &self.resource
+    }
+
+    /// Converts a [`PaygateError`] into a proper 402 HTTP response using
+    /// this gate's accepted price tags and resource information.
+    ///
+    /// This is the public convenience wrapper around [`error_into_response`],
+    /// useful in composable flows where the caller handles verification
+    /// separately from settlement.
+    #[must_use]
+    pub fn error_response(&self, err: PaygateError) -> Response {
+        error_into_response(err, &self.accepts, &self.resource)
     }
 }
 
@@ -173,10 +189,64 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 }
 
 /// The V2 payment header name.
-const PAYMENT_HEADER_NAME: &str = "Payment-Signature";
+pub const PAYMENT_HEADER_NAME: &str = "Payment-Signature";
 
 /// The V2 payment payload type.
-type V2PaymentPayload = v2::PaymentPayload<v2::PaymentRequirements, serde_json::Value>;
+pub type V2PaymentPayload = v2::PaymentPayload<v2::PaymentRequirements, serde_json::Value>;
+
+/// A verified payment token ready for on-chain settlement.
+///
+/// Produced by [`Paygate::verify_only`] after the facilitator confirms the
+/// payment signature is valid. The caller controls *when* settlement happens:
+///
+/// - **Synchronous**: call [`settle`](Self::settle) immediately, then attach
+///   the header via [`settlement_to_header`].
+/// - **Deferred**: stream the response first, then settle and append the
+///   result (e.g., as an SSE trailer event).
+///
+/// [`settle`](Self::settle) **consumes** `self`, preventing double-settlement
+/// at the type level.
+#[derive(Debug)]
+pub struct VerifiedPayment {
+    /// The settle request derived from the verified payment payload.
+    settle_request: proto::SettleRequest,
+}
+
+impl VerifiedPayment {
+    /// Execute on-chain settlement for this verified payment.
+    ///
+    /// Takes ownership of `self` to prevent double-settlement.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaygateError::Settlement`] if the facilitator rejects the
+    /// settlement or if the on-chain transaction fails.
+    pub async fn settle<F: Facilitator>(
+        self,
+        facilitator: &F,
+    ) -> Result<proto::SettleResponse, PaygateError> {
+        let settlement = facilitator
+            .settle(self.settle_request)
+            .await
+            .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
+
+        if let proto::SettleResponse::Error {
+            reason, message, ..
+        } = &settlement
+        {
+            let detail = message.as_deref().unwrap_or(reason.as_str());
+            return Err(PaygateError::Settlement(detail.to_owned()));
+        }
+
+        Ok(settlement)
+    }
+
+    /// Returns a reference to the underlying settle request.
+    #[must_use]
+    pub const fn settle_request(&self) -> &proto::SettleRequest {
+        &self.settle_request
+    }
+}
 
 impl<TFacilitator> Paygate<TFacilitator> {
     /// Calls the inner service with proper telemetry instrumentation.
@@ -226,7 +296,7 @@ where
         ResBody,
         S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
     >(
-        self,
+        &self,
         inner: S,
         req: http::Request<ReqBody>,
     ) -> Result<Response, Infallible>
@@ -256,10 +326,50 @@ where
         self.accepts = Arc::new(accepts);
     }
 
+    /// Verify the payment from request headers without executing the inner
+    /// service or settling on-chain.
+    ///
+    /// Returns a [`VerifiedPayment`] token on success, which the caller can
+    /// later [`settle`](VerifiedPayment::settle) at their discretion.
+    ///
+    /// This is the building block for **composable** payment flows such as
+    /// deferred settlement for streaming responses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaygateError::Verification`] if the payment header is missing,
+    /// malformed, or rejected by the facilitator.
+    #[cfg_attr(feature = "telemetry", instrument(name = "x402.verify_only", skip_all))]
+    pub async fn verify_only(&self, headers: &HeaderMap) -> Result<VerifiedPayment, PaygateError> {
+        let header = extract_payment_header(headers, PAYMENT_HEADER_NAME).ok_or(
+            VerificationError::PaymentHeaderRequired(PAYMENT_HEADER_NAME),
+        )?;
+        let payment_payload = extract_payment_payload::<V2PaymentPayload>(header)
+            .ok_or(VerificationError::InvalidPaymentHeader)?;
+
+        let verify_request = make_verify_request(payment_payload, &self.accepts)?;
+
+        let verify_response = self
+            .facilitator
+            .verify(verify_request.clone())
+            .await
+            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
+
+        validate_verify_response(verify_response)?;
+
+        Ok(VerifiedPayment {
+            settle_request: verify_request.into(),
+        })
+    }
+
     /// Handles an incoming request, returning errors as `PaygateError`.
     ///
-    /// This is the fallible version of `handle_request` that returns an actual error
-    /// instead of turning it into 402 Payment Required response.
+    /// This is the fallible version of [`handle_request`](Self::handle_request)
+    /// that returns an actual error instead of converting it into a 402
+    /// Payment Required response.
+    ///
+    /// Internally delegates to [`verify_only`](Self::verify_only) for
+    /// verification and [`VerifiedPayment::settle`] for settlement.
     ///
     /// # Errors
     ///
@@ -278,22 +388,8 @@ where
         S::Error: IntoResponse,
         S::Future: Send,
     {
-        let header = extract_payment_header(req.headers(), PAYMENT_HEADER_NAME).ok_or(
-            VerificationError::PaymentHeaderRequired(PAYMENT_HEADER_NAME),
-        )?;
-        let payment_payload = extract_payment_payload::<V2PaymentPayload>(header)
-            .ok_or(VerificationError::InvalidPaymentHeader)?;
-
-        let verify_request = make_verify_request(payment_payload, &self.accepts)?;
-
-        // Step 1: Verify the payment before executing the request.
-        let verify_response = self
-            .facilitator
-            .verify(verify_request.clone())
-            .await
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-
-        validate_verify_response(verify_response)?;
+        // Step 1: Verify the payment (borrows headers, does not consume req).
+        let verified = self.verify_only(req.headers()).await?;
 
         // Step 2: Execute the inner handler.
         let response = match Self::call_inner(inner, req).await {
@@ -306,22 +402,9 @@ where
             return Ok(response.into_response());
         }
 
-        // Step 4: Settle the payment on-chain.
-        let settlement = self
-            .facilitator
-            .settle(verify_request.into())
-            .await
-            .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
-
-        if let proto::SettleResponse::Error {
-            reason, message, ..
-        } = &settlement
-        {
-            let detail = message.as_deref().unwrap_or(reason.as_str());
-            return Err(PaygateError::Settlement(detail.to_owned()));
-        }
-
-        let header_value = settlement_to_header(settlement)?;
+        // Step 4: Settle and attach the Payment-Response header.
+        let settlement = verified.settle(&self.facilitator).await?;
+        let header_value = settlement_to_header(&settlement)?;
 
         let mut res = response;
         res.headers_mut().insert("Payment-Response", header_value);
@@ -330,12 +413,16 @@ where
 }
 
 /// Extracts the payment header value from the header map.
-fn extract_payment_header<'a>(header_map: &'a HeaderMap, header_name: &'a str) -> Option<&'a [u8]> {
+pub fn extract_payment_header<'a>(
+    header_map: &'a HeaderMap,
+    header_name: &'a str,
+) -> Option<&'a [u8]> {
     header_map.get(header_name).map(HeaderValue::as_bytes)
 }
 
 /// Extracts and deserializes the payment payload from base64-encoded header bytes.
-fn extract_payment_payload<T>(header_bytes: &[u8]) -> Option<T>
+#[must_use]
+pub fn extract_payment_payload<T>(header_bytes: &[u8]) -> Option<T>
 where
     T: serde::de::DeserializeOwned,
 {
@@ -344,20 +431,32 @@ where
     Some(value)
 }
 
-/// Converts a [`proto::SettleResponse`] into an HTTP header value.
+/// Converts a **successful** [`proto::SettleResponse`] into an HTTP header value.
 ///
-/// Returns an error response if conversion fails.
-#[allow(clippy::needless_pass_by_value)] // settlement is consumed by serialization
-fn settlement_to_header(settlement: proto::SettleResponse) -> Result<HeaderValue, PaygateError> {
-    let json =
-        serde_json::to_vec(&settlement).map_err(|err| PaygateError::Settlement(err.to_string()))?;
-    let payment_header = Base64Bytes::encode(json);
-    HeaderValue::from_bytes(payment_header.as_ref())
+/// Delegates to [`proto::SettleResponse::encode_base64`] for the actual encoding,
+/// which rejects error settlements at the type level.
+///
+/// # Errors
+///
+/// Returns [`PaygateError::Settlement`] if the response is an error variant
+/// or if serialisation / header encoding fails.
+pub fn settlement_to_header(
+    settlement: &proto::SettleResponse,
+) -> Result<HeaderValue, PaygateError> {
+    let encoded = settlement
+        .encode_base64()
+        .ok_or_else(|| PaygateError::Settlement("cannot encode error settlement".to_owned()))?;
+    HeaderValue::from_bytes(encoded.as_ref())
         .map_err(|err| PaygateError::Settlement(err.to_string()))
 }
 
 /// Constructs a V2 verify request from the payment payload and accepted requirements.
-fn make_verify_request(
+///
+/// # Errors
+///
+/// Returns [`VerificationError::NoPaymentMatching`] if the accepted price tag is not found
+/// in the accepts list, or a serialization error if the request cannot be converted to JSON.
+pub fn make_verify_request(
     payment_payload: V2PaymentPayload,
     accepts: &[v2::PriceTag],
 ) -> Result<proto::VerifyRequest, VerificationError> {
@@ -381,7 +480,11 @@ fn make_verify_request(
 }
 
 /// Validates a verify response, rejecting invalid or unknown variants.
-fn validate_verify_response(
+///
+/// # Errors
+///
+/// Returns [`VerificationError::VerificationFailed`] if the response is invalid or unknown.
+pub fn validate_verify_response(
     verify_response: proto::VerifyResponse,
 ) -> Result<(), VerificationError> {
     match verify_response {
@@ -396,7 +499,12 @@ fn validate_verify_response(
 }
 
 /// Converts a [`PaygateError`] into a V2 402 Payment Required HTTP response.
-fn error_into_response(
+///
+/// # Panics
+///
+/// Panics if the payment required response cannot be serialized to JSON or if the
+/// HTTP response cannot be constructed. These conditions indicate a bug in the code.
+pub fn error_into_response(
     err: PaygateError,
     accepts: &[v2::PriceTag],
     resource: &v2::ResourceInfo,

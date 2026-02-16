@@ -89,6 +89,62 @@ let client = reqwest::Client::new()
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
 
+## Composable Payment API
+
+The standard `X402Middleware` Tower layer handles the entire payment lifecycle
+(verify → execute → settle) as an opaque unit. This works well for simple
+request/response APIs, but **blocks streaming responses** (SSE, chunked
+transfer) because the `Payment-Response` header must be computed *after*
+on-chain settlement completes — forcing the server to buffer the entire
+response body until the blockchain confirms the transaction (typically 2–5 s).
+
+To solve this, `r402-http` exposes a **composable API** that lets the
+application control *when* settlement happens:
+
+```rust
+use r402_http::server::{Paygate, VerifiedPayment, settlement_to_header};
+
+// Step 1 — Build the gate once (reusable across requests).
+let gate = Paygate::builder(facilitator)
+    .accepts(price_tags)
+    .resource(resource_info)
+    .build();
+
+// Step 2 — Verify the payment (off-chain, ~200 ms).
+let verified: VerifiedPayment = gate.verify_only(req.headers()).await?;
+
+// Step 3 — Execute the inner handler / stream the response to the client.
+let response = forward_request(&req).await?;
+
+// Step 4 — Settle at your discretion (on-chain, 2–5 s).
+let settlement = verified.settle(&facilitator).await?;
+let header = settlement_to_header(&settlement)?;
+```
+
+### Key design decisions
+
+- **`VerifiedPayment` is `Send + 'static`** — no lifetime parameters, so it
+  can be stored in Axum request extensions, moved across `await` points, or
+  sent to a background task.
+- **`settle(self)` consumes ownership** — prevents double-settlement at the
+  type level without runtime checks.
+- **`SettleResponse::encode_base64()` validates success** — returns `None`
+  for error variants, preventing accidental encoding of failed settlements
+  into `Payment-Response` headers.
+- **`handle_request` / `handle_request_fallible` are unchanged** — they now
+  delegate to `verify_only` + `VerifiedPayment::settle` internally (DRY),
+  so existing Layer-based integrations continue to work without modification.
+
+### Settlement strategies
+
+| Strategy | When to use | Header delivery |
+| --- | --- | --- |
+| **Synchronous** (default) | Non-streaming APIs | `Payment-Response` HTTP header |
+| **Deferred** | SSE / chunked streaming | Appended as final SSE event after stream ends |
+
+The `X402Middleware` Tower layer always uses the synchronous strategy. For
+deferred settlement, use `verify_only` + `settle` directly in your handler.
+
 ## Design
 
 | | r402 | x402-rs |

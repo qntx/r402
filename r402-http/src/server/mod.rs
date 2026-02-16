@@ -27,6 +27,11 @@ pub mod paygate;
 pub mod pricing;
 
 pub use layer::{X402LayerBuilder, X402Middleware};
+pub use paygate::{
+    PAYMENT_HEADER_NAME, Paygate, PaygateBuilder, ResourceInfoBuilder, VerifiedPayment,
+    error_into_response, extract_payment_header, extract_payment_payload, make_verify_request,
+    settlement_to_header, validate_verify_response,
+};
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 
 /// Common verification errors shared between protocol versions.
