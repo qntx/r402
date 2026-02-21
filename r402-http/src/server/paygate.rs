@@ -4,7 +4,7 @@
 //! extracting headers, verifying with the facilitator, settling on-chain,
 //! and returning 402 responses when payment is required.
 //!
-//! Two settlement strategies are available:
+//! Three settlement strategies are available:
 //!
 //! - **Sequential** ([`Paygate::handle_request`]):
 //!   verify → execute → settle. Settlement only runs after the handler
@@ -12,6 +12,9 @@
 //! - **Concurrent** ([`Paygate::handle_request_concurrent`]):
 //!   verify → (settle ∥ execute) → await settle. Settlement runs in
 //!   parallel with the handler, reducing total latency by one settle RTT.
+//! - **Background** ([`Paygate::handle_request_background`]):
+//!   verify → spawn settle (fire-and-forget) → execute → return. Ideal for
+//!   streaming responses where the client should receive data immediately.
 
 use std::sync::Arc;
 
@@ -392,7 +395,7 @@ where
     ///
     /// Settlement is spawned immediately after verification and runs in
     /// parallel with the handler, reducing total latency by one facilitator RTT.
-    /// On handler error (4xx/5xx), the settlement task is detached.
+    /// On handler error (4xx/5xx), the settlement task is abandoned.
     ///
     /// # Errors
     ///
@@ -424,13 +427,13 @@ where
         let response = match call_inner(inner, req).await {
             Ok(r) => r,
             Err(err) => {
-                detach(settle_handle);
+                drop(settle_handle);
                 return Ok(err.into_response());
             }
         };
 
         if response.status().is_client_error() || response.status().is_server_error() {
-            detach(settle_handle);
+            drop(settle_handle);
             return Ok(response.into_response());
         }
 
@@ -442,6 +445,64 @@ where
         let mut res = response;
         res.headers_mut().insert("Payment-Response", header_value);
         Ok(res.into_response())
+    }
+
+    /// Handles an incoming request with **background** (fire-and-forget) settlement.
+    ///
+    /// ```text
+    /// verify → spawn settle (fire-and-forget) → execute → return
+    /// ```
+    ///
+    /// Settlement is spawned immediately after verification but **never awaited**.
+    /// The response is returned to the client as soon as the handler completes,
+    /// without waiting for on-chain settlement.
+    ///
+    /// This is ideal for **streaming** responses (e.g. SSE / LLM token streams)
+    /// where the client should start receiving data immediately.
+    ///
+    /// **Trade-off:** the `Payment-Response` header is **not** attached to the
+    /// response since settlement may still be in progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaygateError::Verification`] if payment verification fails.
+    /// Settlement errors are logged but do not propagate.
+    #[cfg_attr(
+        feature = "telemetry",
+        instrument(name = "x402.handle_request_background", skip_all)
+    )]
+    pub async fn handle_request_background<
+        ReqBody,
+        ResBody,
+        S: Service<http::Request<ReqBody>, Response = http::Response<ResBody>>,
+    >(
+        &self,
+        inner: S,
+        req: http::Request<ReqBody>,
+    ) -> Result<Response, PaygateError>
+    where
+        S::Response: IntoResponse,
+        S::Error: IntoResponse,
+        S::Future: Send + 'static,
+        ReqBody: Send + 'static,
+    {
+        let verified = self.verify_only(req.headers()).await?;
+
+        // Fire-and-forget: spawn settlement without awaiting
+        let facilitator = self.facilitator.clone();
+        tokio::spawn(async move {
+            if let Err(e) = verified.settle(&facilitator).await {
+                #[cfg(feature = "telemetry")]
+                tracing::error!(error = %e, "background settlement failed");
+                #[cfg(not(feature = "telemetry"))]
+                let _ = e;
+            }
+        });
+
+        match call_inner(inner, req).await {
+            Ok(r) => Ok(r.into_response()),
+            Err(err) => Ok(err.into_response()),
+        }
     }
 }
 
@@ -556,11 +617,4 @@ fn build_verify_request(
         .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
     Ok(proto::VerifyRequest::from(json))
-}
-
-/// Detaches a spawned task so it runs to completion without blocking the caller.
-fn detach(handle: tokio::task::JoinHandle<Result<proto::SettleResponse, PaygateError>>) {
-    tokio::spawn(async move {
-        let _ = handle.await;
-    });
 }

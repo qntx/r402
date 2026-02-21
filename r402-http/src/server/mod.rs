@@ -13,6 +13,7 @@
 //!
 //! - **[`SettlementMode::Sequential`]** (default): verify → execute → settle.
 //! - **[`SettlementMode::Concurrent`]**: verify → (settle ∥ execute) → await settle.
+//! - **[`SettlementMode::Background`]**: verify → spawn settle (fire-and-forget) → execute → return.
 
 pub mod facilitator;
 pub mod layer;

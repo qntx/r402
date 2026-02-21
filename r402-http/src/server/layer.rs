@@ -12,6 +12,8 @@
 //!   Safer — settlement only runs after the handler succeeds.
 //! - **[`SettlementMode::Concurrent`]**: verify → (settle ∥ execute) → await settle.
 //!   Lower latency — overlaps settlement with handler execution.
+//! - **[`SettlementMode::Background`]**: verify → spawn settle → execute → return.
+//!   Fire-and-forget — ideal for streaming responses.
 //!
 //! ## Configuration Notes
 //!
@@ -57,13 +59,23 @@ use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 ///   is spawned immediately after verification and runs in parallel with the
 ///   handler, reducing total request latency by one facilitator RTT.
 ///   On handler error the settlement task is detached (fire-and-forget).
+///
+/// - **Background**: verify → spawn settle (fire-and-forget) → execute → return.
+///   Settlement runs entirely in the background — the response is returned to
+///   the client immediately after the handler completes, without waiting for
+///   settlement.  Ideal for **streaming** responses (e.g. SSE / LLM token
+///   streams) where the client should start receiving data as soon as possible.
+///   **Trade-off:** the `Payment-Response` header is not attached since settlement
+///   may still be in progress when the response is sent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum SettlementMode {
     /// Settlement runs **after** the handler completes.
     #[default]
     Sequential,
-    /// Settlement runs **concurrently** with the handler.
+    /// Settlement runs **concurrently** with the handler; response waits for settlement.
     Concurrent,
+    /// Settlement is fire-and-forget; response is returned immediately.
+    Background,
 }
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
@@ -345,10 +357,12 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
     ///
     /// - [`SettlementMode::Sequential`] (default): verify → execute → settle.
     /// - [`SettlementMode::Concurrent`]: verify → (settle ∥ execute) → await settle.
+    /// - [`SettlementMode::Background`]: verify → spawn settle → execute → return.
     ///
     /// Concurrent mode reduces total latency by overlapping settlement with
-    /// handler execution at the cost of initiating settlement before knowing
-    /// whether the handler will succeed.
+    /// handler execution. Background mode is ideal for streaming responses
+    /// where the client should receive data immediately (settlement errors
+    /// are logged but do not propagate).
     #[must_use]
     pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
         self.settlement_mode = mode;
@@ -392,7 +406,7 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     price_source: TSource,
     /// Resource information
     resource: Arc<ResourceTemplate>,
-    /// Settlement strategy (sequential or concurrent)
+    /// Settlement strategy (sequential, concurrent, or background)
     settlement_mode: SettlementMode,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
@@ -443,6 +457,7 @@ where
             let result = match settlement_mode {
                 SettlementMode::Sequential => gate.handle_request(inner, req).await,
                 SettlementMode::Concurrent => gate.handle_request_concurrent(inner, req).await,
+                SettlementMode::Background => gate.handle_request_background(inner, req).await,
             };
             Ok(result.unwrap_or_else(|err| gate.error_response(err)))
         })
