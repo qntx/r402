@@ -11,6 +11,42 @@
 //! - On-chain settlement with gas management
 //! - Smart wallet deployment for counterfactual signatures
 
+/// Awaits a future, optionally instrumenting it with a tracing span.
+macro_rules! traced {
+    ($fut:expr, $span:expr) => {{
+        #[cfg(feature = "telemetry")]
+        {
+            use tracing::Instrument;
+            $fut.instrument($span).await
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            $fut.await
+        }
+    }};
+}
+
+/// Creates a tracing span for a `transferWithAuthorization` call.
+///
+/// All EIP-3009 call sites share the same set of span fields; this macro
+/// avoids repeating the field list at every call site.
+macro_rules! transfer_span {
+    ($name:expr, $call:expr $(, $key:ident = $val:expr)*) => {
+        tracing::info_span!($name,
+            from = %$call.from,
+            to = %$call.to,
+            value = %$call.value,
+            valid_after = %$call.valid_after,
+            valid_before = %$call.valid_before,
+            nonce = %$call.nonce,
+            signature = %$call.signature,
+            token_contract = %$call.contract_address,
+            $($key = $val,)*
+            otel.kind = "client",
+        )
+    };
+}
+
 mod contract;
 mod error;
 mod settle;
@@ -21,7 +57,6 @@ use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
-pub use contract::{IEIP3009, IX402Permit2Proxy, Validator6492};
 pub use error::Eip155ExactError;
 use r402::chain::ChainProvider;
 use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
@@ -29,15 +64,9 @@ use r402::proto;
 use r402::proto::UnixTimestamp;
 use r402::proto::v2;
 use r402::scheme::{SchemeBuilder, SchemeId};
-pub use settle::{
-    TransferWithAuthorization0Call, TransferWithAuthorization1Call, TransferWithAuthorizationCall,
-    settle_payment, settle_permit2_payment,
-};
+use settle::{settle_payment, settle_permit2_payment};
 pub use signature::StructuredSignatureFormatError;
-pub use verify::{
-    assert_domain, assert_enough_balance, assert_enough_value, assert_nonce_unused,
-    assert_requirements_match, assert_time, verify_payment, verify_permit2_payment,
-};
+use verify::{verify_payment, verify_permit2_payment};
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
@@ -180,7 +209,7 @@ where
                     let payer =
                         verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain)
                             .await?;
-                    Ok(v2::VerifyResponse::valid(payer.to_string()))
+                    Ok(proto::VerifyResponse::valid(payer.to_string()))
                 }
                 ExactPayload::Permit2(permit2) => {
                     let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
@@ -195,7 +224,7 @@ where
                     let payer =
                         verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain)
                             .await?;
-                    Ok(v2::VerifyResponse::valid(payer.to_string()))
+                    Ok(proto::VerifyResponse::valid(payer.to_string()))
                 }
             }
         })
@@ -223,7 +252,7 @@ where
                     let tx_hash =
                         settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
 
-                    Ok(v2::SettleResponse::Success {
+                    Ok(proto::SettleResponse::Success {
                         payer: payment.from.to_string(),
                         transaction: tx_hash.to_string(),
                         network: payload.accepted.network.to_string(),
@@ -241,7 +270,7 @@ where
                     )
                     .await?;
                     let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
-                    Ok(v2::SettleResponse::Success {
+                    Ok(proto::SettleResponse::Success {
                         payer: payment.from.to_string(),
                         transaction: tx_hash.to_string(),
                         network: payload.accepted.network.to_string(),

@@ -13,7 +13,7 @@
 //!
 //! # Key Types
 //!
-//! - [`X402Version2`] - Version marker that serializes as `2`
+//! - [`Version2`] - Version marker that serializes as `2`
 //! - [`PaymentPayload`] - Signed payment with accepted requirements
 //! - [`PaymentRequirements`] - Payment terms set by the seller
 //! - [`PaymentRequired`] - HTTP 402 response body
@@ -37,20 +37,10 @@ use crate::proto::SupportedResponse;
 /// integer `2` and rejects other values on deserialization.
 ///
 /// Use the [`V2`] constant when constructing V2 protocol messages.
-pub type X402Version2 = super::Version<2>;
+pub type Version2 = super::Version<2>;
 
 /// Convenience constant for constructing V2 protocol messages.
-pub const V2: X402Version2 = super::Version;
-
-/// Response from a V2 payment verification request.
-///
-/// V2 uses the same response format as the protocol-level type.
-pub type VerifyResponse = proto::VerifyResponse;
-
-/// Response from a V2 payment settlement request.
-///
-/// V2 uses the same response format as the protocol-level type.
-pub type SettleResponse = proto::SettleResponse;
+pub const V2: Version2 = super::Version;
 
 /// Metadata about the resource being paid for.
 ///
@@ -92,7 +82,7 @@ pub struct PaymentPayload<TAccepted, TPayload> {
     /// Information about the resource being paid for.
     pub resource: Option<ResourceInfo>,
     /// Protocol version (always 2).
-    pub x402_version: X402Version2,
+    pub x402_version: Version2,
     /// Optional protocol extensions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub extensions: Option<proto::Extensions>,
@@ -173,7 +163,7 @@ impl PaymentRequirements {
 #[serde(rename_all = "camelCase")]
 pub struct PaymentRequired {
     /// Protocol version (always 2).
-    pub x402_version: X402Version2,
+    pub x402_version: Version2,
     /// Optional error message if the request was malformed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

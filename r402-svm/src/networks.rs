@@ -5,7 +5,7 @@
 
 use std::sync::LazyLock;
 
-use r402::networks::NetworkInfo;
+use r402::chain::NetworkInfo;
 use solana_pubkey::pubkey;
 
 use crate::chain::{SolanaChainReference, SolanaTokenDeployment};

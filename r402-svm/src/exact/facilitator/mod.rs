@@ -73,7 +73,7 @@ where
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v2::VerifyResponse::valid(verification.payer.to_string()))
+            Ok(proto::VerifyResponse::valid(verification.payer.to_string()))
         })
     }
 
@@ -86,7 +86,7 @@ where
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
             let payer = verification.payer.to_string();
             let tx_sig = settle_transaction(&self.provider, verification).await?;
-            Ok(v2::SettleResponse::Success {
+            Ok(proto::SettleResponse::Success {
                 payer,
                 transaction: tx_sig.to_string(),
                 network: self.provider.chain_id().to_string(),

@@ -6,12 +6,20 @@
 //!
 //! Returns a `402 Payment Required` response if the request lacks a valid payment.
 //!
+//! ## Settlement Modes
+//!
+//! - **[`SettlementMode::Sequential`]** (default): verify → execute → settle.
+//!   Safer — settlement only runs after the handler succeeds.
+//! - **[`SettlementMode::Concurrent`]**: verify → (settle ∥ execute) → await settle.
+//!   Lower latency — overlaps settlement with handler execution.
+//!
 //! ## Configuration Notes
 //!
 //! - **[`X402Middleware::with_price_tag`]** sets the assets and amounts accepted for payment (static pricing).
 //! - **[`X402Middleware::with_dynamic_price`]** sets a callback for dynamic pricing based on request context.
 //! - **[`X402Middleware::with_base_url`]** sets the base URL for computing full resource URLs.
 //!   If not set, defaults to `http://localhost/` (avoid in production).
+//! - **[`X402LayerBuilder::with_settlement_mode`]** selects sequential or concurrent settlement.
 //! - **[`X402LayerBuilder::with_description`]** is optional but helps the payer understand what is being paid for.
 //! - **[`X402LayerBuilder::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
 //! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
@@ -34,8 +42,29 @@ use tower::{Layer, Service};
 use url::Url;
 
 use super::facilitator::FacilitatorClient;
-use super::paygate::{Paygate, ResourceInfoBuilder};
+use super::paygate::{Paygate, ResourceTemplate};
 use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+
+/// Controls when on-chain settlement executes relative to the inner service.
+///
+/// # Variants
+///
+/// - **Sequential** (default): verify → execute → settle.  Settlement only
+///   runs after the handler returns a successful response.  This is the
+///   safest option — no settlement occurs on handler errors.
+///
+/// - **Concurrent**: verify → (settle ∥ execute) → await settle.  Settlement
+///   is spawned immediately after verification and runs in parallel with the
+///   handler, reducing total request latency by one facilitator RTT.
+///   On handler error the settlement task is detached (fire-and-forget).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum SettlementMode {
+    /// Settlement runs **after** the handler completes.
+    #[default]
+    Sequential,
+    /// Settlement runs **concurrently** with the handler.
+    Concurrent,
+}
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
 ///
@@ -65,6 +94,18 @@ impl<F: std::fmt::Debug> std::fmt::Debug for X402Middleware<F> {
 }
 
 impl<F> X402Middleware<F> {
+    /// Creates a middleware instance from any facilitator implementation.
+    ///
+    /// Use this when you already have a configured facilitator (e.g. one
+    /// with custom timeouts, caching, or a non-default HTTP client).
+    #[must_use]
+    pub const fn from_facilitator(facilitator: F) -> Self {
+        Self {
+            facilitator,
+            base_url: None,
+        }
+    }
+
     /// Returns a reference to the underlying facilitator.
     pub const fn facilitator(&self) -> &F {
         &self.facilitator
@@ -188,7 +229,28 @@ where
             facilitator: self.facilitator.clone(),
             price_source: StaticPriceTags::new(vec![price_tag]),
             base_url: self.base_url.clone().map(Arc::new),
-            resource: Arc::new(ResourceInfoBuilder::default()),
+            resource: Arc::new(ResourceTemplate::default()),
+            settlement_mode: SettlementMode::default(),
+        }
+    }
+
+    /// Sets multiple price tags for the protected route.
+    ///
+    /// Convenience method for services that accept several payment options
+    /// (e.g. multiple tokens / networks).  Returns an empty-bypass builder
+    /// when the list is empty — the middleware will pass requests through
+    /// without payment enforcement.
+    #[must_use]
+    pub fn with_price_tags(
+        &self,
+        price_tags: Vec<v2::PriceTag>,
+    ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
+        X402LayerBuilder {
+            facilitator: self.facilitator.clone(),
+            price_source: StaticPriceTags::new(price_tags),
+            base_url: self.base_url.clone().map(Arc::new),
+            resource: Arc::new(ResourceTemplate::default()),
+            settlement_mode: SettlementMode::default(),
         }
     }
 
@@ -209,7 +271,8 @@ where
             facilitator: self.facilitator.clone(),
             price_source: DynamicPriceTags::new(callback),
             base_url: self.base_url.clone().map(Arc::new),
-            resource: Arc::new(ResourceInfoBuilder::default()),
+            resource: Arc::new(ResourceTemplate::default()),
+            settlement_mode: SettlementMode::default(),
         }
     }
 }
@@ -224,7 +287,8 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     facilitator: TFacilitator,
     base_url: Option<Arc<Url>>,
     price_source: TSource,
-    resource: Arc<ResourceInfoBuilder>,
+    resource: Arc<ResourceTemplate>,
+    settlement_mode: SettlementMode,
 }
 
 impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
@@ -276,6 +340,20 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
         self.resource = Arc::new(new_resource);
         self
     }
+
+    /// Sets the settlement mode.
+    ///
+    /// - [`SettlementMode::Sequential`] (default): verify → execute → settle.
+    /// - [`SettlementMode::Concurrent`]: verify → (settle ∥ execute) → await settle.
+    ///
+    /// Concurrent mode reduces total latency by overlapping settlement with
+    /// handler execution at the cost of initiating settlement before knowing
+    /// whether the handler will succeed.
+    #[must_use]
+    pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
+        self.settlement_mode = mode;
+        self
+    }
 }
 
 impl<S, TSource, TFacilitator> Layer<S> for X402LayerBuilder<TSource, TFacilitator>
@@ -293,6 +371,7 @@ where
             base_url: self.base_url.clone(),
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
+            settlement_mode: self.settlement_mode,
             inner: BoxCloneSyncService::new(inner),
         }
     }
@@ -312,7 +391,9 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     /// Price tag source - can be static or dynamic
     price_source: TSource,
     /// Resource information
-    resource: Arc<ResourceInfoBuilder>,
+    resource: Arc<ResourceTemplate>,
+    /// Settlement strategy (sequential or concurrent)
+    settlement_mode: SettlementMode,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
@@ -337,6 +418,7 @@ where
         let facilitator = self.facilitator.clone();
         let base_url = self.base_url.clone();
         let resource_builder = Arc::clone(&self.resource);
+        let settlement_mode = self.settlement_mode;
         let mut inner = self.inner.clone();
 
         Box::pin(async move {
@@ -350,17 +432,19 @@ where
                 return inner.call(req).await;
             }
 
-            let resource = resource_builder.as_resource_info(base_url.as_deref(), &req);
+            let resource = resource_builder.resolve(base_url.as_deref(), &req);
 
-            let gate = {
-                let mut gate = Paygate::builder(facilitator)
-                    .accepts(accepts)
-                    .resource(resource)
-                    .build();
-                gate.enrich_accepts().await;
-                gate
+            let mut gate = Paygate::builder(facilitator)
+                .accepts(accepts)
+                .resource(resource)
+                .build();
+            gate.enrich_accepts().await;
+
+            let result = match settlement_mode {
+                SettlementMode::Sequential => gate.handle_request(inner, req).await,
+                SettlementMode::Concurrent => gate.handle_request_concurrent(inner, req).await,
             };
-            gate.handle_request(inner, req).await
+            Ok(result.unwrap_or_else(|err| gate.error_response(err)))
         })
     }
 }

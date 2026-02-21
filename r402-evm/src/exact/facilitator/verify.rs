@@ -30,21 +30,6 @@ use crate::exact::types::TokenPermissions as SolTokenPermissions;
 use crate::exact::types::Witness as SolWitness;
 use crate::exact::{PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY};
 
-/// Awaits a future, optionally instrumenting it with a tracing span.
-macro_rules! traced {
-    ($fut:expr, $span:expr) => {{
-        #[cfg(feature = "telemetry")]
-        {
-            use tracing::Instrument;
-            $fut.instrument($span).await
-        }
-        #[cfg(not(feature = "telemetry"))]
-        {
-            $fut.await
-        }
-    }};
-}
-
 /// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) async fn assert_valid_payment<P: Provider>(
@@ -78,7 +63,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     // Run independent RPC checks in parallel to reduce latency from ~3 RTTs to ~1 RTT.
     let asset_addr: Address = asset_address.into();
     let (domain, (), ()) = tokio::try_join!(
-        assert_domain(chain, &contract, &asset_addr, &accepted.extra),
+        assert_domain(chain, &contract, &asset_addr, accepted.extra.as_ref()),
         assert_nonce_unused(&contract, &authorization.from, &authorization.nonce),
         assert_enough_balance(&contract, &authorization.from, amount_required.into()),
     )?;
@@ -189,9 +174,9 @@ pub async fn assert_domain<P: Provider>(
     chain: &Eip155ChainReference,
     token_contract: &IEIP3009::IEIP3009Instance<P>,
     asset_address: &Address,
-    extra: &Option<PaymentRequirementsExtra>,
+    extra: Option<&PaymentRequirementsExtra>,
 ) -> Result<Eip712Domain, Eip155ExactError> {
-    let name = extra.as_ref().map(|extra| extra.name.clone());
+    let name = extra.map(|extra| extra.name.clone());
     let name = if let Some(name) = name {
         name
     } else {
@@ -202,7 +187,7 @@ pub async fn assert_domain<P: Provider>(
             tracing::info_span!("fetch_eip712_name", otel.kind = "client")
         )?
     };
-    let version = extra.as_ref().map(|extra| extra.version.clone());
+    let version = extra.map(|extra| extra.version.clone());
     let version = if let Some(version) = version {
         version
     } else {
@@ -310,17 +295,7 @@ pub async fn verify_payment<P: Provider>(
             let aggregate3_call = aggregate3.aggregate3();
             let (is_valid_signature_result, transfer_result) = traced!(
                 aggregate3_call,
-                tracing::info_span!("call_transferWithAuthorization_0",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    otel.kind = "client",
-                )
+                transfer_span!("call_transferWithAuthorization_0", transfer_call)
             )?;
             let is_valid_signature_result = is_valid_signature_result
                 .map_err(|e| PaymentVerificationError::InvalidSignature(e.to_string()))?;
@@ -339,17 +314,7 @@ pub async fn verify_payment<P: Provider>(
             let transfer_call_fut = transfer_call.tx.call().into_future();
             traced!(
                 transfer_call_fut,
-                tracing::info_span!("call_transferWithAuthorization_0",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    otel.kind = "client",
-                )
+                transfer_span!("call_transferWithAuthorization_0", transfer_call)
             )?;
         }
         StructuredSignature::EOA(signature) => {
@@ -358,17 +323,7 @@ pub async fn verify_payment<P: Provider>(
             let transfer_call_fut = transfer_call.tx.call().into_future();
             traced!(
                 transfer_call_fut,
-                tracing::info_span!("call_transferWithAuthorization_1",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    otel.kind = "client",
-                )
+                transfer_span!("call_transferWithAuthorization_1", transfer_call)
             )?;
         }
     }

@@ -78,15 +78,13 @@ let app = Router::new().route(
 ```rust
 use alloy_signer_local::PrivateKeySigner;
 use r402_evm::Eip155ExactClient;
-use r402_http::client::{ReqwestWithPayments, ReqwestWithPaymentsBuild, X402Client};
+use r402_http::client::{WithPayments, X402Client};
 use std::sync::Arc;
 
 let signer = Arc::new("0x...".parse::<PrivateKeySigner>()?);
 let x402 = X402Client::new().register(Eip155ExactClient::new(signer));
 
-let client = reqwest::Client::new()
-    .with_payments(x402)
-    .build();
+let client = reqwest::Client::new().with_payments(x402);
 
 let res = client.get("https://api.example.com/paid").send().await?;
 ```

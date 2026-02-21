@@ -18,24 +18,184 @@
 //! is indicated by the `x402Version` field in payment payloads.
 
 use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
+use std::ops::Add;
 use std::str::FromStr;
+use std::time::SystemTime;
 
-use serde::{Deserialize, Serialize};
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as b64;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_with::{VecSkipError, serde_as};
 
 use crate::chain::ChainId;
 use crate::scheme::SchemeSlug;
 
-mod encoding;
 mod error;
-mod timestamp;
 pub mod v2;
-mod version;
 
-pub use encoding::Base64Bytes;
 pub use error::*;
-pub use timestamp::UnixTimestamp;
-pub use version::Version;
+
+/// A wrapper for base64-encoded byte data.
+///
+/// This type holds bytes that represent base64-encoded data and provides
+/// methods for encoding and decoding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Base64Bytes(pub Vec<u8>);
+
+impl Base64Bytes {
+    /// Decodes the base64 string bytes to raw binary data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data is not valid base64.
+    pub fn decode(&self) -> Result<Vec<u8>, base64::DecodeError> {
+        b64.decode(&self.0)
+    }
+
+    /// Encodes raw binary data into base64 string bytes.
+    pub fn encode<T: AsRef<[u8]>>(input: T) -> Self {
+        let encoded = b64.encode(input.as_ref());
+        Self(encoded.into_bytes())
+    }
+}
+
+impl AsRef<[u8]> for Base64Bytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<&[u8]> for Base64Bytes {
+    fn from(slice: &[u8]) -> Self {
+        Self(slice.to_vec())
+    }
+}
+
+impl Display for Base64Bytes {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.0))
+    }
+}
+
+/// A Unix timestamp representing seconds since the Unix epoch (1970-01-01T00:00:00Z).
+///
+/// Used throughout the x402 protocol for time-bounded payment authorizations
+/// (`validAfter` / `validBefore`).
+///
+/// Serialized as a stringified integer to avoid loss of precision in JSON.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq)]
+pub struct UnixTimestamp(u64);
+
+impl Serialize for UnixTimestamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for UnixTimestamp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let ts = s
+            .parse::<u64>()
+            .map_err(|_| serde::de::Error::custom("timestamp must be a non-negative integer"))?;
+        Ok(Self(ts))
+    }
+}
+
+impl Display for UnixTimestamp {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl Add<u64> for UnixTimestamp {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl UnixTimestamp {
+    /// Creates a new [`UnixTimestamp`] from a raw seconds value.
+    #[must_use]
+    pub const fn from_secs(secs: u64) -> Self {
+        Self(secs)
+    }
+
+    /// Returns the current system time as a [`UnixTimestamp`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system clock is set to a time before the Unix epoch.
+    #[must_use]
+    pub fn now() -> Self {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("SystemTime before UNIX epoch?!?")
+            .as_secs();
+        Self(now)
+    }
+
+    /// Returns the timestamp as raw seconds since the Unix epoch.
+    #[must_use]
+    pub const fn as_secs(&self) -> u64 {
+        self.0
+    }
+}
+
+/// A protocol version marker parameterized by its numeric value.
+///
+/// Serializes as a bare integer (e.g., `2`) and rejects any other
+/// value on deserialization, providing compile-time version safety.
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, Hash)]
+pub struct Version<const N: u8>;
+
+impl<const N: u8> Version<N> {
+    /// The numeric value of this protocol version.
+    pub const VALUE: u8 = N;
+}
+
+impl<const N: u8> PartialEq<u8> for Version<N> {
+    fn eq(&self, other: &u8) -> bool {
+        *other == N
+    }
+}
+
+impl<const N: u8> From<Version<N>> for u8 {
+    fn from(_: Version<N>) -> Self {
+        N
+    }
+}
+
+impl<const N: u8> Display for Version<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "{N}")
+    }
+}
+
+impl<const N: u8> Serialize for Version<N> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u8(N)
+    }
+}
+
+impl<'de, const N: u8> Deserialize<'de> for Version<N> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let v = u8::deserialize(deserializer)?;
+        if v == N {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::custom(format!(
+                "expected version {N}, got {v}"
+            )))
+        }
+    }
+}
 
 /// A version-tagged verify/settle request with typed payload and requirements.
 ///
@@ -287,7 +447,7 @@ impl VerifyRequest {
 /// `paymentPayload.accepted.scheme` without cloning the JSON tree.
 fn scheme_slug_from_json(json: &serde_json::Value) -> Option<SchemeSlug> {
     let x402_version: u8 = json.get("x402Version")?.as_u64()?.try_into().ok()?;
-    if x402_version != v2::X402Version2::VALUE {
+    if x402_version != v2::Version2::VALUE {
         return None;
     }
     let accepted = json.get("paymentPayload")?.get("accepted")?;
