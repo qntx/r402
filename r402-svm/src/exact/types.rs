@@ -21,7 +21,6 @@ use solana_signer::Signer;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use solana_transaction::versioned::VersionedTransaction;
 
-use super::error::{SolanaExactError, TransactionSignError, TransactionToB64Error};
 use crate::chain::Address;
 #[cfg(feature = "facilitator")]
 use crate::chain::{SolanaChainProviderError, SolanaChainProviderLike};
