@@ -24,6 +24,27 @@ use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
 
+/// Facilitator for Solana exact scheme payments.
+pub struct SolanaExactFacilitator<P> {
+    provider: P,
+    config: SolanaExactFacilitatorConfig,
+}
+
+impl<P> SolanaExactFacilitator<P> {
+    /// Creates a new Solana exact facilitator.
+    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
+        Self { provider, config }
+    }
+}
+
+impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SolanaExactFacilitator")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P> SchemeBuilder<P> for SolanaExact
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync + 'static,
@@ -38,27 +59,6 @@ where
             .transpose()?
             .unwrap_or_default();
         Ok(Box::new(SolanaExactFacilitator::new(provider, config)))
-    }
-}
-
-/// Facilitator for Solana exact scheme payments.
-pub struct SolanaExactFacilitator<P> {
-    provider: P,
-    config: SolanaExactFacilitatorConfig,
-}
-
-impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SolanaExactFacilitator")
-            .field("config", &self.config)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> SolanaExactFacilitator<P> {
-    /// Creates a new Solana exact facilitator.
-    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
-        Self { provider, config }
     }
 }
 

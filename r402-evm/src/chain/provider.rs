@@ -74,45 +74,6 @@ pub struct Eip155ChainProvider {
 }
 
 impl Eip155ChainProvider {
-    /// Creates an RPC client from HTTP endpoint URLs with optional per-endpoint rate limits.
-    ///
-    /// Each entry in `endpoints` is a `(url, optional_rate_limit)` pair.
-    /// Non-HTTP(S) URLs are silently skipped.
-    ///
-    /// # Panics
-    ///
-    /// Panics if no valid HTTP transports remain after filtering.
-    #[allow(unused_variables)] // chain_id is needed for tracing only
-    #[must_use]
-    pub fn rpc_client(chain_id: &ChainId, endpoints: &[(Url, Option<u32>)]) -> RpcClient {
-        let transports = endpoints
-            .iter()
-            .filter_map(|(url, rate_limit)| {
-                let scheme = url.scheme();
-                let is_http = scheme == "http" || scheme == "https";
-                if !is_http {
-                    return None;
-                }
-                #[cfg(feature = "telemetry")]
-                tracing::info!(chain=%chain_id, rpc_url=%url, rate_limit=?rate_limit, "Using HTTP transport");
-                let limit = rate_limit.unwrap_or(u32::MAX);
-                let service = ServiceBuilder::new()
-                    .layer(ThrottleLayer::new(limit))
-                    .service(Http::new(url.clone()));
-                Some(service)
-            })
-            .collect::<Vec<_>>();
-        let fallback = ServiceBuilder::new()
-            .layer(
-                FallbackLayer::default().with_active_transport_count(
-                    NonZeroUsize::new(transports.len())
-                        .expect("Non-zero amount of stateless transports"),
-                ),
-            )
-            .service(transports);
-        RpcClient::new(fallback, false)
-    }
-
     /// Creates a new EVM chain provider.
     ///
     /// # Parameters
@@ -175,6 +136,46 @@ impl Eip155ChainProvider {
             signer_cursor,
             nonce_manager,
         })
+    }
+
+    /// Creates an RPC client from HTTP endpoint URLs with optional per-endpoint rate limits.
+    ///
+    /// Each entry in `endpoints` is a `(url, optional_rate_limit)` pair.
+    /// Non-HTTP(S) URLs are silently skipped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if no valid HTTP transports remain after filtering.
+    #[must_use]
+    pub fn rpc_client(chain_id: &ChainId, endpoints: &[(Url, Option<u32>)]) -> RpcClient {
+        #[cfg(not(feature = "telemetry"))]
+        let _ = chain_id;
+        let transports = endpoints
+            .iter()
+            .filter_map(|(url, rate_limit)| {
+                let scheme = url.scheme();
+                let is_http = scheme == "http" || scheme == "https";
+                if !is_http {
+                    return None;
+                }
+                #[cfg(feature = "telemetry")]
+                tracing::info!(chain=%chain_id, rpc_url=%url, rate_limit=?rate_limit, "Using HTTP transport");
+                let limit = rate_limit.unwrap_or(u32::MAX);
+                let service = ServiceBuilder::new()
+                    .layer(ThrottleLayer::new(limit))
+                    .service(Http::new(url.clone()));
+                Some(service)
+            })
+            .collect::<Vec<_>>();
+        let fallback = ServiceBuilder::new()
+            .layer(
+                FallbackLayer::default().with_active_transport_count(
+                    NonZeroUsize::new(transports.len())
+                        .expect("Non-zero amount of stateless transports"),
+                ),
+            )
+            .service(transports);
+        RpcClient::new(fallback, false)
     }
 
     /// Round-robin selection of next signer from wallet.

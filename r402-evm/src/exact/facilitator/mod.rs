@@ -11,6 +11,21 @@
 //! - On-chain settlement with gas management
 //! - Smart wallet deployment for counterfactual signatures
 
+use std::collections::HashMap;
+
+use alloy_primitives::{Address, B256, Bytes, U256, address};
+use alloy_provider::Provider;
+use r402::chain::ChainProvider;
+use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
+use r402::proto;
+use r402::proto::UnixTimestamp;
+use r402::proto::v2;
+use r402::scheme::{SchemeBuilder, SchemeId};
+
+use crate::chain::Eip155MetaTransactionProvider;
+use crate::exact::types;
+use crate::exact::{Eip155Exact, ExactPayload, ExactScheme};
+
 /// Awaits a future, optionally instrumenting it with a tracing span.
 macro_rules! traced {
     ($fut:expr, $span:expr) => {{
@@ -53,24 +68,10 @@ mod settle;
 mod signature;
 mod verify;
 
-use std::collections::HashMap;
-
-use alloy_primitives::{Address, B256, Bytes, U256, address};
-use alloy_provider::Provider;
 pub use error::Eip155ExactError;
-use r402::chain::ChainProvider;
-use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
-use r402::proto;
-use r402::proto::UnixTimestamp;
-use r402::proto::v2;
-use r402::scheme::{SchemeBuilder, SchemeId};
 use settle::{settle_payment, settle_permit2_payment};
 pub use signature::StructuredSignatureFormatError;
 use verify::{verify_payment, verify_permit2_payment};
-
-use crate::chain::Eip155MetaTransactionProvider;
-use crate::exact::types;
-use crate::exact::{Eip155Exact, ExactPayload, ExactScheme};
 
 /// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
@@ -120,20 +121,6 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-impl<P> SchemeBuilder<P> for Eip155Exact
-where
-    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
-    Eip155ExactError: From<P::Error>,
-{
-    fn build(
-        &self,
-        provider: P,
-        _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
-        Ok(Box::new(Eip155ExactFacilitator::new(provider)))
-    }
-}
-
 /// Default clock skew tolerance in seconds for time validation.
 ///
 /// Applied as a grace buffer when checking `validBefore` / `deadline` expiration
@@ -150,13 +137,6 @@ pub struct Eip155ExactFacilitator<P> {
     /// Grace period (in seconds) applied to time-window checks to tolerate
     /// clock drift between the facilitator and the blockchain network.
     clock_skew_tolerance: u64,
-}
-
-impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Eip155ExactFacilitator")
-            .finish_non_exhaustive()
-    }
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -178,6 +158,27 @@ impl<P> Eip155ExactFacilitator<P> {
     pub const fn with_clock_skew_tolerance(mut self, seconds: u64) -> Self {
         self.clock_skew_tolerance = seconds;
         self
+    }
+}
+
+impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Eip155ExactFacilitator")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P> SchemeBuilder<P> for Eip155Exact
+where
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
+    Eip155ExactError: From<P::Error>,
+{
+    fn build(
+        &self,
+        provider: P,
+        _config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
+        Ok(Box::new(Eip155ExactFacilitator::new(provider)))
     }
 }
 

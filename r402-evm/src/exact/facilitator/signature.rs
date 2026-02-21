@@ -70,8 +70,7 @@ pub(super) enum StructuredSignature {
         original: Bytes,
     },
     /// Normalized EOA signature.
-    #[allow(clippy::upper_case_acronyms)]
-    EOA(Signature),
+    Eoa(Signature),
     /// A plain EIP-1271 or EOA signature (no 6492 wrappers).
     EIP1271(Bytes),
 }
@@ -132,7 +131,7 @@ impl StructuredSignature {
                     .ok()
                     .is_some_and(|r| r == expected_signer);
                 if is_expected_signer {
-                    Self::EOA(s)
+                    Self::Eoa(s)
                 } else {
                     Self::EIP1271(bytes)
                 }

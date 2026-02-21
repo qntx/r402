@@ -6,29 +6,24 @@
 
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
-use alloy_sol_types::SolStruct;
-use alloy_sol_types::{Eip712Domain, eip712_domain};
+use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
 use r402::chain::ChainId;
-use r402::proto::PaymentVerificationError;
-use r402::proto::UnixTimestamp;
+use r402::proto::{PaymentVerificationError, UnixTimestamp};
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
-use super::Eip3009Payment;
-use super::Permit2Payment;
-use super::VALIDATOR_ADDRESS;
 use super::contract::{IEIP3009, IERC20, Validator6492};
 use super::error::Eip155ExactError;
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
 use super::signature::{SignedMessage, StructuredSignature};
+use super::{Eip3009Payment, Permit2Payment, VALIDATOR_ADDRESS};
 use crate::chain::Eip155ChainReference;
-use crate::exact::Eip3009Payload;
-use crate::exact::PaymentRequirementsExtra;
-use crate::exact::PermitWitnessTransferFrom;
-use crate::exact::types;
 use crate::exact::types::TokenPermissions as SolTokenPermissions;
 use crate::exact::types::Witness as SolWitness;
-use crate::exact::{PERMIT2_ADDRESS, X402_EXACT_PERMIT2_PROXY};
+use crate::exact::{
+    Eip3009Payload, PERMIT2_ADDRESS, PaymentRequirementsExtra, PermitWitnessTransferFrom,
+    X402_EXACT_PERMIT2_PROXY, types,
+};
 
 /// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
@@ -317,7 +312,7 @@ pub async fn verify_payment<P: Provider>(
                 transfer_span!("call_transferWithAuthorization_0", transfer_call)
             )?;
         }
-        StructuredSignature::EOA(signature) => {
+        StructuredSignature::Eoa(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();

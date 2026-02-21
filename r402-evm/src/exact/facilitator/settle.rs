@@ -12,11 +12,10 @@ use alloy_transport::TransportError;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use super::Eip3009Payment;
-use super::Permit2Payment;
 use super::contract::{IEIP3009, IX402Permit2Proxy};
 use super::error::Eip155ExactError;
 use super::signature::{SignedMessage, StructuredSignature};
+use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 
@@ -247,7 +246,7 @@ where
                 )
             )?
         }
-        StructuredSignature::EOA(signature) => {
+        StructuredSignature::Eoa(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let tx_fut = Eip155MetaTransactionProvider::send_transaction(
