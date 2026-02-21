@@ -89,47 +89,66 @@ let client = reqwest::Client::new().with_payments(x402);
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
 
-## Composable Payment API
+## Settlement Modes
 
-The standard `X402Middleware` Tower layer handles the entire payment lifecycle (verify → execute → settle) as an opaque unit. This works well for simple request/response APIs, but **blocks streaming responses** (SSE, chunked transfer) because the `Payment-Response` header must be computed *after* on-chain settlement completes — forcing the server to buffer the entire response body until the blockchain confirms the transaction (typically 2–5 s).
+`X402Middleware` supports two settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402LayerBuilder.html#method.with_settlement_mode):
 
-To solve this, `r402-http` exposes a **composable API** that lets the application control *when* settlement happens:
+### Sequential (default)
 
-```rust
-use r402_http::server::{Paygate, VerifiedPayment, settlement_to_header};
+Verify → execute → settle. The safest mode — on-chain settlement only occurs after the handler succeeds, and the `Payment-Response` header is included in the same HTTP response.
 
-// Step 1 — Build the gate once (reusable across requests).
-let gate = Paygate::builder(facilitator)
-    .accepts(price_tags)
-    .resource(resource_info)
-    .build();
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
 
-// Step 2 — Verify the payment (off-chain, ~200 ms).
-let verified: VerifiedPayment = gate.verify_only(req.headers()).await?;
-
-// Step 3 — Execute the inner handler / stream the response to the client.
-let response = forward_request(&req).await?;
-
-// Step 4 — Settle at your discretion (on-chain, 2–5 s).
-let settlement = verified.settle(&facilitator).await?;
-let header = settlement_to_header(&settlement)?;
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    S->>H: execute request
+    Note over S,H: Balance verified but NOT locked —<br/>handler executing (variable latency)
+    H-->>S: response body
+    S->>F: settle(payment)
+    Note over S,F: On-chain transfer (2–5 s)
+    F-->>S: SettleResponse (tx_hash)
+    S-->>C: 200 OK + Payment-Response header
 ```
 
-### Key design decisions
+### Concurrent
 
-- **`VerifiedPayment` is `Send + 'static`** — no lifetime parameters, so it can be stored in Axum request extensions, moved across `await` points, or sent to a background task.
-- **`settle(self)` consumes ownership** — prevents double-settlement at the type level without runtime checks.
-- **`SettleResponse::encode_base64()` validates success** — returns `None` for error variants, preventing accidental encoding of failed settlements into `Payment-Response` headers.
-- **`handle_request` / `handle_request_fallible` are unchanged** — they now delegate to `verify_only` + `VerifiedPayment::settle` internally (DRY), so existing Layer-based integrations continue to work without modification.
+Verify → (settle ∥ execute) → await both. Reduces total latency by overlapping on-chain settlement with handler execution, saving one facilitator round-trip. On handler error the settlement task is detached (fire-and-forget).
 
-### Settlement strategies
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
 
-| Strategy | When to use | Header delivery |
-| --- | --- | --- |
-| **Synchronous** (default) | Non-streaming APIs | `Payment-Response` HTTP header |
-| **Deferred** | SSE / chunked streaming | Appended as final SSE event after stream ends |
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    par settle ∥ execute
+        S->>F: settle(payment)
+        Note over S,F: On-chain transfer
+        F-->>S: SettleResponse (tx_hash)
+    and
+        S->>H: execute request
+        H-->>S: response body
+    end
+    S-->>C: 200 OK + Payment-Response header
+```
 
-The `X402Middleware` Tower layer always uses the synchronous strategy. For deferred settlement, use `verify_only` + `settle` directly in your handler.
+### Comparison
+
+| Mode | Total latency | Safety | Best for |
+| --- | --- | --- | --- |
+| **Sequential** | verify + handler + settle | Settlement only on handler success | Standard request/response APIs |
+| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | Latency-sensitive endpoints |
+
+> For advanced use cases (SSE streaming, deferred settlement), use the composable [`Paygate`](https://docs.rs/r402-http/latest/r402_http/server/struct.Paygate.html) API directly with `verify_only()` + `VerifiedPayment::settle()`.
 
 ## Design
 
