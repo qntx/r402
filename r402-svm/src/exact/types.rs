@@ -24,6 +24,8 @@ use solana_transaction::versioned::VersionedTransaction;
 use crate::chain::Address;
 #[cfg(feature = "facilitator")]
 use crate::chain::{SolanaChainProviderError, SolanaChainProviderLike};
+#[cfg(any(feature = "client", feature = "facilitator"))]
+use crate::exact::{SolanaExactError, TransactionSignError, TransactionToB64Error};
 
 /// Phantom Lighthouse program ID - security program injected by Phantom wallet on mainnet
 /// See: <https://github.com/coinbase/x402/issues/828>
