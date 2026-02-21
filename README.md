@@ -141,14 +141,37 @@ sequenceDiagram
     S-->>C: 200 OK + Payment-Response header
 ```
 
+### Background
+
+Verify → spawn settle (fire-and-forget) → execute → return. Settlement runs entirely in the background — the response is returned to the client as soon as the handler completes, without waiting for on-chain confirmation. Ideal for **streaming responses** (SSE, LLM token streams) where the client should start receiving data immediately. Settlement errors are logged but do not propagate to the caller. **Trade-off:** the `Payment-Response` header is not attached since settlement may still be in progress when the response is sent.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
+
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    S-)F: settle(payment) [fire-and-forget]
+    S->>H: execute request
+    H-->>S: response body (or stream)
+    S-->>C: 200 OK (no Payment-Response header)
+    Note over S,F: Settlement completes asynchronously
+    F-)S: SettleResponse (logged)
+```
+
 ### Comparison
 
-| Mode | Total latency | Safety | Best for |
-| --- | --- | --- | --- |
-| **Sequential** | verify + handler + settle | Settlement only on handler success | Standard request/response APIs |
-| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | Latency-sensitive endpoints |
+| Mode | Total latency | Safety | `Payment-Response` | Best for |
+| --- | --- | --- | --- | --- |
+| **Sequential** | verify + handler + settle | Settlement only on handler success | ✅ Included | Standard request/response APIs |
+| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | ✅ Included | Latency-sensitive endpoints |
+| **Background** | verify + handler | Settlement errors are non-fatal (logged) | ❌ Not attached | SSE / LLM streaming responses |
 
-> For advanced use cases (SSE streaming, deferred settlement), use the composable [`Paygate`](https://docs.rs/r402-http/latest/r402_http/server/struct.Paygate.html) API directly with `verify_only()` + `VerifiedPayment::settle()`.
+> For full manual control over settlement timing, use the composable [`Paygate`](https://docs.rs/r402-http/latest/r402_http/server/struct.Paygate.html) API directly with `verify_only()` + `VerifiedPayment::settle()`.
 
 ## Design
 
