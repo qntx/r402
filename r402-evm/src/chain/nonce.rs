@@ -40,6 +40,23 @@ pub struct PendingNonceManager {
     nonces: Arc<DashMap<Address, Arc<Mutex<u64>>>>,
 }
 
+impl PendingNonceManager {
+    /// Resets the cached nonce for a given address, forcing a fresh query on next use.
+    ///
+    /// This should be called when a transaction fails, as we cannot be certain of the
+    /// actual on-chain state (the transaction may or may not have reached the mempool).
+    /// By resetting to the sentinel value, the next call to `get_next_nonce` will query
+    /// the RPC provider using `.pending()`, which includes mempool transactions.
+    pub async fn reset_nonce(&self, address: Address) {
+        if let Some(nonce_lock) = self.nonces.get(&address) {
+            let mut nonce = nonce_lock.lock().await;
+            *nonce = u64::MAX; // NONE sentinel - will trigger fresh query
+            #[cfg(feature = "telemetry")]
+            tracing::debug!(%address, "reset nonce cache, will requery on next use");
+        }
+    }
+}
+
 #[async_trait]
 impl NonceManager for PendingNonceManager {
     async fn get_next_nonce<P, N>(&self, provider: &P, address: Address) -> TransportResult<u64>
@@ -73,22 +90,5 @@ impl NonceManager for PendingNonceManager {
         };
         *nonce = new_nonce;
         Ok(new_nonce)
-    }
-}
-
-impl PendingNonceManager {
-    /// Resets the cached nonce for a given address, forcing a fresh query on next use.
-    ///
-    /// This should be called when a transaction fails, as we cannot be certain of the
-    /// actual on-chain state (the transaction may or may not have reached the mempool).
-    /// By resetting to the sentinel value, the next call to `get_next_nonce` will query
-    /// the RPC provider using `.pending()`, which includes mempool transactions.
-    pub async fn reset_nonce(&self, address: Address) {
-        if let Some(nonce_lock) = self.nonces.get(&address) {
-            let mut nonce = nonce_lock.lock().await;
-            *nonce = u64::MAX; // NONE sentinel - will trigger fresh query
-            #[cfg(feature = "telemetry")]
-            tracing::debug!(%address, "reset nonce cache, will requery on next use");
-        }
     }
 }

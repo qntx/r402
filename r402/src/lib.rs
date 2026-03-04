@@ -16,10 +16,9 @@
 //! # Modules
 //!
 //! - [`amount`] - Human-readable currency amount parsing
-//! - [`chain`] - Blockchain identifiers and provider abstractions (CAIP-2 chain IDs)
+//! - [`chain`] - Blockchain identifiers, provider abstractions (CAIP-2), and network metadata
 //! - [`facilitator`] - Core trait for payment verification and settlement
 //! - [`hooks`] - Lifecycle hooks for facilitator verify/settle operations
-//! - [`networks`] - Registry of well-known blockchain networks
 //! - [`proto`] - Wire format types, encoding utilities, and timestamps
 //! - [`scheme`] - Payment scheme system for extensible payment methods
 //!
@@ -31,6 +30,5 @@ pub mod amount;
 pub mod chain;
 pub mod facilitator;
 pub mod hooks;
-pub mod networks;
 pub mod proto;
 pub mod scheme;

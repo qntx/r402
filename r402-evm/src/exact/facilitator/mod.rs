@@ -11,37 +11,67 @@
 //! - On-chain settlement with gas management
 //! - Smart wallet deployment for counterfactual signatures
 
-mod contract;
-mod error;
-mod settle;
-mod signature;
-mod verify;
-
 use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
-pub use contract::{IEIP3009, IX402Permit2Proxy, Validator6492};
-pub use error::Eip155ExactError;
 use r402::chain::ChainProvider;
 use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
 use r402::proto;
 use r402::proto::UnixTimestamp;
 use r402::proto::v2;
 use r402::scheme::{SchemeBuilder, SchemeId};
-pub use settle::{
-    TransferWithAuthorization0Call, TransferWithAuthorization1Call, TransferWithAuthorizationCall,
-    settle_payment, settle_permit2_payment,
-};
-pub use signature::StructuredSignatureFormatError;
-pub use verify::{
-    assert_domain, assert_enough_balance, assert_enough_value, assert_nonce_unused,
-    assert_requirements_match, assert_time, verify_payment, verify_permit2_payment,
-};
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
 use crate::exact::{Eip155Exact, ExactPayload, ExactScheme};
+
+/// Awaits a future, optionally instrumenting it with a tracing span.
+macro_rules! traced {
+    ($fut:expr, $span:expr) => {{
+        #[cfg(feature = "telemetry")]
+        {
+            use tracing::Instrument;
+            $fut.instrument($span).await
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            $fut.await
+        }
+    }};
+}
+
+/// Creates a tracing span for a `transferWithAuthorization` call.
+///
+/// All EIP-3009 call sites share the same set of span fields; this macro
+/// avoids repeating the field list at every call site.
+macro_rules! transfer_span {
+    ($name:expr, $call:expr $(, $key:ident = $val:expr)*) => {
+        tracing::info_span!($name,
+            from = %$call.from,
+            to = %$call.to,
+            value = %$call.value,
+            valid_after = %$call.valid_after,
+            valid_before = %$call.valid_before,
+            nonce = %$call.nonce,
+            signature = %$call.signature,
+            token_contract = %$call.contract_address,
+            $($key = $val,)*
+            otel.kind = "client",
+        )
+    };
+}
+
+mod contract;
+mod error;
+mod settle;
+mod signature;
+mod verify;
+
+pub use error::Eip155ExactError;
+use settle::{settle_payment, settle_permit2_payment};
+pub use signature::StructuredSignatureFormatError;
+use verify::{verify_payment, verify_permit2_payment};
 
 /// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
 /// If absent on a target chain, verification will fail; you should deploy the validator there.
@@ -91,20 +121,6 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-impl<P> SchemeBuilder<P> for Eip155Exact
-where
-    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
-    Eip155ExactError: From<P::Error>,
-{
-    fn build(
-        &self,
-        provider: P,
-        _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
-        Ok(Box::new(Eip155ExactFacilitator::new(provider)))
-    }
-}
-
 /// Default clock skew tolerance in seconds for time validation.
 ///
 /// Applied as a grace buffer when checking `validBefore` / `deadline` expiration
@@ -121,13 +137,6 @@ pub struct Eip155ExactFacilitator<P> {
     /// Grace period (in seconds) applied to time-window checks to tolerate
     /// clock drift between the facilitator and the blockchain network.
     clock_skew_tolerance: u64,
-}
-
-impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Eip155ExactFacilitator")
-            .finish_non_exhaustive()
-    }
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -149,6 +158,27 @@ impl<P> Eip155ExactFacilitator<P> {
     pub const fn with_clock_skew_tolerance(mut self, seconds: u64) -> Self {
         self.clock_skew_tolerance = seconds;
         self
+    }
+}
+
+impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Eip155ExactFacilitator")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P> SchemeBuilder<P> for Eip155Exact
+where
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync + 'static,
+    Eip155ExactError: From<P::Error>,
+{
+    fn build(
+        &self,
+        provider: P,
+        _config: Option<serde_json::Value>,
+    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
+        Ok(Box::new(Eip155ExactFacilitator::new(provider)))
     }
 }
 
@@ -180,7 +210,7 @@ where
                     let payer =
                         verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain)
                             .await?;
-                    Ok(v2::VerifyResponse::valid(payer.to_string()))
+                    Ok(proto::VerifyResponse::valid(payer.to_string()))
                 }
                 ExactPayload::Permit2(permit2) => {
                     let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
@@ -195,7 +225,7 @@ where
                     let payer =
                         verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain)
                             .await?;
-                    Ok(v2::VerifyResponse::valid(payer.to_string()))
+                    Ok(proto::VerifyResponse::valid(payer.to_string()))
                 }
             }
         })
@@ -223,7 +253,7 @@ where
                     let tx_hash =
                         settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
 
-                    Ok(v2::SettleResponse::Success {
+                    Ok(proto::SettleResponse::Success {
                         payer: payment.from.to_string(),
                         transaction: tx_hash.to_string(),
                         network: payload.accepted.network.to_string(),
@@ -241,7 +271,7 @@ where
                     )
                     .await?;
                     let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
-                    Ok(v2::SettleResponse::Success {
+                    Ok(proto::SettleResponse::Success {
                         payer: payment.from.to_string(),
                         transaction: tx_hash.to_string(),
                         network: payload.accepted.network.to_string(),

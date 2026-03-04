@@ -12,28 +12,12 @@ use alloy_transport::TransportError;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use super::Eip3009Payment;
-use super::Permit2Payment;
 use super::contract::{IEIP3009, IX402Permit2Proxy};
 use super::error::Eip155ExactError;
 use super::signature::{SignedMessage, StructuredSignature};
+use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
-
-/// Awaits a future, optionally instrumenting it with a tracing span.
-macro_rules! traced {
-    ($fut:expr, $span:expr) => {{
-        #[cfg(feature = "telemetry")]
-        {
-            use tracing::Instrument;
-            $fut.instrument($span).await
-        }
-        #[cfg(not(feature = "telemetry"))]
-        {
-            $fut.await
-        }
-    }};
-}
 
 /// Prepared `transferWithAuthorization` call using a raw bytes signature.
 pub struct TransferWithAuthorization0Call<P>(
@@ -160,22 +144,6 @@ pub struct TransferWithAuthorizationCall<P, TCall, TSignature> {
     pub contract_address: Address,
 }
 
-/// Check whether contract code is present at `address`.
-async fn is_contract_deployed<P: Provider>(
-    provider: &P,
-    address: &Address,
-) -> Result<bool, TransportError> {
-    let bytes_fut = provider.get_code_at(*address).into_future();
-    let bytes = traced!(
-        bytes_fut,
-        tracing::info_span!("get_code_at",
-            address = %address,
-            otel.kind = "client",
-        )
-    )?;
-    Ok(!bytes.is_empty())
-}
-
 /// Settles a verified payment by sending the transfer transaction on-chain.
 ///
 /// # Errors
@@ -219,17 +187,10 @@ where
                 );
                 traced!(
                     tx_fut,
-                    tracing::info_span!("call_transferWithAuthorization_0",
-                        from = %transfer_call.from,
-                        to = %transfer_call.to,
-                        value = %transfer_call.value,
-                        valid_after = %transfer_call.valid_after,
-                        valid_before = %transfer_call.valid_before,
-                        nonce = %transfer_call.nonce,
-                        signature = %transfer_call.signature,
-                        token_contract = %transfer_call.contract_address,
-                        sig_kind="EIP6492.deployed",
-                        otel.kind = "client",
+                    transfer_span!(
+                        "call_transferWithAuthorization_0",
+                        transfer_call,
+                        sig_kind = "EIP6492.deployed"
                     )
                 )?
             } else {
@@ -256,17 +217,10 @@ where
                 );
                 traced!(
                     tx_fut,
-                    tracing::info_span!("call_transferWithAuthorization_0",
-                        from = %transfer_call.from,
-                        to = %transfer_call.to,
-                        value = %transfer_call.value,
-                        valid_after = %transfer_call.valid_after,
-                        valid_before = %transfer_call.valid_before,
-                        nonce = %transfer_call.nonce,
-                        signature = %transfer_call.signature,
-                        token_contract = %transfer_call.contract_address,
-                        sig_kind="EIP6492.counterfactual",
-                        otel.kind = "client",
+                    transfer_span!(
+                        "call_transferWithAuthorization_0",
+                        transfer_call,
+                        sig_kind = "EIP6492.counterfactual"
                     )
                 )?
             }
@@ -285,21 +239,14 @@ where
             );
             traced!(
                 tx_fut,
-                tracing::info_span!("call_transferWithAuthorization_0",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    sig_kind="EIP1271",
-                    otel.kind = "client",
+                transfer_span!(
+                    "call_transferWithAuthorization_0",
+                    transfer_call,
+                    sig_kind = "EIP1271"
                 )
             )?
         }
-        StructuredSignature::EOA(signature) => {
+        StructuredSignature::Eoa(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let tx_fut = Eip155MetaTransactionProvider::send_transaction(
@@ -312,42 +259,15 @@ where
             );
             traced!(
                 tx_fut,
-                tracing::info_span!("call_transferWithAuthorization_1",
-                    from = %transfer_call.from,
-                    to = %transfer_call.to,
-                    value = %transfer_call.value,
-                    valid_after = %transfer_call.valid_after,
-                    valid_before = %transfer_call.valid_before,
-                    nonce = %transfer_call.nonce,
-                    signature = %transfer_call.signature,
-                    token_contract = %transfer_call.contract_address,
-                    sig_kind="EOA",
-                    otel.kind = "client",
+                transfer_span!(
+                    "call_transferWithAuthorization_1",
+                    transfer_call,
+                    sig_kind = "EOA"
                 )
             )?
         }
     };
-    let success = receipt.status();
-    if success {
-        #[cfg(feature = "telemetry")]
-        tracing::event!(Level::INFO,
-            status = "ok",
-            tx = %receipt.transaction_hash,
-            "transferWithAuthorization succeeded"
-        );
-        Ok(receipt.transaction_hash)
-    } else {
-        #[cfg(feature = "telemetry")]
-        tracing::event!(
-            Level::WARN,
-            status = "failed",
-            tx = %receipt.transaction_hash,
-            "transferWithAuthorization failed"
-        );
-        Err(Eip155ExactError::TransactionReverted(
-            receipt.transaction_hash,
-        ))
-    }
+    check_receipt(&receipt, "transferWithAuthorization")
 }
 
 /// Settles a verified Permit2 payment by calling `x402ExactPermit2Proxy.settle()`.
@@ -403,25 +323,41 @@ where
         )
     )?;
 
-    let success = receipt.status();
-    if success {
+    check_receipt(&receipt, "Permit2 settle")
+}
+
+/// Checks the transaction receipt status and returns the hash on success.
+///
+/// Emits a telemetry event indicating whether the settlement succeeded or failed.
+fn check_receipt(
+    receipt: &alloy_rpc_types_eth::TransactionReceipt,
+    label: &str,
+) -> Result<TxHash, Eip155ExactError> {
+    if receipt.status() {
         #[cfg(feature = "telemetry")]
-        tracing::event!(Level::INFO,
-            status = "ok",
-            tx = %receipt.transaction_hash,
-            "Permit2 settle succeeded"
-        );
+        tracing::event!(Level::INFO, status = "ok", tx = %receipt.transaction_hash, "{label} succeeded");
         Ok(receipt.transaction_hash)
     } else {
         #[cfg(feature = "telemetry")]
-        tracing::event!(
-            Level::WARN,
-            status = "failed",
-            tx = %receipt.transaction_hash,
-            "Permit2 settle failed"
-        );
+        tracing::event!(Level::WARN, status = "failed", tx = %receipt.transaction_hash, "{label} failed");
         Err(Eip155ExactError::TransactionReverted(
             receipt.transaction_hash,
         ))
     }
+}
+
+/// Check whether contract code is present at `address`.
+async fn is_contract_deployed<P: Provider>(
+    provider: &P,
+    address: &Address,
+) -> Result<bool, TransportError> {
+    let bytes_fut = provider.get_code_at(*address).into_future();
+    let bytes = traced!(
+        bytes_fut,
+        tracing::info_span!("get_code_at",
+            address = %address,
+            otel.kind = "client",
+        )
+    )?;
+    Ok(!bytes.is_empty())
 }

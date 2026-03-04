@@ -380,6 +380,25 @@ pub struct DeployedTokenAmount<TAmount, TToken> {
     pub token: TToken,
 }
 
+/// A known network definition with its chain ID and human-readable name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NetworkInfo {
+    /// Human-readable network name (e.g., "base-sepolia", "solana")
+    pub name: &'static str,
+    /// CAIP-2 namespace (e.g., "eip155", "solana")
+    pub namespace: &'static str,
+    /// Chain reference (e.g., "84532" for Base Sepolia, "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" for Solana mainnet)
+    pub reference: &'static str,
+}
+
+impl NetworkInfo {
+    /// Create a `ChainId` from this network info
+    #[must_use]
+    pub fn chain_id(&self) -> ChainId {
+        ChainId::new(self.namespace, self.reference)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -143,6 +143,18 @@ pub const EIP155_NAMESPACE: &str = "eip155";
 pub struct Eip155ChainReference(u64);
 
 impl Eip155ChainReference {
+    /// Creates a new chain reference from a numeric chain ID.
+    #[must_use]
+    pub const fn new(chain_id: u64) -> Self {
+        Self(chain_id)
+    }
+
+    /// Returns the numeric chain ID.
+    #[must_use]
+    pub const fn inner(&self) -> u64 {
+        self.0
+    }
+
     /// Converts this chain reference to a CAIP-2 [`ChainId`].
     #[must_use]
     pub fn as_chain_id(&self) -> ChainId {
@@ -166,14 +178,7 @@ impl TryFrom<ChainId> for Eip155ChainReference {
     type Error = Eip155ChainReferenceFormatError;
 
     fn try_from(value: ChainId) -> Result<Self, Self::Error> {
-        let (namespace, reference) = value.into_parts();
-        if namespace != EIP155_NAMESPACE {
-            return Err(Eip155ChainReferenceFormatError::InvalidNamespace(namespace));
-        }
-        let chain_id: u64 = reference
-            .parse()
-            .map_err(|_| Eip155ChainReferenceFormatError::InvalidReference(reference))?;
-        Ok(Self(chain_id))
+        Self::try_from(&value)
     }
 }
 
@@ -202,20 +207,6 @@ pub enum Eip155ChainReferenceFormatError {
     /// The chain reference is not a valid numeric value.
     #[error("Invalid eip155 chain reference {0}")]
     InvalidReference(String),
-}
-
-impl Eip155ChainReference {
-    /// Creates a new chain reference from a numeric chain ID.
-    #[must_use]
-    pub const fn new(chain_id: u64) -> Self {
-        Self(chain_id)
-    }
-
-    /// Returns the numeric chain ID.
-    #[must_use]
-    pub const fn inner(&self) -> u64 {
-        self.0
-    }
 }
 
 impl Display for Eip155ChainReference {

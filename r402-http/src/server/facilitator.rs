@@ -116,50 +116,6 @@ pub struct FacilitatorClient {
     supported_cache: SupportedCache,
 }
 
-impl Facilitator for FacilitatorClient {
-    fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>> {
-        Box::pin(async move {
-            #[cfg(feature = "telemetry")]
-            let result = with_span(
-                Self::verify(self, &request),
-                tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
-            )
-            .await;
-            #[cfg(not(feature = "telemetry"))]
-            let result = Self::verify(self, &request).await;
-            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
-    }
-
-    fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>> {
-        Box::pin(async move {
-            #[cfg(feature = "telemetry")]
-            let result = with_span(
-                Self::settle(self, &request),
-                tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
-            )
-            .await;
-            #[cfg(not(feature = "telemetry"))]
-            let result = Self::settle(self, &request).await;
-            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
-    }
-
-    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
-        Box::pin(async move {
-            Self::supported(self)
-                .await
-                .map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
-    }
-}
-
 /// Errors that can occur while interacting with a remote facilitator.
 #[derive(Debug, thiserror::Error)]
 pub enum FacilitatorClientError {
@@ -463,6 +419,50 @@ impl FacilitatorClient {
         record_result_on_span(&result);
 
         result
+    }
+}
+
+impl Facilitator for FacilitatorClient {
+    fn verify(
+        &self,
+        request: VerifyRequest,
+    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>> {
+        Box::pin(async move {
+            #[cfg(feature = "telemetry")]
+            let result = with_span(
+                Self::verify(self, &request),
+                tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
+            )
+            .await;
+            #[cfg(not(feature = "telemetry"))]
+            let result = Self::verify(self, &request).await;
+            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
+    }
+
+    fn settle(
+        &self,
+        request: SettleRequest,
+    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>> {
+        Box::pin(async move {
+            #[cfg(feature = "telemetry")]
+            let result = with_span(
+                Self::settle(self, &request),
+                tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
+            )
+            .await;
+            #[cfg(not(feature = "telemetry"))]
+            let result = Self::settle(self, &request).await;
+            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
+    }
+
+    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
+        Box::pin(async move {
+            Self::supported(self)
+                .await
+                .map_err(|e| FacilitatorError::Other(Box::new(e)))
+        })
     }
 }
 

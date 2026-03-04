@@ -24,6 +24,27 @@ use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
 
+/// Facilitator for Solana exact scheme payments.
+pub struct SolanaExactFacilitator<P> {
+    provider: P,
+    config: SolanaExactFacilitatorConfig,
+}
+
+impl<P> SolanaExactFacilitator<P> {
+    /// Creates a new Solana exact facilitator.
+    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
+        Self { provider, config }
+    }
+}
+
+impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SolanaExactFacilitator")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<P> SchemeBuilder<P> for SolanaExact
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync + 'static,
@@ -41,27 +62,6 @@ where
     }
 }
 
-/// Facilitator for Solana exact scheme payments.
-pub struct SolanaExactFacilitator<P> {
-    provider: P,
-    config: SolanaExactFacilitatorConfig,
-}
-
-impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SolanaExactFacilitator")
-            .field("config", &self.config)
-            .finish_non_exhaustive()
-    }
-}
-
-impl<P> SolanaExactFacilitator<P> {
-    /// Creates a new Solana exact facilitator.
-    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
-        Self { provider, config }
-    }
-}
-
 impl<P> Facilitator for SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
@@ -73,7 +73,7 @@ where
         Box::pin(async move {
             let request = types::v2::VerifyRequest::from_proto(request)?;
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
-            Ok(v2::VerifyResponse::valid(verification.payer.to_string()))
+            Ok(proto::VerifyResponse::valid(verification.payer.to_string()))
         })
     }
 
@@ -86,7 +86,7 @@ where
             let verification = verify_transfer(&self.provider, &request, &self.config).await?;
             let payer = verification.payer.to_string();
             let tx_sig = settle_transaction(&self.provider, verification).await?;
-            Ok(v2::SettleResponse::Success {
+            Ok(proto::SettleResponse::Success {
                 payer,
                 transaction: tx_sig.to_string(),
                 network: self.provider.chain_id().to_string(),
