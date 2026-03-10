@@ -91,7 +91,7 @@ let res = client.get("https://api.example.com/paid").send().await?;
 
 ## Settlement Modes
 
-`X402Middleware` supports two settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402LayerBuilder.html#method.with_settlement_mode):
+`X402Middleware` supports three settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402LayerBuilder.html#method.with_settlement_mode):
 
 ### Sequential (default)
 
