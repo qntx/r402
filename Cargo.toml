@@ -60,7 +60,7 @@ alloy-transport = { version = "1.4", features = ["throttle"] }
 alloy-transport-http = "1.4"
 
 # Solana (SVM)
-solana-account = "3"
+solana-account = "4"
 solana-client = "3"
 solana-commitment-config = "3"
 solana-compute-budget-interface = "3"
