@@ -13,7 +13,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, composable lifecycle hooks, MCP (Model Context Protocol) integration for AI agent payments, and 44 built-in chain deployments across EVM and Solana.
+r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, composable lifecycle hooks, and 44 built-in chain deployments across EVM and Solana.
 
 See [Security](SECURITY.md) before using in production.
 
@@ -25,7 +25,6 @@ See [Security](SECURITY.md) before using in production.
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
 | **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
-| **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP integration — paid tool calls for AI agents, with optional [rmcp](https://docs.rs/rmcp) support |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
@@ -43,10 +42,6 @@ See [Security](SECURITY.md) before using in production.
 [r402-svm-doc-url]: https://docs.rs/r402-svm
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
-[r402-mcp-crate]: https://img.shields.io/crates/v/r402-mcp.svg
-[r402-mcp-crate-url]: https://crates.io/crates/r402-mcp
-[r402-mcp-doc]: https://img.shields.io/docsrs/r402-mcp.svg
-[r402-mcp-doc-url]: https://docs.rs/r402-mcp
 
 See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
 
@@ -197,9 +192,6 @@ Each chain and transport crate uses feature flags to minimize compile-time depen
 | `r402-http` | Axum payment gate + facilitator client | Reqwest middleware | — | `tracing` spans |
 | `r402-evm` | Price tag generation | EIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle | `tracing` spans |
 | `r402-svm` | Price tag generation | SPL token signing | On-chain verify & settle | `tracing` spans |
-| `r402-mcp` | — | — | — | `tracing` spans |
-
-`r402-mcp` uses `rmcp` (optional) for built-in [rmcp](https://docs.rs/rmcp) SDK integration.
 
 ## Security
 

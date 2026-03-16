@@ -1,33 +1,45 @@
-# Makefile for r402
+# Makefile for Rust project using Cargo
 
-.PHONY: all
-all: pre-commit
+.PHONY: all build check run test bench clippy clippy-fix fmt doc update
 
-# Build the project in release mode
-.PHONY: build
+all: fmt clippy-fix
+
+# Build the project with all features enabled in release mode
 build:
-	cargo build --release
+	cargo build --workspace --release --all-features
+
+# Check the project for compilation errors without producing binaries
+check:
+	cargo check --workspace --all-features
 
 # Update dependencies to their latest compatible versions
-.PHONY: update
 update:
 	cargo update
 
-# Run the gateway in release mode
-.PHONY: run
+# Run the project with all features enabled in release mode
 run:
-	cargo run --release
+	cargo run --release --all-features
 
-# Run all tests
-.PHONY: test
+# Run all tests with all features enabled
 test:
-	cargo test
+	cargo test --workspace --all-features
 
-# Run Clippy linter with nightly toolchain, fixing issues automatically
-.PHONY: clippy
+# Run benchmarks with all features enabled
+bench:
+	cargo bench --all-features
+
+# Run Clippy linter with nightly toolchain (check only, for CI)
+# Uses workspace lints from Cargo.toml
 clippy:
-	cargo +nightly clippy --fix \
-		--workspace \
+	cargo +nightly clippy --workspace \
+		--all-targets \
+		--all-features \
+		-- -D warnings
+
+# Run Clippy linter with auto-fix (for development)
+clippy-fix:
+	cargo +nightly clippy --workspace \
+		--fix \
 		--all-targets \
 		--all-features \
 		--allow-dirty \
@@ -35,29 +47,9 @@ clippy:
 		-- -D warnings
 
 # Format the code using rustfmt with nightly toolchain
-.PHONY: fmt
 fmt:
 	cargo +nightly fmt
 
-# Generate documentation and open it in the browser
-.PHONY: doc
+# Generate documentation for all crates and open it in the browser
 doc:
-	cargo +nightly doc --no-deps --open
-
-# Generate CHANGELOG.md using git-cliff
-.PHONY: cliff
-cliff:
-	git cliff --output CHANGELOG.md
-
-# Check for unused dependencies using cargo-udeps
-.PHONY: udeps
-udeps:
-	cargo +nightly udeps
-
-# Run pre-commit checks
-.PHONY: pre-commit
-pre-commit:
-	$(MAKE) build
-	$(MAKE) test
-	$(MAKE) clippy
-	$(MAKE) fmt
+	cargo +nightly doc --all-features --no-deps --open
