@@ -38,7 +38,7 @@ url = { version = "2", features = ["serde"] }
 
 # Utility
 base64 = "0.22"
-bincode = "1"
+bincode = "3"
 bs58 = "0.5"
 dashmap = "6"
 rand = "0.10"
