@@ -47,7 +47,7 @@ rust_decimal = "1"
 wiremock = "0.6"
 
 # Alloy (EVM)
-alloy-contract = "1.4"
+alloy-contract = "1.8"
 alloy-network = "1.8"
 alloy-primitives = { version = "1.4", features = ["k256", "serde"] }
 alloy-provider = "1.8"
