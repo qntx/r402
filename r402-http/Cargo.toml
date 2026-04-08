@@ -11,15 +11,15 @@ all-features = true
 
 [features]
 default = []
-client = ["dep:async-trait", "dep:http", "dep:reqwest", "dep:reqwest-middleware"]
-server = ["dep:axum-core", "dep:http", "dep:reqwest", "dep:serde", "dep:tokio", "dep:tower", "dep:url"]
-telemetry = ["dep:tracing", "r402/telemetry"]
+client = ["dep:async-trait", "dep:http", "dep:r402", "dep:reqwest", "dep:reqwest-middleware", "dep:serde_json"]
+server = ["dep:axum-core", "dep:http", "dep:r402", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:tokio", "dep:tower", "dep:url"]
+telemetry = ["dep:r402", "dep:tracing", "r402/telemetry"]
 full = ["client", "server", "telemetry"]
 
 [dependencies]
-r402 = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
+r402 = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
 axum-core = { workspace = true, optional = true }

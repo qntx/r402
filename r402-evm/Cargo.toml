@@ -12,7 +12,7 @@ all-features = true
 [features]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402/telemetry"]
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:rand"]
+client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
 client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
 server = []
 facilitator = [
@@ -23,6 +23,7 @@ facilitator = [
     "dep:alloy-rpc-types-eth",
     "dep:alloy-signer",
     "dep:alloy-signer-local",
+    "dep:alloy-sol-types",
     "dep:alloy-transport",
     "dep:alloy-transport-http",
     "dep:async-trait",
@@ -35,7 +36,7 @@ full = ["telemetry", "client", "client-provider", "server", "facilitator"]
 
 [dependencies]
 alloy-primitives = { workspace = true }
-alloy-sol-types = { workspace = true }
+alloy-sol-types = { workspace = true, optional = true }
 r402 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

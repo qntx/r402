@@ -11,6 +11,11 @@
 //! - `client` — reqwest-middleware for automatic 402 handling
 //! - `telemetry` — Tracing instrumentation
 
+#[cfg(test)]
+use tokio as _;
+#[cfg(test)]
+use wiremock as _;
+
 #[cfg(feature = "server")]
 pub mod server;
 
