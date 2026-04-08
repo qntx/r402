@@ -131,6 +131,10 @@ impl X402Middleware<Arc<FacilitatorClient>> {
     ///
     /// Panics if the facilitator URL is invalid.
     #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "constructor panics on invalid URL by design"
+    )]
     pub fn new(url: &str) -> Self {
         let facilitator = FacilitatorClient::try_from(url).expect("Invalid facilitator URL");
         Self {
@@ -294,7 +298,10 @@ where
 /// Generic over `TSource` which implements [`PriceTagSource`] to support
 /// both static and dynamic pricing strategies.
 #[derive(Clone)]
-#[allow(missing_debug_implementations)] // generic types may not implement Debug
+#[allow(
+    missing_debug_implementations,
+    reason = "generic types may not impl Debug"
+)]
 pub struct X402LayerBuilder<TSource, TFacilitator> {
     facilitator: TFacilitator,
     base_url: Option<Arc<Url>>,
@@ -316,7 +323,10 @@ impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
     }
 }
 
-#[allow(missing_debug_implementations)] // generic types may not implement Debug
+#[allow(
+    missing_debug_implementations,
+    reason = "generic types may not impl Debug"
+)]
 impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
     /// Sets a description of what the payment grants access to.
     ///
@@ -345,7 +355,10 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
     /// When set, this URL is used directly instead of constructing it from the base URL
     /// and request URI. This is the preferred approach in production.
     #[must_use]
-    #[allow(clippy::needless_pass_by_value)] // Url consumed via to_string()
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "Url consumed via to_string()"
+    )]
     pub fn with_resource(mut self, resource: Url) -> Self {
         let mut new_resource = (*self.resource).clone();
         new_resource.url = Some(resource.to_string());
@@ -396,7 +409,10 @@ where
 /// Generic over `TSource` which implements [`PriceTagSource`] to support
 /// both static and dynamic pricing strategies.
 #[derive(Clone)]
-#[allow(missing_debug_implementations)] // BoxCloneSyncService does not implement Debug
+#[allow(
+    missing_debug_implementations,
+    reason = "BoxCloneSyncService does not impl Debug"
+)]
 pub struct X402MiddlewareService<TSource, TFacilitator> {
     /// Payment facilitator (local or remote)
     facilitator: TFacilitator,

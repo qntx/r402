@@ -219,6 +219,64 @@ impl<F> HookedFacilitator<F> {
     }
 }
 
+impl<F: Send + Sync> HookedFacilitator<F> {
+    async fn run_before_verify_hooks(&self, ctx: &VerifyContext) -> Result<(), FacilitatorError> {
+        for hook in &self.hooks {
+            if let HookDecision::Abort { reason, message } = hook.before_verify(ctx).await {
+                return Err(FacilitatorError::Aborted { reason, message });
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_after_verify_hooks(&self, ctx: &VerifyContext, response: &proto::VerifyResponse) {
+        for hook in &self.hooks {
+            hook.after_verify(ctx, response).await;
+        }
+    }
+
+    async fn run_on_verify_failure_hooks(
+        &self,
+        ctx: &VerifyContext,
+        error: &FacilitatorError,
+    ) -> Option<proto::VerifyResponse> {
+        for hook in &self.hooks {
+            if let FailureRecovery::Recovered(response) = hook.on_verify_failure(ctx, error).await {
+                return Some(response);
+            }
+        }
+        None
+    }
+
+    async fn run_before_settle_hooks(&self, ctx: &SettleContext) -> Result<(), FacilitatorError> {
+        for hook in &self.hooks {
+            if let HookDecision::Abort { reason, message } = hook.before_settle(ctx).await {
+                return Err(FacilitatorError::Aborted { reason, message });
+            }
+        }
+        Ok(())
+    }
+
+    async fn run_after_settle_hooks(&self, ctx: &SettleContext, response: &proto::SettleResponse) {
+        for hook in &self.hooks {
+            hook.after_settle(ctx, response).await;
+        }
+    }
+
+    async fn run_on_settle_failure_hooks(
+        &self,
+        ctx: &SettleContext,
+        error: &FacilitatorError,
+    ) -> Option<proto::SettleResponse> {
+        for hook in &self.hooks {
+            if let FailureRecovery::Recovered(response) = hook.on_settle_failure(ctx, error).await {
+                return Some(response);
+            }
+        }
+        None
+    }
+}
+
 impl<F> Facilitator for HookedFacilitator<F>
 where
     F: Facilitator,
@@ -231,28 +289,13 @@ where
             let ctx = VerifyContext {
                 request: request.clone(),
             };
-            for hook in &self.hooks {
-                if let HookDecision::Abort { reason, message } = hook.before_verify(&ctx).await {
-                    return Err(FacilitatorError::Aborted { reason, message });
-                }
-            }
+            self.run_before_verify_hooks(&ctx).await?;
             match self.inner.verify(request).await {
                 Ok(response) => {
-                    for hook in &self.hooks {
-                        hook.after_verify(&ctx, &response).await;
-                    }
+                    self.run_after_verify_hooks(&ctx, &response).await;
                     Ok(response)
                 }
-                Err(e) => {
-                    for hook in &self.hooks {
-                        if let FailureRecovery::Recovered(response) =
-                            hook.on_verify_failure(&ctx, &e).await
-                        {
-                            return Ok(response);
-                        }
-                    }
-                    Err(e)
-                }
+                Err(e) => self.run_on_verify_failure_hooks(&ctx, &e).await.ok_or(e),
             }
         })
     }
@@ -265,28 +308,13 @@ where
             let ctx = SettleContext {
                 request: request.clone(),
             };
-            for hook in &self.hooks {
-                if let HookDecision::Abort { reason, message } = hook.before_settle(&ctx).await {
-                    return Err(FacilitatorError::Aborted { reason, message });
-                }
-            }
+            self.run_before_settle_hooks(&ctx).await?;
             match self.inner.settle(request).await {
                 Ok(response) => {
-                    for hook in &self.hooks {
-                        hook.after_settle(&ctx, &response).await;
-                    }
+                    self.run_after_settle_hooks(&ctx, &response).await;
                     Ok(response)
                 }
-                Err(e) => {
-                    for hook in &self.hooks {
-                        if let FailureRecovery::Recovered(response) =
-                            hook.on_settle_failure(&ctx, &e).await
-                        {
-                            return Ok(response);
-                        }
-                    }
-                    Err(e)
-                }
+                Err(e) => self.run_on_settle_failure_hooks(&ctx, &e).await.ok_or(e),
             }
         })
     }

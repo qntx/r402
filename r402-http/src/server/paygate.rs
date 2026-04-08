@@ -99,7 +99,7 @@ impl ResourceTemplate {
     ///
     /// Panics if the hardcoded fallback URL `http://localhost` cannot be
     /// parsed, which should never happen in practice.
-    #[allow(clippy::unwrap_used)]
+    #[allow(clippy::unwrap_used, reason = "fallback URL is a hardcoded constant")]
     pub fn resolve(&self, base_url: Option<&Url>, req: &Request) -> v2::ResourceInfo {
         let url = self.url.clone().unwrap_or_else(|| {
             let mut url = base_url.cloned().unwrap_or_else(|| {
@@ -140,7 +140,10 @@ impl ResourceTemplate {
 ///     .resource(resource_info)
 ///     .build();
 /// ```
-#[allow(missing_debug_implementations)]
+#[allow(
+    missing_debug_implementations,
+    reason = "generic facilitator may not impl Debug"
+)]
 pub struct PaygateBuilder<TFacilitator> {
     facilitator: TFacilitator,
     accepts: Vec<v2::PriceTag>,
@@ -175,7 +178,7 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
     pub fn build(self) -> Paygate<TFacilitator> {
         Paygate {
             facilitator: self.facilitator,
-            accepts: Arc::new(self.accepts),
+            accepts: self.accepts.into(),
             resource: self.resource.unwrap_or_else(|| v2::ResourceInfo {
                 description: String::new(),
                 mime_type: "application/json".to_owned(),
@@ -195,10 +198,13 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 /// To add lifecycle hooks (before/after verify and settle), wrap your
 /// facilitator with [`HookedFacilitator`](r402::hooks::HookedFacilitator)
 /// before passing it to the payment gate.
-#[allow(missing_debug_implementations)]
+#[allow(
+    missing_debug_implementations,
+    reason = "generic facilitator may not impl Debug"
+)]
 pub struct Paygate<TFacilitator> {
     pub(crate) facilitator: TFacilitator,
-    pub(crate) accepts: Arc<Vec<v2::PriceTag>>,
+    pub(crate) accepts: Arc<[v2::PriceTag]>,
     pub(crate) resource: v2::ResourceInfo,
 }
 
@@ -237,6 +243,10 @@ impl<TFacilitator> Paygate<TFacilitator> {
     /// Panics if the payment-required response cannot be serialized to JSON
     /// or if the HTTP response builder fails. These indicate a bug.
     #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "infallible JSON/HTTP construction; panic indicates a bug"
+    )]
     pub fn error_response(&self, err: PaygateError) -> Response {
         match err {
             PaygateError::Verification(ve) => {
@@ -286,15 +296,16 @@ where
     /// Enriches price tags with facilitator capabilities (e.g., fee payer address).
     pub async fn enrich_accepts(&mut self) {
         let capabilities = self.facilitator.supported().await.unwrap_or_default();
-        let accepts = (*self.accepts)
-            .clone()
-            .into_iter()
+        let accepts: Vec<_> = self
+            .accepts
+            .iter()
+            .cloned()
             .map(|mut pt| {
                 pt.enrich(&capabilities);
                 pt
             })
             .collect();
-        self.accepts = Arc::new(accepts);
+        self.accepts = accepts.into();
     }
 
     /// Verifies the payment from request headers without executing the inner

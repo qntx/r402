@@ -28,7 +28,7 @@ pub(super) struct SignedMessage {
 impl SignedMessage {
     /// Construct a [`SignedMessage`] from an [`Eip3009Payment`] and its
     /// corresponding [`Eip712Domain`](alloy_sol_types::Eip712Domain).
-    pub fn extract(
+    pub(super) fn extract(
         payment: &Eip3009Payment,
         domain: &alloy_sol_types::Eip712Domain,
     ) -> Result<Self, StructuredSignatureFormatError> {
@@ -87,6 +87,10 @@ pub enum StructuredSignatureFormatError {
 ///
 /// Returns `Some(EIP6492 { .. })` if the bytes end with the 32-byte magic
 /// suffix, or `None` if no wrapper is present.
+#[allow(
+    clippy::indexing_slicing,
+    reason = "bounds checked by len() >= 32 guard"
+)]
 fn decode_eip6492(
     bytes: Bytes,
 ) -> Result<Option<StructuredSignature>, StructuredSignatureFormatError> {
@@ -106,7 +110,7 @@ fn decode_eip6492(
 }
 
 impl StructuredSignature {
-    pub fn try_from_bytes(
+    pub(super) fn try_from_bytes(
         bytes: Bytes,
         expected_signer: Address,
         prehash: &B256,

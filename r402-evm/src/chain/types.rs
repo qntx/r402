@@ -84,7 +84,7 @@ impl FromStr for TokenAmount {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let u256 = U256::from_str_radix(s, 10).map_err(|_| "invalid token amount".to_string())?;
+        let u256 = U256::from_str_radix(s, 10).map_err(|_| "invalid token amount".to_owned())?;
         Ok(Self(u256))
     }
 }
@@ -151,13 +151,13 @@ impl Eip155ChainReference {
 
     /// Returns the numeric chain ID.
     #[must_use]
-    pub const fn inner(&self) -> u64 {
+    pub const fn inner(self) -> u64 {
         self.0
     }
 
     /// Converts this chain reference to a CAIP-2 [`ChainId`].
     #[must_use]
-    pub fn as_chain_id(&self) -> ChainId {
+    pub fn as_chain_id(self) -> ChainId {
         ChainId::new(EIP155_NAMESPACE, self.0.to_string())
     }
 }

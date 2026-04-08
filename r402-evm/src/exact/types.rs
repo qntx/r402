@@ -61,7 +61,7 @@ impl ExactPayload {
 
     /// Returns the sender (`from`) address for this payment.
     #[must_use]
-    pub const fn from_address(&self) -> Address {
+    pub const fn sender(&self) -> Address {
         match self {
             Self::Eip3009(p) => p.authorization.from,
             Self::Permit2(p) => p.permit2_authorization.from,

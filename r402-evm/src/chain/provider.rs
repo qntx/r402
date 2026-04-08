@@ -66,7 +66,7 @@ pub struct Eip155ChainProvider {
     receipt_timeout_secs: u64,
     inner: InnerProvider,
     /// Available signer addresses for round-robin selection.
-    signer_addresses: Arc<Vec<Address>>,
+    signer_addresses: Arc<[Address]>,
     /// Current position in round-robin signer rotation.
     signer_cursor: Arc<AtomicUsize>,
     /// Nonce manager for resetting nonces on transaction failures.
@@ -101,7 +101,7 @@ impl Eip155ChainProvider {
         if signer_addresses.is_empty() {
             return Err("at least one signer must be provided".into());
         }
-        let signer_addresses = Arc::new(signer_addresses);
+        let signer_addresses: Arc<[Address]> = signer_addresses.into();
         let signer_cursor = Arc::new(AtomicUsize::new(0));
 
         let chain_id: ChainId = chain.into();
@@ -147,6 +147,10 @@ impl Eip155ChainProvider {
     ///
     /// Panics if no valid HTTP transports remain after filtering.
     #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "panics on empty endpoints is intentional"
+    )]
     pub fn rpc_client(chain_id: &ChainId, endpoints: &[(Url, Option<u32>)]) -> RpcClient {
         #[cfg(not(feature = "telemetry"))]
         let _ = chain_id;
@@ -179,8 +183,15 @@ impl Eip155ChainProvider {
     }
 
     /// Round-robin selection of next signer from wallet.
+    #[allow(
+        clippy::indexing_slicing,
+        reason = "bounds guaranteed by constructor requiring non-empty signers"
+    )]
     fn next_signer_address(&self) -> Address {
-        debug_assert!(!self.signer_addresses.is_empty());
+        debug_assert!(
+            !self.signer_addresses.is_empty(),
+            "signer_addresses must not be empty"
+        );
         if self.signer_addresses.len() == 1 {
             self.signer_addresses[0]
         } else {

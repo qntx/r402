@@ -58,6 +58,10 @@ impl SolanaChainReference {
     /// Panics if the internal bytes are not valid UTF-8 (should never happen
     /// since construction validates ASCII).
     #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "construction validates ASCII, UTF-8 conversion is infallible"
+    )]
     pub fn as_str(&self) -> &str {
         // Safe because we validate ASCII on construction
         std::str::from_utf8(&self.0).expect("SolanaChainReference contains valid ASCII")
@@ -78,7 +82,7 @@ impl FromStr for SolanaChainReference {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if !(s.is_ascii() && s.len() == 32) {
             return Err(SolanaChainReferenceFormatError::InvalidReference(
-                s.to_string(),
+                s.to_owned(),
             ));
         }
         let mut bytes = [0u8; 32];

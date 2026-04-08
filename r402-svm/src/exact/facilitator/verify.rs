@@ -84,6 +84,7 @@ pub fn verify_compute_limit_instruction(
     }
 
     let mut buf = [0u8; 4];
+    #[allow(clippy::indexing_slicing, reason = "length == 5 checked above")]
     buf.copy_from_slice(&data[1..5]);
     let compute_units = u32::from_le_bytes(buf);
 
@@ -111,6 +112,7 @@ pub fn verify_compute_price_instruction(
         return Err(SolanaExactError::InvalidComputePriceInstruction);
     }
     let mut buf = [0u8; 8];
+    #[allow(clippy::indexing_slicing, reason = "length == 9 checked above")]
     buf.copy_from_slice(&data[1..]);
     let microlamports = u64::from_le_bytes(buf);
     if microlamports > max_compute_unit_price {
@@ -150,6 +152,10 @@ pub fn validate_instructions(
             return Err(SolanaExactError::AdditionalInstructionsNotAllowed);
         }
 
+        #[allow(
+            clippy::excessive_nesting,
+            reason = "program validation requires nested conditionals"
+        )]
         for i in 3..instructions.len() {
             if let Some(program_id) = get_program_id(transaction, i) {
                 if config.is_blocked(&program_id) {
@@ -255,6 +261,10 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
                     .get(*account_idx as usize)
                     .ok_or(SolanaExactError::NoAccountAtIndex(*account_idx))?;
 
+                #[allow(
+                    clippy::excessive_nesting,
+                    reason = "nested iteration over instructions and accounts"
+                )]
                 if *account == fee_payer_pubkey {
                     return Err(SolanaExactError::FeePayerIncludedInInstructionAccounts.into());
                 }
@@ -331,11 +341,11 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         return Err(PaymentVerificationError::AssetMismatch);
     }
 
-    let token_program = transfer_checked_instruction.token_program;
+    let expected_token_program = transfer_checked_instruction.token_program;
     let (ata, _) = Pubkey::find_program_address(
         &[
             transfer_requirement.pay_to.as_ref(),
-            token_program.as_ref(),
+            expected_token_program.as_ref(),
             transfer_requirement.asset.as_ref(),
         ],
         &ATA_PROGRAM_PUBKEY,

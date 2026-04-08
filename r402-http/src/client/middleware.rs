@@ -25,7 +25,10 @@ use super::hooks::{ClientHooks, PaymentCreationContext};
 /// The [`X402Client`] acts as middleware for reqwest, automatically handling
 /// 402 Payment Required responses by extracting payment requirements, signing
 /// payments, and retrying requests.
-#[allow(missing_debug_implementations)] // ClientSchemes contains dyn trait objects
+#[allow(
+    missing_debug_implementations,
+    reason = "ClientSchemes contains dyn trait objects"
+)]
 pub struct X402Client<TSelector> {
     schemes: ClientSchemes,
     selector: TSelector,
@@ -149,7 +152,7 @@ where
     pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, ClientError> {
         let payment_required = parse_payment_required(res)
             .await
-            .ok_or_else(|| ClientError::ParseError("Invalid 402 response".to_string()))?;
+            .ok_or_else(|| ClientError::ParseError("Invalid 402 response".to_owned()))?;
 
         let hook_ctx = PaymentCreationContext {
             payment_required: payment_required.clone(),
@@ -221,6 +224,10 @@ where
         let signed_payload = selected.sign().await?;
         let headers = {
             let mut headers = HeaderMap::new();
+            #[allow(
+                clippy::expect_used,
+                reason = "base64-encoded payload is always valid ASCII header"
+            )]
             headers.insert(
                 "Payment-Signature",
                 signed_payload
@@ -236,18 +243,24 @@ where
 
 /// Internal collection of registered scheme clients.
 #[derive(Default)]
-#[allow(missing_debug_implementations)] // dyn trait objects do not implement Debug
-pub struct ClientSchemes(Vec<Arc<dyn SchemeClient>>);
+#[allow(
+    missing_debug_implementations,
+    reason = "dyn trait objects do not impl Debug"
+)]
+pub(super) struct ClientSchemes(Vec<Arc<dyn SchemeClient>>);
 
 impl ClientSchemes {
     /// Adds a scheme client to the collection.
-    pub fn push<T: SchemeClient + 'static>(&mut self, client: T) {
+    pub(super) fn push<T: SchemeClient + 'static>(&mut self, client: T) {
         self.0.push(Arc::new(client));
     }
 
     /// Finds all payment candidates that can handle the given payment requirements.
     #[must_use]
-    pub fn candidates(&self, payment_required: &proto::PaymentRequired) -> Vec<PaymentCandidate> {
+    pub(super) fn candidates(
+        &self,
+        payment_required: &proto::PaymentRequired,
+    ) -> Vec<PaymentCandidate> {
         let mut candidates = vec![];
         for client in &self.0 {
             let accepted = client.accept(payment_required);

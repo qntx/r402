@@ -133,7 +133,7 @@ pub enum ErrorReason {
 impl ErrorReason {
     /// Returns the `snake_case` string representation matching the wire format.
     #[must_use]
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::InvalidFormat => "invalid_format",
             Self::InvalidPaymentAmount => "invalid_payment_amount",

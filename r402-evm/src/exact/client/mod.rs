@@ -477,7 +477,7 @@ where
                     chain_id: requirements.network.clone(),
                     asset: requirements.asset.to_string(),
                     amount: requirements.amount.0.to_string(),
-                    scheme: self.scheme().to_string(),
+                    scheme: self.scheme().to_owned(),
                     pay_to: requirements.pay_to.to_string(),
                     signer: Box::new(V2PayloadSigner {
                         resource_info: Some(payment_required.resource.clone()),
@@ -507,6 +507,10 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "async signing logic with conditional Permit2 flow"
+    )]
     fn sign_payment(&self) -> r402::facilitator::BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
             let use_permit2 = self

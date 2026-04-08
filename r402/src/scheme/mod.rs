@@ -56,7 +56,7 @@ pub trait SchemeId {
     }
     /// Returns the full scheme identifier (e.g., "eip155-exact").
     fn id(&self) -> String {
-        format!("{}-{}", self.namespace(), self.scheme(),)
+        format!("{}-{}", self.namespace(), self.scheme())
     }
 }
 

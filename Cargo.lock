@@ -3905,7 +3905,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "thiserror 2.0.18",
- "tracing",
 ]
 
 [[package]]
@@ -3961,9 +3960,7 @@ dependencies = [
 name = "r402-svm"
 version = "0.12.3"
 dependencies = [
- "alloy-primitives",
  "bincode",
- "bs58",
  "futures-util",
  "r402",
  "serde",
@@ -3984,7 +3981,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-core",
- "url",
 ]
 
 [[package]]

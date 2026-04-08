@@ -85,7 +85,7 @@ pub async fn fetch_mint<R: RpcClientLike>(
         })
     } else if account.owner == spl_token_2022::id() {
         let mint = spl_token_2022::state::Mint::unpack(&account.data).map_err(|e| {
-            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}",))
+            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
         })?;
         Ok(Mint::Token2022 {
             decimals: mint.decimals,
@@ -117,7 +117,11 @@ pub fn build_message_to_simulate(
 
     let with_cu_limit = {
         let mut ixs_mod = ixs.clone();
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "1e5 fits in u32"
+        )]
         update_or_append_set_compute_unit_limit(&mut ixs_mod, 1e5 as u32);
         ixs_mod
     };
@@ -154,9 +158,12 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
         .await
         .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
     let units = sim.value.units_consumed.ok_or_else(|| {
-        ClientError::SigningError("simulation returned no units_consumed".to_string())
+        ClientError::SigningError("simulation returned no units_consumed".to_owned())
     })?;
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "compute units always fit in u32"
+    )]
     Ok(units as u32)
 }
 
@@ -359,7 +366,7 @@ where
                     chain_id,
                     asset: requirements.asset.to_string(),
                     amount: requirements.amount.inner().to_string(),
-                    scheme: self.scheme().to_string(),
+                    scheme: self.scheme().to_owned(),
                     pay_to: requirements.pay_to.to_string(),
                     signer: Box::new(V2PayloadSigner {
                         signer: self.signer.clone(),
@@ -390,7 +397,7 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2Pay
                 .as_ref()
                 .map(|extra| extra.fee_payer)
                 .ok_or_else(|| {
-                    ClientError::SigningError("missing fee_payer in extra".to_string())
+                    ClientError::SigningError("missing fee_payer in extra".to_owned())
                 })?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 

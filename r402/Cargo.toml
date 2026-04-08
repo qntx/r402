@@ -11,7 +11,7 @@ all-features = true
 
 [features]
 default = []
-telemetry = ["dep:tracing"]
+telemetry = []
 full = ["telemetry"]
 
 [dependencies]
@@ -21,7 +21,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -20,7 +20,7 @@ use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 
 /// Prepared `transferWithAuthorization` call using a raw bytes signature.
-pub struct TransferWithAuthorization0Call<P>(
+pub(super) struct TransferWithAuthorization0Call<P>(
     pub TransferWithAuthorizationCall<P, IEIP3009::transferWithAuthorization_0Call, Bytes>,
 );
 
@@ -33,7 +33,7 @@ impl<P> std::fmt::Debug for TransferWithAuthorization0Call<P> {
 
 impl<'a, P: Provider> TransferWithAuthorization0Call<&'a P> {
     /// Constructs a full `transferWithAuthorization` call for a verified payment payload.
-    pub fn new(
+    pub(super) fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
         payment: &Eip3009Payment,
         signature: Bytes,
@@ -68,7 +68,7 @@ impl<'a, P: Provider> TransferWithAuthorization0Call<&'a P> {
 }
 
 /// Prepared `transferWithAuthorization` call using split (v, r, s) signature.
-pub struct TransferWithAuthorization1Call<P>(
+pub(super) struct TransferWithAuthorization1Call<P>(
     pub TransferWithAuthorizationCall<P, IEIP3009::transferWithAuthorization_1Call, Signature>,
 );
 
@@ -82,7 +82,7 @@ impl<P> std::fmt::Debug for TransferWithAuthorization1Call<P> {
 impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
     /// Constructs a full `transferWithAuthorization` call for a verified payment payload
     /// using split signature components (v, r, s).
-    pub fn new(
+    pub(super) fn new(
         contract: &'a IEIP3009::IEIP3009Instance<P>,
         payment: &Eip3009Payment,
         signature: Signature,
@@ -122,8 +122,11 @@ impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
 }
 
 /// A prepared call to `transferWithAuthorization` (ERC-3009) including all derived fields.
-#[allow(missing_debug_implementations)]
-pub struct TransferWithAuthorizationCall<P, TCall, TSignature> {
+#[allow(
+    missing_debug_implementations,
+    reason = "generic type params may not impl Debug"
+)]
+pub(super) struct TransferWithAuthorizationCall<P, TCall, TSignature> {
     /// The prepared call builder that can be `.call()`ed or `.send()`ed.
     pub tx: SolCallBuilder<P, TCall>,
     /// The sender (`from`) address for the authorization.
@@ -153,8 +156,11 @@ pub struct TransferWithAuthorizationCall<P, TCall, TSignature> {
 /// # Panics
 ///
 /// Panics if the authorization deadline timestamp overflows `i64`.
-#[allow(clippy::cognitive_complexity)]
-pub async fn settle_payment<P, E>(
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "settlement logic is inherently complex"
+)]
+pub(super) async fn settle_payment<P, E>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P::Inner>,
     payment: &Eip3009Payment,
@@ -275,8 +281,11 @@ where
 /// # Errors
 ///
 /// Returns [`Eip155ExactError`] if the on-chain settlement transaction fails.
-#[allow(clippy::cognitive_complexity)]
-pub async fn settle_permit2_payment<P, E>(
+#[allow(
+    clippy::cognitive_complexity,
+    reason = "settlement logic is inherently complex"
+)]
+pub(super) async fn settle_permit2_payment<P, E>(
     provider: &P,
     payment: &Permit2Payment,
 ) -> Result<TxHash, Eip155ExactError>

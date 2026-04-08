@@ -86,17 +86,15 @@ pub enum MoneyAmountParseError {
 }
 
 mod constants {
-    use std::sync::LazyLock;
+    use super::Decimal;
 
-    use super::{Decimal, FromStr};
+    pub(super) const MIN_STR: &str = "0.000000001";
+    pub(super) const MAX_STR: &str = "999999999";
 
-    pub const MIN_STR: &str = "0.000000001";
-    pub const MAX_STR: &str = "999999999";
-
-    pub static MIN: LazyLock<Decimal> =
-        LazyLock::new(|| Decimal::from_str(MIN_STR).expect("valid decimal"));
-    pub static MAX: LazyLock<Decimal> =
-        LazyLock::new(|| Decimal::from_str(MAX_STR).expect("valid decimal"));
+    // 0.000000001 = 1 × 10⁻⁹
+    pub(super) const MIN: Decimal = Decimal::from_parts(1, 0, 0, false, 9);
+    // 999_999_999 × 10⁰
+    pub(super) const MAX: Decimal = Decimal::from_parts(999_999_999, 0, 0, false, 0);
 }
 
 impl MoneyAmount {
@@ -122,7 +120,7 @@ impl MoneyAmount {
             return Err(MoneyAmountParseError::Negative);
         }
 
-        if parsed < *constants::MIN || parsed > *constants::MAX {
+        if parsed < constants::MIN || parsed > constants::MAX {
             return Err(MoneyAmountParseError::OutOfRange);
         }
 
@@ -160,7 +158,7 @@ impl TryFrom<f64> for MoneyAmount {
         if decimal.is_sign_negative() {
             return Err(MoneyAmountParseError::Negative);
         }
-        if decimal < *constants::MIN || decimal > *constants::MAX {
+        if decimal < constants::MIN || decimal > constants::MAX {
             return Err(MoneyAmountParseError::OutOfRange);
         }
         Ok(Self(decimal))

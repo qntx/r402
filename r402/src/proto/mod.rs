@@ -129,21 +129,19 @@ impl UnixTimestamp {
 
     /// Returns the current system time as a [`UnixTimestamp`].
     ///
-    /// # Panics
-    ///
-    /// Panics if the system clock is set to a time before the Unix epoch.
+    /// Falls back to epoch (0) if the system clock is before the Unix epoch.
     #[must_use]
     pub fn now() -> Self {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("SystemTime before UNIX epoch?!?")
+            .unwrap_or_default()
             .as_secs();
         Self(now)
     }
 
     /// Returns the timestamp as raw seconds since the Unix epoch.
     #[must_use]
-    pub const fn as_secs(&self) -> u64 {
+    pub const fn as_secs(self) -> u64 {
         self.0
     }
 }
@@ -270,7 +268,7 @@ pub struct U64String(#[serde_as(as = "serde_with::DisplayFromStr")] u64);
 impl U64String {
     /// Returns the inner `u64` value.
     #[must_use]
-    pub const fn inner(&self) -> u64 {
+    pub const fn inner(self) -> u64 {
         self.0
     }
 }

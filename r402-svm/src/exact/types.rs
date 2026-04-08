@@ -29,6 +29,7 @@ use crate::exact::{SolanaExactError, TransactionSignError, TransactionToB64Error
 
 /// Phantom Lighthouse program ID - security program injected by Phantom wallet on mainnet
 /// See: <https://github.com/coinbase/x402/issues/828>
+#[allow(clippy::expect_used, reason = "hardcoded constant is infallible")]
 pub static PHANTOM_LIGHTHOUSE_PROGRAM: LazyLock<Pubkey> = LazyLock::new(|| {
     "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"
         .parse()
@@ -151,17 +152,27 @@ impl TransactionInt {
         let num_required = tx.message.header().num_required_signatures as usize;
         let static_keys = tx.message.static_account_keys();
 
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "num_required <= static_keys.len() by Solana message invariant"
+        )]
         let pos = static_keys[..num_required]
             .iter()
             .position(|k| *k == signer.pubkey())
             .ok_or_else(|| {
-                TransactionSignError("Signer not found in required signers".to_string())
+                TransactionSignError("Signer not found in required signers".to_owned())
             })?;
 
         if tx.signatures.len() < num_required {
             tx.signatures.resize(num_required, Signature::default());
         }
-        tx.signatures[pos] = signature;
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "pos < num_required, resize ensures len >= num_required"
+        )]
+        {
+            tx.signatures[pos] = signature;
+        }
         Ok(Self { inner: tx })
     }
 
@@ -171,7 +182,10 @@ impl TransactionInt {
     ///
     /// Returns [`SolanaChainProviderError`] if sending or confirmation fails.
     #[cfg(feature = "facilitator")]
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "CommitmentConfig is a small Copy type"
+    )]
     pub async fn send_and_confirm<P: SolanaChainProviderLike>(
         &self,
         provider: &P,

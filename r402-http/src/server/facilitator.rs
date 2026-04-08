@@ -67,6 +67,10 @@ impl SupportedCache {
     }
 
     /// Returns the cached response if valid, None otherwise.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "read guard scope matches data access"
+    )]
     pub async fn get(&self) -> Option<SupportedResponse> {
         let guard = self.state.read().await;
         let cache = guard.as_ref()?;
@@ -203,8 +207,8 @@ impl FacilitatorClient {
 
     /// Returns the configured timeout, if any.
     #[must_use]
-    pub const fn timeout(&self) -> &Option<Duration> {
-        &self.timeout
+    pub const fn timeout(&self) -> Option<&Duration> {
+        self.timeout.as_ref()
     }
 
     /// Returns a reference to the supported cache.
@@ -347,7 +351,10 @@ impl FacilitatorClient {
     /// timeout application, and telemetry integration.
     ///
     /// `context` is a human-readable identifier used in tracing and error messages (e.g. `"POST /verify"`).
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "context is a static str, clone cost is zero"
+    )]
     async fn post_json<T, R>(
         &self,
         url: &Url,
@@ -472,7 +479,7 @@ impl TryFrom<&str> for FacilitatorClient {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         // Normalize: strip trailing slashes and add a single trailing slash
-        let mut normalized = value.trim_end_matches('/').to_string();
+        let mut normalized = value.trim_end_matches('/').to_owned();
         normalized.push('/');
         let url = Url::parse(&normalized).map_err(|e| FacilitatorClientError::UrlParse {
             context: "Failed to parse base url",
@@ -519,6 +526,10 @@ fn with_span<F: Future>(fut: F, span: Span) -> impl Future<Output = F::Output> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::indexing_slicing,
+    reason = "test assertions with known-length slices"
+)]
 mod tests {
     use std::collections::HashMap;
 
@@ -532,8 +543,8 @@ mod tests {
         SupportedResponse {
             kinds: vec![SupportedPaymentKind {
                 x402_version: 1,
-                scheme: "eip155-exact".to_string(),
-                network: "1".to_string(),
+                scheme: "eip155-exact".to_owned(),
+                network: "1".to_owned(),
                 extra: None,
             }],
             extensions: vec![],

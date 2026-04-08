@@ -75,9 +75,18 @@ pub fn usdc_solana_deployment(
 /// let tag = SolanaExact::price_tag(pay_to, USDC::solana().amount(1_000_000u64));
 /// ```
 #[derive(Debug, Clone, Copy)]
+#[allow(
+    clippy::upper_case_acronyms,
+    reason = "USDC is a well-known token ticker"
+)]
 pub struct USDC;
 
-#[allow(clippy::doc_markdown, clippy::missing_panics_doc)]
+#[allow(
+    clippy::doc_markdown,
+    clippy::missing_panics_doc,
+    clippy::expect_used,
+    reason = "static deployment lookups are infallible for built-in data"
+)]
 impl USDC {
     /// Looks up a USDC deployment by chain reference.
     ///

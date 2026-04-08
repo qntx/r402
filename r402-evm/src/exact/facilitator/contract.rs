@@ -18,8 +18,8 @@ sol! {
     /// References:
     /// - ERC-3009: <https://eips.ethereum.org/EIPS/eip-3009>
     /// - USDC `FiatTokenV2_2`: <https://github.com/circlefin/stablecoin-evm>
-    #[allow(missing_docs)]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(missing_docs, reason = "sol! generated interface")]
+    #[allow(clippy::too_many_arguments, reason = "matches on-chain ABI")]
     #[derive(Debug)]
     #[sol(rpc)]
     interface IEIP3009 {
@@ -54,7 +54,7 @@ sol! {
     /// EIP-6492 universal signature validator interface.
     ///
     /// Reference: <https://eips.ethereum.org/EIPS/eip-6492>
-    #[allow(missing_docs)]
+    #[allow(missing_docs, reason = "sol! generated interface")]
     #[derive(Debug)]
     #[sol(rpc)]
     interface Validator6492 {
@@ -82,7 +82,7 @@ sol! {
     /// Settles Permit2-based payments by calling through the canonical Permit2 contract.
     ///
     /// Reference: x402 protocol specification
-    #[allow(missing_docs)]
+    #[allow(missing_docs, reason = "sol! generated interface")]
     #[derive(Debug)]
     #[sol(rpc)]
     interface IX402Permit2Proxy {
@@ -114,7 +114,7 @@ sol! {
 
 sol! {
     /// Minimal ERC-20 interface for allowance and balance checks.
-    #[allow(missing_docs)]
+    #[allow(missing_docs, reason = "sol! generated interface")]
     #[derive(Debug)]
     #[sol(rpc)]
     interface IERC20 {

@@ -34,16 +34,14 @@ pub trait PriceTagSource: Clone + Send + Sync + 'static {
 /// It simply stores a vector of price tags and returns clones on each request.
 #[derive(Clone, Debug)]
 pub struct StaticPriceTags {
-    tags: Arc<Vec<v2::PriceTag>>,
+    tags: Arc<[v2::PriceTag]>,
 }
 
 impl StaticPriceTags {
     /// Creates a new static price tag source from a vector of price tags.
     #[must_use]
     pub fn new(tags: Vec<v2::PriceTag>) -> Self {
-        Self {
-            tags: Arc::new(tags),
-        }
+        Self { tags: tags.into() }
     }
 
     /// Returns a reference to the stored price tags.
@@ -55,9 +53,9 @@ impl StaticPriceTags {
     /// Adds a price tag to the source.
     #[must_use]
     pub fn with_price_tag(mut self, tag: v2::PriceTag) -> Self {
-        let mut tags = (*self.tags).clone();
+        let mut tags = self.tags.to_vec();
         tags.push(tag);
-        self.tags = Arc::new(tags);
+        self.tags = tags.into();
         self
     }
 }
@@ -69,7 +67,7 @@ impl PriceTagSource for StaticPriceTags {
         _uri: &Uri,
         _base_url: Option<&Url>,
     ) -> Vec<v2::PriceTag> {
-        (*self.tags).clone()
+        self.tags.to_vec()
     }
 }
 

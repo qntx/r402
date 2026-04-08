@@ -85,13 +85,12 @@ impl FromStr for ChainId {
     type Err = ChainIdFormatError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(ChainIdFormatError(s.into()));
-        }
+        let (namespace, reference) = s
+            .split_once(':')
+            .ok_or_else(|| ChainIdFormatError(s.into()))?;
         Ok(Self {
-            namespace: parts[0].into(),
-            reference: parts[1].into(),
+            namespace: namespace.into(),
+            reference: reference.into(),
         })
     }
 }
@@ -246,20 +245,11 @@ impl FromStr for ChainIdPattern {
 
         // Set: eip155:{1,2,3}
         if let Some(inner) = rest.strip_prefix('{').and_then(|r| r.strip_suffix('}')) {
-            let mut references = HashSet::new();
-
-            for item in inner.split(',') {
-                let item = item.trim();
-                if item.is_empty() {
-                    return Err(ChainIdFormatError(s.into()));
-                }
-                references.insert(item.into());
-            }
-
-            if references.is_empty() {
+            let items: Vec<&str> = inner.split(',').map(str::trim).collect();
+            if items.is_empty() || items.iter().any(|item| item.is_empty()) {
                 return Err(ChainIdFormatError(s.into()));
             }
-
+            let references = items.into_iter().map(Into::into).collect();
             return Ok(Self::set(namespace, references));
         }
 

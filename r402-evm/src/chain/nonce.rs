@@ -48,9 +48,9 @@ impl PendingNonceManager {
     /// By resetting to the sentinel value, the next call to `get_next_nonce` will query
     /// the RPC provider using `.pending()`, which includes mempool transactions.
     pub async fn reset_nonce(&self, address: Address) {
-        if let Some(nonce_lock) = self.nonces.get(&address) {
-            let mut nonce = nonce_lock.lock().await;
-            *nonce = u64::MAX; // NONE sentinel - will trigger fresh query
+        let nonce_lock = self.nonces.get(&address).map(|r| Arc::clone(&*r));
+        if let Some(nonce_lock) = nonce_lock {
+            *nonce_lock.lock().await = u64::MAX; // NONE sentinel - will trigger fresh query
             #[cfg(feature = "telemetry")]
             tracing::debug!(%address, "reset nonce cache, will requery on next use");
         }
@@ -77,18 +77,19 @@ impl NonceManager for PendingNonceManager {
             Arc::clone(rm.value())
         };
 
-        let mut nonce = nonce.lock().await;
-        let new_nonce = if *nonce == NONE {
+        let mut nonce_guard = nonce.lock().await;
+        let new_nonce = if *nonce_guard == NONE {
             // Initialize the nonce if we haven't seen this account before.
             #[cfg(feature = "telemetry")]
             tracing::trace!(%address, "fetching nonce");
             provider.get_transaction_count(address).pending().await?
         } else {
             #[cfg(feature = "telemetry")]
-            tracing::trace!(%address, current_nonce = *nonce, "incrementing nonce");
-            *nonce + 1
+            tracing::trace!(%address, current_nonce = *nonce_guard, "incrementing nonce");
+            *nonce_guard + 1
         };
-        *nonce = new_nonce;
+        *nonce_guard = new_nonce;
+        drop(nonce_guard);
         Ok(new_nonce)
     }
 }

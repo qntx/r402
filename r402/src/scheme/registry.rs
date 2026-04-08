@@ -121,7 +121,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let chain_id = provider.chain_id();
         let handler = blueprint.build(provider, config)?;
-        let slug = SchemeSlug::new(chain_id, blueprint.scheme().to_string());
+        let slug = SchemeSlug::new(chain_id, blueprint.scheme().to_owned());
         self.0.insert(slug, handler);
         Ok(())
     }
@@ -161,7 +161,7 @@ impl SchemeRegistry {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let handler = blueprint.build(provider, config)?;
         let namespace = provider.chain_id().namespace().to_owned();
-        let slug = SchemeSlug::new(ChainId::new(namespace, "*"), blueprint.scheme().to_string());
+        let slug = SchemeSlug::new(ChainId::new(namespace, "*"), blueprint.scheme().to_owned());
         self.0.insert(slug, handler);
         Ok(())
     }
@@ -169,6 +169,29 @@ impl SchemeRegistry {
     /// Returns an iterator over all registered handlers.
     pub fn values(&self) -> impl Iterator<Item = &dyn Facilitator> {
         self.0.values().map(|v| &**v)
+    }
+
+    async fn collect_supported(&self) -> proto::SupportedResponse {
+        let mut kinds = Vec::new();
+        let mut signers: HashMap<String, Vec<String>> = HashMap::new();
+        for handler in self.values() {
+            let Ok(mut resp) = handler.supported().await else {
+                continue;
+            };
+            kinds.append(&mut resp.kinds);
+            for (family, addrs) in resp.signers {
+                signers.entry(family).or_default().extend(addrs);
+            }
+        }
+        for addrs in signers.values_mut() {
+            addrs.sort_unstable();
+            addrs.dedup();
+        }
+        proto::SupportedResponse {
+            kinds,
+            extensions: Vec::new(),
+            signers,
+        }
     }
 
     /// Looks up a handler by slug, returning an `Aborted` error if not found.
@@ -206,26 +229,6 @@ impl Facilitator for SchemeRegistry {
     }
 
     fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let mut kinds = Vec::new();
-            let mut signers: HashMap<String, Vec<String>> = HashMap::new();
-            for handler in self.values() {
-                if let Ok(mut resp) = handler.supported().await {
-                    kinds.append(&mut resp.kinds);
-                    for (family, addrs) in resp.signers {
-                        signers.entry(family).or_default().extend(addrs);
-                    }
-                }
-            }
-            for addrs in signers.values_mut() {
-                addrs.sort_unstable();
-                addrs.dedup();
-            }
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
-        })
+        Box::pin(async move { Ok(self.collect_supported().await) })
     }
 }

@@ -305,6 +305,10 @@ impl SolanaChainProviderLike for SolanaChainProvider {
         let num_required = tx.message.header().num_required_signatures as usize;
         let static_keys = tx.message.static_account_keys();
         // Find signer’s position
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "num_required <= static_keys.len() by Solana message invariant"
+        )]
         let pos = static_keys[..num_required]
             .iter()
             .position(|k| *k == self.pubkey())
@@ -315,10 +319,20 @@ impl SolanaChainProviderLike for SolanaChainProvider {
         if tx.signatures.len() < num_required {
             tx.signatures.resize(num_required, Signature::default());
         }
-        tx.signatures[pos] = signature;
+        #[allow(
+            clippy::indexing_slicing,
+            reason = "pos < num_required, resize ensures len >= num_required"
+        )]
+        {
+            tx.signatures[pos] = signature;
+        }
         Ok(tx)
     }
 
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "pubsub vs polling branches are inherently nested"
+    )]
     async fn send_and_confirm(
         &self,
         tx: &VersionedTransaction,
@@ -353,7 +367,7 @@ impl SolanaChainProviderLike for SolanaChainProvider {
             } else {
                 Err(SolanaChainProviderError::Transport(Box::new(
                     ClientErrorKind::Custom(
-                        "Can not get response from signatureSubscribe".to_string(),
+                        "Can not get response from signatureSubscribe".to_owned(),
                     ),
                 )))
             }

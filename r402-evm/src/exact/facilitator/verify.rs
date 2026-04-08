@@ -87,7 +87,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
 /// # Errors
 ///
 /// Returns [`PaymentVerificationError::AcceptedRequirementsMismatch`] on mismatch.
-pub fn assert_requirements_match(
+pub(super) fn assert_requirements_match(
     accepted: &types::v2::PaymentRequirements,
     requirements: &types::v2::PaymentRequirements,
 ) -> Result<(), PaymentVerificationError> {
@@ -115,7 +115,7 @@ pub fn assert_requirements_match(
     from = %authorizer,
     nonce = %nonce
 )))]
-pub async fn assert_nonce_unused<P: Provider>(
+pub(super) async fn assert_nonce_unused<P: Provider>(
     contract: &IEIP3009::IEIP3009Instance<P>,
     authorizer: &Address,
     nonce: &B256,
@@ -141,7 +141,7 @@ pub async fn assert_nonce_unused<P: Provider>(
 ///
 /// Returns [`PaymentVerificationError::Expired`] or [`PaymentVerificationError::Early`].
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub fn assert_time(
+pub(super) fn assert_time(
     valid_after: UnixTimestamp,
     valid_before: UnixTimestamp,
     clock_skew_tolerance: u64,
@@ -165,7 +165,7 @@ pub fn assert_time(
     network = %chain.as_chain_id(),
     asset = %asset_address
 )))]
-pub async fn assert_domain<P: Provider>(
+pub(super) async fn assert_domain<P: Provider>(
     chain: &Eip155ChainReference,
     token_contract: &IEIP3009::IEIP3009Instance<P>,
     asset_address: &Address,
@@ -212,7 +212,7 @@ pub async fn assert_domain<P: Provider>(
     max_required = %max_amount_required,
     token_contract = %ieip3009_token_contract.address()
 )))]
-pub async fn assert_enough_balance<P: Provider>(
+pub(super) async fn assert_enough_balance<P: Provider>(
     ieip3009_token_contract: &IEIP3009::IEIP3009Instance<P>,
     sender: &Address,
     max_amount_required: U256,
@@ -245,7 +245,7 @@ pub async fn assert_enough_balance<P: Provider>(
     sent = %sent,
     max_amount_required = %max_amount_required
 )))]
-pub fn assert_enough_value(
+pub(super) fn assert_enough_value(
     sent: &U256,
     max_amount_required: &U256,
 ) -> Result<(), PaymentVerificationError> {
@@ -261,7 +261,7 @@ pub fn assert_enough_value(
 /// # Errors
 ///
 /// Returns [`Eip155ExactError`] if signature verification or simulation fails.
-pub async fn verify_payment<P: Provider>(
+pub(super) async fn verify_payment<P: Provider>(
     provider: &P,
     contract: &IEIP3009::IEIP3009Instance<&P>,
     payment: &Eip3009Payment,
@@ -296,7 +296,7 @@ pub async fn verify_payment<P: Provider>(
                 .map_err(|e| PaymentVerificationError::InvalidSignature(e.to_string()))?;
             if !is_valid_signature_result {
                 return Err(PaymentVerificationError::InvalidSignature(
-                    "Chain reported signature to be invalid".to_string(),
+                    "Chain reported signature to be invalid".to_owned(),
                 )
                 .into());
             }
@@ -442,7 +442,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
 /// # Errors
 ///
 /// Returns [`Eip155ExactError`] if signature verification fails.
-pub async fn verify_permit2_payment<P: Provider>(
+pub(super) async fn verify_permit2_payment<P: Provider>(
     provider: &P,
     payment: &Permit2Payment,
     eip712_domain: &Eip712Domain,

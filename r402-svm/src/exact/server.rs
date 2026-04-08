@@ -14,7 +14,10 @@ use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
 
 impl SolanaExact {
     /// Creates a price tag for a Solana SPL token payment.
-    #[allow(clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "DeployedTokenAmount is consumed for its fields"
+    )]
     pub fn price_tag<A: Into<Address>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,
