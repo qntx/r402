@@ -1,4 +1,6 @@
-# r402
+<!-- markdownlint-disable MD033 MD041 MD036 -->
+
+# R402
 
 [![CI][ci-badge]][ci-url]
 [![License][license-badge]][license-url]

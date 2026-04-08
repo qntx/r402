@@ -27,6 +27,20 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 /// # Serialization
 ///
 /// Serializes to/from a colon-separated string: `"eip155:8453"`
+///
+/// # Examples
+///
+/// ```
+/// use r402::chain::ChainId;
+///
+/// let chain = ChainId::new("eip155", "8453");
+/// assert_eq!(chain.namespace(), "eip155");
+/// assert_eq!(chain.reference(), "8453");
+/// assert_eq!(chain.to_string(), "eip155:8453");
+///
+/// let parsed: ChainId = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp".parse().unwrap();
+/// assert_eq!(parsed.namespace(), "solana");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChainId {
     namespace: String,

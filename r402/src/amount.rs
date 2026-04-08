@@ -170,3 +170,76 @@ impl Display for MoneyAmount {
         write!(f, "{}", self.0.normalize())
     }
 }
+
+/// A numeric type that can be constructed by scaling a mantissa by a power of 10.
+///
+/// This trait abstracts the conversion from a parsed [`MoneyAmount`] mantissa
+/// to a chain-specific numeric type (e.g., `u64` for Solana, `U256` for EVM),
+/// enabling shared parsing logic in [`MoneyAmount::to_token_amount`].
+pub trait ScaleFromMantissa: Sized {
+    /// Constructs a value equal to `mantissa × 10^scale_diff`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MoneyAmountParseError::OutOfRange`] if the result overflows
+    /// the target type.
+    fn from_mantissa_scaled(mantissa: u128, scale_diff: u32)
+    -> Result<Self, MoneyAmountParseError>;
+}
+
+impl ScaleFromMantissa for u64 {
+    fn from_mantissa_scaled(
+        mantissa: u128,
+        scale_diff: u32,
+    ) -> Result<Self, MoneyAmountParseError> {
+        let multiplier = 10u64
+            .checked_pow(scale_diff)
+            .ok_or(MoneyAmountParseError::OutOfRange)?;
+        let digits = Self::try_from(mantissa).map_err(|_| MoneyAmountParseError::OutOfRange)?;
+        digits
+            .checked_mul(multiplier)
+            .ok_or(MoneyAmountParseError::OutOfRange)
+    }
+}
+
+impl ScaleFromMantissa for u128 {
+    fn from_mantissa_scaled(
+        mantissa: u128,
+        scale_diff: u32,
+    ) -> Result<Self, MoneyAmountParseError> {
+        let multiplier = 10u128
+            .checked_pow(scale_diff)
+            .ok_or(MoneyAmountParseError::OutOfRange)?;
+        mantissa
+            .checked_mul(multiplier)
+            .ok_or(MoneyAmountParseError::OutOfRange)
+    }
+}
+
+impl MoneyAmount {
+    /// Converts this amount to a token-specific integer scaled to the given decimal places.
+    ///
+    /// This is the shared logic used by chain-specific token deployments (EVM, Solana)
+    /// to convert human-readable amounts into on-chain token units.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The input precision exceeds the token's decimal places
+    /// - The scaled value overflows the target type `T`
+    pub fn to_token_amount<T: ScaleFromMantissa>(
+        self,
+        decimals: u8,
+    ) -> Result<T, MoneyAmountParseError> {
+        let scale = self.scale();
+        let token_scale = u32::from(decimals);
+        if scale > token_scale {
+            return Err(MoneyAmountParseError::WrongPrecision {
+                money: scale,
+                token: token_scale,
+            });
+        }
+        let scale_diff = token_scale - scale;
+        T::from_mantissa_scaled(self.mantissa(), scale_diff)
+    }
+}

@@ -232,3 +232,140 @@ impl Facilitator for SchemeRegistry {
         Box::pin(async move { Ok(self.collect_supported().await) })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct StubFacilitator(&'static str);
+
+    impl Facilitator for StubFacilitator {
+        fn verify(
+            &self,
+            _request: proto::VerifyRequest,
+        ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
+            let tag = self.0.to_owned();
+            Box::pin(async move { Ok(proto::VerifyResponse::valid(tag)) })
+        }
+        fn settle(
+            &self,
+            _request: proto::SettleRequest,
+        ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
+            Box::pin(async {
+                Ok(proto::SettleResponse::Success {
+                    payer: "0x".into(),
+                    transaction: "0x".into(),
+                    network: "eip155:1".into(),
+                    extensions: None,
+                })
+            })
+        }
+        fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+            Box::pin(async { Ok(proto::SupportedResponse::default()) })
+        }
+    }
+
+    fn make_request(network: &str, scheme: &str) -> proto::VerifyRequest {
+        serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": {
+                "accepted": { "network": network, "scheme": scheme }
+            },
+            "paymentRequirements": { "network": network }
+        })
+        .into()
+    }
+
+    #[test]
+    fn slug_display_format() {
+        let slug = SchemeSlug::new(ChainId::new("eip155", "8453"), "exact".into());
+        assert_eq!(slug.to_string(), "eip155:8453:exact");
+    }
+
+    #[test]
+    fn slug_wildcard_conversion() {
+        let slug = SchemeSlug::new(ChainId::new("eip155", "8453"), "exact".into());
+        assert!(!slug.is_wildcard());
+        let wild = slug.as_wildcard();
+        assert!(wild.is_wildcard());
+        assert_eq!(wild.chain_id.reference(), "*");
+        assert_eq!(wild.name, "exact");
+    }
+
+    #[test]
+    fn by_slug_exact_hit_and_miss() {
+        let mut registry = SchemeRegistry::new();
+        let slug = SchemeSlug::new(ChainId::new("eip155", "1"), "exact".into());
+        registry
+            .0
+            .insert(slug.clone(), Box::new(StubFacilitator("eth")));
+        assert!(registry.by_slug(&slug).is_some());
+
+        let miss = SchemeSlug::new(ChainId::new("eip155", "999"), "exact".into());
+        assert!(registry.by_slug(&miss).is_none());
+    }
+
+    #[test]
+    fn by_slug_wildcard_fallback() {
+        let mut registry = SchemeRegistry::new();
+        let wild = SchemeSlug::new(ChainId::new("eip155", "*"), "exact".into());
+        registry.0.insert(wild, Box::new(StubFacilitator("evm")));
+
+        let query = SchemeSlug::new(ChainId::new("eip155", "42161"), "exact".into());
+        assert!(registry.by_slug(&query).is_some());
+
+        let wrong_ns = SchemeSlug::new(ChainId::new("solana", "mainnet"), "exact".into());
+        assert!(registry.by_slug(&wrong_ns).is_none());
+    }
+
+    #[test]
+    fn by_slug_exact_takes_priority_over_wildcard() {
+        let mut registry = SchemeRegistry::new();
+        let wild = SchemeSlug::new(ChainId::new("eip155", "*"), "exact".into());
+        let exact = SchemeSlug::new(ChainId::new("eip155", "1"), "exact".into());
+        registry.0.insert(wild, Box::new(StubFacilitator("wild")));
+        registry
+            .0
+            .insert(exact.clone(), Box::new(StubFacilitator("exact")));
+
+        assert!(registry.by_slug(&exact).is_some());
+    }
+
+    #[tokio::test]
+    async fn dispatch_verify_routes_to_correct_handler() {
+        let mut registry = SchemeRegistry::new();
+        let slug = SchemeSlug::new(ChainId::new("eip155", "8453"), "exact".into());
+        registry
+            .0
+            .insert(slug, Box::new(StubFacilitator("base_handler")));
+
+        let req = make_request("eip155:8453", "exact");
+        let resp = Facilitator::verify(&registry, req).await.unwrap();
+        assert!(resp.is_valid());
+    }
+
+    #[tokio::test]
+    async fn dispatch_verify_no_handler_returns_aborted() {
+        let registry = SchemeRegistry::new();
+        let req = make_request("eip155:999", "exact");
+        let err = Facilitator::verify(&registry, req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. }
+            if reason == "no_facilitator_for_network"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_verify_malformed_request_returns_aborted() {
+        let registry = SchemeRegistry::new();
+        let req: proto::VerifyRequest = serde_json::json!({}).into();
+        let err = Facilitator::verify(&registry, req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { .. }));
+    }
+
+    #[tokio::test]
+    async fn collect_supported_empty_registry() {
+        let registry = SchemeRegistry::new();
+        let resp = Facilitator::supported(&registry).await.unwrap();
+        assert!(resp.kinds.is_empty());
+        assert!(resp.signers.is_empty());
+    }
+}

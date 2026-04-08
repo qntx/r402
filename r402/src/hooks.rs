@@ -323,3 +323,228 @@ where
         Box::pin(async move { self.inner.supported().await })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+
+    struct MockFacilitator {
+        fail: bool,
+    }
+
+    impl MockFacilitator {
+        fn ok() -> Self {
+            Self { fail: false }
+        }
+        fn failing() -> Self {
+            Self { fail: true }
+        }
+        fn mock_verify(&self) -> Result<proto::VerifyResponse, FacilitatorError> {
+            if self.fail {
+                Err(FacilitatorError::OnchainFailure("mock".into()))
+            } else {
+                Ok(proto::VerifyResponse::valid("0xPAYER".into()))
+            }
+        }
+        fn mock_settle(&self) -> Result<proto::SettleResponse, FacilitatorError> {
+            if self.fail {
+                Err(FacilitatorError::OnchainFailure("mock".into()))
+            } else {
+                Ok(proto::SettleResponse::Success {
+                    payer: "0xPAYER".into(),
+                    transaction: "0xTX".into(),
+                    network: "eip155:1".into(),
+                    extensions: None,
+                })
+            }
+        }
+    }
+
+    impl Facilitator for MockFacilitator {
+        fn verify(
+            &self,
+            _request: proto::VerifyRequest,
+        ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
+            Box::pin(async move { self.mock_verify() })
+        }
+
+        fn settle(
+            &self,
+            _request: proto::SettleRequest,
+        ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
+            Box::pin(async move { self.mock_settle() })
+        }
+
+        fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
+            Box::pin(async { Ok(proto::SupportedResponse::default()) })
+        }
+    }
+
+    struct AbortVerifyHook;
+    impl FacilitatorHooks for AbortVerifyHook {
+        fn before_verify<'a>(&'a self, _: &'a VerifyContext) -> BoxFuture<'a, HookDecision> {
+            Box::pin(async {
+                HookDecision::Abort {
+                    reason: "blocked".into(),
+                    message: "test".into(),
+                }
+            })
+        }
+    }
+
+    struct AbortSettleHook;
+    impl FacilitatorHooks for AbortSettleHook {
+        fn before_settle<'a>(&'a self, _: &'a SettleContext) -> BoxFuture<'a, HookDecision> {
+            Box::pin(async {
+                HookDecision::Abort {
+                    reason: "blocked".into(),
+                    message: "test".into(),
+                }
+            })
+        }
+    }
+
+    struct RecoverVerifyHook;
+    impl FacilitatorHooks for RecoverVerifyHook {
+        fn on_verify_failure<'a>(
+            &'a self,
+            _: &'a VerifyContext,
+            _: &'a FacilitatorError,
+        ) -> BoxFuture<'a, FailureRecovery<proto::VerifyResponse>> {
+            Box::pin(async {
+                FailureRecovery::Recovered(proto::VerifyResponse::valid("0xREC".into()))
+            })
+        }
+    }
+
+    struct RecoverSettleHook;
+    impl FacilitatorHooks for RecoverSettleHook {
+        fn on_settle_failure<'a>(
+            &'a self,
+            _: &'a SettleContext,
+            _: &'a FacilitatorError,
+        ) -> BoxFuture<'a, FailureRecovery<proto::SettleResponse>> {
+            Box::pin(async {
+                FailureRecovery::Recovered(proto::SettleResponse::Success {
+                    payer: "0xREC".into(),
+                    transaction: "0xREC_TX".into(),
+                    network: "eip155:1".into(),
+                    extensions: None,
+                })
+            })
+        }
+    }
+
+    struct NoopHook;
+    impl FacilitatorHooks for NoopHook {}
+
+    static SECOND_HOOK_CALLS: AtomicUsize = AtomicUsize::new(0);
+    struct SecondAbortHook;
+    impl FacilitatorHooks for SecondAbortHook {
+        fn before_verify<'a>(&'a self, _: &'a VerifyContext) -> BoxFuture<'a, HookDecision> {
+            Box::pin(async {
+                SECOND_HOOK_CALLS.fetch_add(1, Ordering::Relaxed);
+                HookDecision::Abort {
+                    reason: "second".into(),
+                    message: String::new(),
+                }
+            })
+        }
+    }
+
+    fn dummy_request() -> proto::VerifyRequest {
+        serde_json::json!({}).into()
+    }
+
+    fn dummy_settle() -> proto::SettleRequest {
+        serde_json::json!({}).into()
+    }
+
+    #[tokio::test]
+    async fn verify_no_hooks_passes_through() {
+        let hooked = HookedFacilitator::new(MockFacilitator::ok());
+        assert_eq!(hooked.hook_count(), 0);
+        let resp = hooked.verify(dummy_request()).await.unwrap();
+        assert!(resp.is_valid());
+    }
+
+    #[tokio::test]
+    async fn verify_before_hook_aborts() {
+        let hooked = HookedFacilitator::new(MockFacilitator::ok()).with_hook(AbortVerifyHook);
+        let err = hooked.verify(dummy_request()).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
+    }
+
+    #[tokio::test]
+    async fn verify_failure_hook_recovers() {
+        let hooked =
+            HookedFacilitator::new(MockFacilitator::failing()).with_hook(RecoverVerifyHook);
+        let resp = hooked.verify(dummy_request()).await.unwrap();
+        assert!(resp.is_valid());
+    }
+
+    #[tokio::test]
+    async fn verify_failure_hook_propagates_by_default() {
+        let hooked = HookedFacilitator::new(MockFacilitator::failing()).with_hook(NoopHook);
+        assert!(hooked.verify(dummy_request()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn settle_before_hook_aborts() {
+        let hooked = HookedFacilitator::new(MockFacilitator::ok()).with_hook(AbortSettleHook);
+        let err = hooked.settle(dummy_settle()).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
+    }
+
+    #[tokio::test]
+    async fn settle_success_passes_through() {
+        let hooked = HookedFacilitator::new(MockFacilitator::ok());
+        let resp = hooked.settle(dummy_settle()).await.unwrap();
+        assert!(resp.is_success());
+    }
+
+    #[tokio::test]
+    async fn settle_failure_hook_recovers() {
+        let hooked =
+            HookedFacilitator::new(MockFacilitator::failing()).with_hook(RecoverSettleHook);
+        let resp = hooked.settle(dummy_settle()).await.unwrap();
+        assert!(resp.is_success());
+    }
+
+    #[tokio::test]
+    async fn first_abort_hook_wins_remaining_skipped() {
+        SECOND_HOOK_CALLS.store(0, Ordering::Relaxed);
+
+        let hooked = HookedFacilitator::new(MockFacilitator::ok())
+            .with_hook(AbortVerifyHook)
+            .with_hook(SecondAbortHook);
+
+        let err = hooked.verify(dummy_request()).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
+        assert_eq!(
+            SECOND_HOOK_CALLS.load(Ordering::Relaxed),
+            0,
+            "second hook must not run after first aborts"
+        );
+    }
+
+    #[tokio::test]
+    async fn add_hook_dynamic() {
+        let mut hooked = HookedFacilitator::new(MockFacilitator::ok());
+        assert_eq!(hooked.hook_count(), 0);
+        hooked.add_hook(NoopHook);
+        assert_eq!(hooked.hook_count(), 1);
+        let resp = hooked.verify(dummy_request()).await.unwrap();
+        assert!(resp.is_valid());
+    }
+
+    #[tokio::test]
+    async fn supported_delegates_to_inner() {
+        let hooked = HookedFacilitator::new(MockFacilitator::ok());
+        let resp = hooked.supported().await.unwrap();
+        assert!(resp.kinds.is_empty());
+        assert!(resp.signers.is_empty());
+    }
+}

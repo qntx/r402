@@ -190,36 +190,16 @@ impl SolanaTokenDeployment {
     ///
     /// # Errors
     ///
-    /// Returns [`MoneyAmountParseError`] if the value cannot be parsed or exceeds precision.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the mantissa does not fit in a `u64` (should not occur for valid inputs).
+    /// Returns [`MoneyAmountParseError`] if the value cannot be parsed, exceeds precision,
+    /// or overflows `u64`.
     pub fn parse<V>(&self, v: V) -> Result<DeployedTokenAmount<u64, Self>, MoneyAmountParseError>
     where
         V: TryInto<MoneyAmount>,
         MoneyAmountParseError: From<<V as TryInto<MoneyAmount>>::Error>,
     {
-        let money_amount = v.try_into()?;
-        let scale = money_amount.scale();
-        let token_scale = u32::from(self.decimals);
-        if scale > token_scale {
-            return Err(MoneyAmountParseError::WrongPrecision {
-                money: scale,
-                token: token_scale,
-            });
-        }
-        let scale_diff = token_scale - scale;
-        let multiplier = 10u64
-            .checked_pow(scale_diff)
-            .ok_or(MoneyAmountParseError::OutOfRange)?;
-        let digits = u64::try_from(money_amount.mantissa())
-            .map_err(|_| MoneyAmountParseError::OutOfRange)?;
-        let value = digits
-            .checked_mul(multiplier)
-            .ok_or(MoneyAmountParseError::OutOfRange)?;
+        let amount = v.try_into()?.to_token_amount(self.decimals)?;
         Ok(DeployedTokenAmount {
-            amount: value,
+            amount,
             token: *self,
         })
     }

@@ -4,11 +4,10 @@
 //! of EVM-specific values in the x402 protocol wire format.
 
 use std::fmt::{Display, Formatter};
-use std::ops::Mul;
 use std::str::FromStr;
 
 use alloy_primitives::{Address, U256, hex};
-use r402::amount::{MoneyAmount, MoneyAmountParseError};
+use r402::amount::{MoneyAmount, MoneyAmountParseError, ScaleFromMantissa};
 use r402::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -259,23 +258,26 @@ impl Eip155TokenDeployment {
         V: TryInto<MoneyAmount>,
         MoneyAmountParseError: From<<V as TryInto<MoneyAmount>>::Error>,
     {
-        let money_amount = v.try_into()?;
-        let scale = money_amount.scale();
-        let token_scale = u32::from(self.decimals);
-        if scale > token_scale {
-            return Err(MoneyAmountParseError::WrongPrecision {
-                money: scale,
-                token: token_scale,
-            });
-        }
-        let scale_diff = token_scale - scale;
-        let multiplier = U256::from(10).pow(U256::from(scale_diff));
-        let digits = money_amount.mantissa();
-        let value = U256::from(digits).mul(multiplier);
+        let TokenAmount(amount) = v.try_into()?.to_token_amount(self.decimals)?;
         Ok(DeployedTokenAmount {
-            amount: value,
+            amount,
             token: self.clone(),
         })
+    }
+}
+
+impl ScaleFromMantissa for TokenAmount {
+    fn from_mantissa_scaled(
+        mantissa: u128,
+        scale_diff: u32,
+    ) -> Result<Self, MoneyAmountParseError> {
+        let multiplier = U256::from(10)
+            .checked_pow(U256::from(scale_diff))
+            .ok_or(MoneyAmountParseError::OutOfRange)?;
+        let value = U256::from(mantissa)
+            .checked_mul(multiplier)
+            .ok_or(MoneyAmountParseError::OutOfRange)?;
+        Ok(Self(value))
     }
 }
 
