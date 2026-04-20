@@ -364,8 +364,12 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     if is_receiver_missing {
         return Err(PaymentVerificationError::RecipientMismatch);
     }
-    let instruction_amount = transfer_checked_instruction.amount;
-    if instruction_amount < transfer_requirement.amount {
+    // Strict equality: the exact scheme settles the declared amount, no more,
+    // no less. Overpayment is not "close enough" — it silently leaks value to
+    // the recipient and conflicts with the upto scheme's semantics, which is
+    // where variable amounts belong. Matches Go SDK
+    // (`mechanisms/svm/exact/facilitator.go: verifyTransferInstruction`).
+    if transfer_checked_instruction.amount != transfer_requirement.amount {
         return Err(PaymentVerificationError::InvalidPaymentAmount);
     }
     Ok(transfer_checked_instruction)
