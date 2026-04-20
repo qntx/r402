@@ -78,10 +78,12 @@ sol! {
 sol! {
     /// x402 exact payment Permit2 proxy interface.
     ///
-    /// Deployed at `0x4020615294c913F045dc10f0a5cdEbd86c280001`.
-    /// Settles Permit2-based payments by calling through the canonical Permit2 contract.
+    /// Deployed at the canonical address [`X402_EXACT_PERMIT2_PROXY`](super::super::types::X402_EXACT_PERMIT2_PROXY)
+    /// (`0x402085c248EeA27D92E8b30b2C58ed07f9E20001`). The proxy validates the EIP-712
+    /// witness against the deployed typehash `Witness(address to,uint256 validAfter)` and
+    /// calls through to the canonical Permit2 contract.
     ///
-    /// Reference: x402 protocol specification
+    /// Reference: x402 protocol specification, exact EVM scheme.
     #[allow(missing_docs, reason = "sol! generated interface")]
     #[derive(Debug)]
     #[sol(rpc)]
@@ -100,7 +102,6 @@ sol! {
         struct Witness {
             address to;
             uint256 validAfter;
-            bytes extra;
         }
 
         function settle(
@@ -109,6 +110,12 @@ sol! {
             Witness witness,
             bytes signature
         ) external;
+
+        /// Returns the canonical Permit2 contract address used by this proxy.
+        ///
+        /// Useful for runtime integrity checks (verify the deployed address really
+        /// is the x402 proxy and not an arbitrary EOA).
+        function PERMIT2() external view returns (address);
     }
 }
 

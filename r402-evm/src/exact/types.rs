@@ -16,12 +16,28 @@ use crate::chain::TokenAmount;
 /// Canonical Uniswap Permit2 contract address (same on all EVM chains via CREATE2).
 pub const PERMIT2_ADDRESS: Address = address!("0x000000000022D473030F116dDEE9F6B43aC78BA3");
 
-/// x402 exact payment Permit2 proxy contract address.
+/// Canonical x402 exact payment Permit2 proxy address.
+///
+/// Vanity address `0x4020...0001`, deterministically deployed via CREATE2 with the
+/// same address on every supported EVM chain. The proxy validates EIP-712 witness
+/// data and atomically performs `permitTransferFromWithWitness` against the canonical
+/// Permit2 contract.
+///
+/// Source of truth: [x402 spec — Exact EVM scheme](https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_evm.md)
+/// and the Go reference SDK (`go/mechanisms/evm/constants.go`).
 pub const X402_EXACT_PERMIT2_PROXY: Address =
-    address!("0x4020615294c913F045dc10f0a5cdEbd86c280001");
+    address!("0x402085c248EeA27D92E8b30b2C58ed07f9E20001");
 
-/// x402 upto payment Permit2 proxy contract address.
-pub const X402_UPTO_PERMIT2_PROXY: Address = address!("0x4020633461b2895a48930Ff97eE8fCdE8E520002");
+/// Canonical x402 upto payment Permit2 proxy address.
+///
+/// Vanity address `0x4020...0002`, deterministically deployed via CREATE2 with the
+/// same address on every supported EVM chain. Mirrors [`X402_EXACT_PERMIT2_PROXY`]
+/// but accepts a `Witness` containing an additional `facilitator` field that binds
+/// the signed permit to a specific facilitator (anti-reflection).
+///
+/// Source of truth: [x402 spec — Upto EVM scheme](https://github.com/x402-foundation/x402/blob/main/specs/schemes/upto/scheme_upto_evm.md)
+/// and the Go reference SDK (`go/mechanisms/evm/constants.go`).
+pub const X402_UPTO_PERMIT2_PROXY: Address = address!("0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002");
 
 /// Determines which on-chain mechanism is used for token transfers.
 ///
@@ -108,25 +124,27 @@ pub struct Permit2TokenPermissions {
     pub amount: TokenAmount,
 }
 
-/// Witness data verified on-chain by `x402Permit2Proxy`.
+/// Witness data verified on-chain by `x402ExactPermit2Proxy`.
 ///
 /// Included in the EIP-712 signature and checked by the proxy contract.
-/// Note: upper time bound is enforced by Permit2's `deadline` field.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The upper time bound is enforced by Permit2's `deadline` field on the outer
+/// `PermitWitnessTransferFrom` struct, so only `validAfter` lives in the witness.
+///
+/// The on-chain typehash is hashed from `"Witness(address to,uint256 validAfter)"`,
+/// matching the canonical [exact EVM scheme](https://github.com/x402-foundation/x402/blob/main/specs/schemes/exact/scheme_exact_evm.md).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Permit2Witness {
     /// Destination address for funds.
     pub to: Address,
     /// Unix timestamp — payment invalid before this time.
     pub valid_after: TokenAmount,
-    /// Extra data (typically `0x` for empty).
-    pub extra: Bytes,
 }
 
 /// Permit2 authorization parameters.
 ///
 /// Maps to the `PermitWitnessTransferFrom` struct used by the Permit2 contract.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Permit2Authorization {
     /// Signer / owner address.
@@ -276,12 +294,12 @@ sol!(
 
     /// EIP-712 struct for x402 Permit2 witness data.
     ///
-    /// Field order MUST match the on-chain Permit2 contract definition.
+    /// Field order and typehash MUST match the deployed `x402ExactPermit2Proxy`
+    /// contract definition (`Witness(address to,uint256 validAfter)`).
     #[derive(Serialize, Deserialize)]
     struct Witness {
         address to;
         uint256 validAfter;
-        bytes extra;
     }
 
     /// EIP-712 struct for Permit2 `PermitWitnessTransferFrom`.
@@ -325,4 +343,54 @@ pub mod v2 {
         ChecksummedAddress,
         PaymentRequirementsExtra,
     >;
+}
+
+#[cfg(test)]
+#[cfg(any(feature = "facilitator", feature = "client"))]
+mod tests {
+    use alloy_primitives::{U256, keccak256};
+    use alloy_sol_types::SolStruct;
+
+    use super::*;
+
+    /// Typehash for the x402 `Witness` struct MUST equal the on-chain value
+    /// baked into the `x402ExactPermit2Proxy` contract. If the `sol!` macro
+    /// ever emits a field in the wrong order or with the wrong type, a signed
+    /// Permit2 request would produce a hash that the proxy's `ecrecover`
+    /// cannot match, breaking every payment on every chain. The authoritative
+    /// byte string comes from the x402 spec, not from the Rust struct — this
+    /// test cross-checks the macro expansion against an independent source.
+    #[test]
+    fn witness_typehash_equals_spec_byte_string() {
+        let witness = Witness {
+            to: Address::ZERO,
+            validAfter: U256::ZERO,
+        };
+        let expected = keccak256(b"Witness(address to,uint256 validAfter)");
+        assert_eq!(witness.eip712_type_hash(), expected);
+    }
+
+    /// Same cross-check for the top-level `PermitWitnessTransferFrom` typehash.
+    /// The canonical byte string is defined by the Uniswap Permit2 contract
+    /// and reproduced verbatim in the x402 spec's EVM exact scheme section.
+    #[test]
+    fn permit_witness_transfer_from_typehash_equals_spec_byte_string() {
+        let permit = PermitWitnessTransferFrom {
+            permitted: TokenPermissions {
+                token: Address::ZERO,
+                amount: U256::ZERO,
+            },
+            spender: Address::ZERO,
+            nonce: U256::ZERO,
+            deadline: U256::ZERO,
+            witness: Witness {
+                to: Address::ZERO,
+                validAfter: U256::ZERO,
+            },
+        };
+        let expected = keccak256(
+            b"PermitWitnessTransferFrom(TokenPermissions permitted,address spender,uint256 nonce,uint256 deadline,Witness witness)TokenPermissions(address token,uint256 amount)Witness(address to,uint256 validAfter)",
+        );
+        assert_eq!(permit.eip712_type_hash(), expected);
+    }
 }

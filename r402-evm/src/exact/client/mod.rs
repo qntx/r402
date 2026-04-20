@@ -30,7 +30,7 @@ mod permit2;
 use std::future::Future;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, Bytes, FixedBytes, Signature, U256};
+use alloy_primitives::{Address, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolStruct, eip712_domain};
 #[cfg(feature = "client-provider")]
@@ -225,7 +225,6 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
         witness: SolWitness {
             to: params.pay_to,
             validAfter: U256::from(valid_after_secs),
-            extra: Bytes::new(),
         },
     };
 
@@ -247,7 +246,6 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
         witness: Permit2Witness {
             to: params.pay_to,
             valid_after: TokenAmount::from(U256::from(valid_after_secs)),
-            extra: Bytes::new(),
         },
     };
 

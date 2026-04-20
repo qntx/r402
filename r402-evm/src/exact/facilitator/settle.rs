@@ -307,7 +307,6 @@ where
     let witness = IX402Permit2Proxy::Witness {
         to: payment.to,
         validAfter: payment.valid_after,
-        extra: payment.extra.clone(),
     };
 
     let settle_call = proxy.settle(permit, payment.from, witness, payment.signature.clone());

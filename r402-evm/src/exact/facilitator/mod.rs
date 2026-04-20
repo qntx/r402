@@ -115,8 +115,6 @@ pub struct Permit2Payment {
     pub deadline: U256,
     /// Payment invalid before this timestamp.
     pub valid_after: U256,
-    /// Extra witness data (typically empty `0x`).
-    pub extra: Bytes,
     /// EIP-712 signature bytes.
     pub signature: Bytes,
 }

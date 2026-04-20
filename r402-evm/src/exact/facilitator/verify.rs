@@ -426,7 +426,6 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         nonce: auth.nonce.into(),
         deadline: auth.deadline.into(),
         valid_after: auth.witness.valid_after.into(),
-        extra: auth.witness.extra.clone(),
         signature: permit2.signature.clone(),
     };
 
@@ -458,7 +457,6 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
         witness: SolWitness {
             to: payment.to,
             validAfter: payment.valid_after,
-            extra: payment.extra.clone(),
         },
     };
 
