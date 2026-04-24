@@ -6,8 +6,8 @@
 [![License][license-badge]][license-url]
 [![Rust][rust-badge]][rust-url]
 
-[ci-badge]: https://github.com/qntx/r402/actions/workflows/rust.yml/badge.svg
-[ci-url]: https://github.com/qntx/r402/actions/workflows/rust.yml
+[ci-badge]: https://github.com/qntx/r402/actions/workflows/ci.yml/badge.svg
+[ci-url]: https://github.com/qntx/r402/actions/workflows/ci.yml
 [license-badge]: https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg
 [license-url]: LICENSE-MIT
 [rust-badge]: https://img.shields.io/badge/rust-edition%202024-orange.svg
@@ -16,8 +16,6 @@
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
 r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, composable lifecycle hooks, and 44 built-in chain deployments across EVM and Solana.
-
-See [Security](SECURITY.md) before using in production.
 
 ## Crates
 
