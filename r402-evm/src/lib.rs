@@ -19,6 +19,7 @@
 //!
 //! - [`chain`] - Core EVM chain types, providers, and configuration
 //! - [`exact`] - EIP-155 "exact" payment scheme
+//! - [`upto`]  - EIP-155 "upto" payment scheme (Permit2, usage-based)
 //!
 //! # Feature Flags
 //!
@@ -35,9 +36,13 @@ use compact_str as _;
 
 pub mod chain;
 pub mod exact;
+pub mod upto;
 
 mod networks;
 pub use exact::Eip155Exact;
 #[cfg(feature = "client")]
 pub use exact::client::{Eip155ExactClient, Eip155ExactClientBuilder, Permit2Approver};
 pub use networks::*;
+pub use upto::Eip155Upto;
+#[cfg(feature = "client")]
+pub use upto::client::Eip155UptoClient;

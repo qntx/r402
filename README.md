@@ -15,7 +15,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, composable lifecycle hooks, and 44 built-in chain deployments across EVM and Solana.
+r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and 44 built-in chain deployments across EVM and Solana.
 
 ## Crates
 
@@ -83,6 +83,36 @@ let client = reqwest::Client::new().with_payments(x402);
 
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
+
+### Usage-Based Pricing (`upto` Scheme)
+
+The `upto` scheme lets the buyer sign a **maximum** while the resource server picks the final charge at request time (meter reads, token usage, dynamic tiers). The facilitator settles for any value in `[0, max]`; a final amount of `0` returns no on-chain transaction.
+
+```rust
+use alloy_primitives::address;
+use axum::{Router, response::IntoResponse, routing::post};
+use r402_evm::{Eip155Upto, USDC};
+use r402_http::server::{UptoActualAmount, X402Middleware};
+
+async fn meter(/* ... */) -> impl IntoResponse {
+    let mut response = "result".into_response();
+    // Charge 0.125 USDC for this call.
+    response.extensions_mut().insert(UptoActualAmount::new("125000"));
+    response
+}
+
+let layer = X402Middleware::new("https://facilitator.example.com")
+    .with_price_tag(Eip155Upto::price_tag(
+        address!("0xYourPayToAddress"),
+        USDC::base().amount(1_000_000u64), // up to 1 USDC
+    ));
+let app = Router::new().route("/meter", post(meter).layer(layer));
+```
+
+Handlers opt in by inserting `UptoActualAmount` into the response extensions; the middleware patches `paymentRequirements.amount` before forwarding the settle request. Buyers sign with `Eip155UptoClient` (shares the Permit2 auto-approve plumbing with `Eip155ExactClient`).
+
+> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`.
+> Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
 
 ## Settlement Modes
 
@@ -173,6 +203,7 @@ sequenceDiagram
 | Aspect | Details |
 | --- | --- |
 | Built-in chains | **44** — 42 EVM (EIP-155) + 2 Solana |
+| Schemes | **`exact`** (fixed amount, ERC-3009 + Permit2) + **`upto`** (usage-based, Permit2-only, EVM) |
 | Transfer methods | **Dual path** — ERC-3009 `transferWithAuthorization` + Permit2 proxy |
 | Lifecycle hooks | **`FacilitatorHooks`** (verify/settle) + **`ClientHooks`** (payment creation) |
 | Async model | **Zero `async_trait`** in core — RPITIT / `Pin<Box<dyn Future>>` |

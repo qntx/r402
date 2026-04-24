@@ -444,12 +444,27 @@ where
             return Ok(response.into_response());
         }
 
-        let settlement = verified.settle(&self.facilitator).await?;
+        let mut response = response.into_response();
+        // Upto-scheme amount override: handlers insert UptoActualAmount into
+        // the response extensions to tell us the usage-based charge.
+        let override_amount = response
+            .extensions_mut()
+            .remove::<super::upto::UptoActualAmount>();
+
+        let settlement = verified
+            .settle_with_override(
+                &self.facilitator,
+                override_amount
+                    .as_ref()
+                    .map(super::upto::UptoActualAmount::as_str),
+            )
+            .await?;
         let header_value = settlement_to_header(&settlement)?;
 
-        let mut res = response;
-        res.headers_mut().insert("Payment-Response", header_value);
-        Ok(res.into_response())
+        response
+            .headers_mut()
+            .insert("Payment-Response", header_value);
+        Ok(response)
     }
 }
 
@@ -597,6 +612,34 @@ impl VerifiedPayment {
         self,
         facilitator: &F,
     ) -> Result<wire::SettleResponse, PaygateError> {
+        self.settle_with_override(facilitator, None).await
+    }
+
+    /// Like [`settle`](Self::settle) but overrides
+    /// `paymentRequirements.amount` before forwarding the settle request.
+    ///
+    /// Intended for the **upto** scheme, where the resource server determines
+    /// the actual charge at request time from the inserted
+    /// [`UptoActualAmount`](super::UptoActualAmount) response extension.
+    /// Passing `None` is equivalent to [`settle`](Self::settle).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PaygateError::Settlement`] when the override payload is
+    /// malformed, the facilitator rejects the settlement, or the on-chain
+    /// transaction fails.
+    pub async fn settle_with_override<F: Facilitator>(
+        mut self,
+        facilitator: &F,
+        actual_amount: Option<&str>,
+    ) -> Result<wire::SettleResponse, PaygateError> {
+        if let Some(amount) = actual_amount {
+            self.settle_request
+                .set_settlement_amount(amount)
+                .map_err(|e| {
+                    PaygateError::Settlement(format!("upto amount override failed: {e}"))
+                })?;
+        }
         let settlement = facilitator
             .settle(self.settle_request)
             .await

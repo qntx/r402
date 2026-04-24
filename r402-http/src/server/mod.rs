@@ -22,6 +22,7 @@ pub mod layer;
 pub mod paygate;
 pub mod pricing;
 pub mod status;
+pub mod upto;
 
 pub use cors::{X402_EXPOSED_HEADERS, ensure_expose_headers};
 pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
@@ -32,3 +33,4 @@ pub use paygate::{
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use status::reason_to_status;
+pub use upto::UptoActualAmount;

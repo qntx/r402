@@ -61,6 +61,13 @@ pub enum ErrorReason {
     /// The number of memo instructions attached to a transaction is invalid
     /// (spec requires exactly one when `extra.memo` is declared).
     MemoInstructionCountInvalid,
+    /// The resource server requested a settlement amount exceeding the
+    /// buyer's signed maximum authorisation (upto scheme).
+    ///
+    /// Serialises as `invalid_upto_evm_payload_settlement_exceeds_amount`
+    /// per the x402 v2 `schemes/upto/scheme_upto_evm.md` specification (§4).
+    #[serde(rename = "invalid_upto_evm_payload_settlement_exceeds_amount")]
+    SettlementExceedsAmount,
     /// A catch-all for unexpected errors (RPC failure, internal bug, ...).
     UnexpectedError,
 }
@@ -89,6 +96,7 @@ impl ErrorReason {
             Self::DuplicateSettlement => "duplicate_settlement",
             Self::MemoMismatch => "memo_mismatch",
             Self::MemoInstructionCountInvalid => "memo_instruction_count_invalid",
+            Self::SettlementExceedsAmount => "invalid_upto_evm_payload_settlement_exceeds_amount",
             Self::UnexpectedError => "unexpected_error",
         }
     }

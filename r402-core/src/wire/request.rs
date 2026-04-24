@@ -119,6 +119,34 @@ impl SettleRequest {
     pub fn network(&self) -> &str {
         network_from_json(&self.0)
     }
+
+    /// Overrides `paymentRequirements.amount` in-place.
+    ///
+    /// Intended for the **upto** scheme, where the resource server decides
+    /// the actual settlement amount at request time (≤ the signed maximum).
+    /// For the exact scheme this is a no-op: the amount must already equal
+    /// what the buyer signed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::InvalidFormat`] when the JSON does not
+    /// have a `paymentRequirements` object.
+    pub fn set_settlement_amount(&mut self, amount: &str) -> Result<(), VerificationError> {
+        let req = self
+            .0
+            .get_mut("paymentRequirements")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| {
+                VerificationError::InvalidFormat(
+                    "settle request missing paymentRequirements object".into(),
+                )
+            })?;
+        let _ = req.insert(
+            "amount".to_owned(),
+            serde_json::Value::String(amount.to_owned()),
+        );
+        Ok(())
+    }
 }
 
 impl From<serde_json::Value> for SettleRequest {
@@ -199,5 +227,27 @@ mod tests {
     #[test]
     fn slug_rejects_invalid_caip2() {
         assert!(scheme_slug_from_json(&v2_json("not-a-caip2", "exact")).is_none());
+    }
+
+    #[test]
+    fn settle_amount_override_rewrites_payment_requirements() {
+        let mut settle = SettleRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": { "accepted": { "network": "eip155:8453", "scheme": "upto" } },
+            "paymentRequirements": { "network": "eip155:8453", "amount": "5000000" }
+        }));
+        settle.set_settlement_amount("1500000").unwrap();
+        let json = settle.into_json();
+        assert_eq!(
+            json["paymentRequirements"]["amount"].as_str(),
+            Some("1500000")
+        );
+    }
+
+    #[test]
+    fn settle_amount_override_errors_when_requirements_missing() {
+        let mut settle = SettleRequest::from(serde_json::json!({}));
+        let err = settle.set_settlement_amount("1").unwrap_err();
+        assert!(matches!(err, VerificationError::InvalidFormat(_)));
     }
 }

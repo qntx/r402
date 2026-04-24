@@ -35,6 +35,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **TTL cache primitive.** `r402-core::cache::TtlSet` and the `Duplicate` outcome type.
 - **CORS / status helpers.** `r402-http::server::{cors, status}`: `X402_EXPOSED_HEADERS`, `ensure_expose_headers`, and `reason_to_status` are now part of the public API.
 - **`r402-mcp` crate.** Placeholder for the forthcoming MCP transport implementation.
+- **Upto scheme (`r402-evm::upto`).** Implements the x402 v2 `upto` scheme (`schemes/upto/scheme_upto_evm.md`): Permit2-only `PermitWitnessTransferFrom` with a witness carrying `to`, `validAfter`, and optional `extra` bytes. The buyer signs a maximum, and the resource server settles for any amount in `[0, max]` (`actualAmount == 0` triggers a zero-shortcut with no on-chain tx). Ships with `Eip155Upto` (server price-tag), `Eip155UptoClient` (buyer signer), `Eip155UptoFacilitator` (verify + settle), `UptoPermit2Payload` wire type, dedicated `X402_UPTO_PERMIT2_PROXY` address (`0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002`), and `ErrorReason::SettlementExceedsAmount` (`invalid_upto_evm_payload_settlement_exceeds_amount`). `SettleRequest::set_settlement_amount` lets resource servers override `paymentRequirements.amount` in-place.
+- **HTTP upto bridge (`r402-http::server::upto`).** `UptoActualAmount` response extension lets handlers communicate usage-based charges back to the middleware. `VerifiedPayment::settle_with_override` forwards the amount to the facilitator. Honoured by `SettlementMode::Sequential`; concurrent / background modes settle at the signed maximum.
 
 ### Fixed
 

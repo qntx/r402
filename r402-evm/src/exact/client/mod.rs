@@ -25,7 +25,7 @@
 //! payment and sends an `approve` transaction if needed, making the experience
 //! as seamless as EIP-3009.
 
-mod permit2;
+pub(crate) mod permit2;
 
 use std::future::Future;
 use std::sync::Arc;

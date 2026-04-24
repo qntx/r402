@@ -16,7 +16,7 @@ const EIP6492_MAGIC_SUFFIX: [u8; 32] =
 
 /// Canonical data required to verify a signature.
 #[derive(Debug, Clone)]
-pub(super) struct SignedMessage {
+pub(crate) struct SignedMessage {
     /// Expected signer (an EOA or contract wallet).
     pub address: Address,
     /// 32-byte digest that was signed (typically an EIP-712 hash).
@@ -61,7 +61,7 @@ impl SignedMessage {
 /// - **EIP-6492 wrapped signatures**: used for counterfactual contract wallets.
 /// - **EIP-1271 signatures**: plain contract (or EOA-style) signatures.
 #[derive(Debug, Clone)]
-pub(super) enum StructuredSignature {
+pub(crate) enum StructuredSignature {
     /// An EIP-6492 wrapped signature.
     EIP6492 {
         factory: Address,
@@ -110,7 +110,7 @@ fn decode_eip6492(
 }
 
 impl StructuredSignature {
-    pub(super) fn try_from_bytes(
+    pub(crate) fn try_from_bytes(
         bytes: Bytes,
         expected_signer: Address,
         prehash: &B256,

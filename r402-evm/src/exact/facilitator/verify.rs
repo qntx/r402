@@ -144,7 +144,7 @@ pub(super) async fn assert_nonce_unused<P: Provider>(
 ///
 /// Returns [`VerificationError::Expired`] or [`VerificationError::Early`].
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub(super) fn assert_time(
+pub(crate) fn assert_time(
     valid_after: UnixTimestamp,
     valid_before: UnixTimestamp,
     clock_skew_tolerance: u64,

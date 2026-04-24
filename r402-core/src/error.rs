@@ -102,6 +102,20 @@ pub enum VerificationError {
         /// Observed number of memo instructions.
         count: usize,
     },
+
+    /// Resource server requested a settlement amount exceeding the signed
+    /// maximum authorisation (upto scheme).
+    ///
+    /// Maps to `ErrorReason::SettlementExceedsAmount` on the wire, which
+    /// serialises as `invalid_upto_evm_payload_settlement_exceeds_amount`
+    /// per x402 v2 spec.
+    #[error("settlement amount {requested} exceeds authorised maximum {authorised}")]
+    SettlementAmountExceedsPermitted {
+        /// Amount the resource server asked to settle.
+        requested: String,
+        /// Maximum amount signed by the buyer.
+        authorised: String,
+    },
 }
 
 impl From<serde_json::Error> for VerificationError {
@@ -131,6 +145,7 @@ impl AsPaymentProblem for VerificationError {
             Self::DuplicateSettlement => ErrorReason::DuplicateSettlement,
             Self::MemoMismatch => ErrorReason::MemoMismatch,
             Self::MemoInstructionCountInvalid { .. } => ErrorReason::MemoInstructionCountInvalid,
+            Self::SettlementAmountExceedsPermitted { .. } => ErrorReason::SettlementExceedsAmount,
         };
         PaymentProblem::new(reason, self.to_string())
     }

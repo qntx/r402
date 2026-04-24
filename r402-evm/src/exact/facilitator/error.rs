@@ -1,4 +1,11 @@
-//! Error types for the EIP-155 exact scheme facilitator.
+//! Error types for EIP-155 facilitator operations.
+//!
+//! Despite the name `Eip155ExactError`, this error is functionally
+//! EVM-generic (RPC transport / tx revert / contract call / verification)
+//! and is intentionally shared between the `exact` and `upto` schemes to
+//! avoid error-plumbing duplication. A rename to `Eip155EvmError` may
+//! happen in a future breaking release once the full rename footprint is
+//! accepted.
 
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;

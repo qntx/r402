@@ -96,8 +96,8 @@ pub trait Permit2Approver: Send + Sync {
 /// [`Eip155ExactClientBuilder::provider`](super::Eip155ExactClientBuilder::provider).
 /// Users never need to interact with this type directly.
 #[cfg(feature = "client-provider")]
-pub(super) struct BuiltinPermit2Approver<P> {
-    pub(super) provider: P,
+pub(crate) struct BuiltinPermit2Approver<P> {
+    pub(crate) provider: P,
 }
 
 #[cfg(feature = "client-provider")]
