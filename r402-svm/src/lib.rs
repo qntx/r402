@@ -31,6 +31,10 @@
 pub mod chain;
 pub mod exact;
 
+#[cfg(feature = "facilitator")]
+#[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
+pub mod settlement_cache;
+
 mod networks;
 pub use exact::SolanaExact;
 #[cfg(feature = "client")]

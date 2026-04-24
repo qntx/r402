@@ -22,15 +22,16 @@ use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
 use http::{HeaderMap, HeaderValue, StatusCode};
-use r402::facilitator::Facilitator;
-use r402::proto;
-use r402::proto::Base64Bytes;
-use r402::proto::v2;
+use r402_core::facilitator::Facilitator;
+use r402_core::wire;
+use r402_core::wire::Base64Bytes;
 use serde_json::json;
 use tower::Service;
 #[cfg(feature = "telemetry")]
 use tracing::{Instrument, instrument};
 use url::Url;
+
+use super::hooks::DynPaygateHooks;
 
 const PAYMENT_HEADER: &str = "Payment-Signature";
 
@@ -62,7 +63,7 @@ pub enum PaygateError {
     Settlement(String),
 }
 
-type PaymentPayload = v2::PaymentPayload<v2::PaymentRequirements, serde_json::Value>;
+type PaymentPayload = wire::PaymentPayload<wire::PaymentRequirements, serde_json::Value>;
 
 /// Template for resource metadata included in 402 responses.
 ///
@@ -89,7 +90,7 @@ impl Default for ResourceTemplate {
 }
 
 impl ResourceTemplate {
-    /// Resolves this template into a concrete [`v2::ResourceInfo`].
+    /// Resolves this template into a concrete [`wire::ResourceInfo`].
     ///
     /// If `url` is already set, it is used directly. Otherwise, the URL is
     /// constructed by joining `base_url` (or a fallback derived from the
@@ -100,7 +101,7 @@ impl ResourceTemplate {
     /// Panics if the hardcoded fallback URL `http://localhost` cannot be
     /// parsed, which should never happen in practice.
     #[allow(clippy::unwrap_used, reason = "fallback URL is a hardcoded constant")]
-    pub fn resolve(&self, base_url: Option<&Url>, req: &Request) -> v2::ResourceInfo {
+    pub fn resolve(&self, base_url: Option<&Url>, req: &Request) -> wire::ResourceInfo {
         let url = self.url.clone().unwrap_or_else(|| {
             let mut url = base_url.cloned().unwrap_or_else(|| {
                 let host = req
@@ -122,10 +123,18 @@ impl ResourceTemplate {
             url.set_query(req.uri().query());
             url.to_string()
         });
-        v2::ResourceInfo {
-            description: self.description.clone(),
-            mime_type: self.mime_type.clone(),
-            url,
+        wire::ResourceInfo {
+            description: if self.description.is_empty() {
+                None
+            } else {
+                Some(self.description.clone().into())
+            },
+            mime_type: if self.mime_type.is_empty() {
+                None
+            } else {
+                Some(self.mime_type.clone().into())
+            },
+            url: url.into(),
         }
     }
 }
@@ -146,29 +155,53 @@ impl ResourceTemplate {
 )]
 pub struct PaygateBuilder<TFacilitator> {
     facilitator: TFacilitator,
-    accepts: Vec<v2::PriceTag>,
-    resource: Option<v2::ResourceInfo>,
+    accepts: Vec<wire::PriceTag>,
+    resource: Option<wire::ResourceInfo>,
+    hooks: Option<Arc<dyn DynPaygateHooks>>,
 }
 
 impl<TFacilitator> PaygateBuilder<TFacilitator> {
     /// Adds a single accepted payment option.
     #[must_use]
-    pub fn accept(mut self, price_tag: v2::PriceTag) -> Self {
+    pub fn accept(mut self, price_tag: wire::PriceTag) -> Self {
         self.accepts.push(price_tag);
         self
     }
 
     /// Adds multiple accepted payment options.
     #[must_use]
-    pub fn accepts(mut self, price_tags: impl IntoIterator<Item = v2::PriceTag>) -> Self {
+    pub fn accepts(mut self, price_tags: impl IntoIterator<Item = wire::PriceTag>) -> Self {
         self.accepts.extend(price_tags);
         self
     }
 
     /// Sets the resource metadata returned in 402 responses.
     #[must_use]
-    pub fn resource(mut self, resource: v2::ResourceInfo) -> Self {
+    pub fn resource(mut self, resource: wire::ResourceInfo) -> Self {
         self.resource = Some(resource);
+        self
+    }
+
+    /// Attaches [`PaygateHooks`] for pre- and post-payment extensibility
+    /// (Fix-8). Stored as an [`Arc<dyn>`] so hook state can be shared across
+    /// cloned middleware instances without duplication.
+    #[must_use]
+    pub fn hooks<H>(mut self, hooks: H) -> Self
+    where
+        H: super::hooks::PaygateHooks + 'static,
+    {
+        self.hooks = Some(Arc::new(hooks));
+        self
+    }
+
+    /// Attaches hooks that are already stored behind an
+    /// [`Arc<dyn DynPaygateHooks>`].
+    ///
+    /// This avoids re-wrapping when the same hook object needs to be shared
+    /// between the middleware layer and the paygate it constructs.
+    #[must_use]
+    pub fn hooks_dyn(mut self, hooks: Arc<dyn DynPaygateHooks>) -> Self {
+        self.hooks = Some(hooks);
         self
     }
 
@@ -179,11 +212,12 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         Paygate {
             facilitator: self.facilitator,
             accepts: self.accepts.into(),
-            resource: self.resource.unwrap_or_else(|| v2::ResourceInfo {
-                description: String::new(),
-                mime_type: "application/json".to_owned(),
-                url: String::new(),
+            resource: self.resource.unwrap_or_else(|| wire::ResourceInfo {
+                description: None,
+                mime_type: Some("application/json".into()),
+                url: compact_str::CompactString::default(),
             }),
+            hooks: self.hooks,
         }
     }
 }
@@ -196,7 +230,7 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 /// Construct via [`PaygateBuilder`] (obtained from [`Paygate::builder`]).
 ///
 /// To add lifecycle hooks (before/after verify and settle), wrap your
-/// facilitator with [`HookedFacilitator`](r402::hooks::HookedFacilitator)
+/// facilitator with [`HookedFacilitator`](r402_core::hooks::HookedFacilitator)
 /// before passing it to the payment gate.
 #[allow(
     missing_debug_implementations,
@@ -204,8 +238,9 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 )]
 pub struct Paygate<TFacilitator> {
     pub(crate) facilitator: TFacilitator,
-    pub(crate) accepts: Arc<[v2::PriceTag]>,
-    pub(crate) resource: v2::ResourceInfo,
+    pub(crate) accepts: Arc<[wire::PriceTag]>,
+    pub(crate) resource: wire::ResourceInfo,
+    pub(crate) hooks: Option<Arc<dyn DynPaygateHooks>>,
 }
 
 impl<TFacilitator> Paygate<TFacilitator> {
@@ -215,6 +250,7 @@ impl<TFacilitator> Paygate<TFacilitator> {
             facilitator,
             accepts: Vec::new(),
             resource: None,
+            hooks: None,
         }
     }
 
@@ -224,13 +260,23 @@ impl<TFacilitator> Paygate<TFacilitator> {
     }
 
     /// Returns a reference to the accepted price tags.
-    pub fn accepts(&self) -> &[v2::PriceTag] {
+    pub fn accepts(&self) -> &[wire::PriceTag] {
         &self.accepts
     }
 
     /// Returns a reference to the resource information.
-    pub const fn resource(&self) -> &v2::ResourceInfo {
+    pub const fn resource(&self) -> &wire::ResourceInfo {
         &self.resource
+    }
+
+    /// Returns the attached paygate hooks, if any.
+    ///
+    /// The middleware layer uses this accessor to dispatch
+    /// [`DynPaygateHooks::on_protected_request`] and
+    /// [`DynPaygateHooks::on_payment_verified`] around the payment check.
+    #[must_use]
+    pub fn hooks(&self) -> Option<&Arc<dyn DynPaygateHooks>> {
+        self.hooks.as_ref()
     }
 
     /// Converts a [`PaygateError`] into a proper HTTP response.
@@ -250,16 +296,22 @@ impl<TFacilitator> Paygate<TFacilitator> {
     pub fn error_response(&self, err: PaygateError) -> Response {
         match err {
             PaygateError::Verification(ve) => {
-                let payment_required = v2::PaymentRequired {
-                    error: Some(ve.to_string()),
-                    accepts: self
-                        .accepts
-                        .iter()
-                        .map(|pt| pt.requirements.clone())
-                        .collect(),
-                    x402_version: v2::V2,
-                    resource: self.resource.clone(),
-                    extensions: None,
+                let (status, payment_required) = {
+                    // Fix-5: derive HTTP status from the inner ErrorReason when
+                    // known — Permit2 allowance failures map to 412, others to 402.
+                    let status = inferred_status(&ve);
+                    let payment_required = wire::PaymentRequired {
+                        error: Some(ve.to_string().into()),
+                        accepts: self
+                            .accepts
+                            .iter()
+                            .map(|pt| pt.requirements.clone())
+                            .collect(),
+                        x402_version: wire::V2,
+                        resource: self.resource.clone(),
+                        extensions: wire::Extensions::new(),
+                    };
+                    (status, payment_required)
                 };
                 let body_bytes =
                     serde_json::to_vec(&payment_required).expect("serialization failed");
@@ -267,23 +319,29 @@ impl<TFacilitator> Paygate<TFacilitator> {
                     HeaderValue::from_bytes(Base64Bytes::encode(&body_bytes).as_ref())
                         .expect("invalid header value");
 
-                Response::builder()
-                    .status(StatusCode::PAYMENT_REQUIRED)
+                let mut response = Response::builder()
+                    .status(status)
                     .header("Payment-Required", header_value)
                     .header("Content-Type", "application/json")
                     .body(Body::from(body_bytes))
-                    .expect("failed to construct response")
+                    .expect("failed to construct response");
+                // Fix-6: expose Payment-Required / Payment-Response headers to
+                // browser clients via CORS.
+                super::cors::ensure_expose_headers(response.headers_mut());
+                response
             }
             PaygateError::Settlement(ref detail) => {
                 #[cfg(feature = "telemetry")]
                 tracing::error!(details = %detail, "Settlement failed");
                 let body = json!({ "error": "Settlement failed", "details": detail }).to_string();
 
-                Response::builder()
+                let mut response = Response::builder()
                     .status(StatusCode::PAYMENT_REQUIRED)
                     .header("Content-Type", "application/json")
                     .body(Body::from(body))
-                    .expect("failed to construct response")
+                    .expect("failed to construct response");
+                super::cors::ensure_expose_headers(response.headers_mut());
+                response
             }
         }
     }
@@ -336,8 +394,8 @@ where
             .await
             .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
-        if let proto::VerifyResponse::Invalid { reason, .. } = verify_response {
-            return Err(VerificationError::VerificationFailed(reason).into());
+        if let wire::VerifyResponse::Invalid { reason, .. } = verify_response {
+            return Err(VerificationError::VerificationFailed(reason.to_string()).into());
         }
 
         Ok(VerifiedPayment {
@@ -524,7 +582,7 @@ where
 /// preventing double-settlement at the type level.
 #[derive(Debug)]
 pub struct VerifiedPayment {
-    settle_request: proto::SettleRequest,
+    settle_request: wire::SettleRequest,
 }
 
 impl VerifiedPayment {
@@ -537,13 +595,13 @@ impl VerifiedPayment {
     pub async fn settle<F: Facilitator>(
         self,
         facilitator: &F,
-    ) -> Result<proto::SettleResponse, PaygateError> {
+    ) -> Result<wire::SettleResponse, PaygateError> {
         let settlement = facilitator
             .settle(self.settle_request)
             .await
             .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
 
-        if let proto::SettleResponse::Error {
+        if let wire::SettleResponse::Failure {
             reason, message, ..
         } = &settlement
         {
@@ -556,19 +614,19 @@ impl VerifiedPayment {
 
     /// Returns a reference to the underlying settle request.
     #[must_use]
-    pub const fn settle_request(&self) -> &proto::SettleRequest {
+    pub const fn settle_request(&self) -> &wire::SettleRequest {
         &self.settle_request
     }
 }
 
-/// Encodes a successful [`proto::SettleResponse`] as an HTTP header value.
+/// Encodes a successful [`wire::SettleResponse`] as an HTTP header value.
 ///
 /// # Errors
 ///
 /// Returns [`PaygateError::Settlement`] if the response is an error variant
 /// or if serialisation / header encoding fails.
 pub fn settlement_to_header(
-    settlement: &proto::SettleResponse,
+    settlement: &wire::SettleResponse,
 ) -> Result<HeaderValue, PaygateError> {
     let encoded = settlement
         .encode_base64()
@@ -608,24 +666,40 @@ fn decode_payment_payload<T: serde::de::DeserializeOwned>(header_bytes: &[u8]) -
 }
 
 /// Matches the payment payload against accepted price tags and builds a
-/// [`proto::VerifyRequest`].
+/// [`wire::VerifyRequest`].
+/// Maps an internal [`VerificationError`] to the correct HTTP status.
+///
+/// This is where Fix-5 lives: a `Permit2AllowanceRequired` inside the
+/// `VerificationFailed(..)` string hints the buyer needs an on-chain
+/// approval first — HTTP 412 is the canonical "precondition failed"
+/// status per the x402 v2 spec.
+fn inferred_status(ve: &VerificationError) -> StatusCode {
+    if let VerificationError::VerificationFailed(message) = ve
+        && message.contains("permit2_allowance_required")
+    {
+        return StatusCode::PRECONDITION_FAILED;
+    }
+    StatusCode::PAYMENT_REQUIRED
+}
+
 fn build_verify_request(
     payload: PaymentPayload,
-    accepts: &[v2::PriceTag],
-) -> Result<proto::VerifyRequest, VerificationError> {
+    accepts: &[wire::PriceTag],
+) -> Result<wire::VerifyRequest, VerificationError> {
     let selected = accepts
         .iter()
         .find(|pt| **pt == payload.accepted)
         .ok_or(VerificationError::NoPaymentMatching)?;
 
-    let verify = v2::VerifyRequest {
-        x402_version: v2::V2,
-        payment_payload: payload,
-        payment_requirements: selected.requirements.clone(),
-    };
+    let verify: wire::TypedVerifyRequest<2, PaymentPayload, wire::PaymentRequirements> =
+        wire::TypedVerifyRequest {
+            x402_version: wire::V2,
+            payment_payload: payload,
+            payment_requirements: selected.requirements.clone(),
+        };
 
     let json = serde_json::to_value(&verify)
         .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
-    Ok(proto::VerifyRequest::from(json))
+    Ok(wire::VerifyRequest::from(json))
 }

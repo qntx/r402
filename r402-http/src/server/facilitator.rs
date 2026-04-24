@@ -1,7 +1,7 @@
-//! A [`r402::facilitator::Facilitator`] implementation that interacts with a _remote_ x402 Facilitator over HTTP.
+//! A [`r402_core::facilitator::Facilitator`] implementation that interacts with a _remote_ x402 Facilitator over HTTP.
 //!
 //! This [`FacilitatorClient`] handles the `/verify`, `/settle`, and `/supported` endpoints of a remote facilitator,
-//! and implements the [`r402::facilitator::Facilitator`] trait for compatibility
+//! and implements the [`r402_core::facilitator::Facilitator`] trait for compatibility
 //! with x402-based middleware and logic.
 //!
 //! ## Features
@@ -24,8 +24,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::{HeaderMap, StatusCode};
-use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
-use r402::proto::{
+use r402_core::facilitator::{Facilitator, FacilitatorError};
+use r402_core::wire::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use reqwest::Client;
@@ -430,46 +430,40 @@ impl FacilitatorClient {
 }
 
 impl Facilitator for FacilitatorClient {
-    fn verify(
+    async fn verify(
         &self,
         request: VerifyRequest,
-    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>> {
-        Box::pin(async move {
-            #[cfg(feature = "telemetry")]
-            let result = with_span(
-                Self::verify(self, &request),
-                tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
-            )
-            .await;
-            #[cfg(not(feature = "telemetry"))]
-            let result = Self::verify(self, &request).await;
-            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
+    ) -> Result<VerifyResponse, FacilitatorError> {
+        #[cfg(feature = "telemetry")]
+        let result = with_span(
+            Self::verify(self, &request),
+            tracing::info_span!("x402.facilitator_client.verify", timeout = ?self.timeout),
+        )
+        .await;
+        #[cfg(not(feature = "telemetry"))]
+        let result = Self::verify(self, &request).await;
+        result.map_err(|e| FacilitatorError::Internal(Box::new(e)))
     }
 
-    fn settle(
+    async fn settle(
         &self,
         request: SettleRequest,
-    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>> {
-        Box::pin(async move {
-            #[cfg(feature = "telemetry")]
-            let result = with_span(
-                Self::settle(self, &request),
-                tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
-            )
-            .await;
-            #[cfg(not(feature = "telemetry"))]
-            let result = Self::settle(self, &request).await;
-            result.map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
+    ) -> Result<SettleResponse, FacilitatorError> {
+        #[cfg(feature = "telemetry")]
+        let result = with_span(
+            Self::settle(self, &request),
+            tracing::info_span!("x402.facilitator_client.settle", timeout = ?self.timeout),
+        )
+        .await;
+        #[cfg(not(feature = "telemetry"))]
+        let result = Self::settle(self, &request).await;
+        result.map_err(|e| FacilitatorError::Internal(Box::new(e)))
     }
 
-    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
-        Box::pin(async move {
-            Self::supported(self)
-                .await
-                .map_err(|e| FacilitatorError::Other(Box::new(e)))
-        })
+    async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
+        Self::supported(self)
+            .await
+            .map_err(|e| FacilitatorError::Internal(Box::new(e)))
     }
 }
 
@@ -533,7 +527,7 @@ fn with_span<F: Future>(fut: F, span: Span) -> impl Future<Output = F::Output> {
 mod tests {
     use std::collections::HashMap;
 
-    use r402::proto::SupportedPaymentKind;
+    use r402_core::wire::SupportedPaymentKind;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -543,8 +537,8 @@ mod tests {
         SupportedResponse {
             kinds: vec![SupportedPaymentKind {
                 x402_version: 1,
-                scheme: "eip155-exact".to_owned(),
-                network: "1".to_owned(),
+                scheme: "eip155-exact".into(),
+                network: "1".into(),
                 extra: None,
             }],
             extensions: vec![],

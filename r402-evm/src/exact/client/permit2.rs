@@ -9,7 +9,7 @@ use std::pin::Pin;
 
 use alloy_primitives::{Address, Bytes, U256};
 use alloy_sol_types::{SolCall, sol};
-use r402::scheme::ClientError;
+use r402_core::error::ClientError;
 
 use crate::exact::PERMIT2_ADDRESS;
 

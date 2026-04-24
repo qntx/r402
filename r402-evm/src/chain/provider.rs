@@ -15,7 +15,7 @@ use alloy_rpc_types_eth::{BlockId, TransactionReceipt, TransactionRequest};
 use alloy_transport::TransportError;
 use alloy_transport::layers::{FallbackLayer, ThrottleLayer};
 use alloy_transport_http::Http;
-use r402::chain::{ChainId, ChainProvider};
+use r402_core::chain::{ChainId, ChainProvider};
 use tower::ServiceBuilder;
 #[cfg(feature = "telemetry")]
 use tracing::Instrument;

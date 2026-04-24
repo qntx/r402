@@ -15,12 +15,11 @@ use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
-use r402::chain::ChainProvider;
-use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
-use r402::proto;
-use r402::proto::UnixTimestamp;
-use r402::proto::v2;
-use r402::scheme::{SchemeBuilder, SchemeId};
+use r402_core::chain::ChainProvider;
+use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
+use r402_core::wire;
+use r402_core::wire::UnixTimestamp;
+use r402_core::scheme::{SchemeBuilder, SchemeId};
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
@@ -175,7 +174,7 @@ where
         &self,
         provider: P,
         _config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Box::new(Eip155ExactFacilitator::new(provider)))
     }
 }
@@ -186,119 +185,122 @@ where
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    fn verify(
+    async fn verify(
         &self,
-        request: proto::VerifyRequest,
-    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let request = types::v2::VerifyRequest::from_proto(request)?;
-            let payload = &request.payment_payload;
-            let requirements = &request.payment_requirements;
-            match &payload.payload {
-                ExactPayload::Eip3009(eip3009) => {
-                    let (contract, payment, eip712_domain) = verify::assert_valid_payment(
-                        self.provider.inner(),
-                        self.provider.chain(),
-                        eip3009,
-                        payload,
-                        requirements,
-                        self.clock_skew_tolerance,
-                    )
-                    .await?;
-                    let payer =
-                        verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain)
-                            .await?;
-                    Ok(proto::VerifyResponse::valid(payer.to_string()))
-                }
-                ExactPayload::Permit2(permit2) => {
-                    let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
-                        self.provider.inner(),
-                        self.provider.chain(),
-                        permit2,
-                        payload,
-                        requirements,
-                        self.clock_skew_tolerance,
-                    )
-                    .await?;
-                    let payer =
-                        verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain)
-                            .await?;
-                    Ok(proto::VerifyResponse::valid(payer.to_string()))
-                }
+        request: wire::VerifyRequest,
+    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+        let request = types::v2::VerifyRequest::from_verify(request)?;
+        let payload = &request.payment_payload;
+        let requirements = &request.payment_requirements;
+        match &payload.payload {
+            ExactPayload::Eip3009(eip3009) => {
+                let (contract, payment, eip712_domain) = verify::assert_valid_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    eip3009,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let payer =
+                    verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain)
+                        .await?;
+                Ok(wire::VerifyResponse::valid(payer.to_string()))
             }
-        })
+            ExactPayload::Permit2(permit2) => {
+                let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    permit2,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let payer = verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain)
+                    .await?;
+                Ok(wire::VerifyResponse::valid(payer.to_string()))
+            }
+        }
     }
 
-    fn settle(
+    async fn settle(
         &self,
-        request: proto::SettleRequest,
-    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let request = types::v2::SettleRequest::from_settle(request)?;
-            let payload = &request.payment_payload;
-            let requirements = &request.payment_requirements;
-            match &payload.payload {
-                ExactPayload::Eip3009(eip3009) => {
-                    let (contract, payment, eip712_domain) = verify::assert_valid_payment(
-                        self.provider.inner(),
-                        self.provider.chain(),
-                        eip3009,
-                        payload,
-                        requirements,
-                        self.clock_skew_tolerance,
-                    )
-                    .await?;
-                    let tx_hash =
-                        settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
-
-                    Ok(proto::SettleResponse::Success {
-                        payer: payment.from.to_string(),
-                        transaction: tx_hash.to_string(),
-                        network: payload.accepted.network.to_string(),
-                        extensions: None,
-                    })
-                }
-                ExactPayload::Permit2(permit2) => {
-                    let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
-                        self.provider.inner(),
-                        self.provider.chain(),
-                        permit2,
-                        payload,
-                        requirements,
-                        self.clock_skew_tolerance,
-                    )
-                    .await?;
-                    let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
-                    Ok(proto::SettleResponse::Success {
-                        payer: payment.from.to_string(),
-                        transaction: tx_hash.to_string(),
-                        network: payload.accepted.network.to_string(),
-                        extensions: None,
-                    })
-                }
+        request: wire::SettleRequest,
+    ) -> Result<wire::SettleResponse, FacilitatorError> {
+        let request = types::v2::SettleRequest::from_settle(request)?;
+        let payload = &request.payment_payload;
+        let requirements = &request.payment_requirements;
+        match &payload.payload {
+            ExactPayload::Eip3009(eip3009) => {
+                let (contract, payment, eip712_domain) = verify::assert_valid_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    eip3009,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let tx_hash =
+                    settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
+                Ok(wire::SettleResponse::Success {
+                    payer: payment.from.to_string().into(),
+                    transaction: tx_hash.to_string().into(),
+                    network: payload.accepted.network.to_string().into(),
+                    amount: Some(requirements.amount.0.to_string().into()),
+                    extensions: wire::Extensions::new(),
+                })
             }
-        })
+            ExactPayload::Permit2(permit2) => {
+                let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    permit2,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
+                Ok(wire::SettleResponse::Success {
+                    payer: payment.from.to_string().into(),
+                    transaction: tx_hash.to_string().into(),
+                    network: payload.accepted.network.to_string().into(),
+                    amount: Some(requirements.amount.0.to_string().into()),
+                    extensions: wire::Extensions::new(),
+                })
+            }
+        }
     }
 
-    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let chain_id = self.provider.chain_id();
-            let kinds = vec![proto::SupportedPaymentKind {
-                x402_version: v2::V2.into(),
-                scheme: ExactScheme.to_string(),
-                network: chain_id.into(),
-                extra: None,
-            }];
-            let signers = {
-                let mut signers = HashMap::with_capacity(1);
-                signers.insert(Eip155Exact.caip_family(), self.provider.signer_addresses());
-                signers
-            };
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
+    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+        use compact_str::CompactString;
+
+        let chain_id = self.provider.chain_id();
+        let kinds = vec![wire::SupportedPaymentKind {
+            x402_version: wire::V2.into(),
+            scheme: ExactScheme.to_string().into(),
+            network: chain_id.to_string().into(),
+            extra: None,
+        }];
+        let signers = {
+            let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
+            let _ = signers.insert(
+                Eip155Exact.caip_family().into(),
+                self.provider
+                    .signer_addresses()
+                    .into_iter()
+                    .map(CompactString::from)
+                    .collect(),
+            );
+            signers
+        };
+        Ok(wire::SupportedResponse {
+            kinds,
+            extensions: Vec::new(),
+            signers,
         })
     }
 }

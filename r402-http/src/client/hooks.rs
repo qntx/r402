@@ -18,15 +18,15 @@
 //! have default no-op implementations.
 
 use http::HeaderMap;
-use r402::facilitator::BoxFuture;
-use r402::hooks::{FailureRecovery, HookDecision};
-use r402::proto;
+use r402_core::facilitator::BoxFuture;
+use r402_core::hooks::{FailureRecovery, HookDecision};
+use r402_core::wire;
 
 /// Context passed to client payment creation lifecycle hooks.
 #[derive(Debug, Clone)]
 pub struct PaymentCreationContext {
     /// The parsed payment requirements from the 402 response.
-    pub payment_required: proto::PaymentRequired,
+    pub payment_required: wire::PaymentRequired,
 }
 
 /// Lifecycle hooks for client-side payment creation.
@@ -34,7 +34,7 @@ pub struct PaymentCreationContext {
 /// All methods have default no-op implementations. Override only the hooks you
 /// need. This trait is dyn-compatible for use in heterogeneous hook lists.
 ///
-/// The hook lifecycle mirrors [`r402::hooks::FacilitatorHooks`]:
+/// The hook lifecycle mirrors [`r402_core::hooks::FacilitatorHooks`]:
 ///
 /// 1. **`before_payment_creation`** — Can abort with [`HookDecision::Abort`].
 /// 2. **Payment signing executes**

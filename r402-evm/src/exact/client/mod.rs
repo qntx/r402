@@ -36,12 +36,13 @@ use alloy_sol_types::{SolStruct, eip712_domain};
 #[cfg(feature = "client-provider")]
 use permit2::BuiltinPermit2Approver;
 pub use permit2::{Permit2Approver, permit2_allowance_calldata, permit2_approval_calldata};
-use r402::proto::Base64Bytes;
-use r402::proto::PaymentRequired;
-use r402::proto::UnixTimestamp;
-use r402::proto::v2::{self, ResourceInfo};
-use r402::scheme::SchemeId;
-use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_core::wire::Base64Bytes;
+use r402_core::wire::PaymentRequired;
+use r402_core::wire::UnixTimestamp;
+use r402_core::wire::{self, ResourceInfo};
+use r402_core::scheme::SchemeId;
+use r402_core::error::ClientError;
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use rand::RngExt;
 use rand::rng;
 
@@ -164,7 +165,7 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     let signature = signer
         .sign_hash(&eip712_hash)
         .await
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
 
     Ok(Eip3009Payload {
         signature: signature.as_bytes().into(),
@@ -232,7 +233,7 @@ pub async fn sign_permit2_authorization<S: SignerLike + Sync>(
     let signature = signer
         .sign_hash(&eip712_hash)
         .await
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
 
     let authorization = Permit2Authorization {
         from: signer.address(),
@@ -460,6 +461,8 @@ impl<S> SchemeId for Eip155ExactClient<S> {
     }
 }
 
+impl<S> r402_core::scheme::sealed::Sealed for Eip155ExactClient<S> {}
+
 impl<S> SchemeClient for Eip155ExactClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
@@ -473,10 +476,10 @@ where
                 let chain_reference = Eip155ChainReference::try_from(&requirements.network).ok()?;
                 let candidate = PaymentCandidate {
                     chain_id: requirements.network.clone(),
-                    asset: requirements.asset.to_string(),
-                    amount: requirements.amount.0.to_string(),
-                    scheme: self.scheme().to_owned(),
-                    pay_to: requirements.pay_to.to_string(),
+                    asset: requirements.asset.to_string().into(),
+                    amount: requirements.amount.0.to_string().into(),
+                    scheme: self.scheme().into(),
+                    pay_to: requirements.pay_to.to_string().into(),
                     signer: Box::new(V2PayloadSigner {
                         resource_info: Some(payment_required.resource.clone()),
                         signer: self.signer.clone(),
@@ -509,7 +512,7 @@ where
         clippy::excessive_nesting,
         reason = "async signing logic with conditional Permit2 flow"
     )]
-    fn sign_payment(&self) -> r402::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
             let use_permit2 = self
                 .requirements
@@ -565,11 +568,11 @@ where
             };
 
             let payload = types::v2::PaymentPayload {
-                x402_version: v2::V2,
+                x402_version: wire::V2,
                 accepted: self.requirements.clone(),
                 resource: self.resource_info.clone(),
                 payload: exact_payload,
-                extensions: None,
+                extensions: wire::Extensions::new(),
             };
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);

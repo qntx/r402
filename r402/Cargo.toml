@@ -2,28 +2,74 @@
 name = "r402"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core types for the x402 payment protocol."
+description = "x402 Payment Protocol SDK for Rust — umbrella crate."
+readme = "README.md"
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
-telemetry = []
-full = ["telemetry"]
+default = ["evm", "http"]
+
+evm = ["dep:r402-evm"]
+svm = ["dep:r402-svm"]
+http = ["dep:r402-http"]
+mcp = ["dep:r402-mcp"]
+
+client = [
+    "r402-evm?/client",
+    "r402-svm?/client",
+    "r402-http?/client",
+    "r402-mcp?/client",
+]
+server = [
+    "r402-evm?/server",
+    "r402-svm?/server",
+    "r402-http?/server",
+    "r402-mcp?/server",
+]
+facilitator = [
+    "r402-evm?/facilitator",
+    "r402-svm?/facilitator",
+]
+
+telemetry = [
+    "r402-core/telemetry",
+    "r402-evm?/telemetry",
+    "r402-svm?/telemetry",
+    "r402-http?/telemetry",
+    "r402-mcp?/telemetry",
+]
+
+cache = ["r402-core/cache"]
+
+ext-bazaar = ["r402-core/ext-bazaar"]
+ext-payment-id = ["r402-core/ext-payment-id"]
+all-extensions = ["r402-core/all-extensions"]
+
+full = [
+    "evm",
+    "svm",
+    "http",
+    "mcp",
+    "client",
+    "server",
+    "facilitator",
+    "telemetry",
+    "cache",
+    "all-extensions",
+]
 
 [dependencies]
-base64 = { workspace = true }
-rust_decimal = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-serde_with = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+r402-core = { workspace = true }
+r402-evm = { workspace = true, optional = true }
+r402-svm = { workspace = true, optional = true }
+r402-http = { workspace = true, optional = true }
+r402-mcp = { workspace = true, optional = true }
 
 [lints]
 workspace = true

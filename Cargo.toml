@@ -1,23 +1,29 @@
 [workspace]
-members = ["r402", "r402-evm", "r402-http", "r402-svm"]
+members = ["r402", "r402-core", "r402-evm", "r402-http", "r402-mcp", "r402-svm"]
 default-members = ["r402"]
 resolver = "3"
 
 [workspace.package]
-version = "0.13.0"
+version = "0.14.0-beta.1"
 edition = "2024"
+rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
 # Internal crates
-r402 = { version = "0.13", path = "r402" }
-r402-evm = { version = "0.13", path = "r402-evm" }
-r402-http = { version = "0.13", path = "r402-http" }
-r402-svm = { version = "0.13", path = "r402-svm" }
+r402 = { version = "0.14.0-beta.1", path = "r402" }
+r402-core = { version = "0.14.0-beta.1", path = "r402-core" }
+r402-evm = { version = "0.14.0-beta.1", path = "r402-evm" }
+r402-http = { version = "0.14.0-beta.1", path = "r402-http" }
+r402-mcp = { version = "0.14.0-beta.1", path = "r402-mcp" }
+r402-svm = { version = "0.14.0-beta.1", path = "r402-svm" }
 
 # Core
+# `async-trait` is only kept for implementing external traits (e.g. alloy
+# `NonceManager`, `reqwest_middleware::Middleware`) that pre-date AFIT.
+# All internal traits use native `async fn` in traits (AFIT).
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
@@ -40,7 +46,9 @@ url = { version = "2", features = ["serde"] }
 base64 = "0.22"
 bincode = "1"
 bs58 = "0.5"
+compact_str = { version = "0.8", features = ["serde"] }
 dashmap = "6"
+moka = { version = "0.12", features = ["sync"] }
 rand = "0.10"
 regex = "1"
 rust_decimal = "1"

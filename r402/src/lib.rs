@@ -1,34 +1,20 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![doc = include_str!("../README.md")]
 
-//! Core types for the x402 payment protocol.
-//!
-//! This crate provides the foundational types used throughout the x402 ecosystem
-//! for implementing HTTP 402 Payment Required flows. It is designed to be
-//! blockchain-agnostic, with chain-specific implementations provided by separate crates.
-//!
-//! # Overview
-//!
-//! The x402 protocol enables micropayments over HTTP by leveraging the 402 Payment Required
-//! status code. When a client requests a paid resource, the server responds with payment
-//! requirements. The client signs a payment authorization, which is verified and settled
-//! by a facilitator.
-//!
-//! # Modules
-//!
-//! - [`amount`] - Human-readable currency amount parsing
-//! - [`chain`] - Blockchain identifiers, provider abstractions (CAIP-2), and network metadata
-//! - [`facilitator`] - Core trait for payment verification and settlement
-//! - [`hooks`] - Lifecycle hooks for facilitator verify/settle operations
-//! - [`proto`] - Wire format types, encoding utilities, and timestamps
-//! - [`scheme`] - Payment scheme system for extensible payment methods
-//!
-//! # Feature Flags
-//!
-//! - `telemetry` - Enables tracing instrumentation for debugging and monitoring
+pub use r402_core::*;
 
-pub mod amount;
-pub mod chain;
-pub mod facilitator;
-pub mod hooks;
-pub mod proto;
-pub mod scheme;
+#[cfg(feature = "evm")]
+#[cfg_attr(docsrs, doc(cfg(feature = "evm")))]
+pub use r402_evm as evm;
+
+#[cfg(feature = "svm")]
+#[cfg_attr(docsrs, doc(cfg(feature = "svm")))]
+pub use r402_svm as svm;
+
+#[cfg(feature = "http")]
+#[cfg_attr(docsrs, doc(cfg(feature = "http")))]
+pub use r402_http as http;
+
+#[cfg(feature = "mcp")]
+#[cfg_attr(docsrs, doc(cfg(feature = "mcp")))]
+pub use r402_mcp as mcp;

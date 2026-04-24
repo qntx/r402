@@ -6,8 +6,8 @@
 use std::sync::LazyLock;
 
 #[cfg(any(feature = "client", feature = "facilitator"))]
-use r402::proto::Base64Bytes;
-pub use r402::scheme::ExactScheme;
+use r402_core::wire::Base64Bytes;
+pub use r402_core::scheme::ExactScheme;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "facilitator")]
 use solana_commitment_config::CommitmentConfig;
@@ -36,6 +36,21 @@ pub static PHANTOM_LIGHTHOUSE_PROGRAM: LazyLock<Pubkey> = LazyLock::new(|| {
         .expect("Invalid Lighthouse program ID")
 });
 
+/// Solflare Lighthouse program ID — security program injected by Solflare wallet.
+#[allow(clippy::expect_used, reason = "hardcoded constant is infallible")]
+pub static SOLFLARE_LIGHTHOUSE_PROGRAM: LazyLock<Pubkey> = LazyLock::new(|| {
+    "L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"
+        .parse()
+        .expect("Invalid Solflare Lighthouse program ID")
+});
+
+/// SPL Memo program v2 (official).
+///
+/// Required by x402 v2 §SVM exact scheme when `SupportedPaymentKindExtra::memo`
+/// is declared; the client transaction MUST contain exactly one memo
+/// instruction whose data equals the declared memo.
+pub const SPL_MEMO_PROGRAM: Pubkey = pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+
 /// Solana exact payment payload containing a serialized transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,11 +60,20 @@ pub struct ExactSolanaPayload {
 }
 
 /// Extra fields for Solana payment kind support info.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+///
+/// Per x402 v2 spec §SVM exact scheme the seller MAY declare:
+///
+/// - `fee_payer`: the facilitator address that will submit the transaction
+/// - `memo`: arbitrary UTF-8 (≤ 256 bytes) that the buyer MUST include via
+///   a single SPL Memo instruction — facilitators enforce this on verify.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportedPaymentKindExtra {
     /// The fee payer address for this payment kind.
     pub fee_payer: Address,
+    /// Optional memo required in the transaction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memo: Option<compact_str::CompactString>,
 }
 
 /// Associated Token Account program public key.
@@ -275,14 +299,14 @@ impl InstructionInt {
 /// Uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
 /// for chain identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402::proto::U64String;
-    use r402::proto::v2 as proto_v2;
+    use r402_core::wire::U64String;
+    use r402_core::wire as proto_v2;
 
     use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
     use crate::chain::Address;
 
     /// Type alias for verify requests using the exact Solana payment scheme.
-    pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;

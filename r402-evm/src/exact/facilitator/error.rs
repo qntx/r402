@@ -2,8 +2,8 @@
 
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;
-use r402::facilitator::FacilitatorError;
-use r402::proto::PaymentVerificationError;
+use r402_core::error::FacilitatorError;
+use r402_core::error::VerificationError;
 
 use super::signature::StructuredSignatureFormatError;
 use crate::chain::MetaTransactionSendError;
@@ -25,7 +25,7 @@ pub enum Eip155ExactError {
     ContractCall(String),
     /// Payment verification failed.
     #[error(transparent)]
-    PaymentVerification(#[from] PaymentVerificationError),
+    PaymentVerification(#[from] VerificationError),
 }
 
 impl From<Eip155ExactError> for FacilitatorError {
@@ -34,15 +34,15 @@ impl From<Eip155ExactError> for FacilitatorError {
             Eip155ExactError::Transport(_)
             | Eip155ExactError::PendingTransaction(_)
             | Eip155ExactError::TransactionReverted(_)
-            | Eip155ExactError::ContractCall(_) => Self::OnchainFailure(value.to_string()),
-            Eip155ExactError::PaymentVerification(e) => Self::PaymentVerification(e),
+            | Eip155ExactError::ContractCall(_) => Self::Onchain(value.to_string()),
+            Eip155ExactError::PaymentVerification(e) => Self::Verification(e),
         }
     }
 }
 
 impl From<StructuredSignatureFormatError> for Eip155ExactError {
     fn from(e: StructuredSignatureFormatError) -> Self {
-        Self::PaymentVerification(PaymentVerificationError::InvalidSignature(e.to_string()))
+        Self::PaymentVerification(VerificationError::InvalidSignature(e.to_string()))
     }
 }
 
@@ -63,7 +63,7 @@ impl From<alloy_provider::MulticallError> for Eip155ExactError {
             | alloy_provider::MulticallError::DecodeError(_)
             | alloy_provider::MulticallError::NoReturnData
             | alloy_provider::MulticallError::CallFailed(_) => Self::PaymentVerification(
-                PaymentVerificationError::TransactionSimulation(e.to_string()),
+                VerificationError::SimulationFailed(e.to_string()),
             ),
             alloy_provider::MulticallError::TransportError(transport_error) => {
                 Self::Transport(transport_error)

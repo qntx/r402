@@ -1,7 +1,7 @@
 //! Price tag sources for the x402 payment gate.
 //!
 //! Abstracts over static and dynamic pricing strategies via the
-//! [`PriceTagSource`] trait. All sources produce [`v2::PriceTag`] values
+//! [`PriceTagSource`] trait. All sources produce [`wire::PriceTag`] values
 //! (V2-only server layer).
 
 use std::future::Future;
@@ -9,7 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use http::{HeaderMap, Uri};
-use r402::proto::v2;
+use r402_core::wire;
 use url::Url;
 
 /// Trait for types that can provide V2 price tags for a request.
@@ -25,7 +25,7 @@ pub trait PriceTagSource: Clone + Send + Sync + 'static {
         headers: &HeaderMap,
         uri: &Uri,
         base_url: Option<&Url>,
-    ) -> impl Future<Output = Vec<v2::PriceTag>> + Send;
+    ) -> impl Future<Output = Vec<wire::PriceTag>> + Send;
 }
 
 /// Static price tag source - returns the same price tags for every request.
@@ -34,25 +34,25 @@ pub trait PriceTagSource: Clone + Send + Sync + 'static {
 /// It simply stores a vector of price tags and returns clones on each request.
 #[derive(Clone, Debug)]
 pub struct StaticPriceTags {
-    tags: Arc<[v2::PriceTag]>,
+    tags: Arc<[wire::PriceTag]>,
 }
 
 impl StaticPriceTags {
     /// Creates a new static price tag source from a vector of price tags.
     #[must_use]
-    pub fn new(tags: Vec<v2::PriceTag>) -> Self {
+    pub fn new(tags: Vec<wire::PriceTag>) -> Self {
         Self { tags: tags.into() }
     }
 
     /// Returns a reference to the stored price tags.
     #[must_use]
-    pub fn tags(&self) -> &[v2::PriceTag] {
+    pub fn tags(&self) -> &[wire::PriceTag] {
         &self.tags
     }
 
     /// Adds a price tag to the source.
     #[must_use]
-    pub fn with_price_tag(mut self, tag: v2::PriceTag) -> Self {
+    pub fn with_price_tag(mut self, tag: wire::PriceTag) -> Self {
         let mut tags = self.tags.to_vec();
         tags.push(tag);
         self.tags = tags.into();
@@ -66,7 +66,7 @@ impl PriceTagSource for StaticPriceTags {
         _headers: &HeaderMap,
         _uri: &Uri,
         _base_url: Option<&Url>,
-    ) -> Vec<v2::PriceTag> {
+    ) -> Vec<wire::PriceTag> {
         self.tags.to_vec()
     }
 }
@@ -76,7 +76,7 @@ type BoxedDynamicPriceCallback = dyn for<'a> Fn(
         &'a HeaderMap,
         &'a Uri,
         Option<&'a Url>,
-    ) -> Pin<Box<dyn Future<Output = Vec<v2::PriceTag>> + Send + 'a>>
+    ) -> Pin<Box<dyn Future<Output = Vec<wire::PriceTag>> + Send + 'a>>
     + Send
     + Sync;
 
@@ -111,7 +111,7 @@ impl DynamicPriceTags {
     pub fn new<F, Fut>(callback: F) -> Self
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Vec<v2::PriceTag>> + Send + 'static,
+        Fut: Future<Output = Vec<wire::PriceTag>> + Send + 'static,
     {
         Self {
             callback: Arc::new(move |headers, uri, base_url| {
@@ -127,7 +127,7 @@ impl PriceTagSource for DynamicPriceTags {
         headers: &HeaderMap,
         uri: &Uri,
         base_url: Option<&Url>,
-    ) -> Vec<v2::PriceTag> {
+    ) -> Vec<wire::PriceTag> {
         (self.callback)(headers, uri, base_url).await
     }
 }

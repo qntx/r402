@@ -4,8 +4,8 @@
 //! that clients can use to generate payment authorizations.
 
 use alloy_primitives::U256;
-use r402::chain::{ChainId, DeployedTokenAmount};
-use r402::proto::v2;
+use r402_core::chain::{ChainId, DeployedTokenAmount};
+use r402_core::wire;
 
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
 use crate::exact::{AssetTransferMethod, Eip155Exact, ExactScheme, PaymentRequirementsExtra};
@@ -13,7 +13,7 @@ use crate::exact::{AssetTransferMethod, Eip155Exact, ExactScheme, PaymentRequire
 impl Eip155Exact {
     /// Creates a price tag for an EVM exact payment.
     ///
-    /// Generates a [`v2::PriceTag`] that specifies the payment requirements for a
+    /// Generates a [`wire::PriceTag`] that specifies the payment requirements for a
     /// resource. Uses CAIP-2 chain IDs (e.g., `eip155:8453`) and embeds the
     /// requirements directly in the price tag.
     ///
@@ -25,19 +25,19 @@ impl Eip155Exact {
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         transfer_method: Option<AssetTransferMethod>,
-    ) -> v2::PriceTag {
+    ) -> wire::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let extra = PaymentRequirementsExtra::from_deployment(asset.token.eip712, transfer_method);
-        let requirements = v2::PaymentRequirements {
-            scheme: ExactScheme.to_string(),
-            pay_to: pay_to.into().to_string(),
-            asset: asset.token.address.to_string(),
+        let requirements = wire::PaymentRequirements {
+            scheme: ExactScheme.to_string().into(),
+            pay_to: pay_to.into().to_string().into(),
+            asset: asset.token.address.to_string().into(),
             network: chain_id,
-            amount: asset.amount.to_string(),
+            amount: asset.amount.to_string().into(),
             max_timeout_seconds: 300,
             extra,
         };
-        v2::PriceTag {
+        wire::PriceTag {
             requirements,
             enricher: None,
         }

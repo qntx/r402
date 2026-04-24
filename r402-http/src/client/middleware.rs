@@ -6,13 +6,13 @@
 use std::sync::Arc;
 
 use http::{Extensions, HeaderMap, StatusCode};
-use r402::hooks::{FailureRecovery, HookDecision};
-use r402::proto;
-use r402::proto::Base64Bytes;
-use r402::proto::v2;
-use r402::scheme::{
-    ClientError, FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
+use r402_core::hooks::{FailureRecovery, HookDecision};
+use r402_core::error::ClientError;
+use r402_core::scheme::{
+    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
 };
+use r402_core::wire;
+use r402_core::wire::Base64Bytes;
 use reqwest::{Request, Response};
 use reqwest_middleware as rqm;
 #[cfg(feature = "telemetry")]
@@ -138,7 +138,7 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`ClientError::ParseError`] if the response cannot be parsed.
+    /// Returns [`ClientError::Parse`] if the response cannot be parsed.
     /// Returns [`ClientError::NoMatchingPaymentOption`] if no registered scheme
     /// can handle the payment requirements.
     ///
@@ -152,7 +152,7 @@ where
     pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, ClientError> {
         let payment_required = parse_payment_required(res)
             .await
-            .ok_or_else(|| ClientError::ParseError("Invalid 402 response".to_owned()))?;
+            .ok_or_else(|| ClientError::Parse("Invalid 402 response".to_owned()))?;
 
         let hook_ctx = PaymentCreationContext {
             payment_required: payment_required.clone(),
@@ -163,7 +163,7 @@ where
             if let HookDecision::Abort { reason, .. } =
                 hook.before_payment_creation(&hook_ctx).await
             {
-                return Err(ClientError::ParseError(reason));
+                return Err(ClientError::Parse(reason));
             }
         }
 
@@ -195,7 +195,7 @@ where
     /// Internal helper that performs the actual payment header creation.
     async fn create_payment_headers_inner(
         &self,
-        payment_required: &proto::PaymentRequired,
+        payment_required: &wire::PaymentRequired,
     ) -> Result<HeaderMap, ClientError> {
         let candidates = self.schemes.candidates(payment_required);
 
@@ -259,7 +259,7 @@ impl ClientSchemes {
     #[must_use]
     pub(super) fn candidates(
         &self,
-        payment_required: &proto::PaymentRequired,
+        payment_required: &wire::PaymentRequired,
     ) -> Vec<PaymentCandidate> {
         let mut candidates = vec![];
         for client in &self.0 {
@@ -342,7 +342,7 @@ where
     }
 }
 
-/// Parses a 402 Payment Required response into a [`proto::PaymentRequired`].
+/// Parses a 402 Payment Required response into a [`wire::PaymentRequired`].
 ///
 /// Tries to extract V2 payment requirements from the `Payment-Required` header
 /// (base64-encoded JSON) first, then falls back to parsing the response body as
@@ -352,12 +352,12 @@ where
     feature = "telemetry",
     instrument(name = "x402.reqwest.parse_payment_required", skip(response))
 )]
-pub async fn parse_payment_required(response: Response) -> Option<proto::PaymentRequired> {
+pub async fn parse_payment_required(response: Response) -> Option<wire::PaymentRequired> {
     let v2_from_header = response
         .headers()
         .get("Payment-Required")
         .and_then(|h| Base64Bytes::from(h.as_bytes()).decode().ok())
-        .and_then(|b| serde_json::from_slice::<v2::PaymentRequired>(&b).ok());
+        .and_then(|b| serde_json::from_slice::<wire::PaymentRequired>(&b).ok());
 
     if let Some(v2_payment_required) = v2_from_header {
         #[cfg(feature = "telemetry")]
@@ -367,7 +367,7 @@ pub async fn parse_payment_required(response: Response) -> Option<proto::Payment
 
     // Fall back to body (some servers send PaymentRequired as JSON body)
     if let Ok(body_bytes) = response.bytes().await
-        && let Ok(v2_from_body) = serde_json::from_slice::<v2::PaymentRequired>(&body_bytes)
+        && let Ok(v2_from_body) = serde_json::from_slice::<wire::PaymentRequired>(&body_bytes)
     {
         #[cfg(feature = "telemetry")]
         debug!("Parsed V2 payment required from response body");

@@ -1384,6 +1384,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "castaway"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1487,6 +1496,21 @@ checksum = "ba5a308b75df32fe02788e748662718f03fde005016435c444eea572398219fd"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b79c4069c6cad78e2e0cdfcbd26275770669fb39fd308a752dc110e83b9af32"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "rustversion",
+ "ryu",
+ "serde",
+ "static_assertions",
 ]
 
 [[package]]
@@ -3274,6 +3298,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "moka"
+version = "0.12.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "957228ad12042ee839f93c8f257b62b4c0ab5eaae1d4fa60de53b27c9d7c5046"
+dependencies = [
+ "crossbeam-channel",
+ "crossbeam-epoch",
+ "crossbeam-utils",
+ "equivalent",
+ "parking_lot",
+ "portable-atomic",
+ "smallvec",
+ "tagptr",
+ "uuid",
+]
+
+[[package]]
 name = "nix"
 version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3922,20 +3963,35 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r402"
-version = "0.13.0"
+version = "0.14.0-beta.1"
+dependencies = [
+ "r402-core",
+ "r402-evm",
+ "r402-http",
+ "r402-mcp",
+ "r402-svm",
+]
+
+[[package]]
+name = "r402-core"
+version = "0.14.0-beta.1"
 dependencies = [
  "base64 0.22.1",
+ "compact_str",
+ "moka",
  "rust_decimal",
  "serde",
  "serde_json",
  "serde_with",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "tracing-core",
 ]
 
 [[package]]
 name = "r402-evm"
-version = "0.13.0"
+version = "0.14.0-beta.1"
 dependencies = [
  "alloy-contract",
  "alloy-network",
@@ -3949,8 +4005,9 @@ dependencies = [
  "alloy-transport",
  "alloy-transport-http",
  "async-trait",
+ "compact_str",
  "dashmap 6.1.0",
- "r402",
+ "r402-core",
  "rand 0.10.0",
  "serde",
  "serde_json",
@@ -3964,12 +4021,13 @@ dependencies = [
 
 [[package]]
 name = "r402-http"
-version = "0.13.0"
+version = "0.14.0-beta.1"
 dependencies = [
  "async-trait",
  "axum-core",
+ "compact_str",
  "http 1.4.0",
- "r402",
+ "r402-core",
  "reqwest 0.13.2",
  "reqwest-middleware 0.5.1",
  "serde",
@@ -3983,12 +4041,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "r402-svm"
-version = "0.13.0"
+name = "r402-mcp"
+version = "0.14.0-beta.1"
 dependencies = [
+ "r402-core",
+ "tracing",
+]
+
+[[package]]
+name = "r402-svm"
+version = "0.14.0-beta.1"
+dependencies = [
+ "base64 0.22.1",
  "bincode",
+ "compact_str",
  "futures-util",
- "r402",
+ "r402-core",
  "serde",
  "serde_json",
  "solana-account",
@@ -7008,6 +7076,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "tagptr"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
+
+[[package]]
 name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7523,6 +7597,7 @@ version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5ac8b6f42ead25368cf5b098aeb3dc8a1a2c05a3eee8a9a1a68c640edbfc79d9"
 dependencies = [
+ "getrandom 0.4.2",
  "js-sys",
  "wasm-bindgen",
 ]

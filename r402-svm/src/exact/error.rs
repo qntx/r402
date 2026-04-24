@@ -3,7 +3,7 @@
 //! This module centralizes all error types used across the exact scheme's
 //! client, server, and facilitator components.
 
-use r402::proto::PaymentVerificationError;
+use r402_core::error::VerificationError;
 use solana_pubkey::Pubkey;
 
 /// Errors specific to Solana exact scheme operations.
@@ -63,9 +63,19 @@ pub enum SolanaExactError {
     /// Sender account is missing from the transaction.
     #[error("Missing sender account in transaction")]
     MissingSenderAccount,
+    /// Memo instruction count does not match spec (expected exactly 1 when
+    /// `extra.memo` is declared).
+    #[error("memo instruction count invalid (expected 1, got {count})")]
+    MemoInstructionCountInvalid {
+        /// Observed count.
+        count: usize,
+    },
+    /// Memo data does not match `extra.memo`.
+    #[error("memo data mismatch")]
+    MemoMismatch,
 }
 
-impl From<SolanaExactError> for PaymentVerificationError {
+impl From<SolanaExactError> for VerificationError {
     fn from(e: SolanaExactError) -> Self {
         match e {
             SolanaExactError::TransactionDecoding(_) => Self::InvalidFormat(e.to_string()),
@@ -86,8 +96,12 @@ impl From<SolanaExactError> for PaymentVerificationError {
             | SolanaExactError::FeePayerTransferringFunds
             | SolanaExactError::MissingSenderAccount
             | SolanaExactError::InvalidComputePriceInstruction => {
-                Self::TransactionSimulation(e.to_string())
+                Self::SimulationFailed(e.to_string())
             }
+            SolanaExactError::MemoInstructionCountInvalid { count } => {
+                Self::MemoInstructionCountInvalid { count }
+            }
+            SolanaExactError::MemoMismatch => Self::MemoMismatch,
         }
     }
 }

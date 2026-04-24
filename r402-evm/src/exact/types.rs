@@ -7,8 +7,8 @@
 use alloy_primitives::{Address, B256, Bytes, address};
 #[cfg(any(feature = "facilitator", feature = "client"))]
 use alloy_sol_types::sol;
-use r402::proto::UnixTimestamp;
-pub use r402::scheme::ExactScheme;
+use r402_core::wire::UnixTimestamp;
+pub use r402_core::scheme::ExactScheme;
 use serde::{Deserialize, Serialize};
 
 use crate::chain::TokenAmount;
@@ -322,13 +322,13 @@ sol!(
 /// Uses CAIP-2 chain IDs (e.g., `eip155:8453`) for chain identification
 /// and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402::proto::v2 as proto_v2;
+    use r402_core::wire as proto_v2;
 
     use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Type alias for verify requests using the exact EVM payment scheme.
-    pub type VerifyRequest = proto_v2::VerifyRequest<PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;

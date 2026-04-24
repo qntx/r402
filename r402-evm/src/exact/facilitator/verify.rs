@@ -4,15 +4,18 @@
 //! composite [`verify_payment`] function that ties signature verification
 //! to an on-chain simulation.
 
+use std::future::IntoFuture;
+
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
-use r402::chain::ChainId;
-use r402::proto::{PaymentVerificationError, UnixTimestamp};
+use r402_core::chain::ChainId;
+use r402_core::error::VerificationError;
+use r402_core::wire::UnixTimestamp;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
-use super::contract::{IEIP3009, IERC20, Validator6492};
+use super::contract::{IEIP3009, IERC20, IX402Permit2Proxy, Validator6492};
 use super::error::Eip155ExactError;
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
 use super::signature::{SignedMessage, StructuredSignature};
@@ -41,11 +44,11 @@ pub(super) async fn assert_valid_payment<P: Provider>(
     let chain_id: ChainId = chain.into();
     let payload_chain_id = &accepted.network;
     if payload_chain_id != &chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch.into());
+        return Err(VerificationError::ChainIdMismatch.into());
     }
     let authorization = &eip3009.authorization;
     if authorization.to != accepted.pay_to {
-        return Err(PaymentVerificationError::RecipientMismatch.into());
+        return Err(VerificationError::RecipientMismatch.into());
     }
     let valid_after = authorization.valid_after;
     let valid_before = authorization.valid_before;
@@ -62,7 +65,7 @@ pub(super) async fn assert_valid_payment<P: Provider>(
         assert_nonce_unused(&contract, &authorization.from, &authorization.nonce),
         assert_enough_balance(&contract, &authorization.from, amount_required.into()),
     )?;
-    assert_enough_value(&authorization.value.into(), &amount_required.into())?;
+    assert_exact_value(&authorization.value.into(), &amount_required.into())?;
 
     let payment = Eip3009Payment {
         from: authorization.from,
@@ -86,11 +89,11 @@ pub(super) async fn assert_valid_payment<P: Provider>(
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError::AcceptedRequirementsMismatch`] on mismatch.
+/// Returns [`VerificationError::AcceptedRequirementsMismatch`] on mismatch.
 pub(super) fn assert_requirements_match(
     accepted: &types::v2::PaymentRequirements,
     requirements: &types::v2::PaymentRequirements,
-) -> Result<(), PaymentVerificationError> {
+) -> Result<(), VerificationError> {
     if accepted.scheme == requirements.scheme
         && accepted.network == requirements.network
         && accepted.amount == requirements.amount
@@ -99,7 +102,7 @@ pub(super) fn assert_requirements_match(
     {
         Ok(())
     } else {
-        Err(PaymentVerificationError::AcceptedRequirementsMismatch)
+        Err(VerificationError::AcceptedRequirementsMismatch)
     }
 }
 
@@ -127,7 +130,7 @@ pub(super) async fn assert_nonce_unused<P: Provider>(
         tracing::info_span!("check_authorization_state", otel.kind = "client")
     )?;
     if used {
-        return Err(PaymentVerificationError::NonceAlreadyUsed.into());
+        return Err(VerificationError::NonceAlreadyUsed.into());
     }
     Ok(())
 }
@@ -139,19 +142,19 @@ pub(super) async fn assert_nonce_unused<P: Provider>(
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError::Expired`] or [`PaymentVerificationError::Early`].
+/// Returns [`VerificationError::Expired`] or [`VerificationError::Early`].
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) fn assert_time(
     valid_after: UnixTimestamp,
     valid_before: UnixTimestamp,
     clock_skew_tolerance: u64,
-) -> Result<(), PaymentVerificationError> {
+) -> Result<(), VerificationError> {
     let now = UnixTimestamp::now();
     if valid_before < now + clock_skew_tolerance {
-        return Err(PaymentVerificationError::Expired);
+        return Err(VerificationError::Expired);
     }
     if valid_after > now + clock_skew_tolerance {
-        return Err(PaymentVerificationError::Early);
+        return Err(VerificationError::Early);
     }
     Ok(())
 }
@@ -230,29 +233,33 @@ pub(super) async fn assert_enough_balance<P: Provider>(
     )?;
 
     if balance < max_amount_required {
-        Err(PaymentVerificationError::InsufficientFunds.into())
+        Err(VerificationError::InsufficientFunds.into())
     } else {
         Ok(())
     }
 }
 
-/// Verifies that the declared `value` in the payload is sufficient for the required amount.
+/// Asserts that the declared payment amount equals the required amount exactly.
+///
+/// x402 v2 §Payment Scheme "exact" mandates buyers transfer **exactly**
+/// `maxAmountRequired`. Over- or under-payment is rejected. The previous
+/// `>=` comparison is a protocol violation that was replaced in v0.14.0.
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError::InvalidPaymentAmount`] if value is too low.
+/// Returns [`VerificationError::InvalidPaymentAmount`] when `sent != required`.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
     sent = %sent,
-    max_amount_required = %max_amount_required
+    required = %required,
 )))]
-pub(super) fn assert_enough_value(
+pub(super) fn assert_exact_value(
     sent: &U256,
-    max_amount_required: &U256,
-) -> Result<(), PaymentVerificationError> {
-    if sent < max_amount_required {
-        Err(PaymentVerificationError::InvalidPaymentAmount)
-    } else {
+    required: &U256,
+) -> Result<(), VerificationError> {
+    if sent == required {
         Ok(())
+    } else {
+        Err(VerificationError::InvalidPaymentAmount)
     }
 }
 
@@ -293,15 +300,15 @@ pub(super) async fn verify_payment<P: Provider>(
                 transfer_span!("call_transferWithAuthorization_0", transfer_call)
             )?;
             let is_valid_signature_result = is_valid_signature_result
-                .map_err(|e| PaymentVerificationError::InvalidSignature(e.to_string()))?;
+                .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
             if !is_valid_signature_result {
-                return Err(PaymentVerificationError::InvalidSignature(
+                return Err(VerificationError::InvalidSignature(
                     "Chain reported signature to be invalid".to_owned(),
                 )
                 .into());
             }
             transfer_result
-                .map_err(|e| PaymentVerificationError::TransactionSimulation(e.to_string()))?;
+                .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
         }
         StructuredSignature::EIP1271(signature) => {
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
@@ -345,14 +352,14 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
 
     let chain_id: ChainId = chain.into();
     if accepted.network != chain_id {
-        return Err(PaymentVerificationError::ChainIdMismatch.into());
+        return Err(VerificationError::ChainIdMismatch.into());
     }
 
     let auth = &permit2.permit2_authorization;
 
     // Verify spender is x402ExactPermit2Proxy
     if auth.spender != X402_EXACT_PERMIT2_PROXY {
-        return Err(PaymentVerificationError::InvalidSignature(
+        return Err(VerificationError::InvalidSignature(
             "invalid Permit2 spender: must be x402ExactPermit2Proxy".into(),
         )
         .into());
@@ -360,7 +367,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
 
     // Verify witness.to matches payTo
     if auth.witness.to != Address::from(accepted.pay_to) {
-        return Err(PaymentVerificationError::RecipientMismatch.into());
+        return Err(VerificationError::RecipientMismatch.into());
     }
 
     // Parse and verify deadline not expired (with clock skew tolerance)
@@ -368,23 +375,23 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     let deadline_u64: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
     let deadline_threshold = now.as_secs() + clock_skew_tolerance;
     if deadline_u64 < deadline_threshold {
-        return Err(PaymentVerificationError::Expired.into());
+        return Err(VerificationError::Expired.into());
     }
 
     // Parse and verify validAfter is not in the future (with clock skew tolerance)
     let valid_after_u64: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
     if valid_after_u64 > now.as_secs() + clock_skew_tolerance {
-        return Err(PaymentVerificationError::Early.into());
+        return Err(VerificationError::Early.into());
     }
 
     // Verify amount is sufficient
     let auth_amount: U256 = auth.permitted.amount.into();
     let required_amount: U256 = accepted.amount.into();
-    assert_enough_value(&auth_amount, &required_amount)?;
+    assert_exact_value(&auth_amount, &required_amount)?;
 
     // Verify token matches
     if auth.permitted.token != Address::from(accepted.asset) {
-        return Err(PaymentVerificationError::AssetMismatch.into());
+        return Err(VerificationError::AssetMismatch.into());
     }
 
     let token_address: Address = accepted.asset.into();
@@ -400,14 +407,14 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     if let Ok(allowance) = allowance_result
         && allowance < required_amount
     {
-        return Err(PaymentVerificationError::Permit2AllowanceInsufficient.into());
+        return Err(VerificationError::Permit2AllowanceRequired.into());
     }
 
     // Check balance
     if let Ok(balance) = balance_result
         && balance < required_amount
     {
-        return Err(PaymentVerificationError::InsufficientFunds.into());
+        return Err(VerificationError::InsufficientFunds.into());
     }
 
     // Construct EIP-712 domain for Permit2 (name = "Permit2", no version)
@@ -432,15 +439,21 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     Ok((erc20, payment, domain))
 }
 
-/// Verifies a Permit2 payment by checking the EIP-712 signature.
+/// Verifies a Permit2 payment by checking the EIP-712 signature **and**
+/// simulating the on-chain `x402ExactPermit2Proxy.settle` call via
+/// `eth_call` (Fix-7).
 ///
-/// Reconstructs the `PermitWitnessTransferFrom` typed data, computes the
-/// EIP-712 signing hash, and verifies the signature using the EIP-6492
-/// universal validator (supporting EOA, EIP-1271, and counterfactual wallets).
+/// Signature validity alone does not guarantee the settlement transaction
+/// will succeed: the buyer may have burned the nonce, revoked the
+/// allowance, or set a short deadline that expires between verify and
+/// settle. Running `eth_call` on the exact call that `settle_permit2_payment`
+/// would submit catches all of these revert conditions before the
+/// facilitator commits gas.
 ///
 /// # Errors
 ///
-/// Returns [`Eip155ExactError`] if signature verification fails.
+/// Returns [`Eip155ExactError`] if signature verification or the
+/// simulation call fails.
 pub(super) async fn verify_permit2_payment<P: Provider>(
     provider: &P,
     payment: &Permit2Payment,
@@ -464,27 +477,91 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
     let payer = payment.from;
     let signature_bytes = payment.signature.clone();
 
-    // Use universal signature verification (EIP-6492 validator)
     let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, provider);
     let is_valid_call =
-        validator6492.isValidSigWithSideEffects(payer, eip712_hash, signature_bytes);
+        validator6492.isValidSigWithSideEffects(payer, eip712_hash, signature_bytes.clone());
     let is_valid_fut = is_valid_call.call().into_future();
     let is_valid = traced!(
         is_valid_fut,
-        tracing::info_span!("verify_permit2_signature",
+        tracing::info_span!(
+            "verify_permit2_signature",
             from = %payer,
             token = %payment.token,
             amount = %payment.amount,
             otel.kind = "client",
         )
     )
-    .map_err(|e| PaymentVerificationError::InvalidSignature(e.to_string()))?;
+    .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
 
     if !is_valid {
         return Err(
-            PaymentVerificationError::InvalidSignature("invalid Permit2 signature".into()).into(),
+            VerificationError::InvalidSignature("invalid Permit2 signature".into()).into(),
         );
     }
 
+    // Fix-7: simulate the exact proxy.settle call via eth_call to catch
+    // nonce/allowance/deadline reverts before burning gas.
+    let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider);
+    let settle_call = proxy.settle(
+        IX402Permit2Proxy::Permit {
+            permitted: IX402Permit2Proxy::TokenPermissions {
+                token: payment.token,
+                amount: payment.amount,
+            },
+            nonce: payment.nonce,
+            deadline: payment.deadline,
+        },
+        payment.from,
+        IX402Permit2Proxy::Witness {
+            to: payment.to,
+            validAfter: payment.valid_after,
+        },
+        signature_bytes,
+    );
+    let settle_simulation = settle_call.call().into_future();
+    traced!(
+        settle_simulation,
+        tracing::info_span!(
+            "simulate_permit2_settle",
+            from = %payer,
+            to = %payment.to,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )
+    .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+
     Ok(payer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assert_exact_value_accepts_equal() {
+        let value = U256::from(1_000_000_u64);
+        assert!(assert_exact_value(&value, &value).is_ok());
+    }
+
+    #[test]
+    fn assert_exact_value_rejects_overpayment() {
+        let required = U256::from(1_000_000_u64);
+        let sent = U256::from(1_000_001_u64);
+        assert!(matches!(
+            assert_exact_value(&sent, &required),
+            Err(VerificationError::InvalidPaymentAmount),
+        ));
+    }
+
+    #[test]
+    fn assert_exact_value_rejects_underpayment() {
+        let required = U256::from(1_000_000_u64);
+        let sent = U256::from(999_999_u64);
+        assert!(matches!(
+            assert_exact_value(&sent, &required),
+            Err(VerificationError::InvalidPaymentAmount),
+        ));
+    }
 }

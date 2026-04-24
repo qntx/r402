@@ -6,8 +6,8 @@
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 
-use r402::amount::{MoneyAmount, MoneyAmountParseError};
-use r402::chain::{ChainId, DeployedTokenAmount};
+use r402_core::amount::{MoneyAmount, MoneyAmountParseError};
+use r402_core::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solana_pubkey::Pubkey;
 

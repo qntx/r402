@@ -3,9 +3,9 @@
 //! Contains compute budget checks, instruction validation, transfer verification,
 //! and the settlement function.
 
-use r402::chain::ChainProvider;
-use r402::proto::Base64Bytes;
-use r402::proto::PaymentVerificationError;
+use r402_core::chain::ChainProvider;
+use r402_core::wire::Base64Bytes;
+use r402_core::error::VerificationError;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_response::{TransactionError, UiTransactionError};
 use solana_commitment_config::CommitmentConfig;
@@ -182,12 +182,12 @@ fn get_program_id(transaction: &VersionedTransaction, index: usize) -> Option<Pu
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if the transfer is invalid.
+/// Returns [`VerificationError`] if the transfer is invalid.
 pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
     provider: &P,
     request: &types::v2::VerifyRequest,
     config: &SolanaExactFacilitatorConfig,
-) -> Result<VerifyTransferResult, PaymentVerificationError> {
+) -> Result<VerifyTransferResult, VerificationError> {
     let payload = &request.payment_payload;
     let requirements = &request.payment_requirements;
 
@@ -198,13 +198,13 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
         && accepted.asset == requirements.asset
         && accepted.pay_to == requirements.pay_to)
     {
-        return Err(PaymentVerificationError::AcceptedRequirementsMismatch);
+        return Err(VerificationError::AcceptedRequirementsMismatch);
     }
 
     let chain_id = provider.chain_id();
     let payload_chain_id = &accepted.network;
     if payload_chain_id != &chain_id {
-        return Err(PaymentVerificationError::UnsupportedChain);
+        return Err(VerificationError::UnsupportedChain);
     }
     let transaction_b64_string = payload.payload.transaction.clone();
     let transfer_requirement = TransferRequirement {
@@ -225,13 +225,13 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if verification fails.
+/// Returns [`VerificationError`] if verification fails.
 pub async fn verify_transaction<P: SolanaChainProviderLike>(
     provider: &P,
     transaction_b64_string: String,
     transfer_requirement: &TransferRequirement<'_>,
     config: &SolanaExactFacilitatorConfig,
-) -> Result<VerifyTransferResult, PaymentVerificationError> {
+) -> Result<VerifyTransferResult, VerificationError> {
     let bytes = Base64Bytes::from(transaction_b64_string.as_bytes())
         .decode()
         .map_err(|e| SolanaExactError::TransactionDecoding(e.to_string()))?;
@@ -293,13 +293,13 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
 ///
 /// # Errors
 ///
-/// Returns [`PaymentVerificationError`] if the transfer instruction is invalid.
+/// Returns [`VerificationError`] if the transfer instruction is invalid.
 pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: &VersionedTransaction,
     instruction_index: usize,
     transfer_requirement: &TransferRequirement<'_>,
-) -> Result<TransferCheckedInstruction, PaymentVerificationError> {
+) -> Result<TransferCheckedInstruction, VerificationError> {
     let tx = TransactionInt::new(transaction.clone());
     let instruction = tx.instruction(instruction_index)?;
     instruction.assert_not_empty()?;
@@ -338,7 +338,7 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     }
 
     if Address::new(transfer_checked_instruction.mint) != *transfer_requirement.asset {
-        return Err(PaymentVerificationError::AssetMismatch);
+        return Err(VerificationError::AssetMismatch);
     }
 
     let expected_token_program = transfer_checked_instruction.token_program;
@@ -351,7 +351,7 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
         &ATA_PROGRAM_PUBKEY,
     );
     if transfer_checked_instruction.destination != ata {
-        return Err(PaymentVerificationError::RecipientMismatch);
+        return Err(VerificationError::RecipientMismatch);
     }
     let accounts = provider
         .get_multiple_accounts(&[transfer_checked_instruction.source, ata])
@@ -362,7 +362,7 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     }
     let is_receiver_missing = accounts.get(1).cloned().is_none_or(|a| a.is_none());
     if is_receiver_missing {
-        return Err(PaymentVerificationError::RecipientMismatch);
+        return Err(VerificationError::RecipientMismatch);
     }
     // Strict equality: the exact scheme settles the declared amount, no more,
     // no less. Overpayment is not "close enough" — it silently leaks value to
@@ -370,7 +370,7 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     // where variable amounts belong. Matches Go SDK
     // (`mechanisms/svm/exact/facilitator.go: verifyTransferInstruction`).
     if transfer_checked_instruction.amount != transfer_requirement.amount {
-        return Err(PaymentVerificationError::InvalidPaymentAmount);
+        return Err(VerificationError::InvalidPaymentAmount);
     }
     Ok(transfer_checked_instruction)
 }

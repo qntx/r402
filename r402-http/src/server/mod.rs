@@ -15,14 +15,20 @@
 //! - **[`SettlementMode::Concurrent`]**: verify → (settle ∥ execute) → await settle.
 //! - **[`SettlementMode::Background`]**: verify → spawn settle (fire-and-forget) → execute → return.
 
+pub mod cors;
 pub mod facilitator;
+pub mod hooks;
 pub mod layer;
 pub mod paygate;
 pub mod pricing;
+pub mod status;
 
+pub use cors::{X402_EXPOSED_HEADERS, ensure_expose_headers};
+pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 pub use layer::{SettlementMode, X402LayerBuilder, X402Middleware};
 pub use paygate::{
     Paygate, PaygateBuilder, PaygateError, ResourceTemplate, VerificationError, VerifiedPayment,
     settlement_to_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+pub use status::reason_to_status;

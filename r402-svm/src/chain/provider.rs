@@ -2,9 +2,9 @@ use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
-use r402::chain::{ChainId, ChainProvider};
-use r402::facilitator::FacilitatorError;
-use r402::proto::PaymentVerificationError;
+use r402_core::chain::{ChainId, ChainProvider};
+use r402_core::error::FacilitatorError;
+use r402_core::error::VerificationError;
 use solana_account::Account;
 use solana_client::client_error::{ClientError, ClientErrorKind};
 use solana_client::nonblocking::pubsub_client::PubsubClient;
@@ -53,13 +53,13 @@ impl From<ClientError> for SolanaChainProviderError {
 
 impl From<SolanaChainProviderError> for FacilitatorError {
     fn from(value: SolanaChainProviderError) -> Self {
-        Self::OnchainFailure(value.to_string())
+        Self::Onchain(value.to_string())
     }
 }
 
-impl From<SolanaChainProviderError> for PaymentVerificationError {
+impl From<SolanaChainProviderError> for VerificationError {
     fn from(value: SolanaChainProviderError) -> Self {
-        Self::TransactionSimulation(value.to_string())
+        Self::SimulationFailed(value.to_string())
     }
 }
 

@@ -5,9 +5,8 @@
 
 use std::sync::Arc;
 
-use r402::chain::{ChainId, DeployedTokenAmount};
-use r402::proto;
-use r402::proto::v2;
+use r402_core::chain::{ChainId, DeployedTokenAmount};
+use r402_core::wire;
 
 use crate::chain::{Address, SolanaTokenDeployment};
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
@@ -21,18 +20,18 @@ impl SolanaExact {
     pub fn price_tag<A: Into<Address>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,
-    ) -> v2::PriceTag {
+    ) -> wire::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = v2::PaymentRequirements {
-            scheme: ExactScheme.to_string(),
-            pay_to: pay_to.into().to_string(),
-            asset: asset.token.address.to_string(),
+        let requirements = wire::PaymentRequirements {
+            scheme: ExactScheme.to_string().into(),
+            pay_to: pay_to.into().to_string().into(),
+            asset: asset.token.address.to_string().into(),
             network: chain_id,
-            amount: asset.amount.to_string(),
+            amount: asset.amount.to_string().into(),
             max_timeout_seconds: 300,
             extra: None,
         };
-        v2::PriceTag {
+        wire::PriceTag {
             requirements,
             enricher: Some(Arc::new(solana_fee_payer_enricher_v2)),
         }
@@ -41,8 +40,8 @@ impl SolanaExact {
 
 /// Enricher function for V2 Solana price tags - adds `fee_payer` to extra field
 pub fn solana_fee_payer_enricher_v2(
-    price_tag: &mut v2::PriceTag,
-    capabilities: &proto::SupportedResponse,
+    price_tag: &mut wire::PriceTag,
+    capabilities: &wire::SupportedResponse,
 ) {
     if price_tag.requirements.extra.is_some() {
         return;
@@ -52,9 +51,9 @@ pub fn solana_fee_payer_enricher_v2(
         .kinds
         .iter()
         .find(|kind| {
-            v2::V2 == kind.x402_version
-                && kind.scheme == ExactScheme.to_string()
-                && kind.network == price_tag.requirements.network.to_string()
+            wire::V2 == kind.x402_version
+                && kind.scheme.as_str() == ExactScheme.as_ref()
+                && kind.network.as_str() == price_tag.requirements.network.to_string()
         })
         .and_then(|kind| kind.extra.as_ref())
         .and_then(|extra| serde_json::from_value::<SupportedPaymentKindExtra>(extra.clone()).ok());

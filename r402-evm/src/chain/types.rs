@@ -7,8 +7,8 @@ use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use alloy_primitives::{Address, U256, hex};
-use r402::amount::{MoneyAmount, MoneyAmountParseError, ScaleFromMantissa};
-use r402::chain::{ChainId, DeployedTokenAmount};
+use r402_core::amount::{MoneyAmount, MoneyAmountParseError, ScaleFromMantissa};
+use r402_core::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// An Ethereum address that serializes with EIP-55 checksum encoding.

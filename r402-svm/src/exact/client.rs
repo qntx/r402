@@ -10,11 +10,12 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
-use r402::proto::Base64Bytes;
-use r402::proto::PaymentRequired;
-use r402::proto::v2::{self, ResourceInfo};
-use r402::scheme::SchemeId;
-use r402::scheme::{ClientError, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_core::wire::Base64Bytes;
+use r402_core::wire::PaymentRequired;
+use r402_core::wire::{self, ResourceInfo};
+use r402_core::scheme::SchemeId;
+use r402_core::error::ClientError;
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -73,11 +74,11 @@ pub async fn fetch_mint<R: RpcClientLike>(
 ) -> Result<Mint, ClientError> {
     let mint_pubkey = mint_address.pubkey();
     let account = rpc_client.get_account(mint_pubkey).await.map_err(|e| {
-        ClientError::SigningError(format!("failed to fetch mint {mint_pubkey}: {e}"))
+        ClientError::Signing(format!("failed to fetch mint {mint_pubkey}: {e}"))
     })?;
     if account.owner == spl_token::id() {
         let mint = spl_token::state::Mint::unpack(&account.data).map_err(|e| {
-            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
+            ClientError::Signing(format!("failed to unpack mint {mint_pubkey}: {e}"))
         })?;
         Ok(Mint::Token {
             decimals: mint.decimals,
@@ -85,14 +86,14 @@ pub async fn fetch_mint<R: RpcClientLike>(
         })
     } else if account.owner == spl_token_2022::id() {
         let mint = spl_token_2022::state::Mint::unpack(&account.data).map_err(|e| {
-            ClientError::SigningError(format!("failed to unpack mint {mint_pubkey}: {e}"))
+            ClientError::Signing(format!("failed to unpack mint {mint_pubkey}: {e}"))
         })?;
         Ok(Mint::Token2022 {
             decimals: mint.decimals,
             token_program: spl_token_2022::id(),
         })
     } else {
-        Err(ClientError::SigningError(format!(
+        Err(ClientError::Signing(format!(
             "failed to unpack mint {mint_pubkey}: unknown owner"
         )))
     }
@@ -126,7 +127,7 @@ pub fn build_message_to_simulate(
         ixs_mod
     };
     let message = MessageV0::try_compile(&fee_payer, &with_cu_limit, &[], recent_blockhash)
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
     Ok((message, ixs))
 }
 
@@ -156,9 +157,9 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
             },
         )
         .await
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
     let units = sim.value.units_consumed.ok_or_else(|| {
-        ClientError::SigningError("simulation returned no units_consumed".to_owned())
+        ClientError::Signing("simulation returned no units_consumed".to_owned())
     })?;
     #[allow(
         clippy::cast_possible_truncation,
@@ -179,7 +180,7 @@ pub async fn get_priority_fee_micro_lamports<S: RpcClientLike>(
     let recent_fees = rpc_client
         .get_recent_prioritization_fees(writeable_accounts)
         .await
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
     let fee = recent_fees
         .iter()
         .filter_map(|e| {
@@ -261,7 +262,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
             amount,
             decimals,
         )
-        .map_err(|e| ClientError::SigningError(format!("{e}")))?,
+        .map_err(|e| ClientError::Signing(format!("{e}")))?,
         Mint::Token2022 {
             decimals,
             token_program,
@@ -275,13 +276,13 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
             amount,
             decimals,
         )
-        .map_err(|e| ClientError::SigningError(format!("{e}")))?,
+        .map_err(|e| ClientError::Signing(format!("{e}")))?,
     };
 
     let recent_blockhash = rpc_client
         .get_latest_blockhash()
         .await
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
 
     let fee =
         get_priority_fee_micro_lamports(rpc_client, &[*fee_payer, destination_ata, source_ata])
@@ -298,7 +299,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
         final_instructions.push(cu_ix);
         final_instructions.extend(instructions);
         MessageV0::try_compile(fee_payer, &final_instructions, &[], recent_blockhash)
-            .map_err(|e| ClientError::SigningError(format!("{e:?}")))?
+            .map_err(|e| ClientError::Signing(format!("{e:?}")))?
     };
 
     let tx = VersionedTransaction {
@@ -309,10 +310,10 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
     let tx = TransactionInt::new(tx);
     let signed = tx
         .sign_with_keypair(signer)
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
     let tx_b64 = signed
         .as_base64()
-        .map_err(|e| ClientError::SigningError(format!("{e:?}")))?;
+        .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
 
     Ok(tx_b64)
 }
@@ -347,6 +348,8 @@ impl<S, R> SchemeId for SolanaExactClient<S, R> {
     }
 }
 
+impl<S, R> r402_core::scheme::sealed::Sealed for SolanaExactClient<S, R> {}
+
 impl<S, R> SchemeClient for SolanaExactClient<S, R>
 where
     S: Signer + Send + Sync + Clone + 'static,
@@ -364,10 +367,10 @@ where
                 }
                 let candidate = PaymentCandidate {
                     chain_id,
-                    asset: requirements.asset.to_string(),
-                    amount: requirements.amount.inner().to_string(),
-                    scheme: self.scheme().to_owned(),
-                    pay_to: requirements.pay_to.to_string(),
+                    asset: requirements.asset.to_string().into(),
+                    amount: requirements.amount.inner().to_string().into(),
+                    scheme: self.scheme().into(),
+                    pay_to: requirements.pay_to.to_string().into(),
                     signer: Box::new(V2PayloadSigner {
                         signer: self.signer.clone(),
                         rpc_client: self.rpc_client.clone(),
@@ -388,8 +391,10 @@ struct V2PayloadSigner<S, R> {
     resource: ResourceInfo,
 }
 
-impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2PayloadSigner<S, R> {
-    fn sign_payment(&self) -> r402::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSigner
+    for V2PayloadSigner<S, R>
+{
+    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
@@ -397,7 +402,7 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2Pay
                 .as_ref()
                 .map(|extra| extra.fee_payer)
                 .ok_or_else(|| {
-                    ClientError::SigningError("missing fee_payer in extra".to_owned())
+                    ClientError::Signing("missing fee_payer in extra".to_owned())
                 })?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
@@ -413,13 +418,13 @@ impl<S: Signer + Sync, R: RpcClientLike + Sync> PaymentCandidateSigner for V2Pay
             .await?;
 
             let payload = types::v2::PaymentPayload {
-                x402_version: v2::V2,
+                x402_version: wire::V2,
                 accepted: self.requirements.clone(),
                 resource: Some(self.resource.clone()),
                 payload: ExactSolanaPayload {
                     transaction: tx_b64,
                 },
-                extensions: None,
+                extensions: wire::Extensions::new(),
             };
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);

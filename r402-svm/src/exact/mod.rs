@@ -19,7 +19,7 @@
 //! - Index 2: `TransferChecked` instruction (SPL Token or Token-2022)
 //! - Index 3+: Additional instructions (if allowed by configuration)
 
-use r402::scheme::SchemeId;
+use r402_core::scheme::SchemeId;
 
 #[cfg(feature = "server")]
 pub mod server;

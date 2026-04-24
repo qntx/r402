@@ -1,0 +1,29 @@
+[package]
+name = "r402-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Model Context Protocol (MCP) transport for the x402 payment protocol."
+readme = "README.md"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+
+telemetry = ["r402-core/telemetry", "dep:tracing"]
+server = []
+client = []
+
+full = ["telemetry", "server", "client"]
+
+[dependencies]
+r402-core = { workspace = true }
+tracing = { workspace = true, optional = true }
+
+[lints]
+workspace = true

@@ -4,16 +4,18 @@
 //! payments on Solana.
 
 mod config;
+mod memo;
 mod verify;
 
 use std::collections::HashMap;
 
+use compact_str::CompactString;
 pub use config::SolanaExactFacilitatorConfig;
-use r402::chain::ChainProvider;
-use r402::facilitator::{BoxFuture, Facilitator, FacilitatorError};
-use r402::proto;
-use r402::proto::v2;
-use r402::scheme::{SchemeBuilder, SchemeId};
+use r402_core::chain::ChainProvider;
+use r402_core::error::VerificationError;
+use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
+use r402_core::scheme::{SchemeBuilder, SchemeId};
+use r402_core::wire;
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
     validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
@@ -23,17 +25,37 @@ pub use verify::{
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
+use crate::settlement_cache::{Duplicate, SettlementCache};
 
 /// Facilitator for Solana exact scheme payments.
 pub struct SolanaExactFacilitator<P> {
     provider: P,
     config: SolanaExactFacilitatorConfig,
+    settlement_cache: SettlementCache,
 }
 
 impl<P> SolanaExactFacilitator<P> {
-    /// Creates a new Solana exact facilitator.
-    pub const fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
-        Self { provider, config }
+    /// Creates a new Solana exact facilitator with the default in-memory
+    /// settlement deduplication cache.
+    pub fn new(provider: P, config: SolanaExactFacilitatorConfig) -> Self {
+        Self::with_settlement_cache(provider, config, SettlementCache::new())
+    }
+
+    /// Creates a facilitator with a shared [`SettlementCache`].
+    ///
+    /// Sharing the cache across multiple facilitator instances (e.g. v1 + v2)
+    /// guarantees a transaction submitted through one path cannot be replayed
+    /// through another.
+    pub const fn with_settlement_cache(
+        provider: P,
+        config: SolanaExactFacilitatorConfig,
+        settlement_cache: SettlementCache,
+    ) -> Self {
+        Self {
+            provider,
+            config,
+            settlement_cache,
+        }
     }
 }
 
@@ -53,7 +75,7 @@ where
         &self,
         provider: P,
         config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn Facilitator>, Box<dyn std::error::Error>> {
+    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
         let config = config
             .map(serde_json::from_value::<SolanaExactFacilitatorConfig>)
             .transpose()?
@@ -66,58 +88,110 @@ impl<P> Facilitator for SolanaExactFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
-    fn verify(
+    async fn verify(
         &self,
-        request: proto::VerifyRequest,
-    ) -> BoxFuture<'_, Result<proto::VerifyResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let request = types::v2::VerifyRequest::from_proto(request)?;
-            let verification = verify_transfer(&self.provider, &request, &self.config).await?;
-            Ok(proto::VerifyResponse::valid(verification.payer.to_string()))
+        request: wire::VerifyRequest,
+    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+        let request = types::v2::VerifyRequest::from_verify(request)?;
+        enforce_memo(&request)?;
+        let verification = verify_transfer(&self.provider, &request, &self.config).await?;
+        Ok(wire::VerifyResponse::valid(verification.payer.to_string()))
+    }
+
+    async fn settle(
+        &self,
+        request: wire::SettleRequest,
+    ) -> Result<wire::SettleResponse, FacilitatorError> {
+        let request = types::v2::SettleRequest::from_settle(request)?;
+
+        // Fix-2: Deduplicate by base64 transaction payload before running
+        // on-chain settlement. Once reserved, a retried payload is rejected
+        // with DuplicateSettlement until the cache TTL expires.
+        let cache_key = request.payment_payload.payload.transaction.as_str();
+        if let Duplicate::Yes = self.settlement_cache.reserve(cache_key) {
+            return Err(VerificationError::DuplicateSettlement.into());
+        }
+
+        enforce_memo(&request)?;
+        let amount = request.payment_payload.accepted.amount.to_string();
+        let verification = verify_transfer(&self.provider, &request, &self.config).await?;
+        let payer = verification.payer.to_string();
+        let tx_sig = settle_transaction(&self.provider, verification).await?;
+        Ok(wire::SettleResponse::Success {
+            payer: payer.into(),
+            transaction: tx_sig.to_string().into(),
+            network: self.provider.chain_id().to_string().into(),
+            amount: Some(amount.into()),
+            extensions: wire::Extensions::new(),
         })
     }
 
-    fn settle(
-        &self,
-        request: proto::SettleRequest,
-    ) -> BoxFuture<'_, Result<proto::SettleResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let request = types::v2::SettleRequest::from_settle(request)?;
-            let verification = verify_transfer(&self.provider, &request, &self.config).await?;
-            let payer = verification.payer.to_string();
-            let tx_sig = settle_transaction(&self.provider, verification).await?;
-            Ok(proto::SettleResponse::Success {
-                payer,
-                transaction: tx_sig.to_string(),
-                network: self.provider.chain_id().to_string(),
-                extensions: None,
+    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+        let chain_id = self.provider.chain_id();
+        let kinds: Vec<wire::SupportedPaymentKind> = {
+            let fee_payer = self.provider.fee_payer();
+            let extra = serde_json::to_value(SupportedPaymentKindExtra {
+                fee_payer,
+                memo: None,
             })
+            .ok();
+            vec![wire::SupportedPaymentKind {
+                x402_version: wire::V2.into(),
+                scheme: ExactScheme.to_string().into(),
+                network: chain_id.to_string().into(),
+                extra,
+            }]
+        };
+        let signers = {
+            let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
+            let _ = signers.insert(
+                SolanaExact.caip_family().into(),
+                self.provider
+                    .signer_addresses()
+                    .into_iter()
+                    .map(CompactString::from)
+                    .collect(),
+            );
+            signers
+        };
+        Ok(wire::SupportedResponse {
+            kinds,
+            extensions: Vec::new(),
+            signers,
         })
     }
+}
 
-    fn supported(&self) -> BoxFuture<'_, Result<proto::SupportedResponse, FacilitatorError>> {
-        Box::pin(async move {
-            let chain_id = self.provider.chain_id();
-            let kinds: Vec<proto::SupportedPaymentKind> = {
-                let fee_payer = self.provider.fee_payer();
-                let extra = serde_json::to_value(SupportedPaymentKindExtra { fee_payer }).ok();
-                vec![proto::SupportedPaymentKind {
-                    x402_version: v2::V2.into(),
-                    scheme: ExactScheme.to_string(),
-                    network: chain_id.to_string(),
-                    extra,
-                }]
-            };
-            let signers = {
-                let mut signers = HashMap::with_capacity(1);
-                signers.insert(SolanaExact.caip_family(), self.provider.signer_addresses());
-                signers
-            };
-            Ok(proto::SupportedResponse {
-                kinds,
-                extensions: Vec::new(),
-                signers,
-            })
-        })
-    }
+/// Decodes the base64 transaction from `request.payment_payload.payload.transaction`
+/// and, if `accepted.extra.memo` is declared, enforces the memo instruction
+/// constraint.
+fn enforce_memo(request: &types::v2::VerifyRequest) -> Result<(), FacilitatorError> {
+    use base64::Engine;
+    use solana_message::VersionedMessage;
+
+    let Some(expected) = request
+        .payment_payload
+        .accepted
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.memo.as_deref())
+    else {
+        return Ok(());
+    };
+
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(request.payment_payload.payload.transaction.as_bytes())
+        .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
+    let transaction: solana_transaction::versioned::VersionedTransaction = bincode::deserialize(&raw)
+        .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
+
+    let (instructions, static_keys): (&[solana_message::compiled_instruction::CompiledInstruction], &[solana_pubkey::Pubkey]) =
+        match &transaction.message {
+            VersionedMessage::Legacy(m) => (&m.instructions, &m.account_keys),
+            VersionedMessage::V0(m) => (&m.instructions, &m.account_keys),
+        };
+
+    memo::verify_memo(instructions, static_keys, Some(expected))
+        .map_err(|e| FacilitatorError::Verification(VerificationError::from(e)))?;
+    Ok(())
 }

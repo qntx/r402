@@ -2,22 +2,44 @@
 name = "r402-http"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "HTTP transport layer for the x402 payment protocol."
+readme = "README.md"
 
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-client = ["dep:async-trait", "dep:http", "dep:r402", "dep:reqwest", "dep:reqwest-middleware", "dep:serde_json"]
-server = ["dep:axum-core", "dep:http", "dep:r402", "dep:reqwest", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:tokio", "dep:tower", "dep:url"]
-telemetry = ["dep:r402", "dep:tracing", "r402/telemetry"]
+client = [
+    "dep:async-trait",
+    "dep:http",
+    "dep:r402-core",
+    "dep:reqwest",
+    "dep:reqwest-middleware",
+    "dep:serde_json",
+]
+server = [
+    "dep:axum-core",
+    "dep:http",
+    "dep:r402-core",
+    "dep:reqwest",
+    "dep:serde",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:tokio",
+    "dep:tower",
+    "dep:url",
+]
+telemetry = ["dep:r402-core", "dep:tracing", "r402-core/telemetry"]
 full = ["client", "server", "telemetry"]
 
 [dependencies]
-r402 = { workspace = true, optional = true }
+compact_str = { workspace = true }
+r402-core = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use solana_pubkey::Pubkey;
 
 use crate::chain::Address;
-use crate::exact::PHANTOM_LIGHTHOUSE_PROGRAM;
+use crate::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SOLFLARE_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM};
 
 /// Configuration for Solana Exact Facilitator (shared by V1 and V2).
 ///
@@ -25,7 +25,9 @@ pub struct SolanaExactFacilitatorConfig {
     pub allow_additional_instructions: bool,
 
     /// Maximum number of instructions allowed in a transaction.
-    /// Default: 10
+    /// Default: 6 (per x402 v2 spec §SVM exact scheme recommendation:
+    /// 1 TransferChecked + 2 compute budget + 1 optional memo +
+    /// 1-2 optional lighthouse instructions).
     #[serde(default = "default_max_instruction_count")]
     pub max_instruction_count: usize,
 
@@ -55,11 +57,15 @@ const fn default_allow_additional_instructions() -> bool {
 }
 
 const fn default_max_instruction_count() -> usize {
-    10
+    6
 }
 
 fn default_allowed_program_ids() -> Vec<Address> {
-    vec![Address::new(*PHANTOM_LIGHTHOUSE_PROGRAM)]
+    vec![
+        Address::new(*PHANTOM_LIGHTHOUSE_PROGRAM),
+        Address::new(*SOLFLARE_LIGHTHOUSE_PROGRAM),
+        Address::new(SPL_MEMO_PROGRAM),
+    ]
 }
 
 const fn default_require_fee_payer_not_in_instructions() -> bool {

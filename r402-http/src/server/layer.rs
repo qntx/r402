@@ -37,13 +37,14 @@ use std::time::Duration;
 use axum_core::extract::Request;
 use axum_core::response::Response;
 use http::{HeaderMap, Uri};
-use r402::facilitator::Facilitator;
-use r402::proto::v2;
+use r402_core::facilitator::Facilitator;
+use r402_core::wire;
 use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
 use super::facilitator::FacilitatorClient;
+use super::hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 use super::paygate::{Paygate, ResourceTemplate};
 use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 
@@ -239,7 +240,7 @@ where
     #[must_use]
     pub fn with_price_tag(
         &self,
-        price_tag: v2::PriceTag,
+        price_tag: wire::PriceTag,
     ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
         X402LayerBuilder {
             facilitator: self.facilitator.clone(),
@@ -247,6 +248,7 @@ where
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
+            hooks: None,
         }
     }
 
@@ -259,7 +261,7 @@ where
     #[must_use]
     pub fn with_price_tags(
         &self,
-        price_tags: Vec<v2::PriceTag>,
+        price_tags: Vec<wire::PriceTag>,
     ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
         X402LayerBuilder {
             facilitator: self.facilitator.clone(),
@@ -267,6 +269,7 @@ where
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
+            hooks: None,
         }
     }
 
@@ -281,7 +284,7 @@ where
     ) -> X402LayerBuilder<DynamicPriceTags, TFacilitator>
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = Vec<v2::PriceTag>> + Send + 'static,
+        Fut: Future<Output = Vec<wire::PriceTag>> + Send + 'static,
     {
         X402LayerBuilder {
             facilitator: self.facilitator.clone(),
@@ -289,6 +292,7 @@ where
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
+            hooks: None,
         }
     }
 }
@@ -308,6 +312,7 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     price_source: TSource,
     resource: Arc<ResourceTemplate>,
     settlement_mode: SettlementMode,
+    hooks: Option<Arc<dyn DynPaygateHooks>>,
 }
 
 impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
@@ -317,7 +322,7 @@ impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
     ///
     /// Note: This method is only available for static price tag sources.
     #[must_use]
-    pub fn with_price_tag(mut self, price_tag: v2::PriceTag) -> Self {
+    pub fn with_price_tag(mut self, price_tag: wire::PriceTag) -> Self {
         self.price_source = self.price_source.with_price_tag(price_tag);
         self
     }
@@ -381,6 +386,20 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
         self.settlement_mode = mode;
         self
     }
+
+    /// Attaches [`PaygateHooks`] for pre- and post-payment extensibility.
+    ///
+    /// Hooks fire at the HTTP layer (before and after the x402 payment check)
+    /// and let integrators bypass payment for API-key holders, enforce
+    /// IP allow-lists, or short-circuit with a custom response.
+    #[must_use]
+    pub fn with_hooks<H>(mut self, hooks: H) -> Self
+    where
+        H: PaygateHooks + 'static,
+    {
+        self.hooks = Some(Arc::new(hooks));
+        self
+    }
 }
 
 impl<S, TSource, TFacilitator> Layer<S> for X402LayerBuilder<TSource, TFacilitator>
@@ -399,6 +418,7 @@ where
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
             settlement_mode: self.settlement_mode,
+            hooks: self.hooks.clone(),
             inner: BoxCloneSyncService::new(inner),
         }
     }
@@ -424,6 +444,8 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     resource: Arc<ResourceTemplate>,
     /// Settlement strategy (sequential, concurrent, or background)
     settlement_mode: SettlementMode,
+    /// Optional paygate lifecycle hooks (Fix-8)
+    hooks: Option<Arc<dyn DynPaygateHooks>>,
     /// The inner Axum service being wrapped
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
@@ -449,9 +471,36 @@ where
         let base_url = self.base_url.clone();
         let resource_builder = Arc::clone(&self.resource);
         let settlement_mode = self.settlement_mode;
+        let hooks = self.hooks.clone();
         let mut inner = self.inner.clone();
 
         Box::pin(async move {
+            // Fix-8: dispatch on_protected_request before the payment check.
+            // Hooks may grant access, short-circuit with an error, or let
+            // the standard flow continue.
+            let mut req = req;
+            if let Some(h) = hooks.as_ref() {
+                match h.on_protected_request(&req).await {
+                    ProtectedRequestOutcome::Continue => {}
+                    ProtectedRequestOutcome::GrantAccess => {
+                        return inner.call(req).await;
+                    }
+                    ProtectedRequestOutcome::Abort { status, body } => {
+                        let mut response = Response::new(
+                            axum_core::body::Body::from(body.unwrap_or_default()),
+                        );
+                        *response.status_mut() = status;
+                        if let Ok(ct) = http::HeaderValue::from_str("text/plain; charset=utf-8") {
+                            let _ = response
+                                .headers_mut()
+                                .insert(http::header::CONTENT_TYPE, ct);
+                        }
+                        super::cors::ensure_expose_headers(response.headers_mut());
+                        return Ok(response);
+                    }
+                }
+            }
+
             // Resolve price tags from the source
             let accepts = price_source
                 .resolve(req.headers(), req.uri(), base_url.as_deref())
@@ -464,11 +513,21 @@ where
 
             let resource = resource_builder.resolve(base_url.as_deref(), &req);
 
-            let mut gate = Paygate::builder(facilitator)
+            let mut gate_builder = Paygate::builder(facilitator)
                 .accepts(accepts)
-                .resource(resource)
-                .build();
+                .resource(resource);
+            if let Some(h) = hooks.as_ref() {
+                gate_builder = gate_builder.hooks_dyn(Arc::clone(h));
+            }
+            let mut gate = gate_builder.build();
             gate.enrich_accepts().await;
+
+            // Fix-8: after the paygate verifies the payment, fire
+            // on_payment_verified so hooks can stamp request extensions
+            // (e.g. payer address) for downstream handlers.
+            if let Some(h) = hooks.as_ref() {
+                h.on_payment_verified(&mut req).await;
+            }
 
             let result = match settlement_mode {
                 SettlementMode::Sequential => gate.handle_request(inner, req).await,

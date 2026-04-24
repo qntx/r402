@@ -31,7 +31,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 /// # Examples
 ///
 /// ```
-/// use r402::chain::ChainId;
+/// use r402_core::chain::ChainId;
 ///
 /// let chain = ChainId::new("eip155", "8453");
 /// assert_eq!(chain.namespace(), "eip155");
