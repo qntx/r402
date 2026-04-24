@@ -36,13 +36,13 @@ use alloy_sol_types::{SolStruct, eip712_domain};
 #[cfg(feature = "client-provider")]
 use permit2::BuiltinPermit2Approver;
 pub use permit2::{Permit2Approver, permit2_allowance_calldata, permit2_approval_calldata};
+use r402_core::error::ClientError;
+use r402_core::scheme::SchemeId;
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
 use r402_core::wire::UnixTimestamp;
 use r402_core::wire::{self, ResourceInfo};
-use r402_core::scheme::SchemeId;
-use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use rand::RngExt;
 use rand::rng;
 

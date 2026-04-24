@@ -62,8 +62,9 @@ impl PaymentCandidate {
 /// carries its own `Box<dyn PaymentCandidateSigner>`.
 pub trait PaymentCandidateSigner: Send + Sync {
     /// Produces the signed payment payload (base64-encoded).
-    fn sign_payment<'a>(&'a self)
-        -> std::pin::Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>>;
+    fn sign_payment<'a>(
+        &'a self,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>>;
 }
 
 /// Selector that picks the best candidate from a slice.

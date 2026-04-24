@@ -77,18 +77,13 @@ macro_rules! impl_scheme_marker {
         }
 
         impl serde::Serialize for $ty {
-            fn serialize<S: serde::Serializer>(
-                &self,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error> {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
                 serializer.serialize_str(Self::VALUE)
             }
         }
 
         impl<'de> serde::Deserialize<'de> for $ty {
-            fn deserialize<D: serde::Deserializer<'de>>(
-                deserializer: D,
-            ) -> Result<Self, D::Error> {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 let s = <&str>::deserialize(deserializer)?;
                 if s == Self::VALUE {
                     Ok(Self)

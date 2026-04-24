@@ -15,11 +15,11 @@
 
 use std::time::Duration;
 
-use r402_core::cache::TtlSet;
 pub use r402_core::cache::Duplicate;
+use r402_core::cache::TtlSet;
 
 /// Recommended cache TTL: 2× Solana blockhash lifetime (~60 s → 120 s).
-pub const SETTLEMENT_TTL: Duration = Duration::from_secs(120);
+pub const SETTLEMENT_TTL: Duration = Duration::from_mins(2);
 
 /// Default upper bound on distinct tracked payloads to protect against
 /// memory exhaustion.

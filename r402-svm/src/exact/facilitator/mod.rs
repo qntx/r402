@@ -108,7 +108,7 @@ where
         // on-chain settlement. Once reserved, a retried payload is rejected
         // with DuplicateSettlement until the cache TTL expires.
         let cache_key = request.payment_payload.payload.transaction.as_str();
-        if let Duplicate::Yes = self.settlement_cache.reserve(cache_key) {
+        if self.settlement_cache.reserve(cache_key) == Duplicate::Yes {
             return Err(VerificationError::DuplicateSettlement.into());
         }
 
@@ -182,14 +182,16 @@ fn enforce_memo(request: &types::v2::VerifyRequest) -> Result<(), FacilitatorErr
     let raw = base64::engine::general_purpose::STANDARD
         .decode(request.payment_payload.payload.transaction.as_bytes())
         .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
-    let transaction: solana_transaction::versioned::VersionedTransaction = bincode::deserialize(&raw)
-        .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
+    let transaction: solana_transaction::versioned::VersionedTransaction =
+        bincode::deserialize(&raw).map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
 
-    let (instructions, static_keys): (&[solana_message::compiled_instruction::CompiledInstruction], &[solana_pubkey::Pubkey]) =
-        match &transaction.message {
-            VersionedMessage::Legacy(m) => (&m.instructions, &m.account_keys),
-            VersionedMessage::V0(m) => (&m.instructions, &m.account_keys),
-        };
+    let (instructions, static_keys): (
+        &[solana_message::compiled_instruction::CompiledInstruction],
+        &[solana_pubkey::Pubkey],
+    ) = match &transaction.message {
+        VersionedMessage::Legacy(m) => (&m.instructions, &m.account_keys),
+        VersionedMessage::V0(m) => (&m.instructions, &m.account_keys),
+    };
 
     memo::verify_memo(instructions, static_keys, Some(expected))
         .map_err(|e| FacilitatorError::Verification(VerificationError::from(e)))?;

@@ -164,10 +164,12 @@ pub trait DynExtension: Send + Sync {
     fn advertise(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry>;
 
     /// See [`Extension::on_verify`].
-    fn on_verify<'a>(&'a self, ctx: &'a VerifyContext<'a>) -> BoxFuture<'a, Option<ExtensionEntry>>;
+    fn on_verify<'a>(&'a self, ctx: &'a VerifyContext<'a>)
+    -> BoxFuture<'a, Option<ExtensionEntry>>;
 
     /// See [`Extension::on_settle`].
-    fn on_settle<'a>(&'a self, ctx: &'a SettleContext<'a>) -> BoxFuture<'a, Option<ExtensionEntry>>;
+    fn on_settle<'a>(&'a self, ctx: &'a SettleContext<'a>)
+    -> BoxFuture<'a, Option<ExtensionEntry>>;
 }
 
 impl<T: Extension + ?Sized> DynExtension for T {
@@ -232,12 +234,12 @@ impl ExtensionRegistry {
     /// Looks up an extension by its stable id.
     #[must_use]
     pub fn get(&self, id: &str) -> Option<&dyn DynExtension> {
-        self.by_id.get(id).map(|arc| arc.as_ref())
+        self.by_id.get(id).map(AsRef::as_ref)
     }
 
     /// Iterates over all registered extensions in registration order.
     pub fn iter(&self) -> impl Iterator<Item = &dyn DynExtension> {
-        self.ordered.iter().map(|arc| arc.as_ref())
+        self.ordered.iter().map(AsRef::as_ref)
     }
 
     /// Returns `true` when no extensions are registered.
@@ -291,8 +293,9 @@ impl ExtensionRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     struct StubExt(&'static str, serde_json::Value);
 

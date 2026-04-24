@@ -65,7 +65,7 @@ impl TtlSet {
         // "entry and compute" API via `get_with` which is atomic under
         // moka's internal scheduler.
         let mut was_new = false;
-        let _ = self.inner.get_with(key, || {
+        let () = self.inner.get_with(key, || {
             was_new = true;
         });
         if was_new {
@@ -101,7 +101,7 @@ mod tests {
     use super::*;
 
     fn cache() -> TtlSet {
-        TtlSet::new(Duration::from_secs(60), 1024)
+        TtlSet::new(Duration::from_mins(1), 1024)
     }
 
     #[test]

@@ -43,13 +43,12 @@ pub(crate) fn verify_memo(
         })
         .collect();
 
-    let count = memo_instructions.len();
-    if count != 1 {
-        return Err(SolanaExactError::MemoInstructionCountInvalid { count });
-    }
-
-    let data = &memo_instructions[0].data;
-    if data.as_slice() != expected.as_bytes() {
+    let [only] = memo_instructions.as_slice() else {
+        return Err(SolanaExactError::MemoInstructionCountInvalid {
+            count: memo_instructions.len(),
+        });
+    };
+    if only.data.as_slice() != expected.as_bytes() {
         return Err(SolanaExactError::MemoMismatch);
     }
     Ok(())

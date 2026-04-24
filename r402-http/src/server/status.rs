@@ -16,7 +16,7 @@ use r402_core::error_reason::ErrorReason;
 
 /// Returns the HTTP status corresponding to an [`ErrorReason`].
 #[must_use]
-pub fn reason_to_status(reason: ErrorReason) -> StatusCode {
+pub const fn reason_to_status(reason: ErrorReason) -> StatusCode {
     match reason {
         ErrorReason::Permit2AllowanceRequired => StatusCode::PRECONDITION_FAILED,
         _ => StatusCode::PAYMENT_REQUIRED,

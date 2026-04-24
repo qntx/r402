@@ -44,11 +44,8 @@ pub trait SchemeServer: super::SchemeId + Sealed + Send + Sync {
     /// # Errors
     ///
     /// Returns [`SchemeServerError`] when the price or chain is not supported.
-    fn parse_price(
-        &self,
-        price: &str,
-        network: &ChainId,
-    ) -> Result<AssetAmount, SchemeServerError>;
+    fn parse_price(&self, price: &str, network: &ChainId)
+    -> Result<AssetAmount, SchemeServerError>;
 
     /// Fills in scheme-specific `extra` data on the requirements.
     ///

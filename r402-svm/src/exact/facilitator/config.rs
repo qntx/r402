@@ -26,7 +26,7 @@ pub struct SolanaExactFacilitatorConfig {
 
     /// Maximum number of instructions allowed in a transaction.
     /// Default: 6 (per x402 v2 spec §SVM exact scheme recommendation:
-    /// 1 TransferChecked + 2 compute budget + 1 optional memo +
+    /// 1 `TransferChecked` + 2 compute budget + 1 optional memo +
     /// 1-2 optional lighthouse instructions).
     #[serde(default = "default_max_instruction_count")]
     pub max_instruction_count: usize,

@@ -156,8 +156,7 @@ pub enum SettlementError {
 impl AsPaymentProblem for SettlementError {
     fn as_payment_problem(&self) -> PaymentProblem {
         let reason = match self {
-            Self::Onchain(_) => ErrorReason::UnexpectedError,
-            Self::Timeout => ErrorReason::UnexpectedError,
+            Self::Onchain(_) | Self::Timeout => ErrorReason::UnexpectedError,
             Self::Duplicate => ErrorReason::DuplicateSettlement,
         };
         PaymentProblem::new(reason, self.to_string())
@@ -219,10 +218,9 @@ impl AsPaymentProblem for FacilitatorError {
         match self {
             Self::Verification(e) => e.as_payment_problem(),
             Self::Settlement(e) => e.as_payment_problem(),
-            Self::Aborted { reason, message } => PaymentProblem::new(
-                ErrorReason::UnexpectedError,
-                format!("{reason}: {message}"),
-            ),
+            Self::Aborted { reason, message } => {
+                PaymentProblem::new(ErrorReason::UnexpectedError, format!("{reason}: {message}"))
+            }
             Self::Onchain(message) => {
                 PaymentProblem::new(ErrorReason::UnexpectedError, message.clone())
             }

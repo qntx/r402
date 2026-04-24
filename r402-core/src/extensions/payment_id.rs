@@ -37,7 +37,7 @@ use crate::cache::{Duplicate, TtlSet};
 use crate::wire::ExtensionEntry;
 
 /// Default TTL for remembered payment identifiers.
-pub const DEFAULT_MAX_AGE: Duration = Duration::from_secs(600);
+pub const DEFAULT_MAX_AGE: Duration = Duration::from_mins(10);
 /// Default upper bound on tracked identifiers.
 pub const DEFAULT_CAPACITY: u64 = 10_000;
 
@@ -81,7 +81,6 @@ impl PaymentIdentifierExtension {
     }
 
     /// Records the identifier and returns whether it was newly seen.
-    #[must_use]
     pub fn record(&self, id: &str) -> Duplicate {
         self.cache.reserve(id)
     }

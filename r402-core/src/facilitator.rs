@@ -11,9 +11,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::wire::{SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse};
-
 pub use crate::error::FacilitatorError;
+use crate::wire::{
+    SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
+};
 
 /// Boxed future alias used by [`DynFacilitator`] and legacy code.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -37,65 +38,58 @@ pub trait Facilitator: Send + Sync {
     ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send;
 
     /// Returns the payment kinds supported by this facilitator.
-    fn supported(
-        &self,
-    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send;
+    fn supported(&self)
+    -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send;
 }
 
 /// Object-safe erasure of [`Facilitator`], suitable for storing as
 /// `Box<dyn DynFacilitator>` or `Arc<dyn DynFacilitator>`.
 pub trait DynFacilitator: Send + Sync {
     /// See [`Facilitator::verify`].
-    fn verify<'a>(
-        &'a self,
+    fn verify(
+        &self,
         request: VerifyRequest,
-    ) -> BoxFuture<'a, Result<VerifyResponse, FacilitatorError>>;
+    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>>;
 
     /// See [`Facilitator::settle`].
-    fn settle<'a>(
-        &'a self,
+    fn settle(
+        &self,
         request: SettleRequest,
-    ) -> BoxFuture<'a, Result<SettleResponse, FacilitatorError>>;
+    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>>;
 
     /// See [`Facilitator::supported`].
-    fn supported<'a>(&'a self) -> BoxFuture<'a, Result<SupportedResponse, FacilitatorError>>;
+    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>>;
 }
 
 impl<T> DynFacilitator for T
 where
     T: Facilitator + ?Sized,
 {
-    fn verify<'a>(
-        &'a self,
+    fn verify(
+        &self,
         request: VerifyRequest,
-    ) -> BoxFuture<'a, Result<VerifyResponse, FacilitatorError>> {
+    ) -> BoxFuture<'_, Result<VerifyResponse, FacilitatorError>> {
         Box::pin(<Self as Facilitator>::verify(self, request))
     }
 
-    fn settle<'a>(
-        &'a self,
+    fn settle(
+        &self,
         request: SettleRequest,
-    ) -> BoxFuture<'a, Result<SettleResponse, FacilitatorError>> {
+    ) -> BoxFuture<'_, Result<SettleResponse, FacilitatorError>> {
         Box::pin(<Self as Facilitator>::settle(self, request))
     }
 
-    fn supported<'a>(&'a self) -> BoxFuture<'a, Result<SupportedResponse, FacilitatorError>> {
+    fn supported(&self) -> BoxFuture<'_, Result<SupportedResponse, FacilitatorError>> {
         Box::pin(<Self as Facilitator>::supported(self))
     }
 }
 
 impl<T: Facilitator> Facilitator for Arc<T> {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         self.as_ref().verify(request).await
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         self.as_ref().settle(request).await
     }
 
@@ -105,17 +99,11 @@ impl<T: Facilitator> Facilitator for Arc<T> {
 }
 
 impl<T: Facilitator> Facilitator for Box<T> {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         self.as_ref().verify(request).await
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         self.as_ref().settle(request).await
     }
 
@@ -125,17 +113,11 @@ impl<T: Facilitator> Facilitator for Box<T> {
 }
 
 impl Facilitator for Box<dyn DynFacilitator> {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         DynFacilitator::verify(self.as_ref(), request).await
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         DynFacilitator::settle(self.as_ref(), request).await
     }
 
@@ -145,17 +127,11 @@ impl Facilitator for Box<dyn DynFacilitator> {
 }
 
 impl Facilitator for Arc<dyn DynFacilitator> {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         DynFacilitator::verify(self.as_ref(), request).await
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         DynFacilitator::settle(self.as_ref(), request).await
     }
 

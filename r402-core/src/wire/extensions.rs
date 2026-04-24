@@ -182,8 +182,9 @@ impl From<Value> for ExtensionEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn extensions_empty_by_default() {
@@ -208,9 +209,8 @@ mod tests {
 
     #[test]
     fn raw_entry_roundtrip() {
-        let ext: Extensions = [("custom", ExtensionEntry::raw(json!([1, 2, 3])))]
-            .into_iter()
-            .collect();
+        let mut ext = Extensions::new();
+        ext.insert("custom", ExtensionEntry::raw(json!([1, 2, 3])));
         let encoded = serde_json::to_value(&ext).unwrap();
         assert_eq!(encoded["custom"], json!([1, 2, 3]));
         let decoded: Extensions = serde_json::from_value(encoded).unwrap();

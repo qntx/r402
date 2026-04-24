@@ -430,10 +430,7 @@ impl FacilitatorClient {
 }
 
 impl Facilitator for FacilitatorClient {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         #[cfg(feature = "telemetry")]
         let result = with_span(
             Self::verify(self, &request),
@@ -445,10 +442,7 @@ impl Facilitator for FacilitatorClient {
         result.map_err(|e| FacilitatorError::Internal(Box::new(e)))
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         #[cfg(feature = "telemetry")]
         let result = with_span(
             Self::settle(self, &request),

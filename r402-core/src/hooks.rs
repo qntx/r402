@@ -156,10 +156,7 @@ pub trait DynFacilitatorHooks: Send + Sync {
     ) -> BoxFuture<'a, FailureRecovery<VerifyResponse>>;
 
     /// See [`FacilitatorHooks::before_settle`].
-    fn before_settle<'a>(
-        &'a self,
-        ctx: &'a SettleContext,
-    ) -> BoxFuture<'a, HookDecision>;
+    fn before_settle<'a>(&'a self, ctx: &'a SettleContext) -> BoxFuture<'a, HookDecision>;
 
     /// See [`FacilitatorHooks::after_settle`].
     fn after_settle<'a>(
@@ -177,10 +174,7 @@ pub trait DynFacilitatorHooks: Send + Sync {
 }
 
 impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
-    fn before_verify<'a>(
-        &'a self,
-        ctx: &'a VerifyContext,
-    ) -> BoxFuture<'a, HookDecision> {
+    fn before_verify<'a>(&'a self, ctx: &'a VerifyContext) -> BoxFuture<'a, HookDecision> {
         Box::pin(<Self as FacilitatorHooks>::before_verify(self, ctx))
     }
 
@@ -189,7 +183,9 @@ impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
         ctx: &'a VerifyContext,
         response: &'a VerifyResponse,
     ) -> BoxFuture<'a, ()> {
-        Box::pin(<Self as FacilitatorHooks>::after_verify(self, ctx, response))
+        Box::pin(<Self as FacilitatorHooks>::after_verify(
+            self, ctx, response,
+        ))
     }
 
     fn on_verify_failure<'a>(
@@ -197,13 +193,12 @@ impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
         ctx: &'a VerifyContext,
         error: &'a FacilitatorError,
     ) -> BoxFuture<'a, FailureRecovery<VerifyResponse>> {
-        Box::pin(<Self as FacilitatorHooks>::on_verify_failure(self, ctx, error))
+        Box::pin(<Self as FacilitatorHooks>::on_verify_failure(
+            self, ctx, error,
+        ))
     }
 
-    fn before_settle<'a>(
-        &'a self,
-        ctx: &'a SettleContext,
-    ) -> BoxFuture<'a, HookDecision> {
+    fn before_settle<'a>(&'a self, ctx: &'a SettleContext) -> BoxFuture<'a, HookDecision> {
         Box::pin(<Self as FacilitatorHooks>::before_settle(self, ctx))
     }
 
@@ -212,7 +207,9 @@ impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
         ctx: &'a SettleContext,
         response: &'a SettleResponse,
     ) -> BoxFuture<'a, ()> {
-        Box::pin(<Self as FacilitatorHooks>::after_settle(self, ctx, response))
+        Box::pin(<Self as FacilitatorHooks>::after_settle(
+            self, ctx, response,
+        ))
     }
 
     fn on_settle_failure<'a>(
@@ -220,7 +217,9 @@ impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
         ctx: &'a SettleContext,
         error: &'a FacilitatorError,
     ) -> BoxFuture<'a, FailureRecovery<SettleResponse>> {
-        Box::pin(<Self as FacilitatorHooks>::on_settle_failure(self, ctx, error))
+        Box::pin(<Self as FacilitatorHooks>::on_settle_failure(
+            self, ctx, error,
+        ))
     }
 }
 
@@ -279,7 +278,7 @@ impl<F> HookedFacilitator<F> {
     }
 }
 
-impl<F> HookedFacilitator<F> {
+impl<F: Sync> HookedFacilitator<F> {
     async fn run_before_verify(&self, ctx: &VerifyContext) -> Result<(), FacilitatorError> {
         for hook in &self.hooks {
             if let HookDecision::Abort { reason, message } = hook.before_verify(ctx).await {
@@ -337,11 +336,8 @@ impl<F> HookedFacilitator<F> {
     }
 }
 
-impl<F: Facilitator> Facilitator for HookedFacilitator<F> {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let ctx = VerifyContext {
             request: request.clone(),
         };
@@ -351,17 +347,14 @@ impl<F: Facilitator> Facilitator for HookedFacilitator<F> {
                 self.run_after_verify(&ctx, &response).await;
                 Ok(response)
             }
-            Err(error) => match self.run_on_verify_failure(&ctx, &error).await {
-                Some(response) => Ok(response),
-                None => Err(error),
-            },
+            Err(error) => {
+                let recovered = self.run_on_verify_failure(&ctx, &error).await;
+                recovered.ok_or(error)
+            }
         }
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let ctx = SettleContext {
             request: request.clone(),
         };
@@ -371,10 +364,10 @@ impl<F: Facilitator> Facilitator for HookedFacilitator<F> {
                 self.run_after_settle(&ctx, &response).await;
                 Ok(response)
             }
-            Err(error) => match self.run_on_settle_failure(&ctx, &error).await {
-                Some(response) => Ok(response),
-                None => Err(error),
-            },
+            Err(error) => {
+                let recovered = self.run_on_settle_failure(&ctx, &error).await;
+                recovered.ok_or(error)
+            }
         }
     }
 
@@ -384,6 +377,10 @@ impl<F: Facilitator> Facilitator for HookedFacilitator<F> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::excessive_nesting,
+    reason = "mock facilitator impls inherently nest async fn bodies inside impl-in-fn"
+)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -588,16 +585,10 @@ mod tests {
     async fn verify_invalid_response_with_reason_round_trip() {
         struct Invalid;
         impl Facilitator for Invalid {
-            async fn verify(
-                &self,
-                _r: VerifyRequest,
-            ) -> Result<VerifyResponse, FacilitatorError> {
+            async fn verify(&self, _r: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
                 Ok(VerifyResponse::invalid(None, ErrorReason::InvalidFormat))
             }
-            async fn settle(
-                &self,
-                _r: SettleRequest,
-            ) -> Result<SettleResponse, FacilitatorError> {
+            async fn settle(&self, _r: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
                 unreachable!()
             }
             async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {

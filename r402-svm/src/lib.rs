@@ -28,6 +28,14 @@
 //! - `facilitator` - Facilitator-side payment verification and settlement
 //! - `telemetry` - `OpenTelemetry` tracing support
 //!
+
+// Consumed by feature-gated modules; quiet the linter when default features
+// disable every consumer.
+#[cfg(not(feature = "facilitator"))]
+use base64 as _;
+#[cfg(not(feature = "facilitator"))]
+use futures_util as _;
+
 pub mod chain;
 pub mod exact;
 

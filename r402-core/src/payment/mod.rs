@@ -97,14 +97,14 @@ impl Payment<Unverified> {
                 },
                 response,
             )),
-            VerifyResponse::Invalid { reason, message, .. } => {
-                Err(FacilitatorError::Verification(
-                    crate::error::VerificationError::InvalidFormat(format!(
-                        "{reason}: {}",
-                        message.as_deref().unwrap_or(""),
-                    )),
-                ))
-            }
+            VerifyResponse::Invalid {
+                reason, message, ..
+            } => Err(FacilitatorError::Verification(
+                crate::error::VerificationError::InvalidFormat(format!(
+                    "{reason}: {}",
+                    message.as_deref().unwrap_or(""),
+                )),
+            )),
         }
     }
 }
@@ -210,10 +210,7 @@ mod tests {
     async fn verify_then_settle_succeeds() {
         let facilitator = AlwaysValid;
         let payment = Payment::new(dummy_request());
-        let (verified, verify_resp) = payment
-            .verify(&facilitator, dummy_request())
-            .await
-            .unwrap();
+        let (verified, verify_resp) = payment.verify(&facilitator, dummy_request()).await.unwrap();
         assert!(verify_resp.is_valid());
         let (_settled, settle_resp) = verified
             .settle(&facilitator, dummy_request().into())

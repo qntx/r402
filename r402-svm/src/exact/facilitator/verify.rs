@@ -4,8 +4,8 @@
 //! and the settlement function.
 
 use r402_core::chain::ChainProvider;
-use r402_core::wire::Base64Bytes;
 use r402_core::error::VerificationError;
+use r402_core::wire::Base64Bytes;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_client::rpc_response::{TransactionError, UiTransactionError};
 use solana_commitment_config::CommitmentConfig;

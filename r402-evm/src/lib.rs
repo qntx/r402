@@ -27,6 +27,12 @@
 //! - `facilitator` - Facilitator-side payment verification and settlement
 //! - `telemetry` - `OpenTelemetry` tracing support
 //!
+
+// Consumed by the feature-gated modules below; silence the linter when
+// default features disable every consumer of `compact_str`.
+#[cfg(not(any(feature = "client", feature = "server", feature = "facilitator")))]
+use compact_str as _;
+
 pub mod chain;
 pub mod exact;
 

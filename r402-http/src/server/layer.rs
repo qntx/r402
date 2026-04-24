@@ -465,6 +465,10 @@ where
     }
 
     /// Intercepts the request, injects payment enforcement logic, and forwards to the wrapped service.
+    #[allow(
+        clippy::excessive_nesting,
+        reason = "async move + match inside Box::pin is the idiomatic Service::call shape"
+    )]
     fn call(&mut self, req: Request) -> Self::Future {
         let price_source = self.price_source.clone();
         let facilitator = self.facilitator.clone();
@@ -482,21 +486,9 @@ where
             if let Some(h) = hooks.as_ref() {
                 match h.on_protected_request(&req).await {
                     ProtectedRequestOutcome::Continue => {}
-                    ProtectedRequestOutcome::GrantAccess => {
-                        return inner.call(req).await;
-                    }
+                    ProtectedRequestOutcome::GrantAccess => return inner.call(req).await,
                     ProtectedRequestOutcome::Abort { status, body } => {
-                        let mut response = Response::new(
-                            axum_core::body::Body::from(body.unwrap_or_default()),
-                        );
-                        *response.status_mut() = status;
-                        if let Ok(ct) = http::HeaderValue::from_str("text/plain; charset=utf-8") {
-                            let _ = response
-                                .headers_mut()
-                                .insert(http::header::CONTENT_TYPE, ct);
-                        }
-                        super::cors::ensure_expose_headers(response.headers_mut());
-                        return Ok(response);
+                        return Ok(build_abort_response(status, body));
                     }
                 }
             }
@@ -537,4 +529,17 @@ where
             Ok(result.unwrap_or_else(|err| gate.error_response(err)))
         })
     }
+}
+
+/// Constructs an abort response from a [`PaygateHooks`] short-circuit.
+fn build_abort_response(status: http::StatusCode, body: Option<String>) -> Response {
+    let mut response = Response::new(axum_core::body::Body::from(body.unwrap_or_default()));
+    *response.status_mut() = status;
+    if let Ok(ct) = http::HeaderValue::from_str("text/plain; charset=utf-8") {
+        let _ = response
+            .headers_mut()
+            .insert(http::header::CONTENT_TYPE, ct);
+    }
+    super::cors::ensure_expose_headers(response.headers_mut());
+    response
 }

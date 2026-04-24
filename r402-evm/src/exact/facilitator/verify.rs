@@ -252,10 +252,7 @@ pub(super) async fn assert_enough_balance<P: Provider>(
     sent = %sent,
     required = %required,
 )))]
-pub(super) fn assert_exact_value(
-    sent: &U256,
-    required: &U256,
-) -> Result<(), VerificationError> {
+pub(super) fn assert_exact_value(sent: &U256, required: &U256) -> Result<(), VerificationError> {
     if sent == required {
         Ok(())
     } else {
@@ -307,8 +304,7 @@ pub(super) async fn verify_payment<P: Provider>(
                 )
                 .into());
             }
-            transfer_result
-                .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+            transfer_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
         }
         StructuredSignature::EIP1271(signature) => {
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
@@ -494,9 +490,7 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
     .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
 
     if !is_valid {
-        return Err(
-            VerificationError::InvalidSignature("invalid Permit2 signature".into()).into(),
-        );
+        return Err(VerificationError::InvalidSignature("invalid Permit2 signature".into()).into());
     }
 
     // Fix-7: simulate the exact proxy.settle call via eth_call to catch

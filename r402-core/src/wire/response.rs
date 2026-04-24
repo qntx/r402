@@ -320,9 +320,10 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
     use crate::wire::ExtensionEntry;
-    use serde_json::json;
 
     #[test]
     fn verify_valid_roundtrip() {
@@ -348,7 +349,10 @@ mod tests {
             extensions,
         };
         let encoded = serde_json::to_value(&response).unwrap();
-        assert_eq!(encoded["extensions"]["payment-identifier"]["info"]["id"], "order-123");
+        assert_eq!(
+            encoded["extensions"]["payment-identifier"]["info"]["id"],
+            "order-123"
+        );
         let back: VerifyResponse = serde_json::from_value(encoded).unwrap();
         assert_eq!(back, response);
     }

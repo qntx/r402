@@ -1,5 +1,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
+// Tests exercise serde_json values via `value["key"]` indexing which is the
+// idiomatic way to write assertions; the panic-on-missing-key behaviour is
+// desirable there. Production code never uses `IndexMut` on arbitrary JSON.
+#![cfg_attr(
+    test,
+    allow(
+        clippy::indexing_slicing,
+        clippy::panic,
+        reason = "tests rely on panic-on-failure for simpler assertions"
+    )
+)]
 
 // These crates are re-exported behind feature flags and consumed indirectly
 // by tracing macros / telemetry instrumentation; the linter cannot see those

@@ -58,7 +58,9 @@ where
     TRequirements: Serialize,
 {
     type Error = serde_json::Error;
-    fn try_from(value: TypedVerifyRequest<V, TPayload, TRequirements>) -> Result<Self, Self::Error> {
+    fn try_from(
+        value: TypedVerifyRequest<V, TPayload, TRequirements>,
+    ) -> Result<Self, Self::Error> {
         let json = serde_json::to_value(value)?;
         Ok(Self(json))
     }
@@ -175,7 +177,10 @@ mod tests {
     fn settle_request_from_verify_preserves_slug() {
         let verify = VerifyRequest::from(v2_json("eip155:42161", "exact"));
         let settle: SettleRequest = verify.into();
-        assert_eq!(settle.scheme_slug().unwrap().to_string(), "eip155:42161:exact");
+        assert_eq!(
+            settle.scheme_slug().unwrap().to_string(),
+            "eip155:42161:exact"
+        );
     }
 
     #[test]

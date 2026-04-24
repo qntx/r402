@@ -10,12 +10,12 @@
 //! - SPL Token and Token-2022 support
 //! - Transaction building with proper instruction ordering
 
+use r402_core::error::ClientError;
+use r402_core::scheme::SchemeId;
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
 use r402_core::wire::{self, ResourceInfo};
-use r402_core::scheme::SchemeId;
-use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -73,9 +73,10 @@ pub async fn fetch_mint<R: RpcClientLike>(
     rpc_client: &R,
 ) -> Result<Mint, ClientError> {
     let mint_pubkey = mint_address.pubkey();
-    let account = rpc_client.get_account(mint_pubkey).await.map_err(|e| {
-        ClientError::Signing(format!("failed to fetch mint {mint_pubkey}: {e}"))
-    })?;
+    let account = rpc_client
+        .get_account(mint_pubkey)
+        .await
+        .map_err(|e| ClientError::Signing(format!("failed to fetch mint {mint_pubkey}: {e}")))?;
     if account.owner == spl_token::id() {
         let mint = spl_token::state::Mint::unpack(&account.data).map_err(|e| {
             ClientError::Signing(format!("failed to unpack mint {mint_pubkey}: {e}"))
@@ -158,9 +159,10 @@ pub async fn estimate_compute_units<S: RpcClientLike>(
         )
         .await
         .map_err(|e| ClientError::Signing(format!("{e:?}")))?;
-    let units = sim.value.units_consumed.ok_or_else(|| {
-        ClientError::Signing("simulation returned no units_consumed".to_owned())
-    })?;
+    let units = sim
+        .value
+        .units_consumed
+        .ok_or_else(|| ClientError::Signing("simulation returned no units_consumed".to_owned()))?;
     #[allow(
         clippy::cast_possible_truncation,
         reason = "compute units always fit in u32"
@@ -401,9 +403,7 @@ impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSi
                 .extra
                 .as_ref()
                 .map(|extra| extra.fee_payer)
-                .ok_or_else(|| {
-                    ClientError::Signing("missing fee_payer in extra".to_owned())
-                })?;
+                .ok_or_else(|| ClientError::Signing("missing fee_payer in extra".to_owned()))?;
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.amount.inner();

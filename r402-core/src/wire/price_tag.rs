@@ -69,7 +69,7 @@ impl Debug for PriceTag {
 }
 
 /// Matches a [`PriceTag`] against wire-level requirements on the five
-/// protocol-critical fields only (scheme / network / amount / asset / pay_to).
+/// protocol-critical fields only (scheme / network / amount / asset / `pay_to`).
 ///
 /// `max_timeout_seconds` and `extra` are deliberately ignored so enriched
 /// fields attached by the facilitator do not cause false negatives.

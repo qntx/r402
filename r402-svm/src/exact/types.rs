@@ -5,9 +5,9 @@
 
 use std::sync::LazyLock;
 
+pub use r402_core::scheme::ExactScheme;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 use r402_core::wire::Base64Bytes;
-pub use r402_core::scheme::ExactScheme;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "facilitator")]
 use solana_commitment_config::CommitmentConfig;
@@ -299,8 +299,8 @@ impl InstructionInt {
 /// Uses CAIP-2 chain IDs (e.g., `solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`)
 /// for chain identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402_core::wire::U64String;
     use r402_core::wire as proto_v2;
+    use r402_core::wire::U64String;
 
     use super::{ExactScheme, ExactSolanaPayload, SupportedPaymentKindExtra};
     use crate::chain::Address;

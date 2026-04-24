@@ -191,27 +191,22 @@ impl SchemeRegistry {
         &self,
         slug: Option<SchemeSlug>,
     ) -> Result<&dyn DynFacilitator, FacilitatorError> {
-        slug.and_then(|s| self.by_slug(&s))
-            .ok_or_else(|| FacilitatorError::aborted(
+        slug.and_then(|s| self.by_slug(&s)).ok_or_else(|| {
+            FacilitatorError::aborted(
                 "no_facilitator_for_network",
                 "no handler registered for this payment scheme",
-            ))
+            )
+        })
     }
 }
 
 impl Facilitator for SchemeRegistry {
-    async fn verify(
-        &self,
-        request: VerifyRequest,
-    ) -> Result<VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let handler = self.require_handler(request.scheme_slug())?;
         handler.verify(request).await
     }
 
-    async fn settle(
-        &self,
-        request: SettleRequest,
-    ) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let handler = self.require_handler(request.scheme_slug())?;
         handler.settle(request).await
     }

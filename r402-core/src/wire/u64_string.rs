@@ -3,7 +3,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 
 /// A `u64` that serializes as a JSON string.
 ///

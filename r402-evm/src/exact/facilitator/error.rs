@@ -62,9 +62,9 @@ impl From<alloy_provider::MulticallError> for Eip155ExactError {
             alloy_provider::MulticallError::ValueTx
             | alloy_provider::MulticallError::DecodeError(_)
             | alloy_provider::MulticallError::NoReturnData
-            | alloy_provider::MulticallError::CallFailed(_) => Self::PaymentVerification(
-                VerificationError::SimulationFailed(e.to_string()),
-            ),
+            | alloy_provider::MulticallError::CallFailed(_) => {
+                Self::PaymentVerification(VerificationError::SimulationFailed(e.to_string()))
+            }
             alloy_provider::MulticallError::TransportError(transport_error) => {
                 Self::Transport(transport_error)
             }

@@ -55,7 +55,10 @@ mod tests {
     #[test]
     fn merges_existing_header() {
         let mut headers = HeaderMap::new();
-        let _ = headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("X-Foo"));
+        let _ = headers.insert(
+            ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("X-Foo"),
+        );
         ensure_expose_headers(&mut headers);
         let value = headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap();
         let value = value.to_str().unwrap();

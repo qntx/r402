@@ -65,7 +65,7 @@ impl BazaarExtension {
 
     /// Builder: marks the resource as registered.
     #[must_use]
-    pub const fn as_registered(mut self) -> Self {
+    pub const fn registered(mut self) -> Self {
         self.registered = true;
         self
     }
@@ -96,8 +96,9 @@ impl Extension for BazaarExtension {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn advertise_includes_catalog_and_categories() {
@@ -105,7 +106,7 @@ mod tests {
             .with_catalog("https://example.com/catalog")
             .with_category("data")
             .with_category("api")
-            .as_registered();
+            .registered();
         let ctx = AdvertiseContext { requirement: None };
         let entry = ext.advertise(&ctx).unwrap();
         let info = entry.as_info().unwrap();

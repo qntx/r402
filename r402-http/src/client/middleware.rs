@@ -6,8 +6,8 @@
 use std::sync::Arc;
 
 use http::{Extensions, HeaderMap, StatusCode};
-use r402_core::hooks::{FailureRecovery, HookDecision};
 use r402_core::error::ClientError;
+use r402_core::hooks::{FailureRecovery, HookDecision};
 use r402_core::scheme::{
     FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
 };

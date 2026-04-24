@@ -17,9 +17,9 @@ use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
 use r402_core::chain::ChainProvider;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
+use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
 use r402_core::wire::UnixTimestamp;
-use r402_core::scheme::{SchemeBuilder, SchemeId};
 
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::types;
@@ -218,8 +218,8 @@ where
                     self.clock_skew_tolerance,
                 )
                 .await?;
-                let payer = verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain)
-                    .await?;
+                let payer =
+                    verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain).await?;
                 Ok(wire::VerifyResponse::valid(payer.to_string()))
             }
         }

@@ -182,9 +182,10 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         self
     }
 
-    /// Attaches [`PaygateHooks`] for pre- and post-payment extensibility
-    /// (Fix-8). Stored as an [`Arc<dyn>`] so hook state can be shared across
-    /// cloned middleware instances without duplication.
+    /// Attaches [`PaygateHooks`](super::hooks::PaygateHooks) for pre- and
+    /// post-payment extensibility (Fix-8). Stored as an `Arc<dyn>` so hook
+    /// state can be shared across cloned middleware instances without
+    /// duplication.
     #[must_use]
     pub fn hooks<H>(mut self, hooks: H) -> Self
     where

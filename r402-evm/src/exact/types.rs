@@ -7,8 +7,8 @@
 use alloy_primitives::{Address, B256, Bytes, address};
 #[cfg(any(feature = "facilitator", feature = "client"))]
 use alloy_sol_types::sol;
-use r402_core::wire::UnixTimestamp;
 pub use r402_core::scheme::ExactScheme;
+use r402_core::wire::UnixTimestamp;
 use serde::{Deserialize, Serialize};
 
 use crate::chain::TokenAmount;
