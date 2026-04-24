@@ -60,7 +60,7 @@ alloy-network = "1.8"
 alloy-primitives = { version = "1.4", features = ["k256", "serde"] }
 alloy-provider = "1.8"
 alloy-rpc-client = "1.4"
-alloy-rpc-types-eth = "1.4"
+alloy-rpc-types-eth = "2.0"
 alloy-signer = "1.4"
 alloy-signer-local = "1.8"
 alloy-sol-types = "1.4"
