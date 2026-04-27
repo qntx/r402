@@ -4,8 +4,7 @@
 //! Permit2 contract, they MAY attach a signed EIP-2612 permit to the
 //! payment payload under the `eip2612GasSponsoring` extension key. The
 //! facilitator then routes the settlement through
-//! [`IX402UptoPermit2Proxy::settleWithPermit`](super::facilitator::contract::IX402UptoPermit2Proxy),
-//! which atomically:
+//! `IX402UptoPermit2Proxy::settleWithPermit`, which atomically:
 //!
 //! 1. broadcasts the EIP-2612 `permit` against the token, granting the
 //!    canonical Permit2 contract an allowance equal to

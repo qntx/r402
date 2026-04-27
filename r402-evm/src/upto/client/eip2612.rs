@@ -41,7 +41,7 @@ sol! {
 /// Inputs required to sign an EIP-2612 permit for the upto scheme.
 ///
 /// The `spender` is **always** the canonical
-/// [`PERMIT2_ADDRESS`](crate::exact::PERMIT2_ADDRESS); the proxy contract
+/// [`PERMIT2_ADDRESS`]; the proxy contract
 /// validates this invariant and reverts with `InvalidPermit2Address`
 /// otherwise. The `value` MUST equal the buyer's authorised maximum
 /// (i.e. `payload.permit2Authorization.permitted.amount`); the proxy
