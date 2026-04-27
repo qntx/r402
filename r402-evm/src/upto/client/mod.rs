@@ -13,11 +13,13 @@
 //! `client-provider` feature) to enable hands-off `approve(Permit2, MAX)`
 //! before the first signature.
 
+pub mod eip2612;
 mod signing;
 
 use std::sync::Arc;
 
 use alloy_primitives::U256;
+pub use eip2612::{Eip2612SigningParams, sign_eip2612_permit};
 use r402_core::error::ClientError;
 use r402_core::scheme::{
     PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,

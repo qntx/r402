@@ -9,7 +9,9 @@ use alloy_primitives::{Bytes, TxHash, U256};
 use tracing_core::Level;
 
 use super::contract::IX402UptoPermit2Proxy;
-use super::verify::PreparedUptoPermit2;
+use super::verify::{
+    PreparedUptoPermit2, assert_eip2612_supported_signature_kind, build_eip2612_abi,
+};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::exact::facilitator::Eip155ExactError;
 use crate::exact::facilitator::signature::StructuredSignature;
@@ -64,6 +66,10 @@ where
         return Ok(UptoSettleOutcome::ZeroSettle);
     }
 
+    // Defence in depth: the verify pipeline already rejected this combo,
+    // but the settle path is also reachable via the bare facilitator API.
+    assert_eip2612_supported_signature_kind(prepared)?;
+
     let inner = provider.inner();
     let proxy = IX402UptoPermit2Proxy::new(X402_UPTO_PERMIT2_PROXY, inner);
     let permit = IX402UptoPermit2Proxy::Permit {
@@ -86,8 +92,28 @@ where
         StructuredSignature::EIP1271(bytes) => bytes.clone(),
     };
 
-    let settle_call = proxy.settle(permit, actual_amount, prepared.from, witness, sig_bytes);
-    let calldata = settle_call.calldata().clone();
+    // Route through `settleWithPermit` when the buyer attached an
+    // EIP-2612 sponsorship; otherwise the standard `settle` path. The
+    // proxy contract rejects mismatches at runtime, but selecting the
+    // correct entry point off-chain saves gas and surfaces clearer
+    // diagnostics on revert.
+    let calldata = match prepared.eip2612.as_ref() {
+        Some(eip2612) => proxy
+            .settleWithPermit(
+                build_eip2612_abi(eip2612)?,
+                permit,
+                actual_amount,
+                prepared.from,
+                witness,
+                sig_bytes,
+            )
+            .calldata()
+            .clone(),
+        None => proxy
+            .settle(permit, actual_amount, prepared.from, witness, sig_bytes)
+            .calldata()
+            .clone(),
+    };
 
     let tx_fut = Eip155MetaTransactionProvider::send_transaction(
         provider,

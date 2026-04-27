@@ -124,8 +124,11 @@ where
             self.clock_skew_tolerance,
         )?;
 
-        let prepared =
-            PreparedUptoPermit2::try_new(*self.provider.chain(), &request.payment_payload.payload)?;
+        let prepared = PreparedUptoPermit2::try_new(
+            *self.provider.chain(),
+            &request.payment_payload.payload,
+            &request.payment_payload.extensions,
+        )?;
         let payer = prepared.from;
         let outcome = settle_permit2_upto(&self.provider, &prepared, actual_amount).await?;
 

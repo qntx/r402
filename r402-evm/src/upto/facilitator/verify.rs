@@ -12,9 +12,9 @@
 
 use std::future::IntoFuture;
 
-use alloy_primitives::{Address, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
-use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
+use alloy_sol_types::{Eip712Domain, SolInterface, SolStruct, eip712_domain};
 use r402_core::chain::ChainId;
 use r402_core::error::VerificationError;
 use r402_core::wire::UnixTimestamp;
@@ -22,6 +22,7 @@ use r402_core::wire::UnixTimestamp;
 use tracing::instrument;
 
 use super::contract::IX402UptoPermit2Proxy;
+use super::contract::IX402UptoPermit2Proxy::IX402UptoPermit2ProxyErrors;
 use crate::chain::Eip155ChainReference;
 use crate::exact::PERMIT2_ADDRESS;
 use crate::exact::facilitator::contract::{IERC20, Validator6492};
@@ -31,7 +32,7 @@ use crate::upto::types::{
     self, PermitWitnessTransferFrom as SolPermitWitnessTransferFrom,
     TokenPermissions as SolTokenPermissions, Witness as SolWitness,
 };
-use crate::upto::{UptoPermit2Payload, X402_UPTO_PERMIT2_PROXY};
+use crate::upto::{Eip2612SignedPermit, UptoPermit2Payload, X402_UPTO_PERMIT2_PROXY};
 
 /// Macro copied from the exact facilitator to keep telemetry spans
 /// consistent across both schemes.
@@ -76,14 +77,23 @@ pub(super) struct PreparedUptoPermit2 {
     pub eip712_hash: alloy_primitives::B256,
     /// Parsed signature structure (EOA / EIP-1271 / EIP-6492).
     pub structured_signature: StructuredSignature,
+    /// Optional buyer-signed EIP-2612 permit. When `Some`, both verify and
+    /// settle route through `proxy.settleWithPermit`, atomically setting
+    /// the canonical Permit2 allowance before transferring funds. The
+    /// off-chain consistency invariants (`from`, `asset`, `spender`,
+    /// `value`) are enforced by [`assert_offchain_valid_shared`] before
+    /// this struct is constructed.
+    pub eip2612: Option<Eip2612SignedPermit>,
 }
 
 impl PreparedUptoPermit2 {
     /// Builds the prepared data from a raw payload, reconstructing the
-    /// EIP-712 hash and parsing the structured signature.
+    /// EIP-712 hash, parsing the structured signature, and extracting
+    /// the optional EIP-2612 gas-sponsoring extension.
     pub(super) fn try_new(
         chain_reference: Eip155ChainReference,
         payload: &UptoPermit2Payload,
+        extensions: &r402_core::wire::Extensions,
     ) -> Result<Self, Eip155ExactError> {
         let auth = &payload.permit2_authorization;
         let domain = upto_permit2_domain(chain_reference);
@@ -108,6 +118,8 @@ impl PreparedUptoPermit2 {
             auth.from,
             &eip712_hash,
         )?;
+        let eip2612 = Eip2612SignedPermit::from_extensions(extensions)
+            .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
 
         Ok(Self {
             from: auth.from,
@@ -120,6 +132,7 @@ impl PreparedUptoPermit2 {
             valid_after: auth.witness.valid_after.into(),
             eip712_hash,
             structured_signature,
+            eip2612,
         })
     }
 }
@@ -189,6 +202,12 @@ pub(super) fn assert_offchain_valid_shared(
     // be able to satisfy `msg.sender == witness.facilitator` on settle.
     super::assert_facilitator_authorized(auth.witness.facilitator, facilitator_signers)?;
 
+    if let Some(eip2612) = Eip2612SignedPermit::from_extensions(&payload.extensions)
+        .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?
+    {
+        assert_eip2612_consistent_with_permit2(&eip2612, auth)?;
+    }
+
     let valid_after_secs: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
     let deadline_secs: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
     assert_time(
@@ -197,6 +216,40 @@ pub(super) fn assert_offchain_valid_shared(
         clock_skew_tolerance,
     )?;
 
+    Ok(())
+}
+
+/// Cross-validates the EIP-2612 sponsorship permit against the embedded
+/// Permit2 authorization. The proxy contract enforces these invariants
+/// at settle time (`Permit2612AmountMismatch`, `InvalidPermit2Address`,
+/// etc.); we re-check them off-chain to fail fast and produce richer
+/// wire-level diagnostics.
+fn assert_eip2612_consistent_with_permit2(
+    eip2612: &Eip2612SignedPermit,
+    auth: &crate::upto::UptoPermit2Authorization,
+) -> Result<(), VerificationError> {
+    if eip2612.from != auth.from {
+        return Err(VerificationError::InvalidFormat(
+            "eip2612GasSponsoring.from does not match permit2Authorization.from".into(),
+        ));
+    }
+    if eip2612.asset != auth.permitted.token {
+        return Err(VerificationError::InvalidFormat(
+            "eip2612GasSponsoring.asset does not match permit2Authorization.permitted.token".into(),
+        ));
+    }
+    if eip2612.spender != PERMIT2_ADDRESS {
+        return Err(VerificationError::InvalidFormat(
+            "eip2612GasSponsoring.spender must be the canonical Permit2 contract".into(),
+        ));
+    }
+    let permit2_value: U256 = auth.permitted.amount.into();
+    let eip2612_value: U256 = eip2612.value.into();
+    if permit2_value != eip2612_value {
+        return Err(VerificationError::InvalidFormat(format!(
+            "eip2612GasSponsoring.value ({eip2612_value}) does not match permit2Authorization.permitted.amount ({permit2_value})"
+        )));
+    }
     Ok(())
 }
 
@@ -258,6 +311,132 @@ pub(super) fn assert_offchain_valid_settle(
     Ok(requested)
 }
 
+/// Maps a revert payload returned by the upto Permit2 proxy onto the
+/// matching [`VerificationError`] variant.
+///
+/// The proxy contract emits one of seven custom errors (see
+/// [`IX402UptoPermit2Proxy`] for the full list). Three of them have a
+/// dedicated wire-level reason in x402 v2:
+///
+/// | Solidity error             | `VerificationError` variant            |
+/// | -------------------------- | --------------------------------------- |
+/// | `AmountExceedsPermitted`   | [`UptoAmountExceedsPermitted`]          |
+/// | `UnauthorizedFacilitator`  | [`UptoUnauthorizedFacilitator`]         |
+/// | `PaymentTooEarly`          | [`Early`]                               |
+///
+/// The remaining four errors (`Permit2612AmountMismatch`,
+/// `ReentrancyGuardReentrantCall`, `InvalidDestination`, `InvalidOwner`,
+/// `InvalidPermit2Address`) are operator-side invariants that should not
+/// surface during normal operation; we return [`None`] for them so the
+/// caller can fall back to a generic [`SimulationFailed`] with the raw
+/// transport message.
+///
+/// Returns [`None`] when the bytes are empty, encode an unknown selector,
+/// or fail strict ABI decoding.
+///
+/// [`UptoAmountExceedsPermitted`]: VerificationError::UptoAmountExceedsPermitted
+/// [`UptoUnauthorizedFacilitator`]: VerificationError::UptoUnauthorizedFacilitator
+/// [`Early`]: VerificationError::Early
+/// [`SimulationFailed`]: VerificationError::SimulationFailed
+fn classify_upto_revert_bytes(data: &[u8]) -> Option<VerificationError> {
+    let decoded = IX402UptoPermit2ProxyErrors::abi_decode(data).ok()?;
+    Some(match decoded {
+        IX402UptoPermit2ProxyErrors::AmountExceedsPermitted(_) => {
+            VerificationError::UptoAmountExceedsPermitted
+        }
+        IX402UptoPermit2ProxyErrors::UnauthorizedFacilitator(_) => {
+            VerificationError::UptoUnauthorizedFacilitator
+        }
+        IX402UptoPermit2ProxyErrors::PaymentTooEarly(_) => VerificationError::Early,
+        IX402UptoPermit2ProxyErrors::Permit2612AmountMismatch(_)
+        | IX402UptoPermit2ProxyErrors::ReentrancyGuardReentrantCall(_)
+        | IX402UptoPermit2ProxyErrors::InvalidDestination(_)
+        | IX402UptoPermit2ProxyErrors::InvalidOwner(_)
+        | IX402UptoPermit2ProxyErrors::InvalidPermit2Address(_) => return None,
+    })
+}
+
+/// Lowers a wire [`Eip2612SignedPermit`] into the ABI struct consumed
+/// by `proxy.settleWithPermit`.
+///
+/// The signature MUST be exactly 65 bytes (`r ‖ s ‖ v`); this is
+/// enforced by [`Eip2612SignedPermit::from_extensions`] when the wire
+/// payload is parsed, so failure here implies the `prepared` value
+/// originated from a non-extension code path.
+pub(super) fn build_eip2612_abi(
+    eip2612: &Eip2612SignedPermit,
+) -> Result<IX402UptoPermit2Proxy::EIP2612Permit, VerificationError> {
+    let (r, s, v) = eip2612.split_signature().ok_or_else(|| {
+        VerificationError::InvalidFormat(
+            "eip2612GasSponsoring signature is not the canonical 65-byte (r,s,v) form".into(),
+        )
+    })?;
+    Ok(IX402UptoPermit2Proxy::EIP2612Permit {
+        value: eip2612.value.into(),
+        deadline: eip2612.deadline.into(),
+        r,
+        s,
+        v,
+    })
+}
+
+/// Returns [`VerificationError::InvalidFormat`] when an EIP-2612
+/// sponsorship is paired with a non-EOA Permit2 signature.
+///
+/// Rationale: a valid EIP-2612 permit requires an ECDSA signature that
+/// the token contract can verify via `ecrecover`, which in turn
+/// requires the buyer to control an EOA private key. Smart-contract
+/// wallets expose ERC-1271 / ERC-6492 instead, and cannot produce
+/// EIP-2612 permits themselves.
+pub(super) fn assert_eip2612_supported_signature_kind(
+    prepared: &PreparedUptoPermit2,
+) -> Result<(), VerificationError> {
+    if prepared.eip2612.is_some()
+        && !matches!(prepared.structured_signature, StructuredSignature::Eoa(_))
+    {
+        return Err(VerificationError::InvalidFormat(
+            "eip2612GasSponsoring requires an EOA Permit2 signature".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Translates an [`alloy_contract::Error`] coming out of `proxy.settle.call()`
+/// into a precise [`VerificationError`].
+///
+/// First attempts to decode the revert data via
+/// [`classify_upto_revert_bytes`]; on miss, falls back to wrapping the
+/// transport-layer message in [`VerificationError::SimulationFailed`] so
+/// the diagnostic is still preserved end-to-end.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "intended to be used as a `map_err` closure target which transfers ownership"
+)]
+fn classify_settle_call_error(err: alloy_contract::Error) -> VerificationError {
+    if let Some(data) = err.as_revert_data()
+        && let Some(reason) = classify_upto_revert_bytes(&data)
+    {
+        return reason;
+    }
+    VerificationError::SimulationFailed(err.to_string())
+}
+
+/// Same as [`classify_settle_call_error`] but for the multicall path used
+/// in the EIP-6492 batched simulation.
+///
+/// `aggregate3` returns the revert payload as
+/// [`alloy_provider::Failure::return_data`]; we feed it through the same
+/// classifier so the wire-level reason is identical regardless of
+/// signature kind.
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "intended to be used as a `map_err` closure target which transfers ownership"
+)]
+fn classify_settle_multicall_failure(failure: alloy_provider::Failure) -> VerificationError {
+    classify_upto_revert_bytes(&failure.return_data)
+        .unwrap_or_else(|| VerificationError::SimulationFailed(failure.to_string()))
+}
+
 /// On-chain preconditions: sufficient ERC-20 allowance on Permit2, sufficient
 /// balance, and a successful `eth_call` simulation of `proxy.settle(...)`
 /// with the worst-case (maximum) amount.
@@ -276,15 +455,23 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     prepared: &PreparedUptoPermit2,
     required_amount: U256,
 ) -> Result<Address, Eip155ExactError> {
+    assert_eip2612_supported_signature_kind(prepared)?;
+
     let erc20 = IERC20::new(prepared.token, provider);
 
     // Run allowance + balance checks in parallel.
+    //
+    // The Permit2 allowance check is suppressed when the buyer attached
+    // an EIP-2612 sponsorship: the proxy will atomically grant the
+    // allowance via `token.permit(...)` before invoking Permit2, so a
+    // pre-existing allowance is not required.
     let allowance_call = erc20.allowance(prepared.from, PERMIT2_ADDRESS);
     let balance_call = erc20.balanceOf(prepared.from);
     let (allowance_result, balance_result) =
         tokio::join!(allowance_call.call(), balance_call.call());
 
-    if let Ok(allowance) = allowance_result
+    if prepared.eip2612.is_none()
+        && let Ok(allowance) = allowance_result
         && allowance < required_amount
     {
         return Err(VerificationError::Permit2AllowanceRequired.into());
@@ -352,30 +539,58 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
                 )
                 .into());
             }
-            settle_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+            settle_result.map_err(classify_settle_multicall_failure)?;
         }
         StructuredSignature::Eoa(signature) => {
-            let settle_call = proxy.settle(
-                permit,
-                prepared.max_amount,
-                prepared.from,
-                witness,
-                signature.as_bytes().into(),
-            );
-            let simulation = settle_call.call().into_future();
-            traced!(
-                simulation,
-                tracing::info_span!(
-                    "simulate_upto_permit2_settle",
-                    from = %prepared.from,
-                    to = %prepared.to,
-                    token = %prepared.token,
-                    max_amount = %prepared.max_amount,
-                    sig_kind = "EOA",
-                    otel.kind = "client",
+            let sig_bytes: Bytes = signature.as_bytes().into();
+            if let Some(eip2612) = &prepared.eip2612 {
+                let eip2612_abi = build_eip2612_abi(eip2612)?;
+                let call = proxy.settleWithPermit(
+                    eip2612_abi,
+                    permit,
+                    prepared.max_amount,
+                    prepared.from,
+                    witness,
+                    sig_bytes,
+                );
+                let simulation = call.call().into_future();
+                traced!(
+                    simulation,
+                    tracing::info_span!(
+                        "simulate_upto_permit2_settle_with_permit",
+                        from = %prepared.from,
+                        to = %prepared.to,
+                        token = %prepared.token,
+                        max_amount = %prepared.max_amount,
+                        sig_kind = "EOA",
+                        sponsoring = "eip2612",
+                        otel.kind = "client",
+                    )
                 )
-            )
-            .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+                .map_err(classify_settle_call_error)?;
+            } else {
+                let call = proxy.settle(
+                    permit,
+                    prepared.max_amount,
+                    prepared.from,
+                    witness,
+                    sig_bytes,
+                );
+                let simulation = call.call().into_future();
+                traced!(
+                    simulation,
+                    tracing::info_span!(
+                        "simulate_upto_permit2_settle",
+                        from = %prepared.from,
+                        to = %prepared.to,
+                        token = %prepared.token,
+                        max_amount = %prepared.max_amount,
+                        sig_kind = "EOA",
+                        otel.kind = "client",
+                    )
+                )
+                .map_err(classify_settle_call_error)?;
+            }
         }
         StructuredSignature::EIP1271(signature) => {
             let settle_call = proxy.settle(
@@ -398,7 +613,7 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
                     otel.kind = "client",
                 )
             )
-            .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+            .map_err(classify_settle_call_error)?;
         }
     }
 
@@ -425,7 +640,7 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
         facilitator_signers,
         clock_skew_tolerance,
     )?;
-    let prepared = PreparedUptoPermit2::try_new(chain, &payload.payload)?;
+    let prepared = PreparedUptoPermit2::try_new(chain, &payload.payload, &payload.extensions)?;
     assert_onchain_valid(provider, &prepared, max_amount).await
 }
 
@@ -620,5 +835,187 @@ mod tests {
             err,
             VerificationError::AcceptedRequirementsMismatch
         ));
+    }
+
+    /// Tests covering the EIP-2612 `eip2612GasSponsoring` extension:
+    /// off-chain consistency invariants and prepared-payload routing.
+    mod eip2612_extension {
+        use r402_core::wire;
+
+        use super::super::*;
+        use super::*;
+        use crate::upto::{EIP2612_GAS_SPONSORING_KEY, Eip2612SignedPermit};
+
+        fn sample_eip2612(value: U256) -> Eip2612SignedPermit {
+            Eip2612SignedPermit {
+                from: Address::repeat_byte(0xCC),
+                asset: Address::repeat_byte(0xAA),
+                spender: PERMIT2_ADDRESS,
+                value: TokenAmount::from(value),
+                deadline: TokenAmount::from(U256::from(UnixTimestamp::now().as_secs() + 300)),
+                signature: Bytes::from(vec![0x42u8; 65]),
+            }
+        }
+
+        fn payload_with_eip2612(
+            permitted: U256,
+            mutate: impl FnOnce(&mut Eip2612SignedPermit),
+        ) -> (types::v2::PaymentPayload, types::v2::PaymentRequirements) {
+            let (mut payload, reqs) = base_payload(permitted);
+            let mut eip2612 = sample_eip2612(permitted);
+            mutate(&mut eip2612);
+            payload.extensions.insert(
+                EIP2612_GAS_SPONSORING_KEY,
+                eip2612.to_extension_entry().expect("serialises"),
+            );
+            (payload, reqs)
+        }
+
+        #[test]
+        fn shared_check_accepts_consistent_extension() {
+            let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |_| {});
+            assert_offchain_valid_shared(&payload, &reqs, &signers(), 30)
+                .expect("consistent eip2612 sponsorship is accepted");
+        }
+
+        #[test]
+        fn shared_check_rejects_from_mismatch() {
+            let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |e| {
+                e.from = Address::repeat_byte(0xEE);
+            });
+            let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+            assert!(matches!(err, VerificationError::InvalidFormat(msg) if msg.contains("from")));
+        }
+
+        #[test]
+        fn shared_check_rejects_asset_mismatch() {
+            let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |e| {
+                e.asset = Address::repeat_byte(0xEE);
+            });
+            let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+            assert!(matches!(err, VerificationError::InvalidFormat(msg) if msg.contains("asset")));
+        }
+
+        #[test]
+        fn shared_check_rejects_non_canonical_spender() {
+            let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |e| {
+                e.spender = Address::repeat_byte(0xEE);
+            });
+            let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+            assert!(
+                matches!(err, VerificationError::InvalidFormat(msg) if msg.contains("Permit2"))
+            );
+        }
+
+        #[test]
+        fn shared_check_rejects_value_mismatch() {
+            let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |e| {
+                e.value = TokenAmount::from(U256::from(1_000_000_u64));
+            });
+            let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+            assert!(matches!(err, VerificationError::InvalidFormat(msg) if msg.contains("value")));
+        }
+
+        #[test]
+        fn shared_check_rejects_malformed_extension_envelope() {
+            let (mut payload, reqs) = base_payload(U256::from(5_000_000_u64));
+            payload.extensions.insert(
+                EIP2612_GAS_SPONSORING_KEY,
+                wire::ExtensionEntry::raw(serde_json::json!({"from": "not-an-address"})),
+            );
+            let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+            assert!(matches!(err, VerificationError::InvalidFormat(_)));
+        }
+
+        #[test]
+        fn build_eip2612_abi_splits_signature_correctly() {
+            let mut sig = Vec::with_capacity(65);
+            sig.extend_from_slice(&[0x11u8; 32]);
+            sig.extend_from_slice(&[0x22u8; 32]);
+            sig.push(27);
+            let permit = Eip2612SignedPermit {
+                signature: Bytes::from(sig),
+                ..sample_eip2612(U256::from(1u64))
+            };
+            let abi = build_eip2612_abi(&permit).expect("splits 65-byte sig");
+            assert_eq!(abi.r.as_slice(), [0x11u8; 32]);
+            assert_eq!(abi.s.as_slice(), [0x22u8; 32]);
+            assert_eq!(abi.v, 27);
+            assert_eq!(abi.value, U256::from(1u64));
+        }
+    }
+
+    /// Round-trips every concrete proxy revert through
+    /// [`classify_upto_revert_bytes`] using its own ABI encoding. Drift
+    /// between the encoder and decoder (e.g. selector renames) would
+    /// surface here before it reaches users.
+    mod revert_classification {
+        use alloy_sol_types::SolError;
+
+        use super::super::*;
+        use crate::upto::facilitator::contract::IX402UptoPermit2Proxy::{
+            AmountExceedsPermitted, InvalidDestination, InvalidOwner, InvalidPermit2Address,
+            PaymentTooEarly, Permit2612AmountMismatch, ReentrancyGuardReentrantCall,
+            UnauthorizedFacilitator,
+        };
+
+        #[test]
+        fn amount_exceeds_permitted_maps_to_dedicated_reason() {
+            let bytes = AmountExceedsPermitted {}.abi_encode();
+            assert!(matches!(
+                classify_upto_revert_bytes(&bytes),
+                Some(VerificationError::UptoAmountExceedsPermitted)
+            ));
+        }
+
+        #[test]
+        fn unauthorized_facilitator_maps_to_dedicated_reason() {
+            let bytes = UnauthorizedFacilitator {}.abi_encode();
+            assert!(matches!(
+                classify_upto_revert_bytes(&bytes),
+                Some(VerificationError::UptoUnauthorizedFacilitator)
+            ));
+        }
+
+        #[test]
+        fn payment_too_early_maps_to_early() {
+            let bytes = PaymentTooEarly {}.abi_encode();
+            assert!(matches!(
+                classify_upto_revert_bytes(&bytes),
+                Some(VerificationError::Early)
+            ));
+        }
+
+        #[test]
+        fn operator_invariants_fall_through_to_simulation_failed() {
+            // Each of these is an operator-side bug rather than a buyer
+            // mistake, so they intentionally don't map to a wire reason
+            // and the caller falls back to SimulationFailed with the raw
+            // transport message.
+            for bytes in [
+                Permit2612AmountMismatch {}.abi_encode(),
+                ReentrancyGuardReentrantCall {}.abi_encode(),
+                InvalidDestination {}.abi_encode(),
+                InvalidOwner {}.abi_encode(),
+                InvalidPermit2Address {}.abi_encode(),
+            ] {
+                assert!(
+                    classify_upto_revert_bytes(&bytes).is_none(),
+                    "expected no wire-level mapping for raw bytes {bytes:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn unknown_selector_returns_none() {
+            // 4 bytes of arbitrary non-selector data -> decoder returns
+            // Err -> classifier returns None.
+            assert!(classify_upto_revert_bytes(&[0xDE, 0xAD, 0xBE, 0xEF]).is_none());
+        }
+
+        #[test]
+        fn empty_bytes_return_none() {
+            assert!(classify_upto_revert_bytes(&[]).is_none());
+        }
     }
 }
