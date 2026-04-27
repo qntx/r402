@@ -116,6 +116,34 @@ pub enum VerificationError {
         /// Maximum amount signed by the buyer.
         authorised: String,
     },
+
+    /// `witness.facilitator` does not match any address known to the
+    /// facilitator (upto scheme).
+    ///
+    /// Buyer either signed with a stale `paymentRequirements.extra.facilitatorAddress`
+    /// or attempted to bind the payment to a different facilitator instance.
+    /// Maps to `ErrorReason::UptoFacilitatorMismatch`.
+    #[error("witness.facilitator {witness} is not authorised on this facilitator")]
+    UptoFacilitatorMismatch {
+        /// EIP-55 checksummed `witness.facilitator` from the buyer's signed payload.
+        witness: String,
+    },
+
+    /// On-chain proxy reverted with `UnauthorizedFacilitator` because the
+    /// settle transaction was submitted from an address other than
+    /// `witness.facilitator` (upto scheme).
+    ///
+    /// Maps to `ErrorReason::UptoUnauthorizedFacilitator`.
+    #[error("on-chain proxy rejected settle: msg.sender does not match witness.facilitator")]
+    UptoUnauthorizedFacilitator,
+
+    /// On-chain proxy reverted with `AmountExceedsPermitted` (upto scheme).
+    /// Defence-in-depth signal: the off-chain pipeline should have caught
+    /// this before submission.
+    ///
+    /// Maps to `ErrorReason::UptoAmountExceedsPermitted`.
+    #[error("on-chain proxy rejected settle: amount exceeds permitted maximum")]
+    UptoAmountExceedsPermitted,
 }
 
 impl From<serde_json::Error> for VerificationError {
@@ -146,6 +174,9 @@ impl AsPaymentProblem for VerificationError {
             Self::MemoMismatch => ErrorReason::MemoMismatch,
             Self::MemoInstructionCountInvalid { .. } => ErrorReason::MemoInstructionCountInvalid,
             Self::SettlementAmountExceedsPermitted { .. } => ErrorReason::SettlementExceedsAmount,
+            Self::UptoFacilitatorMismatch { .. } => ErrorReason::UptoFacilitatorMismatch,
+            Self::UptoUnauthorizedFacilitator => ErrorReason::UptoUnauthorizedFacilitator,
+            Self::UptoAmountExceedsPermitted => ErrorReason::UptoAmountExceedsPermitted,
         };
         PaymentProblem::new(reason, self.to_string())
     }

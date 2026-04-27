@@ -68,6 +68,20 @@ pub enum ErrorReason {
     /// per the x402 v2 `schemes/upto/scheme_upto_evm.md` specification (§4).
     #[serde(rename = "invalid_upto_evm_payload_settlement_exceeds_amount")]
     SettlementExceedsAmount,
+    /// `witness.facilitator` doesn't match any of the facilitator's signer
+    /// addresses. Buyer signed a stale or unauthorised facilitator address.
+    /// Mirrors the official `upto_facilitator_mismatch` constant.
+    #[serde(rename = "upto_facilitator_mismatch")]
+    UptoFacilitatorMismatch,
+    /// On-chain proxy reverted with `UnauthorizedFacilitator` (msg.sender
+    /// is not the witness-bound facilitator). Mirrors the official
+    /// `upto_unauthorized_facilitator` constant.
+    #[serde(rename = "upto_unauthorized_facilitator")]
+    UptoUnauthorizedFacilitator,
+    /// On-chain proxy reverted with `AmountExceedsPermitted`. Mirrors the
+    /// official `upto_amount_exceeds_permitted` constant.
+    #[serde(rename = "upto_amount_exceeds_permitted")]
+    UptoAmountExceedsPermitted,
     /// A catch-all for unexpected errors (RPC failure, internal bug, ...).
     UnexpectedError,
 }
@@ -97,6 +111,9 @@ impl ErrorReason {
             Self::MemoMismatch => "memo_mismatch",
             Self::MemoInstructionCountInvalid => "memo_instruction_count_invalid",
             Self::SettlementExceedsAmount => "invalid_upto_evm_payload_settlement_exceeds_amount",
+            Self::UptoFacilitatorMismatch => "upto_facilitator_mismatch",
+            Self::UptoUnauthorizedFacilitator => "upto_unauthorized_facilitator",
+            Self::UptoAmountExceedsPermitted => "upto_amount_exceeds_permitted",
             Self::UnexpectedError => "unexpected_error",
         }
     }

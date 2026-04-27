@@ -76,8 +76,8 @@ where
     };
     let witness = IX402UptoPermit2Proxy::Witness {
         to: prepared.to,
+        facilitator: prepared.facilitator,
         validAfter: prepared.valid_after,
-        extra: prepared.extra.clone(),
     };
 
     let sig_bytes: Bytes = match &prepared.structured_signature {
@@ -91,10 +91,14 @@ where
 
     let tx_fut = Eip155MetaTransactionProvider::send_transaction(
         provider,
+        // Pin the sending signer to `witness.facilitator` so the on-chain
+        // proxy's `msg.sender == witness.facilitator` check passes
+        // (`UnauthorizedFacilitator` revert otherwise).
         MetaTransaction {
             to: X402_UPTO_PERMIT2_PROXY,
             calldata,
             confirmations: 1,
+            from: Some(prepared.facilitator),
         },
     );
     let receipt = traced!(

@@ -189,6 +189,7 @@ where
                         to: transfer_call.tx.target(),
                         calldata: transfer_call.tx.calldata().clone(),
                         confirmations: 1,
+                        from: None,
                     },
                 );
                 traced!(
@@ -219,6 +220,7 @@ where
                         to: MULTICALL3_ADDRESS,
                         calldata: aggregate_call.abi_encode().into(),
                         confirmations: 1,
+                        from: None,
                     },
                 );
                 traced!(
@@ -241,6 +243,7 @@ where
                     to: transfer_call.tx.target(),
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
+                    from: None,
                 },
             );
             traced!(
@@ -261,6 +264,7 @@ where
                     to: transfer_call.tx.target(),
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
+                    from: None,
                 },
             );
             traced!(
@@ -318,6 +322,7 @@ where
             to: X402_EXACT_PERMIT2_PROXY,
             calldata,
             confirmations: 1,
+            from: None,
         },
     );
     let receipt = traced!(

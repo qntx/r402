@@ -58,6 +58,10 @@ pub(super) struct PreparedUptoPermit2 {
     pub from: Address,
     /// Recipient address.
     pub to: Address,
+    /// Facilitator address authorised in the witness (`witness.facilitator`).
+    /// The on-chain proxy enforces `msg.sender == facilitator`, so this MUST
+    /// equal the address that ultimately submits the settle transaction.
+    pub facilitator: Address,
     /// Token contract.
     pub token: Address,
     /// Authorised maximum amount (equals `payload.permitted.amount`).
@@ -68,8 +72,6 @@ pub(super) struct PreparedUptoPermit2 {
     pub deadline: U256,
     /// `validAfter` (unix seconds as `U256`).
     pub valid_after: U256,
-    /// Witness `extra` bytes (currently always empty, reserved).
-    pub extra: alloy_primitives::Bytes,
     /// EIP-712 signing hash for signature verification.
     pub eip712_hash: alloy_primitives::B256,
     /// Parsed signature structure (EOA / EIP-1271 / EIP-6492).
@@ -96,8 +98,8 @@ impl PreparedUptoPermit2 {
             deadline: auth.deadline.into(),
             witness: SolWitness {
                 to: auth.witness.to,
+                facilitator: auth.witness.facilitator,
                 validAfter: auth.witness.valid_after.into(),
-                extra: auth.witness.extra.clone(),
             },
         };
         let eip712_hash = permit_witness.eip712_signing_hash(&domain);
@@ -110,12 +112,12 @@ impl PreparedUptoPermit2 {
         Ok(Self {
             from: auth.from,
             to: auth.witness.to,
+            facilitator: auth.witness.facilitator,
             token: auth.permitted.token,
             max_amount: auth.permitted.amount.into(),
             nonce: auth.nonce.into(),
             deadline: auth.deadline.into(),
             valid_after: auth.witness.valid_after.into(),
-            extra: auth.witness.extra.clone(),
             eip712_hash,
             structured_signature,
         })
@@ -134,12 +136,17 @@ pub(super) const fn upto_permit2_domain(chain: Eip155ChainReference) -> Eip712Do
 
 /// Runs all off-chain preconditions shared by verify and settle.
 ///
-/// Checks scheme / network / `pay_to` / asset / spender / token / time bounds
-/// and that the signed permit amount equals the declared authorised maximum.
+/// Checks scheme / network / `pay_to` / asset / spender / token / time bounds,
+/// and that:
+/// 1. the signed permit amount equals the declared authorised maximum,
+/// 2. `witness.facilitator` matches `requirements.extra.facilitatorAddress`
+///    (the address the resource server announced),
+/// 3. `witness.facilitator` is one of the facilitator's known signers.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 pub(super) fn assert_offchain_valid_shared(
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
 ) -> Result<(), VerificationError> {
     let accepted = &payload.accepted;
@@ -165,6 +172,23 @@ pub(super) fn assert_offchain_valid_shared(
         return Err(VerificationError::AssetMismatch);
     }
 
+    // Spec §2: the buyer signs `witness.facilitator` against the address
+    // the server published in `extra.facilitatorAddress`. Any divergence
+    // is treated as `AcceptedRequirementsMismatch` because the buyer is
+    // signing for a different counterparty than the server expects.
+    let expected_facilitator = requirements
+        .extra
+        .as_ref()
+        .map(|e| Address::from(e.facilitator_address));
+    if expected_facilitator != Some(auth.witness.facilitator) {
+        return Err(VerificationError::AcceptedRequirementsMismatch);
+    }
+
+    // Spec §2 (TS / Go reference): the witness facilitator MUST be one of
+    // the facilitator's announced signer addresses. Otherwise we wouldn't
+    // be able to satisfy `msg.sender == witness.facilitator` on settle.
+    super::assert_facilitator_authorized(auth.witness.facilitator, facilitator_signers)?;
+
     let valid_after_secs: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
     let deadline_secs: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
     assert_time(
@@ -182,9 +206,15 @@ pub(super) fn assert_offchain_valid_shared(
 pub(super) fn assert_offchain_valid_verify(
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
 ) -> Result<U256, VerificationError> {
-    assert_offchain_valid_shared(payload, requirements, clock_skew_tolerance)?;
+    assert_offchain_valid_shared(
+        payload,
+        requirements,
+        facilitator_signers,
+        clock_skew_tolerance,
+    )?;
     let permitted: U256 = payload
         .payload
         .permit2_authorization
@@ -203,9 +233,15 @@ pub(super) fn assert_offchain_valid_verify(
 pub(super) fn assert_offchain_valid_settle(
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
 ) -> Result<U256, VerificationError> {
-    assert_offchain_valid_shared(payload, requirements, clock_skew_tolerance)?;
+    assert_offchain_valid_shared(
+        payload,
+        requirements,
+        facilitator_signers,
+        clock_skew_tolerance,
+    )?;
     let permitted: U256 = payload
         .payload
         .permit2_authorization
@@ -270,8 +306,8 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     };
     let witness = IX402UptoPermit2Proxy::Witness {
         to: prepared.to,
+        facilitator: prepared.facilitator,
         validAfter: prepared.valid_after,
-        extra: prepared.extra.clone(),
     };
 
     match &prepared.structured_signature {
@@ -376,13 +412,19 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
     chain: Eip155ChainReference,
     payload: &types::v2::PaymentPayload,
     requirements: &types::v2::PaymentRequirements,
+    facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
 ) -> Result<Address, Eip155ExactError> {
     let chain_id: ChainId = chain.into();
     if payload.accepted.network != chain_id {
         return Err(VerificationError::ChainIdMismatch.into());
     }
-    let max_amount = assert_offchain_valid_verify(payload, requirements, clock_skew_tolerance)?;
+    let max_amount = assert_offchain_valid_verify(
+        payload,
+        requirements,
+        facilitator_signers,
+        clock_skew_tolerance,
+    )?;
     let prepared = PreparedUptoPermit2::try_new(chain, &payload.payload)?;
     assert_onchain_valid(provider, &prepared, max_amount).await
 }
@@ -396,7 +438,13 @@ mod tests {
     use super::*;
     use crate::chain::{ChecksummedAddress, TokenAmount};
     use crate::exact::Permit2TokenPermissions;
-    use crate::upto::{UptoPermit2Authorization, UptoPermit2Witness, UptoScheme};
+    use crate::upto::{
+        UptoPaymentRequirementsExtra, UptoPermit2Authorization, UptoPermit2Witness, UptoScheme,
+    };
+
+    /// Stable facilitator signer used across tests; mirrors what an
+    /// `Eip155UptoFacilitator::supported()` response would publish.
+    const TEST_FACILITATOR: Address = Address::repeat_byte(0xFA);
 
     fn base_payload(
         permitted_amount: U256,
@@ -406,12 +454,13 @@ mod tests {
         let asset_addr = Address::repeat_byte(0xAA);
         let pay_to = ChecksummedAddress::from(pay_to_addr);
         let asset = ChecksummedAddress::from(asset_addr);
+        let facilitator_addr = TEST_FACILITATOR;
 
         let now = UnixTimestamp::now().as_secs();
         let witness = UptoPermit2Witness {
             to: pay_to_addr,
+            facilitator: facilitator_addr,
             valid_after: TokenAmount::from(U256::from(now.saturating_sub(60))),
-            extra: Bytes::new(),
         };
         let auth = UptoPermit2Authorization {
             from: Address::repeat_byte(0xCC),
@@ -436,7 +485,9 @@ mod tests {
             pay_to,
             asset,
             max_timeout_seconds: 300,
-            extra: None,
+            extra: Some(UptoPaymentRequirementsExtra::new(ChecksummedAddress::from(
+                facilitator_addr,
+            ))),
         };
         let pay_payload = types::v2::PaymentPayload {
             x402_version: wire::V2,
@@ -448,12 +499,16 @@ mod tests {
         (pay_payload, requirements)
     }
 
+    fn signers() -> [Address; 1] {
+        [TEST_FACILITATOR]
+    }
+
     #[test]
     fn verify_phase_rejects_mismatched_permitted_amount() {
         let permitted = U256::from(5_000_000_u64);
         let (payload, mut reqs) = base_payload(permitted);
         reqs.amount = TokenAmount::from(U256::from(4_000_000_u64));
-        let err = assert_offchain_valid_verify(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_verify(&payload, &reqs, &signers(), 30).unwrap_err();
         assert!(matches!(err, VerificationError::InvalidPaymentAmount));
     }
 
@@ -462,7 +517,7 @@ mod tests {
         let permitted = U256::from(5_000_000_u64);
         let (payload, mut reqs) = base_payload(permitted);
         reqs.amount = TokenAmount::from(U256::from(6_000_000_u64));
-        let err = assert_offchain_valid_settle(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_settle(&payload, &reqs, &signers(), 30).unwrap_err();
         match err {
             VerificationError::SettlementAmountExceedsPermitted {
                 requested,
@@ -481,7 +536,7 @@ mod tests {
         let (payload, mut reqs) = base_payload(permitted);
         for settle_amount in [0u64, 1u64, 2_500_000u64, 5_000_000u64] {
             reqs.amount = TokenAmount::from(U256::from(settle_amount));
-            let actual = assert_offchain_valid_settle(&payload, &reqs, 30)
+            let actual = assert_offchain_valid_settle(&payload, &reqs, &signers(), 30)
                 .expect("settle amount within max must be valid");
             assert_eq!(actual, U256::from(settle_amount));
         }
@@ -491,7 +546,7 @@ mod tests {
     fn shared_checks_reject_wrong_spender() {
         let (mut payload, reqs) = base_payload(U256::from(100u64));
         payload.payload.permit2_authorization.spender = Address::ZERO;
-        let err = assert_offchain_valid_shared(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
         assert!(matches!(err, VerificationError::InvalidSignature(_)));
     }
 
@@ -499,7 +554,7 @@ mod tests {
     fn shared_checks_reject_recipient_mismatch() {
         let (mut payload, reqs) = base_payload(U256::from(100u64));
         payload.payload.permit2_authorization.witness.to = Address::repeat_byte(0xEE);
-        let err = assert_offchain_valid_shared(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
         assert!(matches!(err, VerificationError::RecipientMismatch));
     }
 
@@ -507,7 +562,7 @@ mod tests {
     fn shared_checks_reject_asset_mismatch() {
         let (mut payload, reqs) = base_payload(U256::from(100u64));
         payload.payload.permit2_authorization.permitted.token = Address::repeat_byte(0xEE);
-        let err = assert_offchain_valid_shared(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
         assert!(matches!(err, VerificationError::AssetMismatch));
     }
 
@@ -515,7 +570,52 @@ mod tests {
     fn shared_checks_reject_requirements_asset_mismatch() {
         let (payload, mut reqs) = base_payload(U256::from(100u64));
         reqs.asset = ChecksummedAddress::from(Address::repeat_byte(0x01));
-        let err = assert_offchain_valid_shared(&payload, &reqs, 30).unwrap_err();
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+        assert!(matches!(
+            err,
+            VerificationError::AcceptedRequirementsMismatch
+        ));
+    }
+
+    #[test]
+    fn shared_checks_reject_witness_facilitator_mismatch_against_extra() {
+        let (mut payload, reqs) = base_payload(U256::from(100u64));
+        // Buyer signed for an unauthorised facilitator address.
+        payload.payload.permit2_authorization.witness.facilitator = Address::repeat_byte(0xEE);
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+        assert!(matches!(
+            err,
+            VerificationError::AcceptedRequirementsMismatch
+        ));
+    }
+
+    #[test]
+    fn shared_checks_reject_facilitator_not_in_signer_set() {
+        // Witness and accepted.extra agree on facilitator X, but the
+        // facilitator's signer set doesn't include X.
+        let other_facilitator = Address::repeat_byte(0xDD);
+        let (mut payload, mut reqs) = base_payload(U256::from(100u64));
+        payload.payload.permit2_authorization.witness.facilitator = other_facilitator;
+        payload.accepted.extra = Some(UptoPaymentRequirementsExtra::new(ChecksummedAddress::from(
+            other_facilitator,
+        )));
+        reqs.extra = Some(UptoPaymentRequirementsExtra::new(ChecksummedAddress::from(
+            other_facilitator,
+        )));
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
+        match err {
+            VerificationError::UptoFacilitatorMismatch { witness } => {
+                assert_eq!(witness, other_facilitator.to_checksum(None));
+            }
+            other => unreachable!("expected UptoFacilitatorMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shared_checks_reject_missing_facilitator_extra() {
+        let (payload, mut reqs) = base_payload(U256::from(100u64));
+        reqs.extra = None;
+        let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
         assert!(matches!(
             err,
             VerificationError::AcceptedRequirementsMismatch

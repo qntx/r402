@@ -1,6 +1,6 @@
 //! EIP-712 signing for the upto scheme's Permit2 `PermitWitnessTransferFrom`.
 
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, U256};
 use alloy_sol_types::{SolStruct, eip712_domain};
 use r402_core::error::ClientError;
 use r402_core::wire::UnixTimestamp;
@@ -24,6 +24,11 @@ pub struct Permit2UptoSigningParams {
     pub asset_address: Address,
     /// Recipient address for the transfer.
     pub pay_to: Address,
+    /// Facilitator address authorised in the witness. The on-chain proxy
+    /// enforces `msg.sender == witness.facilitator`, so this MUST equal an
+    /// address listed in the facilitator's `/supported` response and MUST
+    /// be the same address that ultimately submits the settle transaction.
+    pub facilitator_address: Address,
     /// **Maximum** amount the buyer authorises. The facilitator may settle
     /// for any value in `[0, max_amount]`.
     pub max_amount: U256,
@@ -34,9 +39,11 @@ pub struct Permit2UptoSigningParams {
 /// Signs a Permit2 `PermitWitnessTransferFrom` for the upto scheme using EIP-712.
 ///
 /// Constructs the Permit2 domain (`name = "Permit2"`,
-/// `verifyingContract = PERMIT2_ADDRESS`), builds the upto witness with
-/// empty `extra` bytes (reserved for future use), and returns a payload
-/// ready to serialise into the `PAYMENT-SIGNATURE` header.
+/// `verifyingContract = PERMIT2_ADDRESS`), embeds the facilitator address
+/// into `witness.facilitator` (the on-chain proxy reverts with
+/// `UnauthorizedFacilitator` when the settle caller doesn't match), and
+/// returns a payload ready to serialise into the `PAYMENT-SIGNATURE`
+/// header.
 ///
 /// # Errors
 ///
@@ -53,15 +60,14 @@ pub async fn sign_permit2_upto_authorization<S: SignerLike + Sync>(
 
     let now = UnixTimestamp::now();
     // `validAfter` is shifted 10 minutes into the past to absorb mild clock
-    // skew between the buyer's host and the facilitator chain node.
+    // skew between the buyer's host and the facilitator chain node
+    // (matches the official TypeScript / Go reference clients).
     let valid_after_secs = now.as_secs().saturating_sub(10 * 60);
     let deadline_secs = now.as_secs() + params.max_timeout_seconds;
 
     // Permit2 nonce is a fresh uint256; we draw 32 random bytes.
     let nonce_bytes: [u8; 32] = rng().random();
     let nonce = U256::from_be_bytes(nonce_bytes);
-
-    let extra = Bytes::new();
 
     let permit_witness = SolPermitWitnessTransferFrom {
         permitted: SolTokenPermissions {
@@ -73,8 +79,8 @@ pub async fn sign_permit2_upto_authorization<S: SignerLike + Sync>(
         deadline: U256::from(deadline_secs),
         witness: SolWitness {
             to: params.pay_to,
+            facilitator: params.facilitator_address,
             validAfter: U256::from(valid_after_secs),
-            extra: extra.clone(),
         },
     };
 
@@ -95,8 +101,8 @@ pub async fn sign_permit2_upto_authorization<S: SignerLike + Sync>(
         deadline: TokenAmount::from(U256::from(deadline_secs)),
         witness: UptoPermit2Witness {
             to: params.pay_to,
+            facilitator: params.facilitator_address,
             valid_after: TokenAmount::from(U256::from(valid_after_secs)),
-            extra,
         },
     };
 
@@ -116,10 +122,12 @@ mod tests {
     #[tokio::test]
     async fn sign_produces_payload_with_expected_shape() {
         let signer = PrivateKeySigner::random();
+        let facilitator = Address::repeat_byte(0xFA);
         let params = Permit2UptoSigningParams {
             chain_id: 8453,
             asset_address: Address::repeat_byte(0xAA),
             pay_to: Address::repeat_byte(0xBB),
+            facilitator_address: facilitator,
             max_amount: U256::from(5_000_000_u64),
             max_timeout_seconds: 300,
         };
@@ -132,7 +140,7 @@ mod tests {
         assert_eq!(auth.permitted.token, params.asset_address);
         assert_eq!(auth.permitted.amount.0, params.max_amount);
         assert_eq!(auth.witness.to, params.pay_to);
-        assert!(auth.witness.extra.is_empty());
+        assert_eq!(auth.witness.facilitator, facilitator);
         // 65-byte EOA signature.
         assert_eq!(payload.signature.len(), 65);
     }
@@ -144,6 +152,7 @@ mod tests {
             chain_id: 1,
             asset_address: Address::ZERO,
             pay_to: Address::ZERO,
+            facilitator_address: Address::ZERO,
             max_amount: U256::from(1_u64),
             max_timeout_seconds: 60,
         };

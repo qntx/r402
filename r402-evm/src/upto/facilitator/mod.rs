@@ -12,10 +12,13 @@ mod settle;
 mod verify;
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
+use alloy_primitives::Address;
 use alloy_provider::Provider;
 use compact_str::CompactString;
 use r402_core::chain::ChainProvider;
+use r402_core::error::VerificationError;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
@@ -95,11 +98,13 @@ where
         request: wire::VerifyRequest,
     ) -> Result<wire::VerifyResponse, FacilitatorError> {
         let request = types::v2::VerifyRequest::from_verify(request)?;
+        let signer_addresses = self.signer_addresses_typed();
         let payer = verify_permit2_upto_payment(
             self.provider.inner(),
             *self.provider.chain(),
             &request.payment_payload,
             &request.payment_requirements,
+            &signer_addresses,
             self.clock_skew_tolerance,
         )
         .await?;
@@ -111,9 +116,11 @@ where
         request: wire::SettleRequest,
     ) -> Result<wire::SettleResponse, FacilitatorError> {
         let request = types::v2::SettleRequest::from_settle(request)?;
+        let signer_addresses = self.signer_addresses_typed();
         let actual_amount = assert_offchain_valid_settle(
             &request.payment_payload,
             &request.payment_requirements,
+            &signer_addresses,
             self.clock_skew_tolerance,
         )?;
 
@@ -139,28 +146,68 @@ where
 
     async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
         let chain_id = self.provider.chain_id();
+        let signer_strings: Vec<CompactString> = self
+            .provider
+            .signer_addresses()
+            .into_iter()
+            .map(CompactString::from)
+            .collect();
+        // Spec §2: publish the first signer as `extra.facilitatorAddress`
+        // so the resource-server price tag and client signing path can pick
+        // it up via `enrich(supported)`. Mirrors the official TypeScript /
+        // Go behaviour (random pick is not required for correctness; first
+        // is deterministic and avoids surprising the buyer between calls).
+        let extra = signer_strings.first().map(|addr| {
+            serde_json::json!({
+                "assetTransferMethod": "permit2",
+                "facilitatorAddress": addr,
+            })
+        });
         let kinds = vec![wire::SupportedPaymentKind {
             x402_version: wire::V2.into(),
             scheme: UptoScheme.to_string().into(),
             network: chain_id.to_string().into(),
-            extra: None,
+            extra,
         }];
-        let signers = {
-            let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
-            let _ = signers.insert(
-                Eip155Upto.caip_family().into(),
-                self.provider
-                    .signer_addresses()
-                    .into_iter()
-                    .map(CompactString::from)
-                    .collect(),
-            );
-            signers
-        };
+        let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
+        let _ = signers.insert(Eip155Upto.caip_family().into(), signer_strings);
         Ok(wire::SupportedResponse {
             kinds,
             extensions: Vec::new(),
             signers,
+        })
+    }
+}
+
+impl<P> Eip155UptoFacilitator<P>
+where
+    P: ChainProvider,
+{
+    /// Returns the facilitator's signer addresses parsed as [`Address`].
+    ///
+    /// Strings emitted by [`ChainProvider::signer_addresses`] that fail to
+    /// parse are silently skipped, mirroring the wire-level
+    /// `VecSkipError` policy used elsewhere.
+    fn signer_addresses_typed(&self) -> Vec<Address> {
+        self.provider
+            .signer_addresses()
+            .into_iter()
+            .filter_map(|s| Address::from_str(&s).ok())
+            .collect()
+    }
+}
+
+/// Returns [`VerificationError::FacilitatorMismatch`] when `witness.facilitator`
+/// is not in the facilitator's signer set.
+pub(super) fn assert_facilitator_authorized(
+    witness_facilitator: Address,
+    signer_addresses: &[Address],
+) -> Result<(), VerificationError> {
+    if signer_addresses.contains(&witness_facilitator) {
+        Ok(())
+    } else {
+        Err(VerificationError::UptoFacilitatorMismatch {
+            witness: witness_facilitator.to_checksum(None),
         })
     }
 }

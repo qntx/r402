@@ -242,10 +242,21 @@ where
         Box::pin(async move {
             self.ensure_permit2_allowance().await?;
 
+            // Spec §2: the buyer MUST embed `paymentRequirements.extra.facilitatorAddress`
+            // into `witness.facilitator`. Reject early when the server failed
+            // to publish one — we cannot produce a settle-able signature.
+            let extra = self.requirements.extra.as_ref().ok_or_else(|| {
+                ClientError::PreConditionFailed(
+                    "upto requires paymentRequirements.extra.facilitatorAddress; \
+                     ensure the server is wired to an upto facilitator that publishes its address"
+                        .to_owned(),
+                )
+            })?;
             let params = Permit2UptoSigningParams {
                 chain_id: self.chain_reference.inner(),
                 asset_address: self.requirements.asset.0,
                 pay_to: self.requirements.pay_to.into(),
+                facilitator_address: extra.facilitator_address.0,
                 max_amount: self.requirements.amount.into(),
                 max_timeout_seconds: self.requirements.max_timeout_seconds,
             };

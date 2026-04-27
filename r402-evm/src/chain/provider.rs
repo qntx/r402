@@ -217,7 +217,7 @@ pub enum MetaTransactionSendError {
 }
 
 /// Meta-transaction parameters: target address, calldata, and required confirmations.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MetaTransaction {
     /// Target contract address.
     pub to: Address,
@@ -225,6 +225,32 @@ pub struct MetaTransaction {
     pub calldata: Bytes,
     /// Number of block confirmations to wait for.
     pub confirmations: u64,
+    /// Optional pinned signer address. When `None`, the provider picks a
+    /// signer using its standard rotation strategy (round-robin in
+    /// [`Eip155ChainProvider`]). When `Some`, the provider MUST submit the
+    /// transaction from that exact address (used by the upto scheme to
+    /// satisfy `msg.sender == witness.facilitator`).
+    pub from: Option<Address>,
+}
+
+impl MetaTransaction {
+    /// Builds a meta-transaction with no signer pinning.
+    #[must_use]
+    pub const fn new(to: Address, calldata: Bytes, confirmations: u64) -> Self {
+        Self {
+            to,
+            calldata,
+            confirmations,
+            from: None,
+        }
+    }
+
+    /// Sets the pinned signer address; consuming and returning `self`.
+    #[must_use]
+    pub const fn with_from(mut self, from: Address) -> Self {
+        self.from = Some(from);
+        self
+    }
 }
 
 impl ChainProvider for Eip155ChainProvider {
@@ -291,11 +317,13 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         &self.chain
     }
 
-    /// Send a meta-transaction with provided `to`, `calldata`, and automatically selected signer.
+    /// Send a meta-transaction with provided `to`, `calldata`, and a signer.
     ///
-    /// This method constructs a transaction from the provided [`MetaTransaction`], automatically
-    /// selects the next available signer using round-robin selection, and handles gas pricing
-    /// based on whether the network supports EIP-1559.
+    /// When [`MetaTransaction::from`] is set, the provider validates that
+    /// the address is in its wallet and uses it as the EOA submitter (the
+    /// upto scheme requires `msg.sender == witness.facilitator`). Otherwise
+    /// it falls back to round-robin selection across configured signers.
+    /// Gas pricing follows the network's EIP-1559 capability.
     ///
     /// If the transaction fails at any point (during submission or receipt fetching), the nonce
     /// for the sending address is reset to force a fresh query on the next transaction. This
@@ -332,7 +360,17 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         &self,
         tx: MetaTransaction,
     ) -> Result<TransactionReceipt, Self::Error> {
-        let from_address = self.next_signer_address();
+        let from_address = match tx.from {
+            Some(pinned) => {
+                if !self.signer_addresses.contains(&pinned) {
+                    return Err(MetaTransactionSendError::Custom(format!(
+                        "requested signer {pinned} is not in the configured wallet"
+                    )));
+                }
+                pinned
+            }
+            None => self.next_signer_address(),
+        };
         let mut txr = TransactionRequest::default()
             .with_to(tx.to)
             .with_from(from_address)
