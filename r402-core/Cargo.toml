@@ -44,6 +44,7 @@ tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

@@ -39,6 +39,10 @@ pub mod cache;
 #[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 pub mod metrics;
 
+// `proptest` is consumed by integration tests under `tests/`, but the
+// lib's own test target also links every dev-dep and would otherwise
+// trip `unused_crate_dependencies` because no unit test references it.
+// The empty re-import silences that lint without affecting binary size.
 pub use error::{ClientError, FacilitatorError, SettlementError, VerificationError};
 pub use error_reason::{AsPaymentProblem, ErrorReason, PaymentProblem};
 pub use facilitator::{BoxFuture, DynFacilitator, Facilitator};
@@ -46,3 +50,5 @@ pub use hooks::{
     DynFacilitatorHooks, FacilitatorHooks, FailureRecovery, HookDecision, HookedFacilitator,
     SettleContext as HookSettleContext, VerifyContext as HookVerifyContext,
 };
+#[cfg(test)]
+use proptest as _;

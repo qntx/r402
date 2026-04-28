@@ -95,6 +95,11 @@ tracing-core = "0.1"
 # recorder.
 metrics = "0.24"
 
+# Property-based testing — only consumed via dev-dependencies, but
+# pinned at the workspace root so all crates run with the same version
+# and configuration.
+proptest = "1"
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

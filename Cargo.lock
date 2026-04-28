@@ -4040,6 +4040,7 @@ dependencies = [
  "compact_str",
  "metrics",
  "moka",
+ "proptest",
  "rust_decimal",
  "serde",
  "serde_json",

@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 89c1cf346b03eab246d5ce1b84e34bd4c337536a65a8ff6010f59d7005f943b1 # shrinks to kind = SupportedPaymentKind { x402_version: 0, scheme: "", network: "", extra: Some(Null) }
+cc bc1e4dab7bb13d42e0c6f012ad714692cc8c42e1fe8e43362cd4ee0d0392c991 # shrinks to resp = SupportedResponse { kinds: [SupportedPaymentKind { x402_version: 0, scheme: "", network: "", extra: Some(Null) }], extensions: [], signers: {} }
+cc 016caf35d4ced8b92bfedec0ec937ef4e0ba594fc17c2c1a5f2b278463617e10 # shrinks to resp = Success { payer: "", transaction: "", network: "", amount: None, extensions: Extensions({}) }

@@ -1,0 +1,29 @@
+{
+  "kinds": [
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:84532"
+    },
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:8453"
+    },
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:43113"
+    },
+    {
+      "x402Version": 2,
+      "scheme": "exact",
+      "network": "eip155:43114"
+    }
+  ],
+  "extensions": [],
+  "signers": {
+    "eip155:*": ["0x1234567890abcdef1234567890abcdef12345678"],
+    "solana:*": ["CKPKJWNdJEqa81x7CkZ14BVPiY6y16Sxs7owznqtWYp5"]
+  }
+}
