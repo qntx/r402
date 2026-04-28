@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use alloy_primitives::{Address, B256, Bytes, U256, address};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::Provider;
 use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
@@ -75,9 +75,9 @@ pub use signature::StructuredSignatureFormatError;
 pub(crate) use verify::assert_time;
 use verify::{verify_payment, verify_permit2_payment};
 
-/// Signature verifier for EIP-6492, EIP-1271, EOA, universally deployed on the supported EVM chains.
-/// If absent on a target chain, verification will fail; you should deploy the validator there.
-pub const VALIDATOR_ADDRESS: Address = address!("0xdAcD51A54883eb67D95FAEb2BBfdC4a9a6BD2a3B");
+// Re-export the canonical signature-validator address for source compatibility
+// with crates that imported it from this path before the move to `exact::types`.
+pub use crate::exact::types::VALIDATOR_ADDRESS;
 
 /// A fully specified ERC-3009 authorization payload for EVM settlement.
 #[derive(Debug)]

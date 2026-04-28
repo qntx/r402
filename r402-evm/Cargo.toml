@@ -78,7 +78,10 @@ tracing-core = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
+alloy-provider = { workspace = true }
+alloy-transport-http = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+url = { workspace = true }
 
 [lints]
 workspace = true

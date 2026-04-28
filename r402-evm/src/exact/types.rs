@@ -39,6 +39,20 @@ pub const X402_EXACT_PERMIT2_PROXY: Address =
 /// and the Go reference SDK (`go/mechanisms/evm/constants.go`).
 pub const X402_UPTO_PERMIT2_PROXY: Address = address!("0x4020A4f3b7b90ccA423B9fabCc0CE57C6C240002");
 
+/// Universal signature verifier for EIP-6492, EIP-1271, and EOA signatures.
+///
+/// Deployed at the same address on every supported EVM chain. The exact and
+/// upto facilitators delegate to this contract via
+/// `Validator6492::isValidSigWithSideEffects`; if the validator is missing on
+/// a particular chain, EIP-6492 / EIP-1271 verification will revert and only
+/// EOA signatures will work. Use the `validator_deployed_on_configured_chains`
+/// integration test to confirm presence on every chain you operate.
+///
+/// This address is **r402-specific** (not currently part of the cross-SDK
+/// canonical-address set). Out-of-tree deployments must mirror the bytecode
+/// to maintain interop.
+pub const VALIDATOR_ADDRESS: Address = address!("0xdAcD51A54883eb67D95FAEb2BBfdC4a9a6BD2a3B");
+
 /// Determines which on-chain mechanism is used for token transfers.
 ///
 /// - `Eip3009`: Uses `transferWithAuthorization` (USDC, etc.) — recommended for compatible tokens

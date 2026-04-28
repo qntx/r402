@@ -33,6 +33,11 @@
 // default features disable every consumer of `compact_str`.
 #[cfg(not(any(feature = "client", feature = "server", feature = "facilitator")))]
 use compact_str as _;
+// Dev-deps consumed by `tests/onchain_deployment.rs` only. The lib test
+// target links every dev-dep and would otherwise trip
+// `unused_crate_dependencies` because no unit test references them.
+#[cfg(test)]
+use {alloy_provider as _, alloy_transport_http as _, tokio as _, url as _};
 
 /// Default clock-skew tolerance (seconds) applied to EIP-712 time-window checks.
 ///
