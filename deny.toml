@@ -1,21 +1,22 @@
-# `cargo deny` configuration.
+# `cargo deny` configuration for the r402 workspace.
 #
 # Run locally:
 #
-#   cargo deny check all
+#     cargo deny check all
 #
 # CI runs `cargo deny check all` via `.github/workflows/security.yml`.
+# Schema reference: <https://embarkstudios.github.io/cargo-deny/checks/cfg.html>
 
 [advisories]
-# Wire `cargo deny` to the official RustSec advisory DB.
-db-path = "~/.cargo/advisory-db"
-db-urls = ["https://github.com/rustsec/advisory-db"]
 # Reject yanked crates: a yank usually accompanies a security or
 # correctness fix.
 yanked = "deny"
-# Tolerate a few well-known unmaintained crates inherited from the Solana
-# stack until upstream migrates. Track via `audit/08-security.md`.
-ignore = []
+# Advisories whose presence in the dependency graph is acceptable for
+# this workspace. Each entry must include a written justification so the
+# decision is auditable on review.
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained but feature-complete; alloy-rs/core#1086 was rejected upstream (DaniPopes, 2026-03-20) on the grounds that the crate works as-is and other deps still pull it in. No CVE, only an unmaintained advisory." },
+]
 
 [licenses]
 # We only accept permissive, OSI-approved licences. New variants must be
@@ -41,12 +42,10 @@ allow = [
 # matches, but lets `cargo deny` accept dual-licensed crates that publish
 # their licence text verbatim.
 confidence-threshold = 0.95
-
-[[licenses.exceptions]]
-# `ring` ships under a BSD-style + ISC + OpenSSL composite which the SPDX
-# parser cannot reduce; it is permissive in spirit.
-name = "ring"
-allow = ["MIT", "ISC", "OpenSSL"]
+# Don't warn when an `allow`-listed licence is not seen in the current
+# dependency graph — the list intentionally over-approximates so future
+# deps don't trip the gate the moment they land.
+unused-allowed-license = "allow"
 
 [bans]
 multiple-versions = "warn"
