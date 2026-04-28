@@ -10,7 +10,7 @@ use crate::chain::ChainId;
 
 /// A single payment kind advertised by a facilitator.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SupportedPaymentKind {
     /// x402 protocol version (`2`).
     pub x402_version: u8,
@@ -29,7 +29,7 @@ pub struct SupportedPaymentKind {
 /// and signer addresses keyed by CAIP-2 chain pattern.
 #[serde_as]
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SupportedResponse {
     /// Supported payment kinds. Invalid entries are silently skipped.
     #[serde_as(as = "VecSkipError<_>")]

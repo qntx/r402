@@ -30,7 +30,7 @@ client = [
     "dep:solana-signer",
     "dep:solana-transaction",
     "dep:spl-token",
-    "dep:spl-token-2022",
+    "dep:spl-token-2022-interface",
 ]
 server = ["dep:serde_json"]
 facilitator = [
@@ -46,7 +46,7 @@ facilitator = [
     "dep:solana-signer",
     "dep:solana-transaction",
     "dep:spl-token",
-    "dep:spl-token-2022",
+    "dep:spl-token-2022-interface",
     "dep:tokio",
     "r402-core/cache",
 ]
@@ -74,7 +74,7 @@ solana-signature = { workspace = true, optional = true }
 solana-signer = { workspace = true, optional = true }
 solana-transaction = { workspace = true, optional = true }
 spl-token = { workspace = true, optional = true }
-spl-token-2022 = { workspace = true, optional = true }
+spl-token-2022-interface = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }
 

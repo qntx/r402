@@ -206,6 +206,26 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
     if payload_chain_id != &chain_id {
         return Err(VerificationError::UnsupportedChain);
     }
+
+    // F-025: enforce that the buyer pinned this payment to a fee payer the
+    // facilitator actually controls. Without this check, a buyer could spoof
+    // any address in `extra.feePayer`; the facilitator would still accept and
+    // submit the transaction (bound to its own keypair) as if it had been
+    // explicitly addressed, defeating the spec §SVM scheme contract that the
+    // buyer-signed payload binds to a specific facilitator.
+    let declared_extra = accepted.extra.as_ref().ok_or_else(|| {
+        VerificationError::InvalidFormat(
+            "missing paymentRequirements.extra: spec §SVM exact requires `feePayer`".into(),
+        )
+    })?;
+    let configured_signers = provider.signer_addresses();
+    let declared_fee_payer = declared_extra.fee_payer.to_string();
+    if !configured_signers.iter().any(|s| s == &declared_fee_payer) {
+        return Err(VerificationError::InvalidFormat(format!(
+            "declared feePayer {declared_fee_payer} is not managed by this facilitator",
+        )));
+    }
+
     let transaction_b64_string = payload.payload.transaction.clone();
     let transfer_requirement = TransferRequirement {
         pay_to: &requirements.pay_to,
@@ -251,23 +271,26 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
     let transfer_instruction =
         verify_transfer_instruction(provider, &transaction, 2, transfer_requirement).await?;
 
-    if config.require_fee_payer_not_in_instructions {
-        let fee_payer_pubkey = provider.pubkey();
-        for instruction in transaction.message.instructions() {
-            for account_idx in &instruction.accounts {
-                let account = transaction
-                    .message
-                    .static_account_keys()
-                    .get(*account_idx as usize)
-                    .ok_or(SolanaExactError::NoAccountAtIndex(*account_idx))?;
+    // F-030: always reject transactions that touch the facilitator's fee
+    // payer account in any non-fee-paying role. Without this check a
+    // malicious buyer could craft an instruction transferring SOL or SPL
+    // tokens *out of* the facilitator's keypair while we cover the gas.
+    // This is a fundamental safety property and not user-configurable.
+    let fee_payer_pubkey = provider.pubkey();
+    for instruction in transaction.message.instructions() {
+        for account_idx in &instruction.accounts {
+            let account = transaction
+                .message
+                .static_account_keys()
+                .get(*account_idx as usize)
+                .ok_or(SolanaExactError::NoAccountAtIndex(*account_idx))?;
 
-                #[allow(
-                    clippy::excessive_nesting,
-                    reason = "nested iteration over instructions and accounts"
-                )]
-                if *account == fee_payer_pubkey {
-                    return Err(SolanaExactError::FeePayerIncludedInInstructionAccounts.into());
-                }
+            #[allow(
+                clippy::excessive_nesting,
+                reason = "nested iteration over instructions and accounts"
+            )]
+            if *account == fee_payer_pubkey {
+                return Err(SolanaExactError::FeePayerIncludedInInstructionAccounts.into());
             }
         }
     }
@@ -304,12 +327,15 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     let instruction = tx.instruction(instruction_index)?;
     instruction.assert_not_empty()?;
     let program_id = instruction.program_id();
-    // Both spl_token and spl_token_2022 share the same instruction layout,
-    // so we use spl_token's unpack for both and only differentiate by program ID.
+    // Both spl_token and the Token-2022 interface share the same
+    // `TransferChecked` instruction layout, so we use spl_token's unpack
+    // for both and only differentiate by program ID. The Token-2022 ID
+    // comes from the interface-only crate to avoid pulling in the full
+    // processor (and its broken `token_group/processor.rs` upstream).
     let token_program = if spl_token::ID.eq(&program_id) {
         spl_token::ID
-    } else if spl_token_2022::ID.eq(&program_id) {
-        spl_token_2022::ID
+    } else if spl_token_2022_interface::ID.eq(&program_id) {
+        spl_token_2022_interface::ID
     } else {
         return Err(SolanaExactError::InvalidTokenInstruction.into());
     };

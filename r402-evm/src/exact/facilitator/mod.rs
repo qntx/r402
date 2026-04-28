@@ -124,7 +124,11 @@ pub struct Permit2Payment {
 /// Applied as a grace buffer when checking `validBefore` / `deadline` expiration
 /// and `validAfter` early-arrival, to account for clock drift between the
 /// facilitator host and the blockchain network.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = 30;
+///
+/// Re-exported from the crate root for shared use with the upto facilitator;
+/// kept as a `const` alias here for backwards compatibility with downstream
+/// code that imports the module-private constant.
+const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
 
 /// Facilitator for EIP-155 exact scheme payments.
 ///
@@ -140,7 +144,9 @@ pub struct Eip155ExactFacilitator<P> {
 impl<P> Eip155ExactFacilitator<P> {
     /// Creates a new EIP-155 exact scheme facilitator with the given provider.
     ///
-    /// Uses `DEFAULT_CLOCK_SKEW_TOLERANCE` (30 s) for time-window validation.
+    /// Uses [`crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS`] (6 s, one EVM
+    /// block, aligned with Go's `Permit2DeadlineBuffer`) for time-window
+    /// validation.
     pub const fn new(provider: P) -> Self {
         Self {
             provider,

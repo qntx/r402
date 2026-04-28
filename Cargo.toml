@@ -79,7 +79,12 @@ solana-signature = "3"
 solana-signer = "3"
 solana-transaction = "3"
 spl-token = { version = "9", features = ["no-entrypoint"] }
-spl-token-2022 = { version = "10.0.0", features = ["no-entrypoint"] }
+# Interface-only sub-crate of `spl-token-2022`. We exclusively need its
+# program ID, `Mint::unpack`, and `transfer_checked` instruction builder,
+# all of which live here without dragging in the processor (and the broken
+# `token_group/processor.rs` in `spl-token-2022 v10.0.0`), confidential
+# transfer, or ZK proof code. Drops dozens of transitive deps too.
+spl-token-2022-interface = "2.1"
 
 # Telemetry
 tracing = "0.1"

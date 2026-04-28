@@ -85,13 +85,13 @@ pub async fn fetch_mint<R: RpcClientLike>(
             decimals: mint.decimals,
             token_program: spl_token::id(),
         })
-    } else if account.owner == spl_token_2022::id() {
-        let mint = spl_token_2022::state::Mint::unpack(&account.data).map_err(|e| {
+    } else if account.owner == spl_token_2022_interface::id() {
+        let mint = spl_token_2022_interface::state::Mint::unpack(&account.data).map_err(|e| {
             ClientError::Signing(format!("failed to unpack mint {mint_pubkey}: {e}"))
         })?;
         Ok(Mint::Token2022 {
             decimals: mint.decimals,
-            token_program: spl_token_2022::id(),
+            token_program: spl_token_2022_interface::id(),
         })
     } else {
         Err(ClientError::Signing(format!(
@@ -268,7 +268,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
         Mint::Token2022 {
             decimals,
             token_program,
-        } => spl_token_2022::instruction::transfer_checked(
+        } => spl_token_2022_interface::instruction::transfer_checked(
             &token_program,
             &source_ata,
             asset.pubkey(),

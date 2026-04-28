@@ -56,7 +56,7 @@ use compact_str::CompactString;
 ///
 /// The value MUST be less than or equal to the authorised maximum from the
 /// buyer's signed payload; otherwise the facilitator returns
-/// [`ErrorReason::SettlementExceedsAmount`](r402_core::error_reason::ErrorReason::SettlementExceedsAmount).
+/// [`ErrorReason::InvalidUptoEvmPayloadSettlementExceedsAmount`](r402_core::error_reason::ErrorReason::InvalidUptoEvmPayloadSettlementExceedsAmount).
 ///
 /// [`Response::extensions_mut`]: axum_core::response::Response::extensions_mut
 #[derive(Debug, Clone, PartialEq, Eq)]

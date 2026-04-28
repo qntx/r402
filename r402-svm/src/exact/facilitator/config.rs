@@ -45,11 +45,6 @@ pub struct SolanaExactFacilitatorConfig {
     /// Blocked program IDs (always rejected, takes precedence over allowed).
     #[serde(default)]
     pub blocked_program_ids: Vec<Address>,
-
-    /// SECURITY: Require fee payer is NOT present in any instruction's accounts.
-    /// Default: true - strongly recommended to keep this enabled
-    #[serde(default = "default_require_fee_payer_not_in_instructions")]
-    pub require_fee_payer_not_in_instructions: bool,
 }
 
 const fn default_allow_additional_instructions() -> bool {
@@ -68,10 +63,6 @@ fn default_allowed_program_ids() -> Vec<Address> {
     ]
 }
 
-const fn default_require_fee_payer_not_in_instructions() -> bool {
-    true
-}
-
 impl Default for SolanaExactFacilitatorConfig {
     fn default() -> Self {
         Self {
@@ -79,7 +70,6 @@ impl Default for SolanaExactFacilitatorConfig {
             max_instruction_count: default_max_instruction_count(),
             allowed_program_ids: default_allowed_program_ids(),
             blocked_program_ids: Vec::new(),
-            require_fee_payer_not_in_instructions: default_require_fee_payer_not_in_instructions(),
         }
     }
 }

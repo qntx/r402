@@ -58,9 +58,45 @@ pub enum PaygateError {
     /// Payment verification failed.
     #[error(transparent)]
     Verification(#[from] VerificationError),
-    /// On-chain settlement failed.
-    #[error("Settlement failed: {0}")]
-    Settlement(String),
+    /// Facilitator returned a structured `SettleResponse::Failure`.
+    ///
+    /// The failure body is preserved end-to-end so the paygate can emit it
+    /// via the `Payment-Response` HTTP header per x402 v2 §HTTP transport,
+    /// giving browser clients access to the machine-readable error reason.
+    #[error("settlement failed: {}", settlement_failure_summary(.0))]
+    Settlement(Box<wire::SettleResponse>),
+    /// Internal error before a structured settlement response could be
+    /// obtained (timeout, panic in spawned task, malformed override, etc.).
+    /// Renders as a 402 with no `Payment-Response` header.
+    #[error("settlement aborted: {0}")]
+    SettlementAborted(String),
+}
+
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "const fn would prevent matching on `Box` indirection"
+)]
+fn settlement_failure_summary(resp: &wire::SettleResponse) -> String {
+    match resp {
+        wire::SettleResponse::Failure {
+            reason,
+            message,
+            network,
+            ..
+        } => format!(
+            "{} ({}){}",
+            reason,
+            network,
+            message
+                .as_ref()
+                .map(|m| format!(": {m}"))
+                .unwrap_or_default(),
+        ),
+        wire::SettleResponse::Success { .. } => "success returned via error path".to_owned(),
+        // wire::SettleResponse is `#[non_exhaustive]`; future variants
+        // surface as a generic placeholder so the formatter remains total.
+        _ => "unknown settlement variant".to_owned(),
+    }
 }
 
 type PaymentPayload = wire::PaymentPayload<wire::PaymentRequirements, serde_json::Value>;
@@ -331,10 +367,34 @@ impl<TFacilitator> Paygate<TFacilitator> {
                 super::cors::ensure_expose_headers(response.headers_mut());
                 response
             }
-            PaygateError::Settlement(ref detail) => {
+            PaygateError::Settlement(failure) => {
                 #[cfg(feature = "telemetry")]
-                tracing::error!(details = %detail, "Settlement failed");
-                let body = json!({ "error": "Settlement failed", "details": detail }).to_string();
+                tracing::error!(failure = ?failure, "Settlement failed");
+                let body_bytes = serde_json::to_vec(&*failure).expect("serialization failed");
+                let header_value = failure
+                    .encode_base64_any()
+                    .and_then(|b64| HeaderValue::from_bytes(b64.as_ref()).ok());
+
+                let mut builder = Response::builder()
+                    .status(StatusCode::PAYMENT_REQUIRED)
+                    .header("Content-Type", "application/json");
+                if let Some(header_value) = header_value {
+                    builder = builder.header("Payment-Response", header_value);
+                }
+                let mut response = builder
+                    .body(Body::from(body_bytes))
+                    .expect("failed to construct response");
+                super::cors::ensure_expose_headers(response.headers_mut());
+                response
+            }
+            PaygateError::SettlementAborted(ref detail) => {
+                #[cfg(feature = "telemetry")]
+                tracing::error!(details = %detail, "Settlement aborted");
+                let body = json!({
+                    "error": "settlement aborted",
+                    "details": detail,
+                })
+                .to_string();
 
                 let mut response = Response::builder()
                     .status(StatusCode::PAYMENT_REQUIRED)
@@ -524,7 +584,7 @@ where
 
         let settlement = settle_handle
             .await
-            .map_err(|e| PaygateError::Settlement(format!("settle task panicked: {e}")))??;
+            .map_err(|e| PaygateError::SettlementAborted(format!("settle task panicked: {e}")))??;
         let header_value = settlement_to_header(&settlement)?;
 
         let mut res = response;
@@ -637,20 +697,16 @@ impl VerifiedPayment {
             self.settle_request
                 .set_settlement_amount(amount)
                 .map_err(|e| {
-                    PaygateError::Settlement(format!("upto amount override failed: {e}"))
+                    PaygateError::SettlementAborted(format!("upto amount override failed: {e}"))
                 })?;
         }
         let settlement = facilitator
             .settle(self.settle_request)
             .await
-            .map_err(|e| PaygateError::Settlement(format!("{e}")))?;
+            .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
 
-        if let wire::SettleResponse::Failure {
-            reason, message, ..
-        } = &settlement
-        {
-            let detail = message.as_deref().unwrap_or(reason.as_str());
-            return Err(PaygateError::Settlement(detail.to_owned()));
+        if matches!(settlement, wire::SettleResponse::Failure { .. }) {
+            return Err(PaygateError::Settlement(Box::new(settlement)));
         }
 
         Ok(settlement)
@@ -672,10 +728,11 @@ impl VerifiedPayment {
 pub fn settlement_to_header(
     settlement: &wire::SettleResponse,
 ) -> Result<HeaderValue, PaygateError> {
-    let encoded = settlement
-        .encode_base64()
-        .ok_or_else(|| PaygateError::Settlement("cannot encode error settlement".to_owned()))?;
-    HeaderValue::from_bytes(encoded.as_ref()).map_err(|e| PaygateError::Settlement(e.to_string()))
+    let encoded = settlement.encode_base64().ok_or_else(|| {
+        PaygateError::SettlementAborted("cannot encode error settlement".to_owned())
+    })?;
+    HeaderValue::from_bytes(encoded.as_ref())
+        .map_err(|e| PaygateError::SettlementAborted(e.to_string()))
 }
 
 /// Calls the inner service with optional telemetry instrumentation.

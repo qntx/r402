@@ -106,9 +106,9 @@ pub enum VerificationError {
     /// Resource server requested a settlement amount exceeding the signed
     /// maximum authorisation (upto scheme).
     ///
-    /// Maps to `ErrorReason::SettlementExceedsAmount` on the wire, which
-    /// serialises as `invalid_upto_evm_payload_settlement_exceeds_amount`
-    /// per x402 v2 spec.
+    /// Maps to `ErrorReason::InvalidUptoEvmPayloadSettlementExceedsAmount`
+    /// on the wire, which serialises as
+    /// `invalid_upto_evm_payload_settlement_exceeds_amount` per x402 v2 spec.
     #[error("settlement amount {requested} exceeds authorised maximum {authorised}")]
     SettlementAmountExceedsPermitted {
         /// Amount the resource server asked to settle.
@@ -159,12 +159,13 @@ impl AsPaymentProblem for VerificationError {
         // codes (e.g. `invalid_exact_evm_payload_signature`) at their own
         // `AsPaymentProblem` impls.
         let reason = match self {
-            Self::InvalidFormat(_) | Self::InvalidSignature(_) => ErrorReason::InvalidPayload,
+            Self::InvalidFormat(_) | Self::InvalidSignature(_) | Self::Early | Self::Expired => {
+                ErrorReason::InvalidPayload
+            }
             Self::InvalidPaymentAmount
             | Self::RecipientMismatch
             | Self::AssetMismatch
             | Self::AcceptedRequirementsMismatch => ErrorReason::InvalidPaymentRequirements,
-            Self::Early | Self::Expired => ErrorReason::InvalidPayload,
             Self::ChainIdMismatch | Self::UnsupportedChain => ErrorReason::InvalidNetwork,
             Self::InsufficientFunds => ErrorReason::InsufficientFunds,
             Self::Permit2AllowanceRequired => ErrorReason::Permit2AllowanceRequired,

@@ -34,6 +34,15 @@
 #[cfg(not(any(feature = "client", feature = "server", feature = "facilitator")))]
 use compact_str as _;
 
+/// Default clock-skew tolerance (seconds) applied to EIP-712 time-window checks.
+///
+/// Aligned with the Go reference SDK's
+/// `DefaultPermit2DeadlineBuffer` (one EVM block ≈ 6 s) so that the same
+/// signed payload is accepted by either implementation. A larger value is
+/// more lenient toward clock drift; a value of `0` enforces exact-time
+/// boundaries (useful for deterministic tests).
+pub const EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS: u64 = 6;
+
 pub mod chain;
 pub mod exact;
 pub mod upto;

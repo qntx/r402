@@ -11,7 +11,7 @@ use super::{Extensions, ResourceInfo, Version2};
 /// plus the scheme-specific `payload`, an optional resource descriptor,
 /// and an optional `extensions` map.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PaymentPayload<TAccepted, TPayload> {
     /// The terms the buyer accepted (a full [`super::PaymentRequirements`] form).
     pub accepted: TAccepted,

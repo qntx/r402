@@ -32,7 +32,11 @@ use crate::exact::facilitator::Eip155ExactError;
 use crate::upto::{Eip155Upto, UptoScheme, types};
 
 /// Default clock skew tolerance (seconds) for time-window checks.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = 30;
+///
+/// Aliases [`crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS`] (6 s) so the
+/// upto and exact facilitators share a single source of truth aligned with
+/// Go's `Permit2DeadlineBuffer`.
+const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
 
 /// Facilitator for the EIP-155 upto scheme (Permit2 only).
 ///

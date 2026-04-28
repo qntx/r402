@@ -15,7 +15,7 @@ use super::{Extensions, PaymentRequirements, ResourceInfo, Version2};
 /// - the list of [`PaymentRequirements`] the seller will accept, and
 /// - an optional `extensions` block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PaymentRequired {
     /// Protocol version (always `2`).
     pub x402_version: Version2,

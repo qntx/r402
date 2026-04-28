@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The field names use `camelCase` to align with the wire format.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResourceInfo {
     /// Canonical URL of the resource.
     pub url: CompactString,
@@ -80,5 +80,12 @@ mod tests {
         assert_eq!(decoded.url, "https://x.test");
         assert!(decoded.description.is_none());
         assert!(decoded.mime_type.is_none());
+    }
+
+    /// F-001 regression: unknown top-level field is rejected.
+    #[test]
+    fn rejects_unknown_field() {
+        let json = serde_json::json!({ "url": "https://x.test", "unknown": 1 });
+        assert!(serde_json::from_value::<ResourceInfo>(json).is_err());
     }
 }

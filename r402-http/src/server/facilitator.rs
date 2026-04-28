@@ -146,9 +146,11 @@ pub enum FacilitatorClientError {
     JsonDeserialization {
         /// Human-readable context.
         context: &'static str,
-        /// The underlying reqwest error.
+        /// The underlying serde error.
         #[source]
-        source: reqwest::Error,
+        source: serde_json::Error,
+        /// The raw body that failed to parse, included for diagnostics.
+        body: String,
     },
     /// Unexpected HTTP status code.
     #[error("Unexpected HTTP status {status}: {context}: {body}")]
@@ -174,6 +176,12 @@ pub enum FacilitatorClientError {
 impl FacilitatorClient {
     /// Default TTL for caching the supported endpoint response (10 minutes).
     pub const DEFAULT_SUPPORTED_CACHE_TTL: Duration = Duration::from_mins(10);
+
+    /// Default per-request timeout. Aligned with the Go reference SDK
+    /// (`http.DefaultClient` plus a 30 s wrapper) so a hung remote
+    /// facilitator does not block payment flows indefinitely. Override via
+    /// [`Self::with_timeout`] for stricter SLOs or faster fail-over.
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
     /// Returns the base URL used by this client.
     #[must_use]
@@ -225,7 +233,13 @@ impl FacilitatorClient {
     ///
     /// Returns [`FacilitatorClientError`] if URL construction fails.
     pub fn try_new(base_url: Url) -> Result<Self, FacilitatorClientError> {
-        let client = Client::new();
+        let client = Client::builder()
+            .timeout(Self::DEFAULT_TIMEOUT)
+            .build()
+            .map_err(|e| FacilitatorClientError::Http {
+                context: "failed to build reqwest client with default timeout",
+                source: e,
+            })?;
         let verify_url =
             base_url
                 .join("./verify")
@@ -254,7 +268,7 @@ impl FacilitatorClient {
             settle_url,
             supported_url,
             headers: HeaderMap::new(),
-            timeout: None,
+            timeout: Some(Self::DEFAULT_TIMEOUT),
             supported_cache: SupportedCache::new(Self::DEFAULT_SUPPORTED_CACHE_TTL),
         })
     }
@@ -321,7 +335,40 @@ impl FacilitatorClient {
         instrument(name = "x402.facilitator_client.supported", skip_all, err)
     )]
     async fn supported_inner(&self) -> Result<SupportedResponse, FacilitatorClientError> {
-        self.get_json(&self.supported_url, "GET /supported").await
+        // F-047: retry rate-limited (`429 Too Many Requests`) and transient
+        // 5xx responses with exponential backoff. The supported endpoint is
+        // idempotent and cached, so retrying is safe and limits flapping
+        // when a facilitator is briefly overloaded.
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt: u32 = 0;
+        loop {
+            let result = self.get_json(&self.supported_url, "GET /supported").await;
+            match result {
+                Ok(resp) => return Ok(resp),
+                Err(err) => {
+                    let retriable = matches!(
+                        &err,
+                        FacilitatorClientError::HttpStatus { status, .. }
+                            if *status == StatusCode::TOO_MANY_REQUESTS
+                                || status.is_server_error()
+                    );
+                    attempt += 1;
+                    if !retriable || attempt >= MAX_ATTEMPTS {
+                        return Err(err);
+                    }
+                    let backoff_ms = 200_u64 << attempt;
+                    let backoff = Duration::from_millis(backoff_ms);
+                    #[cfg(feature = "telemetry")]
+                    tracing::warn!(
+                        attempt,
+                        backoff_ms,
+                        error = %err,
+                        "x402.facilitator_client.supported_retry",
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 
     /// Sends a `GET /supported` request to the facilitator.
@@ -405,22 +452,35 @@ impl FacilitatorClient {
             .await
             .map_err(|e| FacilitatorClientError::Http { context, source: e })?;
 
-        let result = if http_response.status() == StatusCode::OK {
-            http_response
-                .json::<R>()
-                .await
-                .map_err(|e| FacilitatorClientError::JsonDeserialization { context, source: e })
-        } else {
-            let status = http_response.status();
-            let body = http_response
-                .text()
-                .await
-                .map_err(|e| FacilitatorClientError::ResponseBodyRead { context, source: e })?;
-            Err(FacilitatorClientError::HttpStatus {
-                context,
-                status,
-                body,
-            })
+        // F-044: facilitators MAY return structured `VerifyResponse::Invalid`
+        // or `SettleResponse::Failure` bodies on non-2xx HTTP statuses
+        // (e.g. 402, 412 per x402 v2 §HTTP transport error mapping). We
+        // therefore always attempt to parse the body as the expected `R`,
+        // falling back to `HttpStatus` only when the body cannot be parsed.
+        let status = http_response.status();
+        let body_bytes = http_response
+            .bytes()
+            .await
+            .map_err(|e| FacilitatorClientError::ResponseBodyRead { context, source: e })?;
+
+        let result = match serde_json::from_slice::<R>(&body_bytes) {
+            Ok(parsed) => Ok(parsed),
+            Err(parse_err) => {
+                let body = String::from_utf8_lossy(&body_bytes).into_owned();
+                if status.is_success() {
+                    Err(FacilitatorClientError::JsonDeserialization {
+                        context,
+                        source: parse_err,
+                        body,
+                    })
+                } else {
+                    Err(FacilitatorClientError::HttpStatus {
+                        context,
+                        status,
+                        body,
+                    })
+                }
+            }
         };
 
         record_result_on_span(&result);

@@ -15,7 +15,7 @@ use crate::chain::ChainId;
 /// The wire-level defaults are all strings plus an opaque JSON value for
 /// `extra`, mirroring the protocol exactly.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PaymentRequirements<
     TScheme = CompactString,
     TAmount = CompactString,
@@ -71,5 +71,26 @@ impl PaymentRequirements {
             asset,
             extra,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// F-001 regression: typo in a top-level field is rejected at parse time
+    /// rather than silently ignored, leading to clearer diagnostics.
+    #[test]
+    fn rejects_unknown_top_level_field() {
+        let json = serde_json::json!({
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "amount": "1",
+            "payTo": "0x0",
+            "maxTimeoutSeconds": 60,
+            "asset": "0x0",
+            "unknownField": 1
+        });
+        assert!(serde_json::from_value::<PaymentRequirements>(json).is_err());
     }
 }

@@ -36,6 +36,17 @@ use base64 as _;
 #[cfg(not(feature = "facilitator"))]
 use futures_util as _;
 
+/// Recommended hard cap for `max_compute_unit_price` (micro-lamports).
+///
+/// Aligned with the Go reference SDK
+/// (`mechanisms/svm/exact/facilitator/scheme.go: maxComputeUnitPriceMicroLamports`)
+/// so that any client transaction passing Go's verifier passes r402's, and
+/// vice versa. A value of 5 000 000 micro-lamports per CU corresponds to
+/// roughly 0.005 SOL per million CU, well above realistic priority-fee
+/// surge prices on Solana mainnet, while bounding the worst-case fee a
+/// fee-paying facilitator can be tricked into paying.
+pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
+
 pub mod chain;
 pub mod exact;
 

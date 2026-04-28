@@ -93,6 +93,12 @@ impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
 }
 
 /// Shared EIP-712 signing parameters for ERC-3009 authorization.
+///
+/// `extra` is mandatory: ERC-3009 requires the EIP-712 domain to declare the
+/// token's `name` and `version` (e.g. `"USDC"` / `"2"`). If either is empty
+/// or wrong, the facilitator will reconstruct a different EIP-712 hash and
+/// reject the signature with `invalid_exact_evm_payload_signature`. The
+/// values come from `paymentRequirements.extra` advertised by the seller.
 #[derive(Debug, Clone)]
 pub struct Eip3009SigningParams {
     /// The EIP-155 chain ID (numeric)
@@ -105,8 +111,10 @@ pub struct Eip3009SigningParams {
     pub amount: U256,
     /// Maximum timeout in seconds for the authorization validity window
     pub max_timeout_seconds: u64,
-    /// Optional EIP-712 domain name and version override
-    pub extra: Option<PaymentRequirementsExtra>,
+    /// EIP-712 domain `name` and `version` for the token. Required by
+    /// ERC-3009 and must match what the token contract declares; otherwise
+    /// the EIP-712 hash on either side disagrees and the signature fails.
+    pub extra: PaymentRequirementsExtra,
 }
 
 /// Signs an ERC-3009 `TransferWithAuthorization` using EIP-712.
@@ -120,10 +128,18 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
     signer: &S,
     params: &Eip3009SigningParams,
 ) -> Result<Eip3009Payload, ClientError> {
-    let (name, version) = params.extra.as_ref().map_or_else(
-        || (String::new(), String::new()),
-        |extra| (extra.name.clone(), extra.version.clone()),
-    );
+    if params.extra.name.is_empty() {
+        return Err(ClientError::Signing(
+            "ERC-3009 EIP-712 domain `name` is required".into(),
+        ));
+    }
+    if params.extra.version.is_empty() {
+        return Err(ClientError::Signing(
+            "ERC-3009 EIP-712 domain `version` is required".into(),
+        ));
+    }
+    let name = params.extra.name.clone();
+    let version = params.extra.version.clone();
 
     let domain = eip712_domain! {
         name: name,
@@ -555,13 +571,20 @@ where
                 let permit2_payload = sign_permit2_authorization(&self.signer, &params).await?;
                 ExactPayload::Permit2(permit2_payload)
             } else {
+                let extra = self.requirements.extra.clone().ok_or_else(|| {
+                    ClientError::Signing(
+                        "ERC-3009 payment requires `paymentRequirements.extra` with the \
+                         token's EIP-712 domain `name` and `version`"
+                            .into(),
+                    )
+                })?;
                 let params = Eip3009SigningParams {
                     chain_id: self.chain_reference.inner(),
                     asset_address: self.requirements.asset.0,
                     pay_to: self.requirements.pay_to.into(),
                     amount: self.requirements.amount.into(),
                     max_timeout_seconds: self.requirements.max_timeout_seconds,
-                    extra: self.requirements.extra.clone(),
+                    extra,
                 };
                 let eip3009_payload = sign_erc3009_authorization(&self.signer, &params).await?;
                 ExactPayload::Eip3009(eip3009_payload)

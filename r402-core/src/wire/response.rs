@@ -99,7 +99,7 @@ impl VerifyResponse {
 
 /// Flat wire representation of [`VerifyResponse`].
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct VerifyResponseWire {
     is_valid: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -205,12 +205,29 @@ impl SettleResponse {
     /// `Payment-Response` HTTP header.
     ///
     /// Returns `None` for `Failure` variants to avoid accidentally
-    /// transmitting a failed settlement as if it were successful.
+    /// transmitting a failed settlement as if it were successful. Call
+    /// [`Self::encode_base64_any`] when the failure body is needed on the
+    /// wire (for example, when a paygate must inform a browser client of a
+    /// failed settlement via the `Payment-Response` header).
     #[must_use]
     pub fn encode_base64(&self) -> Option<Base64Bytes> {
         if !self.is_success() {
             return None;
         }
+        let json = serde_json::to_vec(self).ok()?;
+        Some(Base64Bytes::encode(json))
+    }
+
+    /// Encodes any [`SettleResponse`] (success or failure) as base64 bytes
+    /// for the `Payment-Response` HTTP header.
+    ///
+    /// Use this when surfacing failed settlements is required by the spec,
+    /// e.g. paygate error paths that still want to communicate the
+    /// machine-readable error reason and chain to a browser client.
+    /// Prefer [`Self::encode_base64`] when you only want to forward
+    /// successful settlements.
+    #[must_use]
+    pub fn encode_base64_any(&self) -> Option<Base64Bytes> {
         let json = serde_json::to_vec(self).ok()?;
         Some(Base64Bytes::encode(json))
     }
@@ -234,7 +251,7 @@ impl SettleResponse {
 
 /// Flat wire representation of [`SettleResponse`].
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SettleResponseWire {
     success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

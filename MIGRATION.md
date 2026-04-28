@@ -127,6 +127,25 @@ Verification errors that surface a `permit2_allowance_required` reason now produ
 
 Raised to **Rust 1.91** (required for `Duration::from_mins` and several `const` slice methods in Solana / HTTP modules). Update your `rust-toolchain.toml` if you pin an older version.
 
-## 11. Upcoming
+## 11. Upto scheme (EVM)
 
-`UptoScheme` handlers for EVM / SVM are deferred to `0.15.0`. The trait markers (`UptoScheme`, `SchemeId::SLUG`) already exist, but no concrete chain handler is registered. Code that only consumes `ExactScheme` is unaffected.
+The EVM `UptoScheme` is **fully implemented** in 0.14.0-beta.1, including
+the `eip2612GasSponsoring` extension that lets buyers pay without a
+pre-existing Permit2 approval. Entry points:
+
+- `r402::upto::Eip155Upto` — scheme handle.
+- `r402::upto::Eip155UptoClient` — client-side signer for the
+  `PermitWitnessTransferFrom` typed-data + optional EIP-2612 permit.
+- `r402::upto::Eip155UptoFacilitator` — facilitator-side verify and
+  settle wired through the canonical `x402UptoPermit2Proxy`.
+
+See the README's "Usage-Based Pricing" section and
+`audit/04-scheme-upto-evm.md` for the full lifecycle.
+
+**SVM `UptoScheme`** is intentionally unimplemented — track via the
+upstream x402 spec roadmap.
+
+**ERC-20 Approval Gas Sponsoring** (extension
+`erc20ApprovalGasSponsoring`) remains the only spec-defined gas
+sponsoring path that r402 does not yet support; track via the audit
+finding `F-036` and the action plan in `audit/99-action-plan.md`.
