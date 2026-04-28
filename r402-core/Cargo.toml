@@ -17,13 +17,17 @@ default = []
 
 telemetry = ["dep:tracing", "dep:tracing-core"]
 cache = ["dep:moka"]
+# Stable metric-name catalogue for the `metrics` facade. Disabled by
+# default; enable when downstream code installs a recorder so the
+# constants and instrumentation hooks become available.
+metrics = ["dep:metrics"]
 
 ext-bazaar = []
 ext-payment-id = ["cache"]
 
 all-extensions = ["ext-bazaar", "ext-payment-id"]
 
-full = ["telemetry", "cache", "all-extensions"]
+full = ["telemetry", "cache", "metrics", "all-extensions"]
 
 [dependencies]
 base64 = { workspace = true }
@@ -34,6 +38,7 @@ serde_json = { workspace = true }
 serde_with = { workspace = true }
 thiserror = { workspace = true }
 
+metrics = { workspace = true, optional = true }
 moka = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }

@@ -15,7 +15,7 @@ use r402_core::scheme::SchemeId;
 use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
-use r402_core::wire::{self, ResourceInfo};
+use r402_core::wire::ResourceInfo;
 use solana_client::rpc_config::RpcSimulateTransactionConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_message::v0::Message as MessageV0;
@@ -417,15 +417,13 @@ impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSi
             )
             .await?;
 
-            let payload = types::v2::PaymentPayload {
-                x402_version: wire::V2,
-                accepted: self.requirements.clone(),
-                resource: Some(self.resource.clone()),
-                payload: ExactSolanaPayload {
+            let payload = types::v2::PaymentPayload::new(
+                self.requirements.clone(),
+                ExactSolanaPayload {
                     transaction: tx_b64,
                 },
-                extensions: wire::Extensions::new(),
-            };
+            )
+            .with_resource(self.resource.clone());
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
 

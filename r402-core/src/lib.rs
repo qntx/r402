@@ -35,6 +35,10 @@ pub mod wire;
 #[cfg_attr(docsrs, doc(cfg(feature = "cache")))]
 pub mod cache;
 
+#[cfg(feature = "metrics")]
+#[cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
+pub mod metrics;
+
 pub use error::{ClientError, FacilitatorError, SettlementError, VerificationError};
 pub use error_reason::{AsPaymentProblem, ErrorReason, PaymentProblem};
 pub use facilitator::{BoxFuture, DynFacilitator, Facilitator};

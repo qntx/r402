@@ -16,6 +16,7 @@ use crate::chain::ChainId;
 /// `extra`, mirroring the protocol exactly.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct PaymentRequirements<
     TScheme = CompactString,
     TAmount = CompactString,
@@ -37,6 +38,46 @@ pub struct PaymentRequirements<
     /// Scheme-specific auxiliary data.
     #[serde(default = "Option::default", skip_serializing_if = "Option::is_none")]
     pub extra: Option<TExtra>,
+}
+
+impl<TScheme, TAmount, TAddress, TExtra> PaymentRequirements<TScheme, TAmount, TAddress, TExtra> {
+    /// Constructs the requirements from the six required wire fields.
+    /// Use [`Self::with_extra`] / [`Self::with_optional_extra`] to attach
+    /// the scheme-specific blob.
+    #[must_use]
+    pub const fn new(
+        scheme: TScheme,
+        network: ChainId,
+        amount: TAmount,
+        pay_to: TAddress,
+        asset: TAddress,
+        max_timeout_seconds: u64,
+    ) -> Self {
+        Self {
+            scheme,
+            network,
+            amount,
+            pay_to,
+            asset,
+            max_timeout_seconds,
+            extra: None,
+        }
+    }
+
+    /// Builder: attaches the scheme-specific `extra` blob.
+    #[must_use]
+    pub fn with_extra(mut self, extra: TExtra) -> Self {
+        self.extra = Some(extra);
+        self
+    }
+
+    /// Builder: passes through an optional `extra` blob (useful when the
+    /// value is produced via `Option::map` upstream).
+    #[must_use]
+    pub fn with_optional_extra(mut self, extra: Option<TExtra>) -> Self {
+        self.extra = extra;
+        self
+    }
 }
 
 impl PaymentRequirements {

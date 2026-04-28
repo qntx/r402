@@ -3315,6 +3315,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "metrics"
+version = "0.24.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d5312e9ba3771cfa961b585728215e3d972c950a3eed9252aa093d6301277e8"
+dependencies = [
+ "ahash 0.8.12",
+ "portable-atomic",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4028,6 +4038,7 @@ version = "0.14.0-beta.1"
 dependencies = [
  "base64 0.22.1",
  "compact_str",
+ "metrics",
  "moka",
  "rust_decimal",
  "serde",
@@ -4077,6 +4088,7 @@ dependencies = [
  "axum-core",
  "compact_str",
  "http 1.4.0",
+ "metrics",
  "r402-core",
  "reqwest 0.13.3",
  "reqwest-middleware 0.5.1",

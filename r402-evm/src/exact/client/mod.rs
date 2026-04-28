@@ -41,8 +41,8 @@ use r402_core::scheme::SchemeId;
 use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
+use r402_core::wire::ResourceInfo;
 use r402_core::wire::UnixTimestamp;
-use r402_core::wire::{self, ResourceInfo};
 use rand::RngExt;
 use rand::rng;
 
@@ -590,13 +590,8 @@ where
                 ExactPayload::Eip3009(eip3009_payload)
             };
 
-            let payload = types::v2::PaymentPayload {
-                x402_version: wire::V2,
-                accepted: self.requirements.clone(),
-                resource: self.resource_info.clone(),
-                payload: exact_payload,
-                extensions: wire::Extensions::new(),
-            };
+            let payload = types::v2::PaymentPayload::new(self.requirements.clone(), exact_payload)
+                .with_optional_resource(self.resource_info.clone());
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
 

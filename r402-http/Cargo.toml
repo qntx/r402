@@ -35,7 +35,12 @@ server = [
     "dep:url",
 ]
 telemetry = ["dep:r402-core", "dep:tracing", "r402-core/telemetry"]
-full = ["client", "server", "telemetry"]
+# Backend-agnostic metrics emission via the `metrics` facade. See the
+# `r402_core::metrics` module for the catalogue of metric names. Operators
+# install a recorder (e.g. `metrics-exporter-prometheus`) at startup; with
+# no recorder the macros expand to no-ops.
+metrics = ["dep:r402-core", "dep:metrics", "r402-core/metrics"]
+full = ["client", "server", "telemetry", "metrics"]
 
 [dependencies]
 compact_str = { workspace = true }
@@ -49,7 +54,8 @@ http = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
+metrics = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["macros", "time"], optional = true }
 tower = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 url = { workspace = true, optional = true }

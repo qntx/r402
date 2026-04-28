@@ -17,6 +17,8 @@
 //!   streaming responses where the client should receive data immediately.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use axum_core::body::Body;
 use axum_core::extract::Request;
@@ -26,6 +28,7 @@ use r402_core::facilitator::Facilitator;
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
 use serde_json::json;
+use tokio::sync::Notify;
 use tower::Service;
 #[cfg(feature = "telemetry")]
 use tracing::{Instrument, instrument};
@@ -189,6 +192,7 @@ pub struct PaygateBuilder<TFacilitator> {
     accepts: Vec<wire::PriceTag>,
     resource: Option<wire::ResourceInfo>,
     hooks: Option<Arc<dyn DynPaygateHooks>>,
+    settlement_tracker: Option<BackgroundSettlementTracker>,
 }
 
 impl<TFacilitator> PaygateBuilder<TFacilitator> {
@@ -237,6 +241,15 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         self
     }
 
+    /// Attaches a [`BackgroundSettlementTracker`] so background settlement
+    /// tasks register with it. Used to await in-flight settlements during
+    /// graceful shutdown via [`Paygate::wait_for_pending_settlements`].
+    #[must_use]
+    pub fn with_settlement_tracker(mut self, tracker: BackgroundSettlementTracker) -> Self {
+        self.settlement_tracker = Some(tracker);
+        self
+    }
+
     /// Consumes the builder and produces a configured [`Paygate`].
     ///
     /// Uses empty resource info if none was provided.
@@ -248,6 +261,7 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
                 .resource
                 .unwrap_or_else(|| wire::ResourceInfo::new("").with_mime_type("application/json")),
             hooks: self.hooks,
+            settlement_tracker: self.settlement_tracker,
         }
     }
 }
@@ -271,6 +285,14 @@ pub struct Paygate<TFacilitator> {
     pub(crate) accepts: Arc<[wire::PriceTag]>,
     pub(crate) resource: wire::ResourceInfo,
     pub(crate) hooks: Option<Arc<dyn DynPaygateHooks>>,
+    /// Optional tracker for background settlement tasks.
+    ///
+    /// When [`PaygateBuilder::with_settlement_tracker`] is set, every
+    /// `handle_request_background` call increments the in-flight counter
+    /// before spawning and decrements it once the supervisor records the
+    /// outcome. Operators call [`Self::wait_for_pending_settlements`]
+    /// during shutdown to await the drain (with a timeout safeguard).
+    pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
 }
 
 impl<TFacilitator> Paygate<TFacilitator> {
@@ -281,6 +303,7 @@ impl<TFacilitator> Paygate<TFacilitator> {
             accepts: Vec::new(),
             resource: None,
             hooks: None,
+            settlement_tracker: None,
         }
     }
 
@@ -292,6 +315,28 @@ impl<TFacilitator> Paygate<TFacilitator> {
     /// Returns a reference to the accepted price tags.
     pub fn accepts(&self) -> &[wire::PriceTag] {
         &self.accepts
+    }
+
+    /// Returns the in-flight settlement tracker, if one was attached at
+    /// construction time.
+    ///
+    /// The handle is shareable; clone it and pass to a shutdown task to
+    /// await the in-flight drain via
+    /// [`BackgroundSettlementTracker::wait_for_drain`]:
+    ///
+    /// ```ignore
+    /// if let Some(tracker) = paygate.settlement_tracker().cloned() {
+    ///     tokio::spawn(async move {
+    ///         match tracker.wait_for_drain(Duration::from_secs(30)).await {
+    ///             Ok(()) => tracing::info!("settle drain complete"),
+    ///             Err(remaining) => tracing::warn!(remaining, "drain timeout"),
+    ///         }
+    ///     });
+    /// }
+    /// ```
+    #[must_use]
+    pub const fn settlement_tracker(&self) -> Option<&BackgroundSettlementTracker> {
+        self.settlement_tracker.as_ref()
     }
 
     /// Returns a reference to the resource information.
@@ -330,17 +375,14 @@ impl<TFacilitator> Paygate<TFacilitator> {
                     // Fix-5: derive HTTP status from the inner ErrorReason when
                     // known — Permit2 allowance failures map to 412, others to 402.
                     let status = inferred_status(&ve);
-                    let payment_required = wire::PaymentRequired {
-                        error: Some(ve.to_string().into()),
-                        accepts: self
-                            .accepts
-                            .iter()
-                            .map(|pt| pt.requirements.clone())
-                            .collect(),
-                        x402_version: wire::V2,
-                        resource: self.resource.clone(),
-                        extensions: wire::Extensions::new(),
-                    };
+                    let payment_required = wire::PaymentRequired::new(self.resource.clone())
+                        .with_error(ve.to_string())
+                        .with_accepts(
+                            self.accepts
+                                .iter()
+                                .map(|pt| pt.requirements.clone())
+                                .collect(),
+                        );
                     (status, payment_required)
                 };
                 let body_bytes =
@@ -639,10 +681,20 @@ where
         // observable settlement outcomes in exchange.
         let facilitator = self.facilitator.clone();
         let settle_handle = tokio::spawn(async move { verified.settle(&facilitator).await });
+        // F-101/F-102: register with the optional tracker before spawning
+        // the supervisor so `wait_for_pending_settlements` observes the
+        // task even if the supervisor finishes within microseconds.
+        let tracker_guard = self
+            .settlement_tracker
+            .as_ref()
+            .map(BackgroundSettlementTracker::start);
         // Detached supervisor: we deliberately drop the JoinHandle. The
         // supervisor itself never panics and only logs, so leaking the
         // handle is the cheapest fire-and-forget pattern.
-        drop(tokio::spawn(supervise_background_settle(settle_handle)));
+        drop(tokio::spawn(supervise_background_settle(
+            settle_handle,
+            tracker_guard,
+        )));
 
         match call_inner(inner, req).await {
             Ok(r) => Ok(r.into_response()),
@@ -719,6 +771,115 @@ impl VerifiedPayment {
     }
 }
 
+/// Shared in-flight counter for background settlement tasks.
+///
+/// Created by the operator at startup, attached to a [`Paygate`] via
+/// [`PaygateBuilder::with_settlement_tracker`], and queried at shutdown
+/// via [`Paygate::wait_for_pending_settlements`]. The implementation is
+/// lock-free in the steady state: a single [`AtomicUsize`] for the
+/// counter and a [`tokio::sync::Notify`] for the drain wake-up.
+///
+/// Cloning the tracker is cheap and shares state, so it can be passed to
+/// multiple paygates serving the same shutdown channel (for example,
+/// when one process hosts several routes behind different price tags).
+#[derive(Clone, Debug)]
+pub struct BackgroundSettlementTracker {
+    inner: Arc<TrackerInner>,
+}
+
+#[derive(Debug)]
+struct TrackerInner {
+    in_flight: AtomicUsize,
+    drained: Notify,
+}
+
+impl Default for BackgroundSettlementTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BackgroundSettlementTracker {
+    /// Constructs a tracker with zero in-flight tasks.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(TrackerInner {
+                in_flight: AtomicUsize::new(0),
+                drained: Notify::new(),
+            }),
+        }
+    }
+
+    /// Returns the current approximate number of in-flight settlement
+    /// tasks. Useful for `/healthz` style readiness probes.
+    #[must_use]
+    pub fn in_flight(&self) -> usize {
+        self.inner.in_flight.load(Ordering::SeqCst)
+    }
+
+    /// Increments the in-flight counter and returns a guard that
+    /// decrements it on drop. Internal: the paygate's
+    /// `handle_request_background` is the only intended caller.
+    fn start(&self) -> SettlementInFlightGuard {
+        let _previous = self.inner.in_flight.fetch_add(1, Ordering::SeqCst);
+        SettlementInFlightGuard {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Awaits the in-flight count to reach zero, bounded by `timeout`.
+    /// Returns `Ok(())` once drained, or `Err(remaining)` after the
+    /// deadline with the count of still-running tasks.
+    ///
+    /// # Errors
+    ///
+    /// Returns the count of in-flight tasks when the timeout elapses
+    /// before the drain completes. Callers may then choose to abort the
+    /// runtime, log, or extend the deadline.
+    pub async fn wait_for_drain(&self, timeout: Duration) -> Result<(), usize> {
+        if self.in_flight() == 0 {
+            return Ok(());
+        }
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let notified = self.inner.drained.notified();
+            tokio::pin!(notified);
+            tokio::select! {
+                () = &mut notified => {}
+                () = tokio::time::sleep_until(deadline) => {
+                    let remaining = self.in_flight();
+                    return if remaining == 0 { Ok(()) } else { Err(remaining) };
+                }
+            }
+            if self.in_flight() == 0 {
+                return Ok(());
+            }
+        }
+    }
+}
+
+/// Drop-guard returned by [`BackgroundSettlementTracker::start`].
+///
+/// On drop, decrements the in-flight counter and notifies any awaiter
+/// blocked in [`BackgroundSettlementTracker::wait_for_drain`]. The guard
+/// is `Send + Sync` so it can be carried across `await` points by the
+/// background settlement supervisor.
+#[derive(Debug)]
+pub(crate) struct SettlementInFlightGuard {
+    inner: Arc<TrackerInner>,
+}
+
+impl Drop for SettlementInFlightGuard {
+    fn drop(&mut self) {
+        let previous = self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+        if previous == 1 {
+            // Last in-flight task drained — wake every waiting drainer.
+            self.inner.drained.notify_waiters();
+        }
+    }
+}
+
 /// Awaits the join handle of a background settlement task and surfaces the
 /// outcome via tracing.
 ///
@@ -736,6 +897,11 @@ impl VerifiedPayment {
 /// outcome (preventing a panic-on-drop scenario for the `JoinHandle`).
 async fn supervise_background_settle(
     handle: tokio::task::JoinHandle<Result<wire::SettleResponse, PaygateError>>,
+    // Held until the supervisor finishes; on drop it decrements the
+    // in-flight counter on the tracker (if any). We deliberately accept
+    // the guard by value so the awaiting `wait_for_pending_settlements`
+    // sees the task as in-flight until the supervisor logs its outcome.
+    _tracker: Option<SettlementInFlightGuard>,
 ) {
     let outcome = handle.await;
     log_background_settle_outcome(outcome);
@@ -752,11 +918,34 @@ fn log_background_settle_outcome(
         Ok(Ok(_settlement)) => {
             #[cfg(feature = "telemetry")]
             tracing::debug!("background settlement completed");
+            record_background_settle_metric("ok");
         }
-        Ok(Err(err)) => log_background_settle_error(&err),
-        Err(join_err) => log_background_settle_join_error(&join_err),
+        Ok(Err(err)) => {
+            log_background_settle_error(&err);
+            record_background_settle_metric("error");
+        }
+        Err(join_err) => {
+            let label = if join_err.is_panic() {
+                "panic"
+            } else {
+                "cancelled"
+            };
+            log_background_settle_join_error(&join_err);
+            record_background_settle_metric(label);
+        }
     }
 }
+
+#[cfg(feature = "metrics")]
+fn record_background_settle_metric(result: &'static str) {
+    ::metrics::counter!(
+        r402_core::metrics::PAYGATE_BACKGROUND_SETTLE_TOTAL,
+        "result" => result,
+    )
+    .increment(1);
+}
+#[cfg(not(feature = "metrics"))]
+fn record_background_settle_metric(_result: &'static str) {}
 
 #[cfg(feature = "telemetry")]
 fn log_background_settle_error(err: &PaygateError) {
@@ -860,4 +1049,64 @@ fn build_verify_request(
         .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
     Ok(wire::VerifyRequest::from(json))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn empty_tracker_drains_immediately() {
+        let tracker = BackgroundSettlementTracker::new();
+        assert_eq!(tracker.in_flight(), 0);
+        // No tasks in flight — drain returns Ok instantly even with a
+        // zero deadline because the early-exit short-circuits the loop.
+        tracker.wait_for_drain(Duration::ZERO).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn drain_waits_for_guard_drop() {
+        let tracker = BackgroundSettlementTracker::new();
+        let guard = tracker.start();
+        assert_eq!(tracker.in_flight(), 1);
+
+        // Drop the guard from another task after a short delay; the main
+        // task should observe the notify and return Ok.
+        let tracker_clone = tracker.clone();
+        let drop_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            drop(guard);
+            assert_eq!(tracker_clone.in_flight(), 0);
+        });
+
+        tracker
+            .wait_for_drain(Duration::from_secs(1))
+            .await
+            .expect("drain should complete after the guard drops");
+        drop_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn drain_times_out_when_guards_outlive_deadline() {
+        let tracker = BackgroundSettlementTracker::new();
+        let _guard = tracker.start();
+
+        let result = tracker.wait_for_drain(Duration::from_millis(20)).await;
+        assert_eq!(result, Err(1), "deadline elapses with the guard alive");
+    }
+
+    #[tokio::test]
+    async fn nested_guards_decrement_in_order() {
+        let tracker = BackgroundSettlementTracker::new();
+        let g1 = tracker.start();
+        let g2 = tracker.start();
+        let g3 = tracker.start();
+        assert_eq!(tracker.in_flight(), 3);
+        drop(g2);
+        assert_eq!(tracker.in_flight(), 2);
+        drop(g1);
+        assert_eq!(tracker.in_flight(), 1);
+        drop(g3);
+        assert_eq!(tracker.in_flight(), 0);
+    }
 }

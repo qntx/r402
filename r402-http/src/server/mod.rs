@@ -28,8 +28,8 @@ pub use cors::{X402_EXPOSED_HEADERS, ensure_expose_headers};
 pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 pub use layer::{SettlementMode, X402LayerBuilder, X402Middleware};
 pub use paygate::{
-    Paygate, PaygateBuilder, PaygateError, ResourceTemplate, VerificationError, VerifiedPayment,
-    settlement_to_header,
+    BackgroundSettlementTracker, Paygate, PaygateBuilder, PaygateError, ResourceTemplate,
+    VerificationError, VerifiedPayment, settlement_to_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use status::reason_to_status;

@@ -648,7 +648,6 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
 mod tests {
     use alloy_primitives::{Address, Bytes, U256};
     use r402_core::chain::ChainId;
-    use r402_core::wire;
 
     use super::*;
     use crate::chain::{ChecksummedAddress, TokenAmount};
@@ -693,24 +692,18 @@ mod tests {
             permit2_authorization: auth,
         };
 
-        let requirements = types::v2::PaymentRequirements {
-            scheme: UptoScheme,
+        let requirements = types::v2::PaymentRequirements::new(
+            UptoScheme,
             network,
-            amount: TokenAmount::from(permitted_amount),
+            TokenAmount::from(permitted_amount),
             pay_to,
             asset,
-            max_timeout_seconds: 300,
-            extra: Some(UptoPaymentRequirementsExtra::new(ChecksummedAddress::from(
-                facilitator_addr,
-            ))),
-        };
-        let pay_payload = types::v2::PaymentPayload {
-            x402_version: wire::V2,
-            accepted: requirements.clone(),
-            resource: None,
-            payload: payload_body,
-            extensions: wire::Extensions::new(),
-        };
+            300,
+        )
+        .with_extra(UptoPaymentRequirementsExtra::new(ChecksummedAddress::from(
+            facilitator_addr,
+        )));
+        let pay_payload = types::v2::PaymentPayload::new(requirements.clone(), payload_body);
         (pay_payload, requirements)
     }
 

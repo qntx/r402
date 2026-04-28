@@ -22,15 +22,14 @@ impl SolanaExact {
         asset: DeployedTokenAmount<u64, SolanaTokenDeployment>,
     ) -> wire::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements {
-            scheme: ExactScheme.to_string().into(),
-            pay_to: pay_to.into().to_string().into(),
-            asset: asset.token.address.to_string().into(),
-            network: chain_id,
-            amount: asset.amount.to_string().into(),
-            max_timeout_seconds: 300,
-            extra: None,
-        };
+        let requirements = wire::PaymentRequirements::new(
+            ExactScheme.to_string().into(),
+            chain_id,
+            asset.amount.to_string().into(),
+            pay_to.into().to_string().into(),
+            asset.token.address.to_string().into(),
+            300,
+        );
         wire::PriceTag {
             requirements,
             enricher: Some(Arc::new(solana_fee_payer_enricher_v2)),

@@ -89,6 +89,11 @@ spl-token-2022-interface = "2.1"
 # Telemetry
 tracing = "0.1"
 tracing-core = "0.1"
+# Metrics facade — backend-agnostic instrumentation (Prometheus, StatsD,
+# OpenTelemetry, ...). Crates pull this through a `metrics` feature flag
+# so the dep stays optional for downstream consumers that don't ship a
+# recorder.
+metrics = "0.24"
 
 [profile.release]
 codegen-units = 1

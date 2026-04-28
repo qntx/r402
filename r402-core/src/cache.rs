@@ -158,9 +158,27 @@ impl SettlementCache {
     /// Atomically reserves the key. Returns [`Duplicate::No`] when newly
     /// inserted (caller may proceed) or [`Duplicate::Yes`] when the key
     /// is already present (caller must abort with `DuplicateSettlement`).
+    ///
+    /// Increments the
+    /// [`r402_settlement_cache_reserve_total`](crate::metrics::SETTLEMENT_CACHE_RESERVE_TOTAL)
+    /// counter with `outcome=inserted|duplicate` when the `metrics`
+    /// feature is enabled.
     #[must_use = "callers MUST honour the Duplicate outcome to enforce idempotency"]
     pub fn reserve(&self, key: impl Into<String>) -> Duplicate {
-        self.inner.reserve(key)
+        let outcome = self.inner.reserve(key);
+        #[cfg(feature = "metrics")]
+        {
+            let label = match outcome {
+                Duplicate::No => "inserted",
+                Duplicate::Yes => "duplicate",
+            };
+            ::metrics::counter!(
+                crate::metrics::SETTLEMENT_CACHE_RESERVE_TOTAL,
+                "outcome" => label,
+            )
+            .increment(1);
+        }
+        outcome
     }
 
     /// Returns the approximate current entry count (observability hook).

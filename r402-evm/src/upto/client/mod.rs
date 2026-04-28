@@ -24,7 +24,7 @@ use r402_core::error::ClientError;
 use r402_core::scheme::{
     PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
 };
-use r402_core::wire::{self, Base64Bytes, PaymentRequired, ResourceInfo};
+use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
 pub use signing::{Permit2UptoSigningParams, sign_permit2_upto_authorization};
 
 use crate::chain::Eip155ChainReference;
@@ -264,13 +264,8 @@ where
             };
             let upto_payload = sign_permit2_upto_authorization(&self.signer, &params).await?;
 
-            let payload = types::v2::PaymentPayload {
-                x402_version: wire::V2,
-                accepted: self.requirements.clone(),
-                resource: self.resource_info.clone(),
-                payload: upto_payload,
-                extensions: wire::Extensions::new(),
-            };
+            let payload = types::v2::PaymentPayload::new(self.requirements.clone(), upto_payload)
+                .with_optional_resource(self.resource_info.clone());
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
 

@@ -104,15 +104,15 @@ fn base_requirements<A: Into<ChecksummedAddress>>(
     chain_id: &ChainId,
     extra: Option<serde_json::Value>,
 ) -> wire::PaymentRequirements {
-    wire::PaymentRequirements {
-        scheme: UptoScheme.to_string().into(),
-        pay_to: pay_to.into().to_string().into(),
-        asset: asset.token.address.to_string().into(),
-        network: chain_id.clone(),
-        amount: asset.amount.to_string().into(),
-        max_timeout_seconds: 300,
-        extra,
-    }
+    wire::PaymentRequirements::new(
+        UptoScheme.to_string().into(),
+        chain_id.clone(),
+        asset.amount.to_string().into(),
+        pay_to.into().to_string().into(),
+        asset.token.address.to_string().into(),
+        300,
+    )
+    .with_optional_extra(extra)
 }
 
 fn pick_facilitator_address(
