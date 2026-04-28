@@ -109,7 +109,7 @@ impl Eip155ChainProvider {
 
         let nonce_manager = PendingNonceManager::default();
         let filler = JoinFill::new(
-            GasFiller,
+            GasFiller::default(),
             JoinFill::new(
                 BlobGasFiller::default(),
                 JoinFill::new(
