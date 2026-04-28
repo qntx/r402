@@ -243,7 +243,8 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 
     /// Attaches a [`BackgroundSettlementTracker`] so background settlement
     /// tasks register with it. Used to await in-flight settlements during
-    /// graceful shutdown via [`Paygate::wait_for_pending_settlements`].
+    /// graceful shutdown via [`Paygate::settlement_tracker`] +
+    /// [`BackgroundSettlementTracker::wait_for_drain`].
     #[must_use]
     pub fn with_settlement_tracker(mut self, tracker: BackgroundSettlementTracker) -> Self {
         self.settlement_tracker = Some(tracker);
@@ -290,8 +291,9 @@ pub struct Paygate<TFacilitator> {
     /// When [`PaygateBuilder::with_settlement_tracker`] is set, every
     /// `handle_request_background` call increments the in-flight counter
     /// before spawning and decrements it once the supervisor records the
-    /// outcome. Operators call [`Self::wait_for_pending_settlements`]
-    /// during shutdown to await the drain (with a timeout safeguard).
+    /// outcome. Operators call [`Self::settlement_tracker`] +
+    /// [`BackgroundSettlementTracker::wait_for_drain`] during shutdown to
+    /// await the drain (with a timeout safeguard).
     pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
 }
 
@@ -774,8 +776,9 @@ impl VerifiedPayment {
 /// Shared in-flight counter for background settlement tasks.
 ///
 /// Created by the operator at startup, attached to a [`Paygate`] via
-/// [`PaygateBuilder::with_settlement_tracker`], and queried at shutdown
-/// via [`Paygate::wait_for_pending_settlements`]. The implementation is
+/// [`PaygateBuilder::with_settlement_tracker`], and drained at shutdown
+/// via [`Paygate::settlement_tracker`] + [`Self::wait_for_drain`]. The
+/// implementation is
 /// lock-free in the steady state: a single [`AtomicUsize`] for the
 /// counter and a [`tokio::sync::Notify`] for the drain wake-up.
 ///

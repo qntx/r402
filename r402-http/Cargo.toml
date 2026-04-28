@@ -5,8 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "HTTP transport layer for the x402 payment protocol."
 readme = "README.md"
+keywords = ["x402", "payment", "http", "axum", "reqwest"]
+categories = [
+    "web-programming::http-server",
+    "web-programming::http-client",
+    "api-bindings",
+    "asynchronous",
+]
 
 [package.metadata.docs.rs]
 all-features = true

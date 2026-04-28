@@ -4,11 +4,16 @@ default-members = ["r402"]
 resolver = "3"
 
 [workspace.package]
+# Fields below are shared across every member crate via `field.workspace =
+# true`. `keywords` and `categories` are deliberately *per-crate* (each
+# crate's audience is different — solana people don't search for
+# "ethereum") and so live in the individual `Cargo.toml` files.
 version = "0.14.0-beta.1"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
+homepage = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]

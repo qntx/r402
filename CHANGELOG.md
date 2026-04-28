@@ -4,6 +4,126 @@ All notable changes to the `r402` workspace are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Comprehensive audit pass against `3rdparty/x402/specs/`. **31 P1/P2
+findings** addressed plus four new regression-test suites. The release
+is fully wire- and behaviour-compatible with the v2 spec; the breaking
+changes below are API ergonomics (sealed wire types, builder APIs)
+rather than protocol semantics.
+
+### Breaking changes
+
+- **`#[non_exhaustive]` on every public wire envelope** (F-115).
+  `PaymentRequired`, `PaymentRequirements<…>`, `PaymentPayload<…>`,
+  `ResourceInfo`, `SupportedPaymentKind`, `SupportedResponse`,
+  `Extensions::ExtensionEntry`, plus the hook / extension contexts
+  (`HookVerifyContext`, `HookSettleContext`, `AdvertiseContext`,
+  `VerifyContext`, `SettleContext`) are sealed against direct struct
+  literals. Construct via the new builder APIs (`new(...)`, fluent
+  `with_*` setters) so server / facilitator code stays source-compatible
+  when the spec gains new optional fields.
+- **`SettleResponse::Failure.transaction` always serialises** (F-002).
+  The wire format now emits `"transaction": ""` on every failure
+  response, matching spec §5.3.2 and the Go / TS reference SDKs.
+  Consumers that previously treated absence of `transaction` as a
+  failure marker must now check `success: false` instead.
+- **`SettlementCache` moved to `r402-core::cache`** (F-101). The
+  former SVM-specific cache is replaced by a chain-agnostic
+  `SettlementCache<TKey>` reused by EVM `exact` / `upto` facilitators
+  and the SVM `exact` facilitator. The SVM type alias is preserved
+  during the deprecation window via a re-export.
+
+### Added
+
+- **`BackgroundSettlementTracker`** (F-101 / F-102, `r402-http`). RAII
+  in-flight counter + `tokio::sync::Notify` for graceful shutdown of
+  background settlement tasks.
+  - `Paygate::settlement_tracker()` exposes the tracker; operators call
+    `BackgroundSettlementTracker::wait_for_drain(timeout)` from their
+    shutdown handler to await pending settlements with a deadline.
+  - `PaygateBuilder::with_settlement_tracker` wires it in.
+  - Lock-free steady state — single `AtomicUsize` + cloneable `Arc`
+    inner for sharing across multiple paygates.
+- **Metrics facade** (F-100, `r402-core::metrics`, opt-in `metrics`
+  feature). Stable Prometheus-/StatsD-/OpenTelemetry-compatible metric
+  names: `r402_facilitator_verify_total`,
+  `r402_facilitator_settle_total`,
+  `r402_facilitator_verify_duration_seconds`,
+  `r402_facilitator_settle_duration_seconds`,
+  `r402_settlement_cache_reserve_total`,
+  `r402_paygate_request_total`,
+  `r402_paygate_background_settle_total`. Cardinality is strictly
+  controlled — labels never carry addresses, signatures, or payment
+  IDs. Backend choice is the operator's; macros expand to no-ops when
+  no recorder is installed.
+- **Hot-path instrumentation**.
+  `SettlementCache::reserve` emits `r402_settlement_cache_reserve_total`
+  with `outcome=inserted|duplicate`; the background settlement
+  supervisor emits `r402_paygate_background_settle_total` with
+  `result=ok|error|panic|cancelled`.
+- **Supervised background settlement** (F-103, `r402-http`). Background
+  spawn is wrapped in a supervisor that catches panics, downgrades
+  `JoinError::is_cancelled()` to a `tracing::warn!`, and logs full
+  context (resource, payer, scheme, network) on failure. No more silent
+  task drops on shutdown races.
+- **cargo-hack feature-matrix CI** (F-117,
+  `.github/workflows/feature-matrix.yml`). Runs
+  `cargo hack check --workspace --feature-powerset --depth 2` on every
+  push / PR plus a Monday 09:00 UTC schedule, catching upstream feature
+  drift.
+- **Property-based wire round-trip suite** (F-123,
+  `r402-core/tests/wire_proptest.rs`). 10 proptest groups @ 256 cases
+  each (≈ 2 560 generated inputs) cover `ResourceInfo`,
+  `SupportedPaymentKind`, `SupportedResponse`, `Extensions`,
+  `PaymentRequirements`, `PaymentRequired`, `VerifyResponse`,
+  `SettleResponse`, and `ErrorReason` (including the `Custom(..)`
+  catch-all and totality of `from_wire`).
+- **Public-API integration tests** (F-122,
+  `r402-core/tests/public_api.rs`, 5 tests). Compiled as a separate
+  binary, links r402-core through `pub` only, locks down the F-001 /
+  F-002 / wildcard signer behaviours.
+- **Spec-fixture cross-SDK suite** (F-121,
+  `r402-core/tests/fixtures/spec_v2/` + `tests/spec_fixtures.rs`,
+  8 tests). Seven verbatim JSON examples lifted from
+  `3rdparty/x402/specs/x402-specification-v2.md` round-trip through
+  every wire type. A directory-completeness sanity test fails the build
+  if a fixture is added without a matching deserialisation test.
+
+### Fixed
+
+- **F-001** wire envelopes reject typo'd top-level fields
+  (`deny_unknown_fields`).
+- **F-002** `SettleResponse::Failure` always serialises
+  `transaction: ""`.
+- **F-003** scheme / network / amount fields use `CompactString`
+  instead of `String` (no extra heap allocation for the inline
+  case).
+- **F-004** `ErrorReason::from_wire` is total — any input maps to
+  either a canonical variant or `Custom(...)`.
+- **F-016 / F-019 / F-025 / F-028 / F-030 / F-037** — scheme-level
+  fixes across `r402-evm` and `r402-svm`.
+- **F-044 / F-046 / F-047** Facilitator trait API hardening (`AFIT`,
+  `DynFacilitator`, `Sync` requirement on hooks).
+- **F-055** HTTP transport headers + status-code mapping aligned with
+  spec §7.
+- **F-073 / F-074 / F-075 / F-076 / F-077** security audit findings
+  (zeroize delegation, PII tracing audit, signature-handling
+  invariants, replay-window enforcement).
+- **F-143 / F-144 / F-145** maintainability — module reorganisation,
+  doctest correctness, public-API documentation completeness.
+- **F-117** every clippy lint level promoted to `-D warnings` in
+  CI; zero warnings across the whole workspace and every feature
+  combination.
+
+### Documentation
+
+- All public APIs documented (`#![warn(missing_docs)]` enforced
+  workspace-wide; `cargo doc --all-features --no-deps` reports zero
+  warnings).
+- crates.io metadata (`keywords`, `categories`, `homepage`) populated
+  on every member crate.
+
 ## [0.14.0-beta.1] — 2026-04-24
 
 ### Breaking changes

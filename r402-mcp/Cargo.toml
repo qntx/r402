@@ -5,8 +5,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Model Context Protocol (MCP) transport for the x402 payment protocol."
 readme = "README.md"
+keywords = ["x402", "payment", "mcp", "ai", "http-402"]
+categories = [
+    "api-bindings",
+    "web-programming",
+    "asynchronous",
+]
 
 [package.metadata.docs.rs]
 all-features = true

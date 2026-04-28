@@ -5,8 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Core types, traits, and wire formats for the x402 payment protocol."
 readme = "README.md"
+keywords = ["x402", "payment", "protocol", "wire-format", "http-402"]
+categories = [
+    "api-bindings",
+    "encoding",
+    "data-structures",
+    "web-programming",
+    "cryptography::cryptocurrencies",
+]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -5,8 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
 description = "Solana chain support for the x402 payment protocol."
 readme = "README.md"
+keywords = ["x402", "payment", "solana", "spl-token", "svm"]
+categories = [
+    "api-bindings",
+    "cryptography::cryptocurrencies",
+    "web-programming",
+    "asynchronous",
+]
 
 [package.metadata.docs.rs]
 all-features = true
