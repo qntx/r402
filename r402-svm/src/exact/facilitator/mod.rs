@@ -135,12 +135,14 @@ where
                 memo: None,
             })
             .ok();
-            vec![wire::SupportedPaymentKind {
-                x402_version: wire::V2.into(),
-                scheme: ExactScheme.to_string().into(),
-                network: chain_id.to_string().into(),
-                extra,
-            }]
+            vec![
+                wire::SupportedPaymentKind::new(
+                    wire::V2.into(),
+                    ExactScheme.to_string(),
+                    chain_id.to_string(),
+                )
+                .with_optional_extra(extra),
+            ]
         };
         let signers = {
             let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
@@ -154,11 +156,9 @@ where
             );
             signers
         };
-        Ok(wire::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
-        })
+        Ok(wire::SupportedResponse::new()
+            .with_kinds(kinds)
+            .with_signers(signers))
     }
 }
 

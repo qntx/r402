@@ -96,6 +96,86 @@ impl Debug for TtlSet {
     }
 }
 
+/// Spec-recommended TTL for cross-chain settlement deduplication.
+///
+/// Per x402 v2 §Duplicate Settlement Mitigation, facilitators SHOULD retain
+/// a short-lived cache keyed by the unique settlement identifier (EIP-3009
+/// nonce, Permit2 nonce, or base64 SVM transaction). The 2-minute window
+/// covers:
+///
+/// - Solana blockhash lifetime (≈ 60 s) plus a safety multiplier of 2;
+/// - Typical EVM finality (12 blocks × ≈ 12 s) plus margin so two requests
+///   re-using the same EIP-3009 / Permit2 nonce are caught even when the
+///   first settlement is mid-confirmation.
+pub const DEFAULT_SETTLEMENT_TTL: Duration = Duration::from_mins(2);
+
+/// Default upper bound on tracked settlement identifiers.
+///
+/// At ≈ 32 bytes per key (a 32-byte EIP-3009 nonce hex string) plus moka
+/// overhead, the worst-case footprint is in the low MB range — small
+/// enough that the bound mostly protects against unbounded growth from
+/// adversarial replay storms rather than from steady-state traffic.
+pub const DEFAULT_SETTLEMENT_CAPACITY: u64 = 10_000;
+
+/// Chain-agnostic deduplication cache for facilitator settlement requests.
+///
+/// Wraps [`TtlSet`] with the canonical x402 v2 TTL ([`DEFAULT_SETTLEMENT_TTL`])
+/// and capacity ([`DEFAULT_SETTLEMENT_CAPACITY`]). Used by every chain
+/// crate to defend against duplicate / replayed `/settle` calls within
+/// the on-chain replay window:
+///
+/// - **EVM exact** — keyed by `chain:nonce_hex` (the EIP-3009 nonce binds
+///   one-shot to a single token + payer pair).
+/// - **EVM upto** — keyed by `chain:permit2_nonce_hex`.
+/// - **SVM exact** — keyed by the base64 transaction payload.
+///
+/// The cache is **in-memory only**. A facilitator deployment that spans
+/// multiple processes must either pin requests to a single worker or
+/// replace this cache with a Redis-backed implementation by wiring its
+/// own [`TtlSet`]-equivalent through the same trait surface.
+#[derive(Debug, Clone)]
+pub struct SettlementCache {
+    inner: TtlSet,
+}
+
+impl SettlementCache {
+    /// Constructs a cache with the spec-recommended TTL and capacity.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            inner: TtlSet::new(DEFAULT_SETTLEMENT_TTL, DEFAULT_SETTLEMENT_CAPACITY),
+        }
+    }
+
+    /// Constructs a cache with custom TTL and capacity.
+    #[must_use]
+    pub fn with_params(ttl: Duration, capacity: u64) -> Self {
+        Self {
+            inner: TtlSet::new(ttl, capacity),
+        }
+    }
+
+    /// Atomically reserves the key. Returns [`Duplicate::No`] when newly
+    /// inserted (caller may proceed) or [`Duplicate::Yes`] when the key
+    /// is already present (caller must abort with `DuplicateSettlement`).
+    #[must_use = "callers MUST honour the Duplicate outcome to enforce idempotency"]
+    pub fn reserve(&self, key: impl Into<String>) -> Duplicate {
+        self.inner.reserve(key)
+    }
+
+    /// Returns the approximate current entry count (observability hook).
+    #[must_use]
+    pub fn entry_count(&self) -> u64 {
+        self.inner.entry_count()
+    }
+}
+
+impl Default for SettlementCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +204,28 @@ mod tests {
         assert_eq!(cache.reserve("b"), Duplicate::No);
         assert_eq!(cache.reserve("a"), Duplicate::Yes);
         assert_eq!(cache.reserve("b"), Duplicate::Yes);
+    }
+
+    #[test]
+    fn settlement_cache_default_is_2_minute_ttl() {
+        // Verify the spec-recommended TTL is wired correctly so future
+        // refactors can't silently lengthen / shorten it.
+        assert_eq!(DEFAULT_SETTLEMENT_TTL, Duration::from_mins(2));
+    }
+
+    #[test]
+    fn settlement_cache_reserves_then_dedups() {
+        let cache = SettlementCache::new();
+        assert_eq!(cache.reserve("0xabc"), Duplicate::No);
+        assert_eq!(cache.reserve("0xabc"), Duplicate::Yes);
+    }
+
+    #[test]
+    fn settlement_cache_independent_keys() {
+        let cache = SettlementCache::new();
+        assert_eq!(cache.reserve("eip155:8453:0xnonce_a"), Duplicate::No);
+        assert_eq!(cache.reserve("eip155:8453:0xnonce_b"), Duplicate::No);
+        assert_eq!(cache.reserve("eip155:8453:0xnonce_a"), Duplicate::Yes);
+        assert_eq!(cache.reserve("eip155:8453:0xnonce_b"), Duplicate::Yes);
     }
 }

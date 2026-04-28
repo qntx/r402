@@ -164,11 +164,7 @@ mod tests {
             "eip155:8453".into(),
             vec![facilitator.to_checksum(None).into()],
         );
-        let supported = wire::SupportedResponse {
-            kinds: Vec::new(),
-            extensions: Vec::new(),
-            signers,
-        };
+        let supported = wire::SupportedResponse::new().with_signers(signers);
         tag.enrich(&supported);
 
         let extra = tag
@@ -240,11 +236,7 @@ mod tests {
             "eip155:8453".into(),
             vec![Address::repeat_byte(0xFF).to_checksum(None).into()],
         );
-        let supported = wire::SupportedResponse {
-            kinds: Vec::new(),
-            extensions: Vec::new(),
-            signers,
-        };
+        let supported = wire::SupportedResponse::new().with_signers(signers);
         tag.enrich(&supported);
         let extra = tag
             .requirements

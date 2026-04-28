@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 /// The field names use `camelCase` to align with the wire format.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
 pub struct ResourceInfo {
     /// Canonical URL of the resource.
     pub url: CompactString,

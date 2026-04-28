@@ -38,6 +38,7 @@ facilitator = [
     "dep:tokio",
     "dep:tower",
     "dep:url",
+    "r402-core/cache",
 ]
 full = ["telemetry", "exact", "upto", "client", "client-provider", "server", "facilitator"]
 

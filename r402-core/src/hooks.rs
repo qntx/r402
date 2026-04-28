@@ -50,6 +50,7 @@ pub enum FailureRecovery<T> {
 
 /// Context passed to verify-related hooks.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct VerifyContext {
     /// The incoming verify request.
     pub request: VerifyRequest,
@@ -63,6 +64,7 @@ impl Debug for VerifyContext {
 
 /// Context passed to settle-related hooks.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct SettleContext {
     /// The incoming settle request.
     pub request: SettleRequest,

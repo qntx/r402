@@ -67,6 +67,7 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 /// Context passed to [`Extension::advertise`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct AdvertiseContext<'a> {
     /// The requirement entry being advertised (if any). `None` when the
     /// extension is being advertised as a top-level `PaymentRequired.extensions`
@@ -75,6 +76,7 @@ pub struct AdvertiseContext<'a> {
 }
 
 /// Context passed to [`Extension::on_verify`].
+#[non_exhaustive]
 pub struct VerifyContext<'a> {
     /// The fully-decoded payment payload (as generic JSON, since per-scheme
     /// types are unknown at this level). Use `serde_json::from_value` if the
@@ -96,6 +98,7 @@ impl Debug for VerifyContext<'_> {
 }
 
 /// Context passed to [`Extension::on_settle`].
+#[non_exhaustive]
 pub struct SettleContext<'a> {
     /// The fully-decoded payment payload.
     pub payload: &'a PaymentPayload<serde_json::Value, serde_json::Value>,

@@ -14,9 +14,10 @@ mod verify;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use alloy_primitives::Address;
+use alloy_primitives::{Address, U256};
 use alloy_provider::Provider;
 use compact_str::CompactString;
+use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
 use r402_core::error::VerificationError;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
@@ -48,17 +49,30 @@ const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANC
 /// `paymentRequirements.amount` (the resource server's usage-dependent
 /// charge), enforces `actual ≤ signed_max`, and takes the **zero-settle
 /// shortcut** (no on-chain tx) when the charge is zero.
+///
+/// Maintains a [`SettlementCache`] keyed by `chain_id:permit2:nonce_hex`
+/// so concurrent or replayed `/settle` calls within the on-chain replay
+/// window short-circuit with [`VerificationError::DuplicateSettlement`]
+/// before any RPC work happens.
 pub struct Eip155UptoFacilitator<P> {
     provider: P,
     clock_skew_tolerance: u64,
+    settlement_cache: SettlementCache,
 }
 
 impl<P> Eip155UptoFacilitator<P> {
-    /// Creates a new upto facilitator with default clock-skew tolerance (30 s).
-    pub const fn new(provider: P) -> Self {
+    /// Creates a new upto facilitator with the spec-recommended defaults
+    /// (6 s clock-skew, 2-minute settlement-cache TTL).
+    pub fn new(provider: P) -> Self {
+        Self::with_settlement_cache(provider, SettlementCache::new())
+    }
+
+    /// Creates a facilitator with a caller-supplied [`SettlementCache`].
+    pub const fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
         Self {
             provider,
             clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+            settlement_cache,
         }
     }
 
@@ -67,6 +81,14 @@ impl<P> Eip155UptoFacilitator<P> {
     pub const fn with_clock_skew_tolerance(mut self, seconds: u64) -> Self {
         self.clock_skew_tolerance = seconds;
         self
+    }
+
+    /// Builds a settlement-cache key for the upto Permit2 path.
+    fn permit2_cache_key(&self, nonce: U256) -> String
+    where
+        P: ChainProvider,
+    {
+        format!("{}:upto:permit2:{nonce:#x}", self.provider.chain_id())
     }
 }
 
@@ -121,6 +143,18 @@ where
     ) -> Result<wire::SettleResponse, FacilitatorError> {
         let request = types::v2::SettleRequest::from_settle(request)?;
         let signer_addresses = self.signer_addresses_typed();
+        // F-073: deduplicate before any RPC work.
+        let nonce: U256 = request
+            .payment_payload
+            .payload
+            .permit2_authorization
+            .nonce
+            .into();
+        let cache_key = self.permit2_cache_key(nonce);
+        if self.settlement_cache.reserve(cache_key) == Duplicate::Yes {
+            return Err(VerificationError::DuplicateSettlement.into());
+        }
+
         let actual_amount = assert_offchain_valid_settle(
             &request.payment_payload,
             &request.payment_requirements,
@@ -170,19 +204,19 @@ where
                 "facilitatorAddress": addr,
             })
         });
-        let kinds = vec![wire::SupportedPaymentKind {
-            x402_version: wire::V2.into(),
-            scheme: UptoScheme.to_string().into(),
-            network: chain_id.to_string().into(),
-            extra,
-        }];
+        let kinds = vec![
+            wire::SupportedPaymentKind::new(
+                wire::V2.into(),
+                UptoScheme.to_string(),
+                chain_id.to_string(),
+            )
+            .with_optional_extra(extra),
+        ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(Eip155Upto.caip_family().into(), signer_strings);
-        Ok(wire::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
-        })
+        Ok(wire::SupportedResponse::new()
+            .with_kinds(kinds)
+            .with_signers(signers))
     }
 }
 

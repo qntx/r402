@@ -159,19 +159,14 @@ impl ResourceTemplate {
             url.set_query(req.uri().query());
             url.to_string()
         });
-        wire::ResourceInfo {
-            description: if self.description.is_empty() {
-                None
-            } else {
-                Some(self.description.clone().into())
-            },
-            mime_type: if self.mime_type.is_empty() {
-                None
-            } else {
-                Some(self.mime_type.clone().into())
-            },
-            url: url.into(),
+        let mut info = wire::ResourceInfo::new(url);
+        if !self.description.is_empty() {
+            info = info.with_description(self.description.clone());
         }
+        if !self.mime_type.is_empty() {
+            info = info.with_mime_type(self.mime_type.clone());
+        }
+        info
     }
 }
 
@@ -249,11 +244,9 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         Paygate {
             facilitator: self.facilitator,
             accepts: self.accepts.into(),
-            resource: self.resource.unwrap_or_else(|| wire::ResourceInfo {
-                description: None,
-                mime_type: Some("application/json".into()),
-                url: compact_str::CompactString::default(),
-            }),
+            resource: self
+                .resource
+                .unwrap_or_else(|| wire::ResourceInfo::new("").with_mime_type("application/json")),
             hooks: self.hooks,
         }
     }
@@ -633,16 +626,23 @@ where
     {
         let verified = self.verify_only(req.headers()).await?;
 
-        // Fire-and-forget: spawn settlement without awaiting
+        // F-103: spawn the settlement task and a supervisor that awaits the
+        // join handle. The supervisor surfaces three failure modes that
+        // would otherwise be silenced:
+        //
+        // - structured `FacilitatorError` from `settle()`,
+        // - panics inside the settle task (lost into the void by tokio),
+        // - cancellations (e.g. runtime shutdown).
+        //
+        // Two `tokio::spawn` calls cost a single extra heap allocation per
+        // request — negligible compared to the on-chain work — and we get
+        // observable settlement outcomes in exchange.
         let facilitator = self.facilitator.clone();
-        tokio::spawn(async move {
-            if let Err(e) = verified.settle(&facilitator).await {
-                #[cfg(feature = "telemetry")]
-                tracing::error!(error = %e, "background settlement failed");
-                #[cfg(not(feature = "telemetry"))]
-                let _ = e;
-            }
-        });
+        let settle_handle = tokio::spawn(async move { verified.settle(&facilitator).await });
+        // Detached supervisor: we deliberately drop the JoinHandle. The
+        // supervisor itself never panics and only logs, so leaking the
+        // handle is the cheapest fire-and-forget pattern.
+        drop(tokio::spawn(supervise_background_settle(settle_handle)));
 
         match call_inner(inner, req).await {
             Ok(r) => Ok(r.into_response()),
@@ -718,6 +718,63 @@ impl VerifiedPayment {
         &self.settle_request
     }
 }
+
+/// Awaits the join handle of a background settlement task and surfaces the
+/// outcome via tracing.
+///
+/// Three classes of failure are otherwise lost when a fire-and-forget
+/// `tokio::spawn` is used directly:
+///
+/// 1. structured [`FacilitatorError`] returned by `settle()`,
+/// 2. **panics** inside the spawn (tokio aborts the task but the host
+///    process never sees the error),
+/// 3. cancellations (e.g. runtime shutdown).
+///
+/// This supervisor logs each at the appropriate level so operators can
+/// detect silent settlement failures in production. Telemetry is
+/// feature-gated; without `telemetry` the supervisor still consumes the
+/// outcome (preventing a panic-on-drop scenario for the `JoinHandle`).
+async fn supervise_background_settle(
+    handle: tokio::task::JoinHandle<Result<wire::SettleResponse, PaygateError>>,
+) {
+    let outcome = handle.await;
+    log_background_settle_outcome(outcome);
+}
+
+/// Logs the result of a background settlement task at the appropriate
+/// level. Split out from [`supervise_background_settle`] so the supervisor
+/// stays under clippy's cognitive-complexity limit and the logging
+/// behaviour is unit-testable in isolation.
+fn log_background_settle_outcome(
+    outcome: Result<Result<wire::SettleResponse, PaygateError>, tokio::task::JoinError>,
+) {
+    match outcome {
+        Ok(Ok(_settlement)) => {
+            #[cfg(feature = "telemetry")]
+            tracing::debug!("background settlement completed");
+        }
+        Ok(Err(err)) => log_background_settle_error(&err),
+        Err(join_err) => log_background_settle_join_error(&join_err),
+    }
+}
+
+#[cfg(feature = "telemetry")]
+fn log_background_settle_error(err: &PaygateError) {
+    tracing::error!(error = %err, "background settlement returned error");
+}
+#[cfg(not(feature = "telemetry"))]
+fn log_background_settle_error(_err: &PaygateError) {}
+
+#[cfg(feature = "telemetry")]
+fn log_background_settle_join_error(join_err: &tokio::task::JoinError) {
+    if join_err.is_panic() {
+        tracing::error!(error = %join_err, "background settlement task panicked");
+    } else {
+        tracing::warn!(error = %join_err, "background settlement task cancelled");
+    }
+}
+#[cfg(not(feature = "telemetry"))]
+fn log_background_settle_join_error(_join_err: &tokio::task::JoinError) {}
 
 /// Encodes a successful [`wire::SettleResponse`] as an HTTP header value.
 ///

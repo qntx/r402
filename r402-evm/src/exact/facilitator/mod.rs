@@ -15,7 +15,9 @@ use std::collections::HashMap;
 
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use alloy_provider::Provider;
+use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
+use r402_core::error::VerificationError;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
@@ -134,11 +136,21 @@ const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANC
 ///
 /// Supports both EIP-3009 and Permit2 transfer methods. The transfer method
 /// is determined by the [`ExactPayload`] variant in the payment payload.
+///
+/// Maintains a [`SettlementCache`] keyed by `chain_id:nonce_hex` so that
+/// concurrent or replayed `/settle` calls within the on-chain replay
+/// window return [`VerificationError::DuplicateSettlement`] before the
+/// transaction is broadcast a second time. EIP-3009 and Permit2 nonces
+/// are already unique per buyer + token + chain, so this cache mirrors
+/// the underlying chain's protection but reacts faster than RPC
+/// confirmation.
 pub struct Eip155ExactFacilitator<P> {
     provider: P,
     /// Grace period (in seconds) applied to time-window checks to tolerate
     /// clock drift between the facilitator and the blockchain network.
     clock_skew_tolerance: u64,
+    /// Settle-time deduplication cache (see struct-level docs).
+    settlement_cache: SettlementCache,
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -146,11 +158,23 @@ impl<P> Eip155ExactFacilitator<P> {
     ///
     /// Uses [`crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS`] (6 s, one EVM
     /// block, aligned with Go's `Permit2DeadlineBuffer`) for time-window
-    /// validation.
-    pub const fn new(provider: P) -> Self {
+    /// validation, and a default [`SettlementCache`] with the spec-recommended
+    /// 2-minute TTL.
+    pub fn new(provider: P) -> Self {
+        Self::with_settlement_cache(provider, SettlementCache::new())
+    }
+
+    /// Creates a facilitator with a caller-supplied [`SettlementCache`].
+    ///
+    /// Use this when you want to share a cache across worker tasks (e.g.
+    /// behind a load-balancer that pins by buyer address) or to plug in a
+    /// custom backend (Redis, etc.) by wrapping its primitives in the same
+    /// shape.
+    pub const fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
         Self {
             provider,
             clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+            settlement_cache,
         }
     }
 
@@ -162,6 +186,29 @@ impl<P> Eip155ExactFacilitator<P> {
     pub const fn with_clock_skew_tolerance(mut self, seconds: u64) -> Self {
         self.clock_skew_tolerance = seconds;
         self
+    }
+
+    /// Builds a stable settlement-cache key for the EIP-3009 path.
+    ///
+    /// `B256` formats as `0x`-prefixed lowercase hex, matching the
+    /// `eip155:<chain>:<nonce>` convention used by the Go SDK.
+    fn eip3009_cache_key(&self, nonce: B256) -> String
+    where
+        P: ChainProvider,
+    {
+        format!("{}:{nonce}", self.provider.chain_id())
+    }
+
+    /// Builds a stable settlement-cache key for the Permit2 path.
+    ///
+    /// Permit2 nonces are `uint256`; the `:permit2:` infix discriminates
+    /// from EIP-3009 32-byte nonces so the two namespaces never collide
+    /// on a value that happens to be representable in both.
+    fn permit2_cache_key(&self, nonce: U256) -> String
+    where
+        P: ChainProvider,
+    {
+        format!("{}:permit2:{nonce:#x}", self.provider.chain_id())
     }
 }
 
@@ -239,6 +286,21 @@ where
         let request = types::v2::SettleRequest::from_settle(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
+        // F-073: deduplicate concurrent / replayed settle attempts before
+        // any verification or RPC work. EIP-3009 nonces and Permit2 nonces
+        // are already unique per buyer + token + chain on-chain, but
+        // checking the cache up-front protects against double broadcast
+        // during the confirmation window where the chain has not yet
+        // observed the first transaction.
+        let cache_key = match &payload.payload {
+            ExactPayload::Eip3009(eip3009) => self.eip3009_cache_key(eip3009.authorization.nonce),
+            ExactPayload::Permit2(permit2) => {
+                self.permit2_cache_key(permit2.permit2_authorization.nonce.into())
+            }
+        };
+        if self.settlement_cache.reserve(cache_key) == Duplicate::Yes {
+            return Err(VerificationError::DuplicateSettlement.into());
+        }
         match &payload.payload {
             ExactPayload::Eip3009(eip3009) => {
                 let (contract, payment, eip712_domain) = verify::assert_valid_payment(
@@ -286,28 +348,22 @@ where
         use compact_str::CompactString;
 
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind {
-            x402_version: wire::V2.into(),
-            scheme: ExactScheme.to_string().into(),
-            network: chain_id.to_string().into(),
-            extra: None,
-        }];
-        let signers = {
-            let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
-            let _ = signers.insert(
-                Eip155Exact.caip_family().into(),
-                self.provider
-                    .signer_addresses()
-                    .into_iter()
-                    .map(CompactString::from)
-                    .collect(),
-            );
-            signers
-        };
-        Ok(wire::SupportedResponse {
-            kinds,
-            extensions: Vec::new(),
-            signers,
-        })
+        let kinds = vec![wire::SupportedPaymentKind::new(
+            wire::V2.into(),
+            ExactScheme.to_string(),
+            chain_id.to_string(),
+        )];
+        let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
+        let _ = signers.insert(
+            Eip155Exact.caip_family().into(),
+            self.provider
+                .signer_addresses()
+                .into_iter()
+                .map(CompactString::from)
+                .collect(),
+        );
+        Ok(wire::SupportedResponse::new()
+            .with_kinds(kinds)
+            .with_signers(signers))
     }
 }

@@ -579,8 +579,6 @@ fn with_span<F: Future>(fut: F, span: Span) -> impl Future<Output = F::Output> {
     reason = "test assertions with known-length slices"
 )]
 mod tests {
-    use std::collections::HashMap;
-
     use r402_core::wire::SupportedPaymentKind;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -588,16 +586,7 @@ mod tests {
     use super::*;
 
     fn create_test_supported_response() -> SupportedResponse {
-        SupportedResponse {
-            kinds: vec![SupportedPaymentKind {
-                x402_version: 1,
-                scheme: "eip155-exact".into(),
-                network: "1".into(),
-                extra: None,
-            }],
-            extensions: vec![],
-            signers: HashMap::new(),
-        }
+        SupportedResponse::new().with_kinds(vec![SupportedPaymentKind::new(1, "eip155-exact", "1")])
     }
 
     #[tokio::test]
