@@ -154,26 +154,31 @@ impl From<serde_json::Error> for VerificationError {
 
 impl AsPaymentProblem for VerificationError {
     fn as_payment_problem(&self) -> PaymentProblem {
+        // Chain-agnostic mappings target the spec §9 standard codes.
+        // Chain-specific facilitators may override with chain-prefixed
+        // codes (e.g. `invalid_exact_evm_payload_signature`) at their own
+        // `AsPaymentProblem` impls.
         let reason = match self {
-            Self::InvalidFormat(_) => ErrorReason::InvalidFormat,
-            Self::InvalidPaymentAmount => ErrorReason::InvalidPaymentAmount,
-            Self::Early => ErrorReason::InvalidPaymentEarly,
-            Self::Expired => ErrorReason::InvalidPaymentExpired,
-            Self::ChainIdMismatch => ErrorReason::ChainIdMismatch,
-            Self::RecipientMismatch => ErrorReason::RecipientMismatch,
-            Self::AssetMismatch => ErrorReason::AssetMismatch,
+            Self::InvalidFormat(_) | Self::InvalidSignature(_) => ErrorReason::InvalidPayload,
+            Self::InvalidPaymentAmount
+            | Self::RecipientMismatch
+            | Self::AssetMismatch
+            | Self::AcceptedRequirementsMismatch => ErrorReason::InvalidPaymentRequirements,
+            Self::Early | Self::Expired => ErrorReason::InvalidPayload,
+            Self::ChainIdMismatch | Self::UnsupportedChain => ErrorReason::InvalidNetwork,
             Self::InsufficientFunds => ErrorReason::InsufficientFunds,
             Self::Permit2AllowanceRequired => ErrorReason::Permit2AllowanceRequired,
-            Self::InvalidSignature(_) => ErrorReason::InvalidSignature,
-            Self::SimulationFailed(_) => ErrorReason::SimulationFailed,
-            Self::UnsupportedChain => ErrorReason::UnsupportedChain,
+            Self::SimulationFailed(_) => ErrorReason::InvalidTransactionState,
             Self::UnsupportedScheme => ErrorReason::UnsupportedScheme,
-            Self::AcceptedRequirementsMismatch => ErrorReason::AcceptedRequirementsMismatch,
             Self::NonceAlreadyUsed => ErrorReason::NonceAlreadyUsed,
             Self::DuplicateSettlement => ErrorReason::DuplicateSettlement,
-            Self::MemoMismatch => ErrorReason::MemoMismatch,
-            Self::MemoInstructionCountInvalid { .. } => ErrorReason::MemoInstructionCountInvalid,
-            Self::SettlementAmountExceedsPermitted { .. } => ErrorReason::SettlementExceedsAmount,
+            Self::MemoMismatch => ErrorReason::InvalidExactSolanaPayloadMemoMismatch,
+            Self::MemoInstructionCountInvalid { .. } => {
+                ErrorReason::InvalidExactSolanaPayloadMemoCount
+            }
+            Self::SettlementAmountExceedsPermitted { .. } => {
+                ErrorReason::InvalidUptoEvmPayloadSettlementExceedsAmount
+            }
             Self::UptoFacilitatorMismatch { .. } => ErrorReason::UptoFacilitatorMismatch,
             Self::UptoUnauthorizedFacilitator => ErrorReason::UptoUnauthorizedFacilitator,
             Self::UptoAmountExceedsPermitted => ErrorReason::UptoAmountExceedsPermitted,
@@ -202,7 +207,8 @@ pub enum SettlementError {
 impl AsPaymentProblem for SettlementError {
     fn as_payment_problem(&self) -> PaymentProblem {
         let reason = match self {
-            Self::Onchain(_) | Self::Timeout => ErrorReason::UnexpectedError,
+            Self::Onchain(_) => ErrorReason::InvalidTransactionState,
+            Self::Timeout => ErrorReason::UnexpectedSettleError,
             Self::Duplicate => ErrorReason::DuplicateSettlement,
         };
         PaymentProblem::new(reason, self.to_string())
@@ -264,13 +270,18 @@ impl AsPaymentProblem for FacilitatorError {
         match self {
             Self::Verification(e) => e.as_payment_problem(),
             Self::Settlement(e) => e.as_payment_problem(),
-            Self::Aborted { reason, message } => {
-                PaymentProblem::new(ErrorReason::UnexpectedError, format!("{reason}: {message}"))
-            }
+            // Hook-supplied reason strings round-trip through `from_wire`,
+            // which preserves any unknown code as `Custom(…)`.
+            Self::Aborted { reason, message } => PaymentProblem::new(
+                ErrorReason::from_wire(reason),
+                format!("{reason}: {message}"),
+            ),
             Self::Onchain(message) => {
-                PaymentProblem::new(ErrorReason::UnexpectedError, message.clone())
+                PaymentProblem::new(ErrorReason::InvalidTransactionState, message.clone())
             }
-            Self::Internal(e) => PaymentProblem::new(ErrorReason::UnexpectedError, e.to_string()),
+            Self::Internal(e) => {
+                PaymentProblem::new(ErrorReason::UnexpectedVerifyError, e.to_string())
+            }
         }
     }
 }

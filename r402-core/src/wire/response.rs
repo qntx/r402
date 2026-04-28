@@ -243,7 +243,10 @@ struct SettleResponseWire {
     error_message: Option<CompactString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     payer: Option<CompactString>,
-    #[serde(default, skip_serializing_if = "CompactString::is_empty")]
+    /// Always serialized per x402 v2 spec §5.3.2: empty string on failure,
+    /// transaction hash on success. Deserialization tolerates omission for
+    /// legacy clients but the success path enforces non-empty in `try_from`.
+    #[serde(default)]
     transaction: CompactString,
     network: CompactString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -429,6 +432,24 @@ mod tests {
         assert_eq!(back, response);
     }
 
+    /// Regression test for F-002: spec §5.3.2 marks `transaction` as Required
+    /// (empty string on failure). Go SDK rejects responses lacking the field.
+    #[test]
+    fn settle_failure_serializes_empty_transaction() {
+        let response = SettleResponse::Failure {
+            reason: ErrorReason::UnexpectedSettleError,
+            message: None,
+            payer: None,
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+        };
+        let encoded = serde_json::to_value(&response).unwrap();
+        assert_eq!(
+            encoded["transaction"], "",
+            "spec §5.3.2 requires `transaction` field present (empty on failure)"
+        );
+    }
+
     #[test]
     fn settle_encode_base64_only_for_success() {
         let success = SettleResponse::Success {
@@ -441,7 +462,7 @@ mod tests {
         assert!(success.encode_base64().is_some());
 
         let failure = SettleResponse::Failure {
-            reason: ErrorReason::UnexpectedError,
+            reason: ErrorReason::UnexpectedSettleError,
             message: None,
             payer: None,
             network: "eip155:1".into(),

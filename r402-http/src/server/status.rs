@@ -16,7 +16,7 @@ use r402_core::error_reason::ErrorReason;
 
 /// Returns the HTTP status corresponding to an [`ErrorReason`].
 #[must_use]
-pub const fn reason_to_status(reason: ErrorReason) -> StatusCode {
+pub const fn reason_to_status(reason: &ErrorReason) -> StatusCode {
     match reason {
         ErrorReason::Permit2AllowanceRequired => StatusCode::PRECONDITION_FAILED,
         _ => StatusCode::PAYMENT_REQUIRED,
@@ -30,7 +30,7 @@ mod tests {
     #[test]
     fn permit2_allowance_required_maps_to_412() {
         assert_eq!(
-            reason_to_status(ErrorReason::Permit2AllowanceRequired),
+            reason_to_status(&ErrorReason::Permit2AllowanceRequired),
             StatusCode::PRECONDITION_FAILED,
         );
     }
@@ -38,17 +38,18 @@ mod tests {
     #[test]
     fn other_reasons_map_to_402() {
         for reason in [
-            ErrorReason::InvalidFormat,
-            ErrorReason::InvalidPaymentAmount,
-            ErrorReason::InvalidSignature,
+            ErrorReason::InvalidPayload,
+            ErrorReason::InvalidPaymentRequirements,
+            ErrorReason::InvalidExactEvmPayloadSignature,
             ErrorReason::InsufficientFunds,
             ErrorReason::DuplicateSettlement,
-            ErrorReason::MemoMismatch,
-            ErrorReason::SimulationFailed,
-            ErrorReason::UnexpectedError,
+            ErrorReason::InvalidExactSolanaPayloadMemoMismatch,
+            ErrorReason::InvalidTransactionState,
+            ErrorReason::UnexpectedSettleError,
+            ErrorReason::Custom("some_unknown_code".into()),
         ] {
             assert_eq!(
-                reason_to_status(reason),
+                reason_to_status(&reason),
                 StatusCode::PAYMENT_REQUIRED,
                 "reason {reason:?} should map to 402"
             );

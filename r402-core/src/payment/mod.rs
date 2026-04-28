@@ -187,7 +187,7 @@ mod tests {
             &self,
             _request: VerifyRequest,
         ) -> Result<VerifyResponse, FacilitatorError> {
-            Ok(VerifyResponse::invalid(None, ErrorReason::InvalidFormat))
+            Ok(VerifyResponse::invalid(None, ErrorReason::InvalidPayload))
         }
 
         async fn settle(

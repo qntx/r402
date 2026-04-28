@@ -586,7 +586,7 @@ mod tests {
         struct Invalid;
         impl Facilitator for Invalid {
             async fn verify(&self, _r: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
-                Ok(VerifyResponse::invalid(None, ErrorReason::InvalidFormat))
+                Ok(VerifyResponse::invalid(None, ErrorReason::InvalidPayload))
             }
             async fn settle(&self, _r: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
                 unreachable!()
@@ -599,7 +599,7 @@ mod tests {
         let response = hooked.verify(dummy_verify()).await.unwrap();
         match response {
             VerifyResponse::Invalid { reason, .. } => {
-                assert_eq!(reason, ErrorReason::InvalidFormat);
+                assert_eq!(reason, ErrorReason::InvalidPayload);
             }
             VerifyResponse::Valid { .. } => panic!("expected invalid"),
         }
