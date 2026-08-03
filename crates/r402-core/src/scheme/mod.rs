@@ -84,7 +84,11 @@ macro_rules! impl_scheme_marker {
 
         impl<'de> serde::Deserialize<'de> for $ty {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                let s = <&str>::deserialize(deserializer)?;
+                // `Cow` rather than `&str`: scheme markers are also decoded from
+                // owned `serde_json::Value` trees (e.g. `TypedVerifyRequest::from_verify`),
+                // where no borrowed string is available.
+                let s = <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
+                let s = s.as_ref();
                 if s == Self::VALUE {
                     Ok(Self)
                 } else {
@@ -125,5 +129,18 @@ mod marker_tests {
     fn wrong_scheme_rejected() {
         assert!(serde_json::from_str::<ExactScheme>(r#""upto""#).is_err());
         assert!(serde_json::from_str::<UptoScheme>(r#""exact""#).is_err());
+    }
+
+    /// Scheme markers must decode from an owned `serde_json::Value` tree, not
+    /// only from a borrowing `&str` deserializer. `TypedVerifyRequest::from_verify`
+    /// goes through `serde_json::from_value`, which cannot hand out borrowed
+    /// strings.
+    #[test]
+    fn markers_decode_from_owned_value() {
+        let exact: ExactScheme = serde_json::from_value(serde_json::json!("exact")).unwrap();
+        assert_eq!(exact, ExactScheme);
+        let upto: UptoScheme = serde_json::from_value(serde_json::json!("upto")).unwrap();
+        assert_eq!(upto, UptoScheme);
+        assert!(serde_json::from_value::<ExactScheme>(serde_json::json!("upto")).is_err());
     }
 }
