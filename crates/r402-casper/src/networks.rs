@@ -69,11 +69,11 @@ pub fn wcspr_casper_deployments() -> &'static [CasperTokenDeployment] {
 /// Returns the wCSPR deployment for a specific Casper chain, if known.
 #[must_use]
 pub fn wcspr_casper_deployment(
-    chain: &CasperChainReference,
+    chain: CasperChainReference,
 ) -> Option<&'static CasperTokenDeployment> {
     WCSPR_DEPLOYMENTS
         .iter()
-        .find(|deployment| deployment.chain_reference == *chain)
+        .find(|deployment| deployment.chain_reference == chain)
 }
 
 /// Ergonomic accessors for wCSPR token deployments on well-known Casper
@@ -103,7 +103,7 @@ impl WCSPR {
     ///
     /// Returns `None` if the chain is not in the built-in deployment table.
     #[must_use]
-    pub fn on(chain: &CasperChainReference) -> Option<&'static CasperTokenDeployment> {
+    pub fn on(chain: CasperChainReference) -> Option<&'static CasperTokenDeployment> {
         wcspr_casper_deployment(chain)
     }
 
@@ -116,15 +116,13 @@ impl WCSPR {
     /// wCSPR on Casper testnet (`casper:casper-test`).
     #[must_use]
     pub fn casper_test() -> &'static CasperTokenDeployment {
-        wcspr_casper_deployment(&CasperChainReference::CASPER_TEST)
+        wcspr_casper_deployment(CasperChainReference::CASPER_TEST)
             .expect("built-in wCSPR deployment for Casper testnet missing")
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use r402_core::chain::ChainId;
-
     use super::*;
 
     #[test]
@@ -139,7 +137,7 @@ mod tests {
     #[test]
     fn every_network_info_maps_to_a_chain_reference() {
         for network in CASPER_NETWORKS {
-            let chain_id: ChainId = network.chain_id();
+            let chain_id = network.chain_id();
             assert!(
                 CasperChainReference::try_from(chain_id).is_ok(),
                 "network {} has no chain reference",
@@ -163,7 +161,7 @@ mod tests {
 
     #[test]
     fn lookup_returns_none_for_chains_without_deployments() {
-        assert!(WCSPR::on(&CasperChainReference::CASPER).is_none());
+        assert!(WCSPR::on(CasperChainReference::CASPER).is_none());
         assert_eq!(WCSPR::all().len(), 1);
     }
 

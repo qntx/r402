@@ -191,6 +191,10 @@ mod duration_secs {
     }
 }
 
+#[allow(
+    clippy::indexing_slicing,
+    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
+)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +202,10 @@ mod tests {
     #[test]
     fn default_targets_the_hosted_casper_facilitator() {
         let config = CasperFacilitatorConfig::default();
-        assert_eq!(config.base_url.as_str(), "https://x402-facilitator.cspr.cloud/");
+        assert_eq!(
+            config.base_url.as_str(),
+            "https://x402-facilitator.cspr.cloud/"
+        );
         assert_eq!(
             config.verify_url().as_str(),
             "https://x402-facilitator.cspr.cloud/verify"
@@ -267,7 +274,8 @@ mod tests {
 
     #[test]
     fn json_config_falls_back_to_defaults() {
-        let config: CasperFacilitatorConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        let config: CasperFacilitatorConfig =
+            serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(config, CasperFacilitatorConfig::default());
     }
 }

@@ -47,7 +47,9 @@ pub enum CasperExactError {
         requirements: String,
     },
     /// `authorization.value` does not equal `requirements.amount`.
-    #[error("amount mismatch: authorization.value={authorization} requirements.amount={requirements}")]
+    #[error(
+        "amount mismatch: authorization.value={authorization} requirements.amount={requirements}"
+    )]
     AmountMismatch {
         /// Amount the buyer signed for.
         authorization: String,

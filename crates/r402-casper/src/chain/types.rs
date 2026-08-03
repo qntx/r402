@@ -618,10 +618,8 @@ impl CasperTokenDeployment {
 mod tests {
     use super::*;
 
-    const ACCOUNT_HEX: &str =
-        "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd";
-    const PACKAGE_HEX: &str =
-        "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    const ACCOUNT_HEX: &str = "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd";
+    const PACKAGE_HEX: &str = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
 
     fn account() -> String {
         format!("00{PACKAGE_HEX}")
@@ -663,7 +661,10 @@ mod tests {
     #[test]
     fn chain_reference_exposes_chain_name_and_rpc() {
         assert_eq!(CasperChainReference::CASPER.chain_name(), "casper");
-        assert_eq!(CasperChainReference::CASPER_TEST.chain_name(), "casper-test");
+        assert_eq!(
+            CasperChainReference::CASPER_TEST.chain_name(),
+            "casper-test"
+        );
         assert!(CasperChainReference::CASPER_TEST.is_testnet());
         assert!(!CasperChainReference::CASPER.is_testnet());
         assert!(
@@ -739,7 +740,9 @@ mod tests {
         ));
         // ...and neither must a 33-byte body under the ed25519 tag.
         assert!(matches!(
-            format!("01{PACKAGE_HEX}ab").parse::<PublicKey>().unwrap_err(),
+            format!("01{PACKAGE_HEX}ab")
+                .parse::<PublicKey>()
+                .unwrap_err(),
             PublicKeyParseError::InvalidLength {
                 algorithm: "ed25519",
                 ..
@@ -776,7 +779,10 @@ mod tests {
             "Wrapped CSPR",
             "1",
         );
-        assert_eq!(deployment.parse("2.5").unwrap().amount.inner(), 2_500_000_000);
+        assert_eq!(
+            deployment.parse("2.5").unwrap().amount.inner(),
+            2_500_000_000
+        );
         assert_eq!(deployment.amount(7).amount.inner(), 7);
         assert!(matches!(
             deployment.parse("0.0000000001").unwrap_err(),

@@ -112,7 +112,8 @@ impl Motes {
     /// Returns [`MotesParseError`] when the input is malformed, carries
     /// sub-mote precision, or overflows `u128`.
     pub fn from_cspr_str(input: &str) -> Result<Self, MotesParseError> {
-        let trimmed = input.trim().strip_prefix('+').unwrap_or(input.trim());
+        let trimmed = input.trim();
+        let trimmed = trimmed.strip_prefix('+').unwrap_or(trimmed);
         if trimmed.is_empty() {
             return Err(MotesParseError::Empty);
         }
@@ -202,7 +203,9 @@ fn parse_u128(digits: &str) -> Result<u128, MotesParseError> {
     if digits.is_empty() {
         return Ok(0);
     }
-    digits.parse::<u128>().map_err(|_| MotesParseError::Overflow)
+    digits
+        .parse::<u128>()
+        .map_err(|_| MotesParseError::Overflow)
 }
 
 impl Display for Motes {
@@ -259,9 +262,9 @@ impl<'de> Deserialize<'de> for Motes {
             return Err(serde::de::Error::custom(MotesParseError::Empty));
         }
         if let Some(bad) = raw.chars().find(|c| !c.is_ascii_digit()) {
-            return Err(serde::de::Error::custom(
-                MotesParseError::InvalidCharacter(bad),
-            ));
+            return Err(serde::de::Error::custom(MotesParseError::InvalidCharacter(
+                bad,
+            )));
         }
         raw.parse::<u128>()
             .map(Self)
@@ -330,7 +333,10 @@ mod tests {
             Motes::from_cspr_str("-1").unwrap_err(),
             MotesParseError::InvalidCharacter('-')
         );
-        assert_eq!(Motes::from_cspr_str("   ").unwrap_err(), MotesParseError::Empty);
+        assert_eq!(
+            Motes::from_cspr_str("   ").unwrap_err(),
+            MotesParseError::Empty
+        );
     }
 
     #[test]
@@ -358,7 +364,13 @@ mod tests {
 
     #[test]
     fn cspr_string_round_trips() {
-        for raw in [0u128, 1, 999_999_999, 1_000_000_000, 123_456_789_987_654_321] {
+        for raw in [
+            0u128,
+            1,
+            999_999_999,
+            1_000_000_000,
+            123_456_789_987_654_321,
+        ] {
             let motes = Motes::new(raw);
             let rendered = motes.to_cspr_string();
             assert_eq!(

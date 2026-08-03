@@ -39,7 +39,7 @@ pub fn is_hex(input: &str) -> bool {
 /// Returns [`HexDecodeError`] when the input length is odd or a character is
 /// not an ASCII hex digit.
 pub fn decode(input: &str) -> Result<Vec<u8>, HexDecodeError> {
-    if input.len() % 2 != 0 {
+    if !input.len().is_multiple_of(2) {
         return Err(HexDecodeError::OddLength(input.len()));
     }
     let bytes = input.as_bytes();
@@ -73,14 +73,13 @@ pub fn decode_exact<const N: usize>(input: &str) -> Result<[u8; N], HexDecodeErr
 pub fn encode(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
 
-    bytes.iter().fold(
-        String::with_capacity(bytes.len() * 2),
-        |mut acc, byte| {
+    bytes
+        .iter()
+        .fold(String::with_capacity(bytes.len() * 2), |mut acc, byte| {
             // Writing into a String is infallible.
-            let _ = write!(acc, "{byte:02x}");
+            let _unused = write!(acc, "{byte:02x}");
             acc
-        },
-    )
+        })
 }
 
 fn nibble(byte: u8) -> Result<u8, HexDecodeError> {

@@ -138,6 +138,10 @@ where
     }
 }
 
+#[allow(
+    clippy::indexing_slicing,
+    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
+)]
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
@@ -180,10 +184,7 @@ mod tests {
             Ok(self.response.clone())
         }
 
-        async fn get_json(
-            &self,
-            url: &url::Url,
-        ) -> Result<serde_json::Value, FacilitatorError> {
+        async fn get_json(&self, url: &url::Url) -> Result<serde_json::Value, FacilitatorError> {
             self.calls.lock().unwrap().push(url.to_string());
             Ok(self.response.clone())
         }
@@ -257,9 +258,8 @@ mod tests {
             "amount": "1500000000"
         }));
         let facilitator = CasperExactFacilitator::hosted(transport);
-        let request = wire::SettleRequest::from(
-            verify_request("1500000000", far_future()).into_json(),
-        );
+        let request =
+            wire::SettleRequest::from(verify_request("1500000000", far_future()).into_json());
         let response = facilitator.settle(request).await.unwrap();
         assert!(response.is_success());
         assert_eq!(

@@ -36,6 +36,25 @@ rather than protocol semantics.
 
 ### Added
 
+- **`r402-casper` chain crate** — Casper Network support for the x402
+  protocol, structurally mirroring `r402-evm` / `r402-svm`: same
+  `client` / `server` / `facilitator` / `telemetry` / `full` feature
+  flags, same module layout (`chain`, `exact`), and the same error
+  taxonomy mapped onto spec `ErrorReason` values.
+  - Networks `casper:casper` (mainnet) and `casper:casper-test`
+    (testnet) with CAIP-2 chain IDs, plus a built-in wCSPR CEP-18
+    deployment table and the `WCSPR` accessor.
+  - `exact` scheme over wCSPR CEP-18 transfers with pre-signed
+    EIP-712-style authorizations.
+  - Facilitator client (`verify` / `settle` / `supported`) targeting
+    `https://x402-facilitator.cspr.cloud`, overridable through
+    `R402_CASPER_FACILITATOR_URL`.
+  - 9-decimal mote arithmetic is exact integer math — sub-mote
+    precision returns a typed `MotesParseError` rather than silently
+    truncating.
+  - Dependency footprint kept comparable to `r402-svm`; no heavy Casper
+    SDK is pulled into the workspace.
+
 - **`BackgroundSettlementTracker`** (F-101 / F-102, `r402-http`). RAII
   in-flight counter + `tokio::sync::Notify` for graceful shutdown of
   background settlement tasks.
@@ -92,6 +111,14 @@ rather than protocol semantics.
 
 ### Fixed
 
+- **Scheme markers decode from owned JSON** (`r402-core`).
+  `ExactScheme` / `UptoScheme` implemented `Deserialize` via
+  `<&str>::deserialize`, which `serde_json::from_value` cannot satisfy.
+  This broke `TypedVerifyRequest::from_verify` for every chain crate
+  with `invalid type: string "exact", expected a borrowed string`.
+  The markers now decode through `Cow<'de, str>`, so both borrowed and
+  owned inputs work; covered by a `markers_decode_from_owned_value`
+  regression test.
 - **F-001** wire envelopes reject typo'd top-level fields
   (`deny_unknown_fields`).
 - **F-002** `SettleResponse::Failure` always serialises

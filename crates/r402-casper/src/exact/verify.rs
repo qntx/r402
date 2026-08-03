@@ -178,6 +178,10 @@ pub fn now_unix() -> u64 {
         .map_or(0, |duration| duration.as_secs())
 }
 
+#[allow(
+    clippy::indexing_slicing,
+    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
+)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,11 +299,11 @@ mod tests {
             CasperExactError::MissingTokenName
         );
 
-        let mut json = request_json();
-        json["paymentRequirements"]["extra"] =
+        let mut json_version = request_json();
+        json_version["paymentRequirements"]["extra"] =
             serde_json::json!({ "name": "Wrapped CSPR", "version": "  " });
         assert_eq!(
-            validate_at(&request_from(json), NOW).unwrap_err(),
+            validate_at(&request_from(json_version), NOW).unwrap_err(),
             CasperExactError::MissingTokenVersion
         );
     }

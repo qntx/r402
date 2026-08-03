@@ -163,13 +163,15 @@ pub struct SupportedPaymentKindExtra {
 mod unix_seconds {
     use serde::{Deserialize, Deserializer, Serializer};
 
+    #[allow(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "signature is dictated by serde's `serialize_with` contract"
+    )]
     pub(super) fn serialize<S: Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&value.to_string())
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<u64, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<u64, D::Error> {
         let raw = String::deserialize(deserializer)?;
         raw.trim().parse::<u64>().map_err(serde::de::Error::custom)
     }
@@ -221,6 +223,10 @@ pub mod v2 {
     pub type SupportedExtra = SupportedPaymentKindExtra;
 }
 
+#[allow(
+    clippy::indexing_slicing,
+    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
+)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,7 +334,7 @@ mod tests {
         let extra = SupportedPaymentKindExtra {
             fee_payer: ACCOUNT.parse().unwrap(),
         };
-        let json = serde_json::to_value(&extra).unwrap();
+        let json = serde_json::to_value(extra).unwrap();
         assert_eq!(json["feePayer"], ACCOUNT);
         assert_eq!(
             serde_json::from_value::<SupportedPaymentKindExtra>(json).unwrap(),

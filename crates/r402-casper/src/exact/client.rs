@@ -175,7 +175,9 @@ pub fn build_payment_payload(
 ///
 /// Returns [`CasperExactError`] when `asset` is not a package hash or when
 /// the `extra` block is missing the token name/version the domain requires.
-pub fn domain_for(requirements: &v2::PaymentRequirements) -> Result<Eip712Domain, CasperExactError> {
+pub fn domain_for(
+    requirements: &v2::PaymentRequirements,
+) -> Result<Eip712Domain, CasperExactError> {
     let verifying_contract = requirements
         .asset
         .parse::<ContractPackageHash>()
@@ -198,6 +200,10 @@ pub fn domain_for(requirements: &v2::PaymentRequirements) -> Result<Eip712Domain
     })
 }
 
+#[allow(
+    clippy::indexing_slicing,
+    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
+)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,13 +257,10 @@ mod tests {
 
     #[test]
     fn build_payload_validates_signature_width() {
-        let auth = AuthorizationBuilder::for_requirements(
-            PAYER.parse().unwrap(),
-            &requirements(),
-            1_000,
-        )
-        .unwrap()
-        .build();
+        let auth =
+            AuthorizationBuilder::for_requirements(PAYER.parse().unwrap(), &requirements(), 1_000)
+                .unwrap()
+                .build();
         let payload = build_payload(auth.clone(), public_key(), "aa".repeat(65)).unwrap();
         assert_eq!(payload.authorization, auth);
 
@@ -267,13 +270,10 @@ mod tests {
 
     #[test]
     fn payment_payload_envelope_is_x402_v2() {
-        let auth = AuthorizationBuilder::for_requirements(
-            PAYER.parse().unwrap(),
-            &requirements(),
-            1_000,
-        )
-        .unwrap()
-        .build();
+        let auth =
+            AuthorizationBuilder::for_requirements(PAYER.parse().unwrap(), &requirements(), 1_000)
+                .unwrap()
+                .build();
         let payload = build_payload(auth, public_key(), "aa".repeat(65)).unwrap();
         let envelope = build_payment_payload(requirements(), payload);
         let json = serde_json::to_value(&envelope).unwrap();

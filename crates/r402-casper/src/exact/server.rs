@@ -81,8 +81,7 @@ pub fn casper_fee_payer_enricher_v2(
             let _ = existing.insert("feePayer".to_owned(), fee_payer);
         }
         _ => {
-            price_tag.requirements.extra =
-                Some(serde_json::json!({ "feePayer": fee_payer.clone() }));
+            price_tag.requirements.extra = Some(serde_json::json!({ "feePayer": fee_payer }));
         }
     }
 }
@@ -164,7 +163,12 @@ mod tests {
         );
         casper_fee_payer_enricher_v2(&mut tag, &supported);
         assert!(
-            tag.requirements.extra.as_ref().unwrap().get("feePayer").is_none(),
+            tag.requirements
+                .extra
+                .as_ref()
+                .unwrap()
+                .get("feePayer")
+                .is_none(),
             "fee payer from a different network must not leak in"
         );
     }
