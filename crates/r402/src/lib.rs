@@ -1,6 +1,9 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "casper")]
+#[cfg_attr(docsrs, doc(cfg(feature = "casper")))]
+pub use r402_casper as casper;
 pub use r402_core::*;
 #[cfg(feature = "evm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "evm")))]

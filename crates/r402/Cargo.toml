@@ -25,30 +25,35 @@ default = ["evm", "http"]
 
 evm = ["dep:r402-evm"]
 svm = ["dep:r402-svm"]
+casper = ["dep:r402-casper"]
 http = ["dep:r402-http"]
 mcp = ["dep:r402-mcp"]
 
 client = [
     "r402-evm?/client",
     "r402-svm?/client",
+    "r402-casper?/client",
     "r402-http?/client",
     "r402-mcp?/client",
 ]
 server = [
     "r402-evm?/server",
     "r402-svm?/server",
+    "r402-casper?/server",
     "r402-http?/server",
     "r402-mcp?/server",
 ]
 facilitator = [
     "r402-evm?/facilitator",
     "r402-svm?/facilitator",
+    "r402-casper?/facilitator",
 ]
 
 telemetry = [
     "r402-core/telemetry",
     "r402-evm?/telemetry",
     "r402-svm?/telemetry",
+    "r402-casper?/telemetry",
     "r402-http?/telemetry",
     "r402-mcp?/telemetry",
 ]
@@ -62,6 +67,7 @@ all-extensions = ["r402-core/all-extensions"]
 full = [
     "evm",
     "svm",
+    "casper",
     "http",
     "mcp",
     "client",
@@ -74,6 +80,7 @@ full = [
 
 [dependencies]
 r402-core = { workspace = true }
+r402-casper = { workspace = true, optional = true }
 r402-evm = { workspace = true, optional = true }
 r402-svm = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }

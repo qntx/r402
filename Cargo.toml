@@ -19,6 +19,7 @@ description = "x402 Payment Protocol SDK for Rust."
 [workspace.dependencies]
 # Internal crates
 r402 = { version = "0.14.0", path = "crates/r402" }
+r402-casper = { version = "0.14.0", path = "crates/r402-casper" }
 r402-core = { version = "0.14.0", path = "crates/r402-core" }
 r402-evm = { version = "0.14.0", path = "crates/r402-evm" }
 r402-http = { version = "0.14.0", path = "crates/r402-http" }
