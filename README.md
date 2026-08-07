@@ -224,10 +224,6 @@ Each chain and transport crate uses feature flags to minimize compile-time depen
 | `r402-evm` | Price tag generation | EIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle | `tracing` spans |
 | `r402-svm` | Price tag generation | SPL token signing | On-chain verify & settle | `tracing` spans |
 
-## Security
-
-See [`SECURITY.md`](SECURITY.md) for disclaimers, supported versions, and vulnerability reporting.
-
 ## Acknowledgments
 
 - [x402 Protocol Specification](https://www.x402.org/) — protocol design by Coinbase
