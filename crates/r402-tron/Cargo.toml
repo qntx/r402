@@ -1,0 +1,63 @@
+[package]
+name = "r402-tron"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Tron chain support for the x402 payment protocol."
+readme = "README.md"
+keywords = ["x402", "payment", "tron", "trc20", "usdc"]
+categories = [
+    "api-bindings",
+    "cryptography::cryptocurrencies",
+    "web-programming",
+    "asynchronous",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
+
+client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
+server = []
+facilitator = [
+    "dep:alloy-signer",
+    "dep:alloy-sol-types",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:url",
+    "r402-core/cache",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+alloy-primitives = { workspace = true }
+alloy-sol-types = { workspace = true, optional = true }
+bs58 = "0.5"
+compact_str = { workspace = true }
+r402-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.10"
+thiserror = { workspace = true }
+
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true
