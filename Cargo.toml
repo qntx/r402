@@ -49,12 +49,12 @@ tower = "0.5"
 url = { version = "2", features = ["serde"] }
 
 # Utility
-base64 = "0.22"
+base64 = "0.23"
 # Solana's entire ecosystem still ships bincode 1 (legacy serde wire
 # format). Upgrading to bincode 3 here would split the workspace across
 # two incompatible serialization stacks — keep v1 until upstream moves.
 bincode = "1"
-compact_str = { version = "0.9", features = ["serde"] }
+compact_str = { version = "0.10", features = ["serde"] }
 dashmap = "6"
 moka = { version = "0.12", features = ["sync"] }
 rand = "0.10"
