@@ -61,13 +61,13 @@ impl StaticPriceTags {
 }
 
 impl PriceTagSource for StaticPriceTags {
-    async fn resolve(
+    fn resolve(
         &self,
         _headers: &HeaderMap,
         _uri: &Uri,
         _base_url: Option<&Url>,
-    ) -> Vec<wire::PriceTag> {
-        self.tags.to_vec()
+    ) -> impl Future<Output = Vec<wire::PriceTag>> + Send {
+        std::future::ready(self.tags.to_vec())
     }
 }
 

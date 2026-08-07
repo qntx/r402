@@ -218,34 +218,38 @@ impl Facilitator for SchemeRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
     use crate::wire::Extensions;
 
     struct StubFacilitator(CompactString);
 
     impl Facilitator for StubFacilitator {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
-            Ok(VerifyResponse::valid(self.0.clone()))
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid(self.0.clone())))
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
-            Ok(SettleResponse::Success {
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SettleResponse::Success {
                 payer: "0x".into(),
                 transaction: "0x".into(),
                 network: "eip155:1".into(),
                 amount: None,
                 extensions: Extensions::new(),
-            })
+            }))
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 

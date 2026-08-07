@@ -148,6 +148,8 @@ impl Payment<Settled> {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
     use crate::error_reason::ErrorReason;
     use crate::wire::{Extensions, SettleResponse, SupportedResponse, VerifyResponse};
@@ -155,50 +157,57 @@ mod tests {
     struct AlwaysValid;
 
     impl Facilitator for AlwaysValid {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
-            Ok(VerifyResponse::valid("0xPAYER"))
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("0xPAYER")))
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
-            Ok(SettleResponse::Success {
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SettleResponse::Success {
                 payer: "0xPAYER".into(),
                 transaction: "0xTX".into(),
                 network: "eip155:1".into(),
                 amount: Some("1000000".into()),
                 extensions: Extensions::new(),
-            })
+            }))
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 
     struct AlwaysInvalid;
 
     impl Facilitator for AlwaysInvalid {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
-            Ok(VerifyResponse::invalid(None, ErrorReason::InvalidPayload))
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::invalid(
+                None,
+                ErrorReason::InvalidPayload,
+            )))
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
-            unreachable!()
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 

@@ -67,7 +67,7 @@ mod tests {
         assert_eq!(tag.requirements.scheme, "exact");
         assert_eq!(tag.requirements.network.to_string(), "tron:0x2b6653dc");
         let extra = tag.requirements.extra.unwrap();
-        assert_eq!(extra["name"], "Tether USD");
-        assert_eq!(extra["version"], "1");
+        assert_eq!(extra.get("name"), Some(&serde_json::json!("Tether USD")));
+        assert_eq!(extra.get("version"), Some(&serde_json::json!("1")));
     }
 }

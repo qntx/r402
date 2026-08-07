@@ -12,6 +12,7 @@
 //! - On-chain settlement with transaction confirmation polling
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use alloy_primitives::{Address as EvmAddress, B256, Bytes, U256};
 use r402_core::cache::{Duplicate, SettlementCache};
@@ -292,7 +293,9 @@ impl Facilitator for TronExactFacilitator {
         }
     }
 
-    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
         use compact_str::CompactString;
 
         let chain_id = self.provider.chain_id();
@@ -310,8 +313,8 @@ impl Facilitator for TronExactFacilitator {
                 .map(CompactString::from)
                 .collect(),
         );
-        Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(wire::SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers))
+            .with_signers(signers)))
     }
 }

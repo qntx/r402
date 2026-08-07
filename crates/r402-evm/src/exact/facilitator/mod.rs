@@ -12,6 +12,7 @@
 //! - Smart wallet deployment for counterfactual signatures
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::Provider;
@@ -344,7 +345,9 @@ where
         }
     }
 
-    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
         use compact_str::CompactString;
 
         let chain_id = self.provider.chain_id();
@@ -362,8 +365,8 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(wire::SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers))
+            .with_signers(signers)))
     }
 }

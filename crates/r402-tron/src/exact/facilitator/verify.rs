@@ -75,12 +75,15 @@ pub(super) fn assert_domain(
     token: EvmAddress,
     extra: Option<&PaymentRequirementsExtra>,
 ) -> Result<Eip712Domain, TronExactError> {
-    let name = extra.map_or_else(|| {
-        // Query token name via triggerconstantcontract
-        // For now, use empty string if not provided — the signature will
-        // fail to recover, which is the correct outcome.
-        String::new()
-    }, |e| e.name.clone());
+    let name = extra.map_or_else(
+        || {
+            // Query token name via triggerconstantcontract
+            // For now, use empty string if not provided — the signature will
+            // fail to recover, which is the correct outcome.
+            String::new()
+        },
+        |e| e.name.clone(),
+    );
     let version = extra.map_or_else(String::new, |e| e.version.clone());
     if name.is_empty() || version.is_empty() {
         return Err(TronExactError::MissingTip712Domain);

@@ -8,6 +8,7 @@ mod memo;
 mod verify;
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use compact_str::CompactString;
 pub use config::SolanaExactFacilitatorConfig;
@@ -126,7 +127,9 @@ where
         })
     }
 
-    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let kinds: Vec<wire::SupportedPaymentKind> = {
             let fee_payer = self.provider.fee_payer();
@@ -156,9 +159,9 @@ where
             );
             signers
         };
-        Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(wire::SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers))
+            .with_signers(signers)))
     }
 }
 

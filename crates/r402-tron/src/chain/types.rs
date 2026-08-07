@@ -458,8 +458,7 @@ mod tests {
         corrupted.push('1');
         assert!(matches!(
             Address::from_base58check(&corrupted),
-            Err(AddressFormatError::InvalidChecksum |
-AddressFormatError::InvalidBase58(_))
+            Err(AddressFormatError::InvalidChecksum | AddressFormatError::InvalidBase58(_))
         ));
     }
 
@@ -474,7 +473,7 @@ AddressFormatError::InvalidBase58(_))
         let round2 = Sha256::digest(round1);
         let mut full = [0u8; 25];
         full[..21].copy_from_slice(&payload);
-        full[21..].copy_from_slice(&round2[..4]);
+        full[21..].copy_from_slice(round2.get(..4).expect("sha256 output >= 4 bytes"));
         let encoded = bs58::encode(full).into_string();
         assert!(matches!(
             Address::from_base58check(&encoded),

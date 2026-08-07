@@ -28,6 +28,7 @@
 #![cfg(feature = "ext-payment-id")]
 #![cfg_attr(docsrs, doc(cfg(feature = "ext-payment-id")))]
 
+use std::future::Future;
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -126,28 +127,40 @@ impl Extension for PaymentIdentifierExtension {
         ))
     }
 
-    async fn on_verify(&self, ctx: &VerifyContext<'_>) -> Option<ExtensionEntry> {
-        let entry = ctx.payload.extensions.get("payment-identifier")?;
-        let value = entry.to_value();
-        let id = extract_id(&value)?;
+    fn on_verify<'a>(
+        &'a self,
+        ctx: &VerifyContext<'_>,
+    ) -> impl Future<Output = Option<ExtensionEntry>> + Send + 'a {
+        let entry = ctx.payload.extensions.get("payment-identifier");
+        let value = entry.map(ExtensionEntry::to_value);
+        let id = value.as_ref().and_then(|v| extract_id(v));
+        let Some(id) = id else {
+            return std::future::ready(None);
+        };
         let status = match self.record(id) {
             Duplicate::No => "accepted",
             Duplicate::Yes => "duplicate",
         };
-        Some(ExtensionEntry::info(json!({
+        std::future::ready(Some(ExtensionEntry::info(json!({
             "id": id,
             "status": status,
-        })))
+        }))))
     }
 
-    async fn on_settle(&self, ctx: &SettleContext<'_>) -> Option<ExtensionEntry> {
-        let entry = ctx.payload.extensions.get("payment-identifier")?;
-        let value = entry.to_value();
-        let id = extract_id(&value)?;
-        Some(ExtensionEntry::info(json!({
+    fn on_settle<'a>(
+        &'a self,
+        ctx: &SettleContext<'_>,
+    ) -> impl Future<Output = Option<ExtensionEntry>> + Send + 'a {
+        let entry = ctx.payload.extensions.get("payment-identifier");
+        let value = entry.map(ExtensionEntry::to_value);
+        let id = value.as_ref().and_then(|v| extract_id(v));
+        let Some(id) = id else {
+            return std::future::ready(None);
+        };
+        std::future::ready(Some(ExtensionEntry::info(json!({
             "id": id,
             "status": "settled",
-        })))
+        }))))
     }
 }
 

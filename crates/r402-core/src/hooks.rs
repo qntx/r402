@@ -404,22 +404,23 @@ mod tests {
     }
 
     impl Facilitator for MockFacilitator {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
-            if self.fail {
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            let result = if self.fail {
                 Err(FacilitatorError::Onchain("mock".into()))
             } else {
                 Ok(VerifyResponse::valid("0xPAYER"))
-            }
+            };
+            std::future::ready(result)
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
-            if self.fail {
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            let result = if self.fail {
                 Err(FacilitatorError::Onchain("mock".into()))
             } else {
                 Ok(SettleResponse::Success {
@@ -429,59 +430,68 @@ mod tests {
                     amount: None,
                     extensions: Extensions::new(),
                 })
-            }
+            };
+            std::future::ready(result)
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 
     struct AbortVerifyHook;
     impl FacilitatorHooks for AbortVerifyHook {
-        async fn before_verify(&self, _: &VerifyContext) -> HookDecision {
-            HookDecision::Abort {
+        fn before_verify<'a>(
+            &'a self,
+            _: &VerifyContext,
+        ) -> impl Future<Output = HookDecision> + Send + 'a {
+            std::future::ready(HookDecision::Abort {
                 reason: "blocked".into(),
                 message: "test".into(),
-            }
+            })
         }
     }
 
     struct AbortSettleHook;
     impl FacilitatorHooks for AbortSettleHook {
-        async fn before_settle(&self, _: &SettleContext) -> HookDecision {
-            HookDecision::Abort {
+        fn before_settle<'a>(
+            &'a self,
+            _: &SettleContext,
+        ) -> impl Future<Output = HookDecision> + Send + 'a {
+            std::future::ready(HookDecision::Abort {
                 reason: "blocked".into(),
                 message: "test".into(),
-            }
+            })
         }
     }
 
     struct RecoverVerifyHook;
     impl FacilitatorHooks for RecoverVerifyHook {
-        async fn on_verify_failure(
-            &self,
+        fn on_verify_failure<'a>(
+            &'a self,
             _: &VerifyContext,
             _: &FacilitatorError,
-        ) -> FailureRecovery<VerifyResponse> {
-            FailureRecovery::Recovered(VerifyResponse::valid("0xREC"))
+        ) -> impl Future<Output = FailureRecovery<VerifyResponse>> + Send + 'a {
+            std::future::ready(FailureRecovery::Recovered(VerifyResponse::valid("0xREC")))
         }
     }
 
     struct RecoverSettleHook;
     impl FacilitatorHooks for RecoverSettleHook {
-        async fn on_settle_failure(
-            &self,
+        fn on_settle_failure<'a>(
+            &'a self,
             _: &SettleContext,
             _: &FacilitatorError,
-        ) -> FailureRecovery<SettleResponse> {
-            FailureRecovery::Recovered(SettleResponse::Success {
+        ) -> impl Future<Output = FailureRecovery<SettleResponse>> + Send + 'a {
+            std::future::ready(FailureRecovery::Recovered(SettleResponse::Success {
                 payer: "0xREC".into(),
                 transaction: "0xREC_TX".into(),
                 network: "eip155:1".into(),
                 amount: None,
                 extensions: Extensions::new(),
-            })
+            }))
         }
     }
 
@@ -490,12 +500,15 @@ mod tests {
 
     struct SecondAbortHook(&'static AtomicUsize);
     impl FacilitatorHooks for SecondAbortHook {
-        async fn before_verify(&self, _: &VerifyContext) -> HookDecision {
+        fn before_verify<'a>(
+            &'a self,
+            _: &VerifyContext,
+        ) -> impl Future<Output = HookDecision> + Send + 'a {
             let _ = self.0.fetch_add(1, Ordering::Relaxed);
-            HookDecision::Abort {
+            std::future::ready(HookDecision::Abort {
                 reason: "second".into(),
                 message: String::new(),
-            }
+            })
         }
     }
 
@@ -587,14 +600,26 @@ mod tests {
     async fn verify_invalid_response_with_reason_round_trip() {
         struct Invalid;
         impl Facilitator for Invalid {
-            async fn verify(&self, _r: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
-                Ok(VerifyResponse::invalid(None, ErrorReason::InvalidPayload))
+            fn verify(
+                &self,
+                _r: VerifyRequest,
+            ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+                std::future::ready(Ok(VerifyResponse::invalid(
+                    None,
+                    ErrorReason::InvalidPayload,
+                )))
             }
-            async fn settle(&self, _r: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
-                unreachable!()
+            fn settle(
+                &self,
+                _r: SettleRequest,
+            ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+                std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
             }
-            async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-                Ok(SupportedResponse::default())
+            fn supported(
+                &self,
+            ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send
+            {
+                std::future::ready(Ok(SupportedResponse::default()))
             }
         }
         let hooked = HookedFacilitator::new(Invalid);

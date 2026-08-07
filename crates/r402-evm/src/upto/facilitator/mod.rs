@@ -12,6 +12,7 @@ mod settle;
 mod verify;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::str::FromStr;
 
 use alloy_primitives::{Address, U256};
@@ -185,7 +186,9 @@ where
         })
     }
 
-    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let signer_strings: Vec<CompactString> = self
             .provider
@@ -193,11 +196,6 @@ where
             .into_iter()
             .map(CompactString::from)
             .collect();
-        // Spec §2: publish the first signer as `extra.facilitatorAddress`
-        // so the resource-server price tag and client signing path can pick
-        // it up via `enrich(supported)`. Mirrors the official TypeScript /
-        // Go behaviour (random pick is not required for correctness; first
-        // is deterministic and avoids surprising the buyer between calls).
         let extra = signer_strings.first().map(|addr| {
             serde_json::json!({
                 "assetTransferMethod": "permit2",
@@ -214,9 +212,9 @@ where
         ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(Eip155Upto.caip_family().into(), signer_strings);
-        Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(wire::SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers))
+            .with_signers(signers)))
     }
 }
 

@@ -131,7 +131,8 @@ impl StructuredSignature {
             None => Self::EIP1271(bytes),
             Some(s) => {
                 let is_expected_signer = s
-                    .recover_address_from_prehash(prehash).is_ok_and(|r| r == expected_signer);
+                    .recover_address_from_prehash(prehash)
+                    .is_ok_and(|r| r == expected_signer);
                 if is_expected_signer {
                     Self::Eoa(s)
                 } else {

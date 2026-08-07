@@ -271,15 +271,16 @@ impl TronGridClient {
             .and_then(Value::as_bool)
             .unwrap_or(false);
         if !ok {
-            let message = response
-                .get("message")
-                .and_then(Value::as_str).map_or_else(|| "broadcasttransaction failed".to_owned(), |b64_or_text| {
+            let message = response.get("message").and_then(Value::as_str).map_or_else(
+                || "broadcasttransaction failed".to_owned(),
+                |b64_or_text| {
                     // TronGrid often hex-encodes the message field.
                     hex::decode(b64_or_text)
                         .ok()
                         .and_then(|bytes| String::from_utf8(bytes).ok())
                         .unwrap_or_else(|| b64_or_text.to_owned())
-                });
+                },
+            );
             return Err(TronExactError::TransactionFailed(message));
         }
         Ok(hex::encode(unsigned.tx_id))
