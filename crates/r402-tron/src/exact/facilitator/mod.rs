@@ -40,7 +40,7 @@ use verify::{verify_payment, verify_permit2_payment};
 /// Tron produces blocks approximately every 3 seconds; we use 6 seconds
 /// (2 blocks) to align with the EVM default and provide a reasonable
 /// grace window for clock drift.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = 6;
+const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::TRON_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
 
 /// A fully specified EIP-3009 authorization payload for Tron settlement.
 #[derive(Debug)]
@@ -102,7 +102,7 @@ pub struct TronExactFacilitator {
 impl TronExactFacilitator {
     /// Creates a new Tron exact scheme facilitator with the given provider.
     ///
-    /// Uses [`DEFAULT_CLOCK_SKEW_TOLERANCE`] (6 s) for time-window validation
+    /// Uses [`crate::TRON_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS`] (6 s) for time-window validation
     /// and a default [`SettlementCache`] with the spec-recommended 2-minute TTL.
     #[must_use]
     pub fn new(provider: TronChainProvider) -> Self {

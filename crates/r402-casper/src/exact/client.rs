@@ -27,7 +27,8 @@ use crate::exact::{
 use crate::hex;
 use crate::motes::Motes;
 
-/// Field names and Solidity-style types of [`PRIMARY_TYPE`], in signing order.
+/// Field names and Solidity-style types of
+/// [`PRIMARY_TYPE`](crate::exact::PRIMARY_TYPE), in signing order.
 pub const TRANSFER_WITH_AUTHORIZATION_FIELDS: &[(&str, &str)] = &[
     ("from", "address"),
     ("to", "address"),
