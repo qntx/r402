@@ -1,26 +1,32 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::expect_used,
+        reason = "tests use panic/expect for clearer failure messages"
+    )
+)]
 
-//! MCP (Model Context Protocol) transport for x402.
+//! MCP transport for x402 on the official [`rmcp`] SDK.
 //!
-//! Built on the **official** Rust MCP SDK [`rmcp`](https://crates.io/crates/rmcp)
-//! (`modelcontextprotocol/rust-sdk`), mirroring how Go binds
-//! `modelcontextprotocol/go-sdk` and TypeScript binds
-//! `@modelcontextprotocol/sdk`.
+//! # Official pins
+//!
+//! | Component | Source |
+//! |-----------|--------|
+//! | Behaviour | `specs/transports-v2/mcp.md` |
+//! | Control flow | Go `go/mcp/{server,client,utils}.go` |
+//! | MCP types | **`rmcp`** (`modelcontextprotocol/rust-sdk`) |
 //!
 //! # Feature flags
 //!
 //! | Feature | Surface |
 //! |---------|---------|
-//! | `server` | [`server::PaymentWrapper`] + encode helpers |
-//! | `client` | [`client::X402McpClient`] auto-pay |
-//! | `full` | server + client + telemetry |
-//!
-//! # Normative references
-//!
-//! - `specs/transports-v2/mcp.md`
-//! - `go/mcp/{server,client,utils,types,constants}.go`
-//! - `@x402/mcp` TypeScript package
+//! | `server` | [`PaymentWrapper`] |
+//! | `client` | [`X402McpClient`], [`call_paid_tool`] |
+//! | `full` | both + telemetry |
 
 pub mod constants;
 
@@ -30,6 +36,10 @@ use tracing as _;
 #[cfg(any(feature = "server", feature = "client"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "server", feature = "client"))))]
 pub mod encode;
+
+#[cfg(any(feature = "server", feature = "client"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "server", feature = "client"))))]
+pub mod error;
 
 #[cfg(feature = "server")]
 #[cfg_attr(docsrs, doc(cfg(feature = "server")))]
@@ -51,11 +61,21 @@ pub use encode::{
     is_payment_required_result, payment_required_tool_result, settlement_failed_tool_result,
 };
 
+#[cfg(any(feature = "server", feature = "client"))]
+pub use error::{McpClientError, PaymentRequiredError};
+
 #[cfg(feature = "server")]
-pub use server::{PaymentWrapper, PaymentWrapperConfig, PaymentWrapperHooks, ServerHookContext};
+pub use server::{
+    AfterExecutionContext, PaymentWrapper, PaymentWrapperConfig, PaymentWrapperConfigError,
+    PaymentWrapperHooks, ServerHookContext, SettlementContext,
+};
 
 #[cfg(feature = "client")]
 pub use client::{
-    McpClientError, McpToolCaller, PaidToolCallResult, PaymentSigner, X402McpClient,
-    X402McpClientOptions,
+    AfterPaymentContext, ClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
+    PaymentRequiredHookResult, PaymentSigner, X402McpClient, X402McpClientOptions, call_paid_tool,
 };
+
+// `serde` is a workspace dep used transitively via wire types; silence when
+// no direct path reference exists under the selected feature set.
+use serde as _;

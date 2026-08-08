@@ -4262,6 +4262,7 @@ version = "0.14.0"
 dependencies = [
  "r402-core",
  "rmcp",
+ "serde",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",

@@ -32,7 +32,7 @@ r402 (umbrella)
   ├── r402-tron          ── r402-core   exact (TronGrid)
   ├── r402-casper        ── r402-core   exact (preflight + remote facilitator)
   ├── r402-http          ── r402-core   Axum gate + reqwest client
-  └── r402-mcp           ── r402-core   MCP transport (placeholder)
+  └── r402-mcp           ── r402-core   MCP transport (rmcp, V2)
 ```
 
 Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-mcp` → `r402`.

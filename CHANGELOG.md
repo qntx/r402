@@ -45,7 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - Removed dead `../audit/` links from crate READMEs (no audit tree in-repo).
 - Clarified EVM network table as default stablecoin deployments (not all USDC).
-- Marked `r402-mcp` as a non-production placeholder in the crate catalog.
+- Crate catalog: `r402-mcp` documented as production V2 transport on `rmcp`
+  (no longer a placeholder).
 
 Comprehensive audit pass against `3rdparty/x402/specs/`. **31 P1/P2
 findings** addressed plus four new regression-test suites. The release

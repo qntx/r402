@@ -28,8 +28,11 @@ pub mod extensions;
 pub mod facilitator;
 pub mod hooks;
 pub mod payment;
+pub mod resource_server;
 pub mod scheme;
 pub mod wire;
+
+pub use resource_server::{ResourceServer, WirePaymentPayload};
 
 #[cfg(feature = "cache")]
 #[cfg_attr(docsrs, doc(cfg(feature = "cache")))]

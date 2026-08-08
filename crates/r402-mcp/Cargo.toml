@@ -23,13 +23,14 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 telemetry = ["r402-core/telemetry", "dep:tracing"]
 # Server types use rmcp model (CallToolResult, meta) — no transport required.
-server = ["dep:rmcp"]
+server = ["dep:rmcp", "dep:thiserror"]
 # Client types + tool-call adapter.
 client = ["dep:rmcp", "dep:thiserror"]
 full = ["telemetry", "server", "client"]
 
 [dependencies]
 r402-core = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 rmcp = { workspace = true, optional = true, default-features = false }
 thiserror = { workspace = true, optional = true }

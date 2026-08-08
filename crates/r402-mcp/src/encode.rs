@@ -1,21 +1,24 @@
 //! Transport encoding for MCP × x402.
 //!
-//! Implements `specs/transports-v2/mcp.md` and Go `go/mcp/utils.go`:
-//! payment-required results carry **both** `structuredContent` and
-//! `content[0].text` (JSON string of the same object).
+//! Ports Go `go/mcp/utils.go` and `specs/transports-v2/mcp.md`:
+//! - payment-required: dual `structuredContent` + `content[0].text`
+//! - settlement failure uses the **same** dual format (Go server R5)
+//! - meta keys `x402/payment` / `x402/payment-response`
 
-use r402_core::wire::{PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse};
+use r402_core::wire::{
+    Extensions, PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse,
+};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, RequestMetaObject};
 use serde_json::Value;
 
-use crate::constants::{
-    MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX,
-};
+use crate::constants::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX};
 
 /// Wire payment payload shape used on MCP `_meta` (opaque scheme payload).
 pub type McpPaymentPayload = PaymentPayload<PaymentRequirements, Value>;
 
 /// Builds a tool resource URL: custom if non-empty, else `mcp://tool/{name}`.
+///
+/// Go: `CreateToolResourceUrl`.
 #[must_use]
 pub fn create_tool_resource_url(tool_name: &str, custom_url: Option<&str>) -> String {
     match custom_url {
@@ -24,49 +27,87 @@ pub fn create_tool_resource_url(tool_name: &str, custom_url: Option<&str>) -> St
     }
 }
 
-/// Payment-required tool result per transport spec.
+/// Payment-required tool result per transport spec / Go `paymentRequiredResult`.
 ///
 /// Sets `isError: true`, `structuredContent` = `PaymentRequired`, and
-/// `content[0].text` = JSON string of the same object
-/// (`CallToolResult::structured_error` matches that shape).
+/// `content[0].text` = JSON string of the same object.
 #[must_use]
 pub fn payment_required_tool_result(required: &PaymentRequired) -> CallToolResult {
     let value = serde_json::to_value(required).unwrap_or(Value::Null);
     CallToolResult::structured_error(value)
 }
 
-/// Settlement-failed tool result (handler succeeded but settle failed).
+/// Settlement-failed result (Go R5: same dual format as payment-required).
+///
+/// Go `settlementFailedResult` delegates to `paymentRequiredResult`.
 #[must_use]
-pub fn settlement_failed_tool_result(message: impl Into<String>) -> CallToolResult {
-    CallToolResult::error(vec![ContentBlock::text(message.into())])
+pub fn settlement_failed_tool_result(
+    accepts: &[PaymentRequirements],
+    resource: &r402_core::wire::ResourceInfo,
+    extensions: &Extensions,
+    error_msg: impl Into<String>,
+) -> CallToolResult {
+    let mut required = PaymentRequired::new(resource.clone())
+        .with_error(error_msg.into())
+        .with_accepts(accepts.to_vec());
+    if !extensions.is_empty() {
+        required = required.with_extensions(extensions.clone());
+    }
+    payment_required_tool_result(&required)
 }
 
 /// Prefer `structuredContent`, else parse first text content as JSON.
+///
+/// Go `paymentRequiredObject` / `ExtractPaymentRequiredFromResult`:
+/// requires `x402Version` present and non-empty `accepts`; V2 only for us.
 #[must_use]
 pub fn extract_payment_required(result: &CallToolResult) -> Option<PaymentRequired> {
     if !result.is_error.unwrap_or(false) {
         return None;
     }
     if let Some(ref sc) = result.structured_content
-        && let Ok(pr) = serde_json::from_value::<PaymentRequired>(sc.clone())
-        && !pr.accepts.is_empty()
+        && let Some(pr) = payment_required_from_value(sc)
     {
         return Some(pr);
     }
     result
         .content
-        .first()
-        .and_then(ContentBlock::as_text)
-        .and_then(|t| serde_json::from_str(&t.text).ok())
-        .filter(|pr: &PaymentRequired| !pr.accepts.is_empty())
+        .iter()
+        .find_map(ContentBlock::as_text)
+        .and_then(|t| serde_json::from_str::<Value>(&t.text).ok())
+        .and_then(|v| payment_required_from_value(&v))
+}
+
+fn payment_required_from_value(value: &Value) -> Option<PaymentRequired> {
+    let obj = value.as_object()?;
+    // Go isPaymentRequiredObject: accepts + x402Version
+    if !obj.contains_key("x402Version") || !obj.contains_key("accepts") {
+        return None;
+    }
+    let version = obj.get("x402Version").and_then(Value::as_u64)?;
+    if version != 2 {
+        return None;
+    }
+    let accepts = obj.get("accepts")?.as_array()?;
+    if accepts.is_empty() {
+        return None;
+    }
+    serde_json::from_value(value.clone()).ok()
 }
 
 /// Reads `_meta["x402/payment"]` from tool-call params.
+///
+/// Go `ExtractPaymentFromMeta`: invalid structure → None (not error).
 #[must_use]
 pub fn extract_payment_from_params(params: &CallToolRequestParams) -> Option<McpPaymentPayload> {
     let meta = params.meta.as_ref()?;
     let value = meta.get(MCP_PAYMENT_META_KEY)?.clone();
-    serde_json::from_value(value).ok()
+    let payload: McpPaymentPayload = serde_json::from_value(value).ok()?;
+    // Go utils: require version and payload present
+    if payload.payload.is_null() {
+        return None;
+    }
+    Some(payload)
 }
 
 /// Writes `_meta["x402/payment"]` onto tool-call params.
@@ -134,19 +175,40 @@ mod tests {
         let pr = sample_required();
         let result = payment_required_tool_result(&pr);
         assert_eq!(result.is_error, Some(true));
-        assert!(result.structured_content.is_some());
+        let sc = result.structured_content.as_ref().unwrap();
         let text = result
             .content
             .first()
             .and_then(ContentBlock::as_text)
             .unwrap();
-        let parsed: PaymentRequired = serde_json::from_str(&text.text).unwrap();
-        assert_eq!(parsed.accepts.len(), 1);
+        let from_text: Value = serde_json::from_str(&text.text).unwrap();
+        assert_eq!(sc, &from_text);
         let again = extract_payment_required(&result).unwrap();
         assert_eq!(
             again.accepts.first().map(|a| a.amount.as_str()),
             Some("10000")
         );
+    }
+
+    #[test]
+    fn settlement_failed_uses_dual_format() {
+        let pr = sample_required();
+        let result = settlement_failed_tool_result(
+            &pr.accepts,
+            &pr.resource,
+            &Extensions::new(),
+            "Settlement failed",
+        );
+        assert!(extract_payment_required(&result).is_some());
+    }
+
+    #[test]
+    fn rejects_v1_shaped_payment_required() {
+        let result = CallToolResult::structured_error(serde_json::json!({
+            "x402Version": 1,
+            "accepts": [{"scheme":"exact","network":"eip155:1","amount":"1","payTo":"0xa","asset":"0xb","maxTimeoutSeconds":60}]
+        }));
+        assert!(extract_payment_required(&result).is_none());
     }
 
     #[test]
@@ -173,12 +235,52 @@ mod tests {
                 "asset": "0xb",
                 "maxTimeoutSeconds": 60
             },
-            "payload": {}
+            "payload": {"sig": "0x"}
         }))
         .unwrap();
         let params = CallToolRequestParams::new("demo");
         let params = attach_payment_to_params(params, &payload);
         let extracted = extract_payment_from_params(&params).unwrap();
         assert_eq!(extracted.accepted.scheme.as_str(), "exact");
+    }
+
+    #[test]
+    fn null_payload_body_rejected() {
+        use rmcp::model::RequestParamsMeta;
+
+        let mut params = CallToolRequestParams::new("demo");
+        let mut meta = RequestMetaObject::new();
+        meta.insert(
+            MCP_PAYMENT_META_KEY.to_owned(),
+            serde_json::json!({
+                "x402Version": 2,
+                "accepted": {
+                    "scheme": "exact",
+                    "network": "eip155:1",
+                    "amount": "1",
+                    "payTo": "0xa",
+                    "asset": "0xb",
+                    "maxTimeoutSeconds": 60
+                },
+                "payload": null
+            }),
+        );
+        params.set_meta(meta);
+        assert!(extract_payment_from_params(&params).is_none());
+    }
+
+    #[test]
+    fn attach_and_extract_settle_response() {
+        let settle = SettleResponse::Success {
+            payer: "0xpayer".into(),
+            transaction: "0xtx".into(),
+            network: "eip155:1".into(),
+            amount: Some("1".into()),
+            extensions: Extensions::new(),
+        };
+        let result = CallToolResult::success(vec![ContentBlock::text("ok")]);
+        let result = attach_settle_response(result, &settle);
+        let extracted = extract_settle_response(&result).unwrap();
+        assert!(extracted.is_success());
     }
 }
