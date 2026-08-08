@@ -12,7 +12,7 @@ use r402_core::scheme::{
     PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
 };
 use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
-use rand::RngExt as _;
+use rand::RngExt;
 use rand::rng;
 
 use crate::chain::{Address, ContractPackageHash, PublicKey};

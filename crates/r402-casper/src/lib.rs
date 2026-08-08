@@ -61,6 +61,14 @@
 #[cfg(feature = "telemetry")]
 use tracing as _;
 
+// Optional `client` deps are consumed from feature-gated modules
+// (`exact::client`, `exact::eip712`). Name them at the crate root so
+// `unused_crate_dependencies` still sees them under feature unification.
+#[cfg(feature = "client")]
+use rand as _;
+#[cfg(feature = "client")]
+use sha3 as _;
+
 /// Public JSON-RPC endpoint documentation for the Casper facilitator stack.
 ///
 /// The hosted facilitator, node endpoints, and their request/response shapes
