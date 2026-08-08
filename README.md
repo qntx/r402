@@ -31,7 +31,7 @@ r402 is a production-grade, multi-chain implementation of x402 with dual-path ER
 
 ```toml
 [dependencies]
-r402 = { version = "0.14", features = ["evm", "http", "client", "server"] }
+r402 = { version = "0.15", features = ["evm", "http", "client", "server"] }
 ```
 
 Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.

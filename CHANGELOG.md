@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-08-08
+
 ### Production alignment (ex-chain-breadth program)
 
 - **Scheme markers** — `BatchSettlementScheme` (`"batch-settlement"`) and
@@ -271,5 +273,6 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.15.0]: https://github.com/qntx/r402/releases/tag/v0.15.0
 [0.14.0-beta.1]: https://github.com/qntx/r402/releases/tag/v0.14.0-beta.1
-[`r402-core`]: https://docs.rs/r402-core/0.14.0-beta.1
+[`r402-core`]: https://docs.rs/r402-core/0.15.0

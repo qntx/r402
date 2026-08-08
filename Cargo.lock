@@ -4156,7 +4156,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r402"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "r402-casper",
  "r402-core",
@@ -4169,7 +4169,7 @@ dependencies = [
 
 [[package]]
 name = "r402-casper"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "blake2",
  "compact_str",
@@ -4187,7 +4187,7 @@ dependencies = [
 
 [[package]]
 name = "r402-core"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
@@ -4206,7 +4206,7 @@ dependencies = [
 
 [[package]]
 name = "r402-evm"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "alloy-contract",
  "alloy-network",
@@ -4236,7 +4236,7 @@ dependencies = [
 
 [[package]]
 name = "r402-http"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "async-trait",
  "axum-core",
@@ -4258,7 +4258,7 @@ dependencies = [
 
 [[package]]
 name = "r402-mcp"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "r402-core",
  "rmcp",
@@ -4271,7 +4271,7 @@ dependencies = [
 
 [[package]]
 name = "r402-svm"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "base64 0.23.1",
  "bincode",
@@ -4300,7 +4300,7 @@ dependencies = [
 
 [[package]]
 name = "r402-tron"
-version = "0.14.0"
+version = "0.15.0"
 dependencies = [
  "alloy-primitives",
  "alloy-signer",
