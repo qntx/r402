@@ -298,6 +298,7 @@ impl PaymentWrapper {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -321,27 +322,27 @@ mod tests {
     }
 
     impl Facilitator for MockFacilitator {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
             self.verifies.fetch_add(1, Ordering::SeqCst);
-            if self.verify_ok {
+            std::future::ready(if self.verify_ok {
                 Ok(VerifyResponse::valid("0xpayer"))
             } else {
                 Ok(VerifyResponse::invalid(
                     None,
                     r402_core::ErrorReason::InvalidExactEvmPayloadAuthorizationValidAfter,
                 ))
-            }
+            })
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
             self.settles.fetch_add(1, Ordering::SeqCst);
-            if self.settle_ok {
+            std::future::ready(if self.settle_ok {
                 Ok(SettleResponse::Success {
                     payer: "0xpayer".into(),
                     transaction: "0xtx".into(),
@@ -357,11 +358,13 @@ mod tests {
                     network: "eip155:1".into(),
                     extensions: Extensions::new(),
                 })
-            }
+            })
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 

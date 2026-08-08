@@ -335,44 +335,56 @@ mod tests {
     }
 
     impl McpToolCaller for MockCaller {
-        async fn call_tool(&self, params: CallToolRequestParams) -> Result<CallToolResult, String> {
+        fn call_tool(
+            &self,
+            params: CallToolRequestParams,
+        ) -> impl Future<Output = Result<CallToolResult, String>> + Send {
+            std::future::ready(self.handle_call(&params))
+        }
+    }
+
+    impl MockCaller {
+        fn handle_call(&self, params: &CallToolRequestParams) -> Result<CallToolResult, String> {
             let unpaid = params.meta.is_none();
-            {
-                let mut n = self.calls.lock().map_err(|e| e.to_string())?;
-                *n = n.saturating_add(1);
+            let mut n = self.calls.lock().map_err(|e| e.to_string())?;
+            *n = n.saturating_add(1);
+            drop(n);
+            if !unpaid {
+                return Ok(CallToolResult::success(vec![
+                    rmcp::model::ContentBlock::text("ok"),
+                ]));
             }
-            if unpaid {
-                let resource = ResourceInfo::new("mcp://tool/demo");
-                let req = PaymentRequirements::new(
-                    "exact".into(),
-                    "eip155:1".parse().unwrap(),
-                    "1".into(),
-                    "0xa".into(),
-                    "0xb".into(),
-                    60,
-                );
-                let pr = PaymentRequired::new(resource).with_accepts(vec![req]);
-                return Ok(payment_required_tool_result(&pr));
-            }
-            Ok(CallToolResult::success(vec![
-                rmcp::model::ContentBlock::text("ok"),
-            ]))
+            let network = "eip155:1"
+                .parse()
+                .map_err(|e| format!("fixture network: {e}"))?;
+            let resource = ResourceInfo::new("mcp://tool/demo");
+            let req = PaymentRequirements::new(
+                "exact".into(),
+                network,
+                "1".into(),
+                "0xa".into(),
+                "0xb".into(),
+                60,
+            );
+            let pr = PaymentRequired::new(resource).with_accepts(vec![req]);
+            Ok(payment_required_tool_result(&pr))
         }
     }
 
     struct MockSigner;
 
     impl PaymentSigner for MockSigner {
-        async fn sign_payment(
+        fn sign_payment(
             &self,
             required: PaymentRequired,
-        ) -> Result<McpPaymentPayload, String> {
-            let accepted = required
+        ) -> impl Future<Output = Result<McpPaymentPayload, String>> + Send {
+            let result = required
                 .accepts
                 .into_iter()
                 .next()
-                .ok_or_else(|| "no accepts".to_owned())?;
-            Ok(McpPaymentPayload::new(accepted, json!({"s":1})))
+                .ok_or_else(|| "no accepts".to_owned())
+                .map(|accepted| McpPaymentPayload::new(accepted, json!({"s": 1})));
+            std::future::ready(result)
         }
     }
 

@@ -8,14 +8,15 @@
 
 use std::sync::Arc;
 
+use serde::Serialize;
+use serde_json::Value;
+
 use crate::error::FacilitatorError;
 use crate::facilitator::{DynFacilitator, Facilitator};
 use crate::wire::{
     PaymentPayload, PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2,
     VerifyRequest, VerifyResponse, find_matching_requirements,
 };
-use serde::Serialize;
-use serde_json::Value;
 
 /// Wire payment payload with typed requirements and opaque scheme body.
 pub type WirePaymentPayload = PaymentPayload<PaymentRequirements, Value>;
@@ -142,9 +143,11 @@ fn to_verify_request<T: Serialize>(typed: &T) -> Result<VerifyRequest, Facilitat
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use crate::wire::SupportedResponse;
-    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct MockFacilitator {
         verifies: AtomicUsize,
@@ -152,30 +155,32 @@ mod tests {
     }
 
     impl Facilitator for MockFacilitator {
-        async fn verify(
+        fn verify(
             &self,
             _request: VerifyRequest,
-        ) -> Result<VerifyResponse, FacilitatorError> {
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
             self.verifies.fetch_add(1, Ordering::SeqCst);
-            Ok(VerifyResponse::valid("0xpayer"))
+            std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
         }
 
-        async fn settle(
+        fn settle(
             &self,
             _request: SettleRequest,
-        ) -> Result<SettleResponse, FacilitatorError> {
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
             self.settles.fetch_add(1, Ordering::SeqCst);
-            Ok(SettleResponse::Success {
+            std::future::ready(Ok(SettleResponse::Success {
                 payer: "0xpayer".into(),
                 transaction: "0xtx".into(),
                 network: "eip155:1".into(),
                 amount: Some("1".into()),
                 extensions: crate::wire::Extensions::new(),
-            })
+            }))
         }
 
-        async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
-            Ok(SupportedResponse::default())
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
         }
     }
 
