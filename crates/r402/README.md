@@ -1,45 +1,67 @@
 # r402
 
-x402 Payment Protocol SDK for Rust — umbrella crate.
+x402 Payment Protocol SDK for Rust — **umbrella crate**.
 
-This crate is a convenience re-export of the component crates that make up the r402 SDK.
-For finer-grained control over compile-time and runtime dependencies, depend on the
-individual crates directly:
+This crate re-exports the workspace under feature flags. Prefer depending on
+individual crates when you need a minimal dependency graph.
 
-- [`r402-core`](https://docs.rs/r402-core) — wire format, `Facilitator` trait, extension framework
-- [`r402-evm`](https://docs.rs/r402-evm) — EVM chain support (EIP-3009 + Permit2 schemes)
-- [`r402-svm`](https://docs.rs/r402-svm) — Solana chain support (SPL Token + Token-2022)
-- [`r402-tron`](https://docs.rs/r402-tron) — Tron chain support (EIP-3009 + Permit2 via `TronGrid`)
-- [`r402-casper`](https://docs.rs/r402-casper) — Casper exact scheme (remote facilitator)
-- [`r402-http`](https://docs.rs/r402-http) — HTTP transport (server middleware + buyer client)
-- [`r402-mcp`](https://docs.rs/r402-mcp) — MCP transport (placeholder, see crate docs)
+## Included crates
+
+| Feature | Crate | Role |
+| --- | --- | --- |
+| *(always)* | [`r402-core`](https://docs.rs/r402-core) | Wire types, `Facilitator`, schemes, hooks, extensions |
+| `evm` (default) | [`r402-evm`](https://docs.rs/r402-evm) | EVM exact + upto (ERC-3009 / Permit2) |
+| `svm` | [`r402-svm`](https://docs.rs/r402-svm) | Solana exact (SPL Token / Token-2022) |
+| `tron` | [`r402-tron`](https://docs.rs/r402-tron) | Tron exact (TIP-712 / EIP-3009 + Permit2) |
+| `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
+| `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
+| `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport (placeholder) |
+
+Forwarding features: `client`, `server`, `facilitator`, `telemetry`, `cache`,
+`ext-bazaar`, `ext-payment-id`, `all-extensions`, `full`.
 
 ## Quick Start
 
 ```toml
 [dependencies]
-r402 = { version = "0.14", features = ["evm", "http", "facilitator"] }
+# Minimal EVM HTTP server/client
+r402 = { version = "0.14", features = ["evm", "http", "client", "server", "facilitator"] }
+
+# Multi-chain
+r402 = { version = "0.14", features = [
+  "evm", "svm", "tron", "casper",
+  "http", "client", "server", "facilitator",
+] }
+```
+
+```rust,ignore
+// After enabling the matching features:
+use r402::evm;    // r402-evm
+use r402::svm;    // r402-svm
+use r402::tron;   // r402-tron
+use r402::casper; // r402-casper
+use r402::http;   // r402-http
 ```
 
 ## Features
 
-| Flag             | Default | What it enables                                      |
-| ---------------- | :-----: | ---------------------------------------------------- |
-| `evm`            |   ✅    | Re-export `r402-evm` as [`evm`]                      |
-| `svm`            |         | Re-export `r402-svm` as [`svm`]                      |
-| `tron`           |         | Re-export `r402-tron` as [`tron`]                    |
-| `casper`         |         | Re-export `r402-casper` as [`casper`]                |
-| `http`           |   ✅    | Re-export `r402-http` as [`http`]                    |
-| `mcp`            |         | Re-export `r402-mcp` as [`mcp`]                      |
-| `client`         |         | Forward `client` feature to all enabled chain crates |
-| `server`         |         | Forward `server` feature                             |
-| `facilitator`    |         | Forward `facilitator` feature                        |
-| `telemetry`      |         | Enable `tracing` instrumentation                     |
-| `cache`          |         | Enable in-memory caches (`moka`)                     |
-| `ext-bazaar`     |         | Enable bazaar resource discovery extension           |
-| `ext-payment-id` |         | Enable payment-identifier idempotency extension      |
-| `all-extensions` |         | Enable every built-in extension                      |
-| `full`           |         | Enable every feature (kitchen-sink)                  |
+| Flag | Default | What it enables |
+| --- | :---: | --- |
+| `evm` | yes | Re-export `r402-evm` as [`evm`] |
+| `svm` | | Re-export `r402-svm` as [`svm`] |
+| `tron` | | Re-export `r402-tron` as [`tron`] |
+| `casper` | | Re-export `r402-casper` as [`casper`] |
+| `http` | yes | Re-export `r402-http` as [`http`] |
+| `mcp` | | Re-export `r402-mcp` as [`mcp`] |
+| `client` | | Forward `client` to enabled chain + http crates |
+| `server` | | Forward `server` to enabled chain + http crates |
+| `facilitator` | | Forward `facilitator` (Casper also enables `http-client`) |
+| `telemetry` | | Forward `telemetry` / `tracing` |
+| `cache` | | `r402-core` settlement cache |
+| `ext-bazaar` | | Bazaar extension |
+| `ext-payment-id` | | Payment-identifier extension |
+| `all-extensions` | | All built-in extensions |
+| `full` | | Every feature above |
 
 ## License
 

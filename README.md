@@ -15,21 +15,25 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across EVM, Solana, Casper, and Tron.
+r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana (SVM), Tron, and Casper**.
 
 ## Crates
 
 | Crate | | Description |
 | --- | --- | --- |
-| **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
-| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
-| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
-| **[`r402-tron`](crates/r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — EIP-3009 + Permit2 (TIP-712) via TronGrid |
-| **[`r402-casper`](crates/r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme via remote facilitator |
-| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
+| **[`r402`](crates/r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Umbrella crate — feature-gated re-exports of the crates below |
+| **[`r402-core`](crates/r402-core/)** | [![crates.io][r402-core-crate]][r402-core-crate-url] [![docs.rs][r402-core-doc]][r402-core-doc-url] | Protocol types, scheme traits, facilitator abstractions, hooks, extensions |
+| **[`r402-evm`](crates/r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 + Permit2, `exact` + `upto`, multi-signer / nonce |
+| **[`r402-svm`](crates/r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL Token / Token-2022 exact transfers |
+| **[`r402-tron`](crates/r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
+| **[`r402-casper`](crates/r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
+| **[`r402-http`](crates/r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate, reqwest client, facilitator client |
+| **[`r402-mcp`](crates/r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport (placeholder) |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
+[r402-core-crate]: https://img.shields.io/crates/v/r402-core.svg
+[r402-core-crate-url]: https://crates.io/crates/r402-core
 [r402-evm-crate]: https://img.shields.io/crates/v/r402-evm.svg
 [r402-evm-crate-url]: https://crates.io/crates/r402-evm
 [r402-svm-crate]: https://img.shields.io/crates/v/r402-svm.svg
@@ -40,8 +44,12 @@ r402 provides a production-grade, multi-chain implementation of the x402 protoco
 [r402-casper-crate-url]: https://crates.io/crates/r402-casper
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
+[r402-mcp-crate]: https://img.shields.io/crates/v/r402-mcp.svg
+[r402-mcp-crate-url]: https://crates.io/crates/r402-mcp
 [r402-doc]: https://img.shields.io/docsrs/r402.svg
 [r402-doc-url]: https://docs.rs/r402
+[r402-core-doc]: https://img.shields.io/docsrs/r402-core.svg
+[r402-core-doc-url]: https://docs.rs/r402-core
 [r402-evm-doc]: https://img.shields.io/docsrs/r402-evm.svg
 [r402-evm-doc-url]: https://docs.rs/r402-evm
 [r402-svm-doc]: https://img.shields.io/docsrs/r402-svm.svg
@@ -52,8 +60,29 @@ r402 provides a production-grade, multi-chain implementation of the x402 protoco
 [r402-casper-doc-url]: https://docs.rs/r402-casper
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
+[r402-mcp-doc]: https://img.shields.io/docsrs/r402-mcp.svg
+[r402-mcp-doc-url]: https://docs.rs/r402-mcp
 
 See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
+
+### Chain support matrix
+
+| Chain crate | CAIP-2 examples | Schemes | Settlement model |
+| --- | --- | --- | --- |
+| [`r402-evm`](crates/r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto` | In-process on-chain facilitator |
+| [`r402-svm`](crates/r402-svm/) | `solana:…` | `exact` | In-process on-chain facilitator |
+| [`r402-tron`](crates/r402-tron/) | `tron:0x2b6653dc` (mainnet), Nile, Shasta | `exact` | In-process via TronGrid HTTP |
+| [`r402-casper`](crates/r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator |
+
+Enable chains through the umbrella crate:
+
+```toml
+[dependencies]
+r402 = { version = "0.14", features = [
+  "evm", "svm", "tron", "casper",
+  "http", "client", "server", "facilitator",
+] }
+```
 
 ## Quick Start
 

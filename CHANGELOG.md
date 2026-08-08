@@ -124,9 +124,10 @@ rather than protocol semantics.
   - `Motes::FromStr` parses base-unit integers (wire form), matching
     `Deserialize` / EVM `TokenAmount` — use `from_cspr_str` for decimals.
 
-- **Docs / facade: surface `r402-tron`.** Root README, umbrella
-  `r402` feature (`tron`), and `crates/r402-tron/README.md` so Tron is
-  discoverable the same way as EVM / SVM / Casper.
+- **Docs / facade: surface all chains.** Root README and umbrella
+  `r402` document EVM, SVM, Tron, and Casper (crate table, support
+  matrix, feature flags). `r402-core` / `r402-mcp` listed. Umbrella
+  feature `tron` + crate READMEs for `r402-tron` and `r402-casper`.
 
 - **Scheme markers decode from owned JSON** (`r402-core`).
   `ExactScheme` / `UptoScheme` implemented `Deserialize` via
