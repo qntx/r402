@@ -49,12 +49,13 @@ pub mod types;
 pub use types::*;
 
 pub mod verify;
-pub use verify::{ValidatedPayment, validate_at, validate_payload_shape, validate_request};
-
 #[cfg(feature = "client")]
-pub use client::{AuthorizationBuilder, CasperExactClient, CasperSigner, build_payload, domain_for};
+pub use client::{
+    AuthorizationBuilder, CasperExactClient, CasperSigner, build_payload, domain_for,
+};
 #[cfg(feature = "client")]
 pub use eip712::{Eip712Domain, PRIMARY_TYPE, transfer_with_authorization_digest};
+pub use verify::{ValidatedPayment, validate_at, validate_payload_shape, validate_request};
 
 /// Casper exact scheme identifier.
 ///

@@ -16,9 +16,7 @@ use rand::RngExt;
 use rand::rng;
 
 use crate::chain::{Address, ContractPackageHash, PublicKey};
-use crate::exact::eip712::{
-    Eip712Domain, domain_from_parts, transfer_with_authorization_digest,
-};
+use crate::exact::eip712::{Eip712Domain, domain_from_parts, transfer_with_authorization_digest};
 use crate::exact::types::v2;
 use crate::exact::{
     CasperExact, CasperExactError, ExactCasperAuthorization, ExactCasperPayload, NONCE_LEN,
@@ -291,14 +289,11 @@ where
             let public_key = self.signer.public_key();
             let from = public_key.account_hash();
             let now = crate::exact::verify::now_unix();
-            let authorization = AuthorizationBuilder::for_requirements(
-                from,
-                &self.requirements,
-                now,
-            )
-            .map_err(|e| ClientError::Signing(e.to_string()))?
-            .nonce(rng().random())
-            .build();
+            let authorization =
+                AuthorizationBuilder::for_requirements(from, &self.requirements, now)
+                    .map_err(|e| ClientError::Signing(e.to_string()))?
+                    .nonce(rng().random())
+                    .build();
 
             let domain =
                 domain_for(&self.requirements).map_err(|e| ClientError::Signing(e.to_string()))?;

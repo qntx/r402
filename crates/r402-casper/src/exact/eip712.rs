@@ -158,8 +158,7 @@ mod tests {
             value: Motes::new(7_500_000_000),
             valid_after: 1_782_725_469,
             valid_before: 1_782_729_069,
-            nonce: "6505daf8ee30b4bf90db8e4ef3849ea869945ba0638853f6194704e8c9001115"
-                .to_owned(),
+            nonce: "6505daf8ee30b4bf90db8e4ef3849ea869945ba0638853f6194704e8c9001115".to_owned(),
         }
     }
 
