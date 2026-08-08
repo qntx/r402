@@ -1,20 +1,24 @@
 //! Payload validation for the Casper "exact" payment scheme.
 //!
 //! These checks are the chain-agnostic half of Casper verification: shape,
-//! address and asset well-formedness, amount equality, and the timing
-//! window. They run identically on the client (before a payment is sent),
-//! on the resource server (before a payment is relayed), and inside the
-//! facilitator client (before a request leaves the process), so a malformed
-//! payment is rejected without a network round trip.
+//! address and asset well-formedness, amount equality, accepted↔requirements
+//! consistency, public-key binding, and the timing window. They run
+//! identically on the client (before a payment is sent), on the resource
+//! server (before a payment is relayed), and inside the facilitator client
+//! (before a request leaves the process), so a malformed payment is rejected
+//! without a network round trip.
 //!
 //! Cryptographic verification of the EIP-712 signature and the on-chain
 //! `transfer_with_authorization` call are performed by the settlement
 //! facilitator, which holds the signing key and the node connection.
+//!
+//! Rules follow `specs/schemes/exact/scheme_exact_casper.md` and match the
+//! five-field `assert_requirements_match` used by `r402-evm` / `r402-svm`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::chain::{Address, CasperChainReference, ContractPackageHash};
-use crate::exact::types::{MIN_SETTLEMENT_WINDOW_SECS, v2};
+use crate::exact::types::{MIN_SETTLEMENT_WINDOW_SECS, SIGNATURE_LEN, v2};
 use crate::exact::{CasperExactError, ExactCasperPayload};
 
 /// Outcome of a successful local validation pass.
@@ -55,12 +59,7 @@ pub fn validate_at(
     let requirements = &request.payment_requirements;
     let accepted = &request.payment_payload.accepted;
 
-    if accepted.network != requirements.network {
-        return Err(CasperExactError::NetworkMismatch {
-            payload: accepted.network.to_string(),
-            requirements: requirements.network.to_string(),
-        });
-    }
+    assert_requirements_match(accepted, requirements)?;
 
     let chain = CasperChainReference::try_from(requirements.network.clone())?;
 
@@ -108,7 +107,12 @@ pub fn validate_at(
         return Err(CasperExactError::ZeroAmount);
     }
 
-    validate_timing(authorization.valid_after, authorization.valid_before, now)?;
+    validate_timing(
+        authorization.valid_after,
+        authorization.valid_before,
+        now,
+        requirements.max_timeout_seconds,
+    )?;
 
     Ok(ValidatedPayment {
         payer: authorization.from,
@@ -118,15 +122,56 @@ pub fn validate_at(
     })
 }
 
+/// Compares the five protocol-critical fields of `accepted` and
+/// `requirements`, matching EVM/SVM and the Go SDK's
+/// `FindMatchingRequirements` (ignores `maxTimeoutSeconds` and `extra`).
+fn assert_requirements_match(
+    accepted: &v2::PaymentRequirements,
+    requirements: &v2::PaymentRequirements,
+) -> Result<(), CasperExactError> {
+    if accepted.scheme == requirements.scheme
+        && accepted.network == requirements.network
+        && accepted.amount == requirements.amount
+        && accepted.asset == requirements.asset
+        && accepted.pay_to == requirements.pay_to
+    {
+        Ok(())
+    } else if accepted.network != requirements.network {
+        // Preserve the more specific network error when only the network
+        // diverges, so HTTP clients still see `invalid_network`.
+        Err(CasperExactError::NetworkMismatch {
+            payload: accepted.network.to_string(),
+            requirements: requirements.network.to_string(),
+        })
+    } else {
+        Err(CasperExactError::AcceptedRequirementsMismatch)
+    }
+}
+
 /// Validates the structural invariants of a payload: fixed-width signature,
-/// fixed-width nonce, and an account-hash payer.
+/// algorithm-tag consistency, fixed-width nonce, account-hash payer/payee,
+/// and `publicKey` → `authorization.from` binding.
 ///
 /// # Errors
 ///
 /// Returns [`CasperExactError`] when a field is malformed.
 pub fn validate_payload_shape(payload: &ExactCasperPayload) -> Result<(), CasperExactError> {
-    let _ = payload.signature_bytes()?;
+    let signature = payload.signature_bytes()?;
     let _ = payload.authorization.nonce_bytes()?;
+
+    // scheme_exact_casper.md: publicKey and signature share the algorithm tag.
+    let sig_tag = signature.first().copied().unwrap_or_default();
+    if sig_tag != payload.public_key.algorithm().tag_byte() {
+        return Err(CasperExactError::InvalidSignature(format!(
+            "signature algorithm tag {sig_tag:#04x} does not match publicKey tag {:#04x}",
+            payload.public_key.algorithm().tag_byte()
+        )));
+    }
+    if signature.len() != SIGNATURE_LEN {
+        return Err(CasperExactError::InvalidSignature(format!(
+            "expected {SIGNATURE_LEN} bytes"
+        )));
+    }
 
     if !payload.authorization.from.is_account() {
         return Err(CasperExactError::InvalidPayer(
@@ -138,30 +183,55 @@ pub fn validate_payload_shape(payload: &ExactCasperPayload) -> Result<(), Casper
             payload.authorization.to.to_string(),
         ));
     }
+
+    let derived = payload.public_key.account_hash();
+    if derived != payload.authorization.from {
+        return Err(CasperExactError::PublicKeyMismatch);
+    }
+
     Ok(())
 }
 
 /// Checks the authorisation validity window against `now`.
 ///
-/// A payment must already be valid, must not have expired, and must leave at
-/// least [`MIN_SETTLEMENT_WINDOW_SECS`] for the settlement transaction to be
-/// included in a block.
+/// Per `scheme_exact_casper.md`:
+/// - `validAfter < now < validBefore` (strict bounds)
+/// - remaining window must cover `max_timeout_seconds` when that is known
+///   (`validBefore >= now + maxTimeoutSeconds`)
+/// - additionally enforce [`MIN_SETTLEMENT_WINDOW_SECS`] as a floor when
+///   `max_timeout_seconds` is zero or smaller (defence in depth)
 ///
 /// # Errors
 ///
 /// Returns [`CasperExactError::NotYetValid`] or [`CasperExactError::Expired`].
-pub const fn validate_timing(
+#[allow(
+    clippy::missing_const_for_fn,
+    reason = "kept non-const so Ord-style remaining-window logic stays readable"
+)]
+pub fn validate_timing(
     valid_after: u64,
     valid_before: u64,
     now: u64,
+    max_timeout_seconds: u64,
 ) -> Result<(), CasperExactError> {
-    if valid_after > now {
+    // Strict: now must be strictly after validAfter.
+    if valid_after >= now {
         return Err(CasperExactError::NotYetValid { valid_after, now });
     }
+    // Strict: now must be strictly before validBefore.
     if valid_before <= now {
         return Err(CasperExactError::Expired { valid_before, now });
     }
-    if valid_before - now < MIN_SETTLEMENT_WINDOW_SECS {
+
+    let remaining = valid_before - now;
+    // Prefer the seller's maxTimeoutSeconds; never drop below the settlement
+    // floor so a zero/tiny maxTimeout cannot green-light an unlandable payment.
+    let min_remaining = if max_timeout_seconds > MIN_SETTLEMENT_WINDOW_SECS {
+        max_timeout_seconds
+    } else {
+        MIN_SETTLEMENT_WINDOW_SECS
+    };
+    if remaining < min_remaining {
         return Err(CasperExactError::Expired { valid_before, now });
     }
     Ok(())
@@ -186,10 +256,16 @@ pub fn now_unix() -> u64 {
 mod tests {
     use super::*;
 
-    const PAYER: &str = "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    /// Secp256k1 fixture from `scheme_exact_casper.md` example payload.
+    const PAYER: &str = "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3";
+    const PUBLIC_KEY: &str = "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867";
     const PAYEE: &str = "00fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321";
     const ASSET: &str = "3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e";
     const NOW: u64 = 1_700_000_100;
+    /// Signature leading byte matches secp256k1 tag `0x02`.
+    fn signature_hex() -> String {
+        format!("02{}", "aa".repeat(64))
+    }
 
     fn request_json() -> serde_json::Value {
         let requirements = serde_json::json!({
@@ -207,8 +283,8 @@ mod tests {
                 "x402Version": 2,
                 "accepted": requirements,
                 "payload": {
-                    "signature": "aa".repeat(65),
-                    "publicKey": format!("01{}", "bb".repeat(32)),
+                    "signature": signature_hex(),
+                    "publicKey": PUBLIC_KEY,
                     "authorization": {
                         "from": PAYER,
                         "to": PAYEE,
@@ -242,6 +318,31 @@ mod tests {
         json["paymentPayload"]["accepted"]["network"] = serde_json::json!("casper:casper");
         let err = validate_at(&request_from(json), NOW).unwrap_err();
         assert!(matches!(err, CasperExactError::NetworkMismatch { .. }));
+    }
+
+    #[test]
+    fn rejects_accepted_amount_mismatch() {
+        let mut json = request_json();
+        json["paymentPayload"]["accepted"]["amount"] = serde_json::json!("1");
+        // Keep authorization aligned with requirements so only accepted diverges.
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
+    }
+
+    #[test]
+    fn rejects_accepted_pay_to_mismatch() {
+        let mut json = request_json();
+        json["paymentPayload"]["accepted"]["payTo"] = serde_json::json!(PAYER);
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
+    }
+
+    #[test]
+    fn rejects_accepted_asset_mismatch() {
+        let mut json = request_json();
+        json["paymentPayload"]["accepted"]["asset"] = serde_json::json!("ab".repeat(32));
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
     }
 
     #[test]
@@ -294,6 +395,8 @@ mod tests {
     fn rejects_missing_eip712_domain_fields() {
         let mut json = request_json();
         json["paymentRequirements"]["extra"] = serde_json::json!({ "name": "", "version": "1" });
+        json["paymentPayload"]["accepted"]["extra"] =
+            serde_json::json!({ "name": "", "version": "1" });
         assert_eq!(
             validate_at(&request_from(json), NOW).unwrap_err(),
             CasperExactError::MissingTokenName
@@ -301,6 +404,8 @@ mod tests {
 
         let mut json_version = request_json();
         json_version["paymentRequirements"]["extra"] =
+            serde_json::json!({ "name": "Wrapped CSPR", "version": "  " });
+        json_version["paymentPayload"]["accepted"]["extra"] =
             serde_json::json!({ "name": "Wrapped CSPR", "version": "  " });
         assert_eq!(
             validate_at(&request_from(json_version), NOW).unwrap_err(),
@@ -314,30 +419,55 @@ mod tests {
         json["paymentPayload"]["payload"]["authorization"]["from"] =
             serde_json::json!(format!("01{ASSET}"));
         let err = validate_at(&request_from(json), NOW).unwrap_err();
-        assert!(matches!(err, CasperExactError::InvalidPayer(_)));
+        assert!(matches!(
+            err,
+            CasperExactError::InvalidPayer(_) | CasperExactError::PublicKeyMismatch
+        ));
+    }
+
+    #[test]
+    fn rejects_public_key_that_does_not_derive_from() {
+        let mut json = request_json();
+        // Valid ed25519 key shape that does not hash to PAYER.
+        json["paymentPayload"]["payload"]["publicKey"] =
+            serde_json::json!(format!("01{}", "bb".repeat(32)));
+        json["paymentPayload"]["payload"]["signature"] =
+            serde_json::json!(format!("01{}", "aa".repeat(64)));
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::PublicKeyMismatch);
+    }
+
+    #[test]
+    fn rejects_signature_algorithm_tag_mismatch() {
+        let mut json = request_json();
+        // publicKey is secp (02) but signature tagged ed25519 (01).
+        json["paymentPayload"]["payload"]["signature"] =
+            serde_json::json!(format!("01{}", "aa".repeat(64)));
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert!(matches!(err, CasperExactError::InvalidSignature(_)));
     }
 
     #[test]
     fn timing_window_boundaries() {
-        // Not yet valid.
+        // Not yet valid: now == validAfter is rejected (strict).
         assert!(matches!(
-            validate_timing(100, 200, 99),
+            validate_timing(100, 500, 100, 300),
             Err(CasperExactError::NotYetValid { .. })
         ));
-        // Exactly at validAfter is acceptable.
-        assert!(validate_timing(100, 200, 100).is_ok());
+        // Strictly after validAfter with enough remaining window.
+        assert!(validate_timing(100, 500, 101, 300).is_ok());
         // Already expired.
         assert!(matches!(
-            validate_timing(100, 200, 200),
+            validate_timing(100, 200, 200, 6),
             Err(CasperExactError::Expired { .. })
         ));
-        // Too close to expiry to realistically settle.
+        // Remaining window shorter than maxTimeoutSeconds.
         assert!(matches!(
-            validate_timing(100, 200, 195),
+            validate_timing(100, 200, 150, 60),
             Err(CasperExactError::Expired { .. })
         ));
-        // Exactly the minimum settlement window is acceptable.
-        assert!(validate_timing(100, 200, 200 - MIN_SETTLEMENT_WINDOW_SECS).is_ok());
+        // Exactly maxTimeoutSeconds remaining is acceptable.
+        assert!(validate_timing(100, 500, 200, 300).is_ok());
     }
 
     #[test]

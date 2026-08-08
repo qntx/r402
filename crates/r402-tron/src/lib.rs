@@ -32,6 +32,8 @@
 // Silence the linter when default features disable every consumer.
 #[cfg(not(any(feature = "client", feature = "server", feature = "facilitator")))]
 use compact_str as _;
+#[cfg(not(any(feature = "client", feature = "server", feature = "facilitator")))]
+use serde_json as _;
 #[cfg(feature = "telemetry")]
 use tracing_core as _;
 

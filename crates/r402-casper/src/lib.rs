@@ -56,12 +56,15 @@
 //! # fn main() {}
 //! ```
 
-// Consumed by feature-gated modules; quiet the linter when default features
-// disable every consumer.
-#[cfg(not(feature = "facilitator"))]
-use url as _;
 // The `telemetry` feature wires tracing through `r402-core`'s instrumentation;
 // this crate declares the dependency so downstream feature unification works.
+// Optional `client` deps are consumed from feature-gated modules
+// (`exact::client`, `exact::eip712`). Name them at the crate root so
+// `unused_crate_dependencies` still sees them under feature unification.
+#[cfg(feature = "client")]
+use rand as _;
+#[cfg(feature = "client")]
+use sha3 as _;
 #[cfg(feature = "telemetry")]
 use tracing as _;
 
@@ -79,8 +82,14 @@ pub mod motes;
 mod networks;
 
 pub use exact::CasperExact;
+#[cfg(feature = "http-client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "http-client")))]
+pub use exact::facilitator::ReqwestTransport;
 #[cfg(feature = "facilitator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
 pub use exact::facilitator::{CasperExactFacilitator, CasperFacilitatorConfig};
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use exact::{CasperExactClient, CasperSigner, Eip712Domain};
 pub use motes::{CSPR_DECIMALS, MOTES_PER_CSPR, Motes, MotesParseError};
 pub use networks::*;

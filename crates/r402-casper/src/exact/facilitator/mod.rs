@@ -14,6 +14,10 @@
 //! rejected with a precise typed error instead of an opaque remote failure.
 
 mod config;
+#[cfg(feature = "http-client")]
+mod transport;
+
+use std::time::Duration;
 
 pub use config::{
     CasperFacilitatorConfig, CasperFacilitatorConfigError, DEFAULT_FACILITATOR_URL,
@@ -22,6 +26,8 @@ pub use config::{
 use r402_core::error::VerificationError;
 use r402_core::facilitator::{Facilitator, FacilitatorError};
 use r402_core::wire;
+#[cfg(feature = "http-client")]
+pub use transport::ReqwestTransport;
 
 use crate::exact::types::v2;
 use crate::exact::verify::validate_request;
@@ -39,18 +45,23 @@ pub struct CasperExactFacilitator<T> {
 /// Implemented for any HTTP stack the host application already uses; r402
 /// therefore does not force a specific client (or TLS backend) on downstream
 /// consumers of this crate.
+///
+/// Callers MUST honour `timeout` (from [`CasperFacilitatorConfig::timeout`])
+/// so that operator configuration is not silently ignored.
 pub trait FacilitatorTransport: Send + Sync {
     /// Sends a `POST` with a JSON body and returns the JSON response.
     fn post_json(
         &self,
         url: &url::Url,
         body: serde_json::Value,
+        timeout: Duration,
     ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> + Send;
 
     /// Sends a `GET` and returns the JSON response.
     fn get_json(
         &self,
         url: &url::Url,
+        timeout: Duration,
     ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> + Send;
 }
 
@@ -96,6 +107,25 @@ impl<T> CasperExactFacilitator<T> {
     }
 }
 
+#[cfg(feature = "http-client")]
+impl CasperExactFacilitator<ReqwestTransport> {
+    /// Hosted facilitator with the default `reqwest` transport.
+    #[must_use]
+    pub fn hosted_http() -> Self {
+        Self::hosted(ReqwestTransport::new())
+    }
+
+    /// Environment-configured facilitator with the default `reqwest` transport.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CasperFacilitatorConfigError`] when
+    /// [`FACILITATOR_URL_ENV`] is set to an invalid URL.
+    pub fn from_env_http() -> Result<Self, CasperFacilitatorConfigError> {
+        Self::from_env(ReqwestTransport::new())
+    }
+}
+
 impl<T> Facilitator for CasperExactFacilitator<T>
 where
     T: FacilitatorTransport,
@@ -108,7 +138,7 @@ where
         self.preflight(&body)?;
         let response = self
             .transport
-            .post_json(&self.config.verify_url(), body)
+            .post_json(&self.config.verify_url(), body, self.config.timeout)
             .await?;
         serde_json::from_value(response)
             .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
@@ -122,7 +152,7 @@ where
         self.preflight(&body)?;
         let response = self
             .transport
-            .post_json(&self.config.settle_url(), body)
+            .post_json(&self.config.settle_url(), body, self.config.timeout)
             .await?;
         serde_json::from_value(response)
             .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
@@ -131,7 +161,7 @@ where
     async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
         let response = self
             .transport
-            .get_json(&self.config.supported_url())
+            .get_json(&self.config.supported_url(), self.config.timeout)
             .await?;
         serde_json::from_value(response)
             .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
@@ -150,15 +180,17 @@ mod tests {
 
     use super::*;
 
-    const PAYER: &str = "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    /// Secp256k1 fixture from `scheme_exact_casper.md` (publicKey → from).
+    const PAYER: &str = "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3";
+    const PUBLIC_KEY: &str = "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867";
     const PAYEE: &str = "00fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321";
     const ASSET: &str = "3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e";
 
-    /// Records the URLs it was called with and replays a canned response.
+    /// Records the URLs + timeouts it was called with and replays a canned response.
     #[derive(Debug)]
     struct MockTransport {
         response: serde_json::Value,
-        calls: Mutex<Vec<String>>,
+        calls: Mutex<Vec<(String, Duration)>>,
     }
 
     impl MockTransport {
@@ -169,24 +201,43 @@ mod tests {
             }
         }
 
-        fn calls(&self) -> Vec<String> {
-            self.calls.lock().unwrap().clone()
+        fn call_urls(&self) -> Vec<String> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(url, _)| url.clone())
+                .collect()
+        }
+
+        fn call_timeouts(&self) -> Vec<Duration> {
+            self.calls
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(_, timeout)| *timeout)
+                .collect()
         }
     }
 
     impl FacilitatorTransport for MockTransport {
-        async fn post_json(
+        fn post_json(
             &self,
             url: &url::Url,
             _body: serde_json::Value,
-        ) -> Result<serde_json::Value, FacilitatorError> {
-            self.calls.lock().unwrap().push(url.to_string());
-            Ok(self.response.clone())
+            timeout: Duration,
+        ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> {
+            self.calls.lock().unwrap().push((url.to_string(), timeout));
+            std::future::ready(Ok(self.response.clone()))
         }
 
-        async fn get_json(&self, url: &url::Url) -> Result<serde_json::Value, FacilitatorError> {
-            self.calls.lock().unwrap().push(url.to_string());
-            Ok(self.response.clone())
+        fn get_json(
+            &self,
+            url: &url::Url,
+            timeout: Duration,
+        ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> {
+            self.calls.lock().unwrap().push((url.to_string(), timeout));
+            std::future::ready(Ok(self.response.clone()))
         }
     }
 
@@ -210,8 +261,8 @@ mod tests {
                 "x402Version": 2,
                 "accepted": requirements,
                 "payload": {
-                    "signature": "aa".repeat(65),
-                    "publicKey": format!("01{}", "bb".repeat(32)),
+                    "signature": format!("02{}", "aa".repeat(64)),
+                    "publicKey": PUBLIC_KEY,
                     "authorization": {
                         "from": PAYER,
                         "to": PAYEE,
@@ -243,8 +294,12 @@ mod tests {
             .unwrap();
         assert!(response.is_valid());
         assert_eq!(
-            facilitator.transport.calls(),
+            facilitator.transport.call_urls(),
             vec!["https://x402-facilitator.cspr.cloud/verify".to_owned()]
+        );
+        assert_eq!(
+            facilitator.transport.call_timeouts(),
+            vec![Duration::from_secs(30)]
         );
     }
 
@@ -263,7 +318,7 @@ mod tests {
         let response = facilitator.settle(request).await.unwrap();
         assert!(response.is_success());
         assert_eq!(
-            facilitator.transport.calls(),
+            facilitator.transport.call_urls(),
             vec!["https://x402-facilitator.cspr.cloud/settle".to_owned()]
         );
     }
@@ -283,7 +338,7 @@ mod tests {
         assert_eq!(response.kinds.len(), 1);
         assert_eq!(response.kinds[0].network, "casper:casper-test");
         assert_eq!(
-            facilitator.transport.calls(),
+            facilitator.transport.call_urls(),
             vec!["https://x402-facilitator.cspr.cloud/supported".to_owned()]
         );
     }
@@ -301,7 +356,7 @@ mod tests {
             FacilitatorError::Verification(VerificationError::Expired)
         ));
         assert!(
-            facilitator.transport.calls().is_empty(),
+            facilitator.transport.call_urls().is_empty(),
             "an expired payment must not reach the network"
         );
     }
@@ -332,7 +387,7 @@ mod tests {
             .await
             .unwrap();
         assert!(response.is_valid());
-        assert_eq!(facilitator.transport.calls().len(), 1);
+        assert_eq!(facilitator.transport.call_urls().len(), 1);
     }
 
     #[tokio::test]
@@ -382,8 +437,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            facilitator.transport.calls(),
+            facilitator.transport.call_urls(),
             vec!["https://facilitator.internal/x402/verify".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn configured_timeout_is_forwarded_to_the_transport() {
+        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let facilitator = CasperExactFacilitator::new(
+            CasperFacilitatorConfig::default().with_timeout(Duration::from_secs(7)),
+            transport,
+        );
+        let _ = facilitator
+            .verify(verify_request("1500000000", far_future()))
+            .await
+            .unwrap();
+        assert_eq!(
+            facilitator.transport.call_timeouts(),
+            vec![Duration::from_secs(7)]
         );
     }
 }

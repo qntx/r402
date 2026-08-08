@@ -60,9 +60,11 @@ pub enum MotesParseError {
 /// ```
 /// use r402_casper::Motes;
 ///
-/// let motes: Motes = "1.5".parse::<Motes>().unwrap();
+/// let motes = Motes::from_cspr_str("1.5").unwrap();
 /// assert_eq!(motes.inner(), 1_500_000_000);
 /// assert_eq!(motes.to_cspr_string(), "1.5");
+/// // Wire / `FromStr` form is already in base units:
+/// assert_eq!("1500000000".parse::<Motes>().unwrap().inner(), 1_500_000_000);
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
@@ -217,10 +219,20 @@ impl Display for Motes {
 impl FromStr for Motes {
     type Err = MotesParseError;
 
-    /// Parses a **decimal CSPR** amount. Use [`Motes::new`] for raw mote
-    /// counts already expressed in base units.
+    /// Parses a **base-unit** (mote) integer string, matching the x402 wire
+    /// format and [`Deserialize`]. Use [`Motes::from_cspr_str`] for human
+    /// decimal CSPR amounts such as `"1.5"`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::from_cspr_str(s)
+        let raw = s.trim();
+        if raw.is_empty() {
+            return Err(MotesParseError::Empty);
+        }
+        if let Some(bad) = raw.chars().find(|c| !c.is_ascii_digit()) {
+            return Err(MotesParseError::InvalidCharacter(bad));
+        }
+        raw.parse::<u128>()
+            .map(Self)
+            .map_err(|_| MotesParseError::Overflow)
     }
 }
 
