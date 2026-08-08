@@ -1,32 +1,75 @@
 # r402-mcp
 
-Model Context Protocol (MCP) transport for the [x402 payment protocol][x402],
-part of the [`r402`](../r402) workspace.
+MCP transport for the [x402 payment protocol][x402], part of the
+[`r402`](../r402) workspace.
 
 [x402]: https://www.x402.org
 
-## Status
+## Design
 
-**Production-oriented skeleton** aligned with foundation Go (`go/mcp`) and
-TypeScript (`@x402/mcp`) meta keys and flow:
+Binds the **official** Rust MCP SDK [`rmcp`](https://crates.io/crates/rmcp)
+(`modelcontextprotocol/rust-sdk`), the same role as:
 
-| Surface | Feature | Notes |
-| --- | --- | --- |
-| Meta keys / error code | always | Match official `x402/payment`, `x402/payment-response`, `x402_payment_required` |
-| [`server::PaymentWrapper`](src/server.rs) | `server` | Verify (+ optional settle) around a tool handler via any `Facilitator` |
-| [`client::pay_and_call`](src/client.rs) | `client` | One automatic retry after payment-required |
+| Language | Official MCP SDK |
+| -------- | ---------------- |
+| Go | `github.com/modelcontextprotocol/go-sdk/mcp` |
+| TypeScript | `@modelcontextprotocol/sdk` |
+| **Rust (this crate)** | **`rmcp`** |
 
-Host applications supply their MCP SDK binding; r402 stays SDK-agnostic so
-it does not pin a particular Rust MCP crate.
+Protocol behaviour is pinned to:
 
-## Cargo features
+- `specs/transports-v2/mcp.md`
+- Go `go/mcp/*` (primary control-flow pin)
+- TypeScript `@x402/mcp` (secondary)
+
+### Constants (must match foundation)
+
+| Name | Value |
+| ---- | ----- |
+| `MCP_PAYMENT_REQUIRED_CODE` | **`402` (i32)** |
+| `MCP_PAYMENT_META_KEY` | `"x402/payment"` |
+| `MCP_PAYMENT_RESPONSE_META_KEY` | `"x402/payment-response"` |
+
+Payment-required tool results set **both** `structuredContent` and
+`content[0].text` (JSON of the same `PaymentRequired` object).
+
+## Features
 
 | Feature | Surface |
-| --- | --- |
-| `server` | Payment wrapper for tool handlers |
-| `client` | Auto-pay retry helper |
-| `telemetry` | `tracing` hooks |
-| `full` | All of the above |
+| ------- | ------- |
+| `server` | `PaymentWrapper` + encode helpers (`rmcp` model types) |
+| `client` | `X402McpClient` + `McpToolCaller` / `PaymentSigner` traits |
+| `full` | server + client + telemetry |
+
+## Server (sketch)
+
+```rust,ignore
+use std::sync::Arc;
+use r402_mcp::{PaymentWrapper, PaymentWrapperConfig};
+use r402_core::wire::ResourceInfo;
+
+let wrapper = PaymentWrapper::new(
+    Arc::new(my_facilitator),
+    PaymentWrapperConfig::new(accepts, ResourceInfo::new("mcp://tool/demo")),
+);
+
+// Inside your rmcp tool handler:
+let result = wrapper.invoke(params, |params| async move {
+    // business logic → CallToolResult::success(...)
+}).await;
+```
+
+## Client (sketch)
+
+```rust,ignore
+use r402_mcp::{X402McpClient, McpToolCaller, PaymentSigner};
+
+let client = X402McpClient::new(my_rmcp_peer_adapter, my_x402_signer);
+let out = client.call_tool("demo", None).await?;
+```
+
+`PaymentSigner` is typically backed by `r402-http::X402Client` scheme
+registration (wire payment without HTTP).
 
 ## License
 

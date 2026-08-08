@@ -1,72 +1,106 @@
 //! Server-side MCP payment wrapper.
 //!
-//! Wraps an async tool handler so unpaid calls receive a structured
-//! payment-required error and paid calls run verify → handler → settle.
+//! Control flow ports Go `go/mcp/server.go` `PaymentWrapper.Wrap`:
+//! extract meta payment → match accepts → verify → handler → settle → attach meta.
+//!
+//! Verify/settle failures return **tool-level** error results (not transport errors),
+//! matching the official Go SDK.
 
 use std::future::Future;
 use std::sync::Arc;
 
 use r402_core::facilitator::Facilitator;
 use r402_core::wire::{
-    PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest,
+    PaymentRequired, PaymentRequirements, ResourceInfo, SettleRequest, TypedVerifyRequest,
+    VerifyRequest, V2, find_matching_requirements,
 };
-use serde_json::{Value, json};
+use rmcp::model::{CallToolRequestParams, CallToolResult};
 
-use crate::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_REQUIRED_CODE, MCP_PAYMENT_RESPONSE_META_KEY};
+use crate::encode::{
+    McpPaymentPayload, attach_settle_response, extract_payment_from_params,
+    payment_required_tool_result, settlement_failed_tool_result,
+};
+
+/// Server-side lifecycle hooks (optional).
+#[derive(Clone, Default)]
+pub struct PaymentWrapperHooks {
+    /// Called after successful verify, before the tool runs.
+    /// Return `false` to abort (tool-level payment error).
+    pub on_before_execution: Option<Arc<dyn Fn(ServerHookContext) -> bool + Send + Sync>>,
+    /// Called after the tool succeeds, before settle.
+    pub on_after_execution: Option<Arc<dyn Fn(ServerHookContext) + Send + Sync>>,
+    /// Called after successful settlement.
+    pub on_after_settlement: Option<Arc<dyn Fn(ServerHookContext) + Send + Sync>>,
+}
+
+impl std::fmt::Debug for PaymentWrapperHooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaymentWrapperHooks")
+            .field("on_before_execution", &self.on_before_execution.is_some())
+            .field("on_after_execution", &self.on_after_execution.is_some())
+            .field("on_after_settlement", &self.on_after_settlement.is_some())
+            .finish()
+    }
+}
+
+/// Context passed to server hooks.
+#[derive(Debug, Clone)]
+pub struct ServerHookContext {
+    /// Tool name from the MCP call.
+    pub tool_name: String,
+    /// Matched payment requirements.
+    pub requirements: PaymentRequirements,
+}
 
 /// Configuration for [`PaymentWrapper`].
 #[derive(Debug, Clone)]
 pub struct PaymentWrapperConfig {
-    /// Accepts array used to build `PaymentRequired` when payment is missing.
-    pub accepts: Vec<Value>,
-    /// Resource info embedded in the payment-required payload.
+    /// Advertised payment options (Go `Accepts`).
+    pub accepts: Vec<PaymentRequirements>,
+    /// Resource metadata for payment-required responses.
     pub resource: ResourceInfo,
-    /// When true, settle after the handler succeeds (sequential semantics).
-    pub settle_on_success: bool,
+    /// Optional lifecycle hooks.
+    pub hooks: PaymentWrapperHooks,
 }
 
 impl PaymentWrapperConfig {
-    /// Builds a config with the given accepts list and resource.
+    /// Builds config with accepts and resource.
     #[must_use]
-    pub const fn new(accepts: Vec<Value>, resource: ResourceInfo) -> Self {
+    pub fn new(accepts: Vec<PaymentRequirements>, resource: ResourceInfo) -> Self {
         Self {
             accepts,
             resource,
-            settle_on_success: true,
+            hooks: PaymentWrapperHooks::default(),
         }
     }
 
-    /// Disables automatic settlement (verify-only gate).
+    /// Attaches hooks.
     #[must_use]
-    pub const fn without_settle(mut self) -> Self {
-        self.settle_on_success = false;
+    pub fn with_hooks(mut self, hooks: PaymentWrapperHooks) -> Self {
+        self.hooks = hooks;
         self
     }
 }
 
-/// Result of a payment-wrapped tool invocation.
-#[derive(Debug, Clone)]
-pub struct WrappedToolResult {
-    /// Whether the tool reported an error (including payment-required).
-    pub is_error: bool,
-    /// Free-form tool content (opaque to r402).
-    pub content: Value,
-    /// MCP `_meta` map (may contain payment / payment-response).
-    pub meta: Value,
-}
-
-/// Wraps tool handlers with x402 verify / settle.
-#[derive(Debug)]
+/// Wraps MCP tool handlers with x402 verify / settle.
 pub struct PaymentWrapper<F> {
     facilitator: Arc<F>,
     config: PaymentWrapperConfig,
 }
 
+impl<F> std::fmt::Debug for PaymentWrapper<F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaymentWrapper")
+            .field("config", &self.config)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<F> PaymentWrapper<F>
 where
-    F: Facilitator + Send + Sync,
+    F: Facilitator + 'static,
 {
-    /// Creates a new wrapper around `facilitator`.
+    /// Creates a wrapper around any [`Facilitator`].
     #[must_use]
     pub const fn new(facilitator: Arc<F>, config: PaymentWrapperConfig) -> Self {
         Self {
@@ -75,99 +109,96 @@ where
         }
     }
 
-    /// Builds a payment-required tool result (no handler invocation).
+    /// Builds a payment-required tool result for `error_msg`.
     #[must_use]
-    pub fn payment_required_result(&self, error_detail: impl Into<String>) -> WrappedToolResult {
-        let accepts: Vec<_> = self
-            .config
-            .accepts
-            .iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect();
+    pub fn payment_required_result(&self, error_msg: impl Into<String>) -> CallToolResult {
         let required = PaymentRequired::new(self.config.resource.clone())
-            .with_error(error_detail.into())
-            .with_accepts(accepts);
-        let payment_json = serde_json::to_value(&required).unwrap_or_else(|_| json!({}));
-        WrappedToolResult {
-            is_error: true,
-            content: json!([{
-                "type": "text",
-                "text": MCP_PAYMENT_REQUIRED_CODE,
-            }]),
-            meta: json!({
-                MCP_PAYMENT_META_KEY: payment_json,
-            }),
-        }
+            .with_error(error_msg.into())
+            .with_accepts(self.config.accepts.clone());
+        payment_required_tool_result(&required)
     }
 
-    /// Runs verify (+ optional settle) around `handler`.
+    /// Runs the full verify → handler → settle pipeline.
     ///
-    /// `payment_payload` is the client payment JSON from tool request
-    /// `_meta["x402/payment"]`. `requirements` defaults to the first accept.
-    pub async fn invoke<H, Fut>(
-        &self,
-        payment_payload: Option<Value>,
-        requirements: Option<Value>,
-        handler: H,
-    ) -> WrappedToolResult
+    /// `handler` receives the original params (after payment extraction).
+    pub async fn invoke<H, Fut>(&self, params: CallToolRequestParams, handler: H) -> CallToolResult
     where
-        H: FnOnce() -> Fut,
-        Fut: Future<Output = WrappedToolResult>,
+        H: FnOnce(CallToolRequestParams) -> Fut,
+        Fut: Future<Output = CallToolResult>,
     {
-        let Some(payload) = payment_payload else {
-            return self.payment_required_result("missing payment in tool _meta");
+        let Some(payload) = extract_payment_from_params(&params) else {
+            return self.payment_required_result("Payment Required");
         };
-        let Some(requirements) = requirements.or_else(|| self.config.accepts.first().cloned())
+
+        let Some(requirements) =
+            find_matching_requirements(&self.config.accepts, &payload.accepted).cloned()
         else {
-            return self.payment_required_result("no payment requirements configured");
+            return self.payment_required_result("No matching payment requirements found");
         };
 
-        let verify_body = json!({
-            "x402Version": 2,
-            "paymentPayload": payload,
-            "paymentRequirements": requirements,
-        });
-        let verify_req = VerifyRequest::from(verify_body.clone());
+        let verify_req = match build_verify_request(&payload, &requirements) {
+            Ok(r) => r,
+            Err(msg) => return self.payment_required_result(msg),
+        };
 
-        if let Err(err) = self.facilitator.verify(verify_req).await {
-            return self.payment_required_result(err.to_string());
+        match self.facilitator.verify(verify_req.clone()).await {
+            Ok(resp) if resp.is_valid() => {}
+            Ok(_) => {
+                return self.payment_required_result("Payment verification failed");
+            }
+            Err(err) => {
+                return self.payment_required_result(format!("Payment verification error: {err}"));
+            }
         }
 
-        let mut result = handler().await;
-        if result.is_error {
+        let tool_name = params.name.to_string();
+        let hook_ctx = ServerHookContext {
+            tool_name,
+            requirements: requirements.clone(),
+        };
+
+        if let Some(ref before) = self.config.hooks.on_before_execution
+            && !before(hook_ctx.clone())
+        {
+            return self.payment_required_result("Execution aborted by OnBeforeExecution hook");
+        }
+
+        let result = handler(params).await;
+        if result.is_error.unwrap_or(false) {
             return result;
         }
 
-        if self.config.settle_on_success {
-            result = self.attach_settlement(result, verify_body).await;
+        if let Some(ref after) = self.config.hooks.on_after_execution {
+            after(hook_ctx.clone());
         }
 
-        result
-    }
-
-    async fn attach_settlement(
-        &self,
-        mut result: WrappedToolResult,
-        verify_body: Value,
-    ) -> WrappedToolResult {
-        let settle_req = SettleRequest::from(verify_body);
-        match self.facilitator.settle(settle_req).await {
-            Ok(settle) if settle.is_success() => {
-                Self::insert_payment_response_meta(&mut result, &settle);
-                result
+        let settle_req = SettleRequest::from(verify_req.into_json());
+        let settle = match self.facilitator.settle(settle_req).await {
+            Ok(s) if s.is_success() => s,
+            Ok(_) => return settlement_failed_tool_result("Settlement failed"),
+            Err(err) => {
+                return settlement_failed_tool_result(format!("Settlement error: {err}"));
             }
-            Ok(_) | Err(_) => self.payment_required_result("settlement failed"),
-        }
-    }
-
-    fn insert_payment_response_meta(result: &mut WrappedToolResult, settle: &SettleResponse) {
-        let Ok(v) = serde_json::to_value(settle) else {
-            return;
         };
-        if let Some(obj) = result.meta.as_object_mut() {
-            obj.insert(MCP_PAYMENT_RESPONSE_META_KEY.to_owned(), v);
-        } else {
-            result.meta = json!({ MCP_PAYMENT_RESPONSE_META_KEY: v });
+
+        if let Some(ref after_settle) = self.config.hooks.on_after_settlement {
+            after_settle(hook_ctx);
         }
+
+        attach_settle_response(result, &settle)
     }
+}
+
+fn build_verify_request(
+    payload: &McpPaymentPayload,
+    requirements: &PaymentRequirements,
+) -> Result<VerifyRequest, String> {
+    let typed: TypedVerifyRequest<2, McpPaymentPayload, PaymentRequirements> =
+        TypedVerifyRequest {
+            x402_version: V2,
+            payment_payload: payload.clone(),
+            payment_requirements: requirements.clone(),
+        };
+    let json = serde_json::to_value(&typed).map_err(|e| e.to_string())?;
+    Ok(VerifyRequest::from(json))
 }

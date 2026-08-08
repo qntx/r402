@@ -11,14 +11,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **Scheme markers** — `BatchSettlementScheme` (`"batch-settlement"`) and
   `AuthCaptureScheme` (`"auth-capture"`) sealed markers in `r402-core`
   (unblocks EVM scheme crates).
+- **`find_matching_requirements`** — Go `FindMatchingRequirements` semantics
+  in `r402-core` (scheme/network/amount/asset/payTo; ignore maxTimeout/extra).
 - **SVM Path 2 foundation** — opt-in
   `SolanaExactFacilitatorConfig::enable_smart_wallet_verification` (default
   `false`, matches TS). Path 1 layout failures fall through to outcome-based
   TransferChecked matching (`smart_wallet` module). CPI inner-instruction
-  plumbing through the provider is the next hardening step for CPI-only
-  wallets.
-- **`r402-mcp`** — real server `PaymentWrapper` + client `pay_and_call`
-  with foundation meta keys; no longer an empty placeholder.
+  plumbing through the provider remains follow-up for CPI-only wallets.
+- **`r402-mcp` rewrite on official `rmcp` 3.x** (breaking):
+  - Constants match Go/TS (`MCP_PAYMENT_REQUIRED_CODE = 402` i32).
+  - Encode layer implements transport `mcp.md` dual structuredContent+text.
+  - `PaymentWrapper` ports Go `server.go` control flow on `rmcp` types.
+  - `X402McpClient` + `McpToolCaller` / `PaymentSigner` (Go `MCPCaller` shape).
+  - Removed the prior JSON/`Value` shell API.
 
 ### Protocol alignment (x402 foundation / Go / TS)
 

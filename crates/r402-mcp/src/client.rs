@@ -1,142 +1,246 @@
-//! Client-side MCP auto-pay helper.
+//! Client-side MCP auto-pay (Go `X402MCPClient` / `CallPaidTool` shape).
 //!
-//! Host code supplies a single tool-call primitive and a payment signer;
-//! [`pay_and_call`] retries once after a payment-required meta response.
+//! Hosts supply an [`McpToolCaller`] (satisfied by tests or an `rmcp` peer
+//! adapter). Payment signing is a callback so `r402-http::X402Client` can be
+//! wired without a hard dependency cycle.
 
 use std::future::Future;
 
+use r402_core::wire::{PaymentRequired, SettleResponse};
+use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::Value;
 
-use crate::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_REQUIRED_CODE};
+use crate::encode::{
+    McpPaymentPayload, attach_payment_to_params, extract_payment_required, extract_settle_response,
+    is_payment_required_result,
+};
 
-/// A tool call result as seen by the MCP client wrapper.
-#[derive(Debug, Clone)]
-pub struct McpCallResult {
-    /// Whether the server marked the result as an error.
-    pub is_error: bool,
-    /// Opaque content array / payload.
-    pub content: Value,
-    /// `_meta` object (may be null).
-    pub meta: Value,
-}
-
-impl McpCallResult {
-    /// Returns true when the result is an x402 payment-required challenge.
-    #[must_use]
-    pub fn is_payment_required(&self) -> bool {
-        if !self.is_error {
-            return false;
-        }
-        if self.meta.get(MCP_PAYMENT_META_KEY).is_some() {
-            return true;
-        }
-        // Fallback: text content carries the official code string.
-        self.content
-            .to_string()
-            .contains(MCP_PAYMENT_REQUIRED_CODE)
-    }
-
-    /// Extracts the payment-required JSON from `_meta`, if present.
-    #[must_use]
-    pub fn payment_required_value(&self) -> Option<&Value> {
-        self.meta.get(MCP_PAYMENT_META_KEY)
-    }
-}
-
-/// Errors from [`pay_and_call`].
+/// Errors from paid tool calls.
 #[derive(Debug, thiserror::Error)]
-pub enum PayAndCallError {
+pub enum McpClientError {
     /// Underlying MCP transport / tool call failed.
-    #[error("mcp tool call failed: {0}")]
+    #[error("mcp transport: {0}")]
     Transport(String),
-    /// Payment creation failed.
-    #[error("payment creation failed: {0}")]
+    /// Building a payment payload failed.
+    #[error("payment creation: {0}")]
     Payment(String),
-    /// Server still rejected after payment was attached.
-    #[error("payment rejected after retry")]
+    /// Server still required payment after a signed retry.
+    #[error("payment still required after retry")]
     StillRequired,
+    /// Auto-payment disabled and payment was required.
+    #[error("payment required but auto_payment is disabled")]
+    AutoPaymentDisabled,
 }
 
-/// Calls `call` once; on payment-required, builds a payment via `sign_payment`
-/// and retries with the payment JSON in `_meta`.
-///
-/// # Errors
-///
-/// Returns [`PayAndCallError`] on transport, signing, or final rejection.
-pub async fn pay_and_call<C, S, FutC, FutS>(
-    mut call: C,
-    mut sign_payment: S,
-) -> Result<McpCallResult, PayAndCallError>
+/// Minimal tool-call surface (Go `MCPCaller`).
+pub trait McpToolCaller: Send + Sync {
+    /// Invokes `tools/call` with the given params.
+    fn call_tool(
+        &self,
+        params: CallToolRequestParams,
+    ) -> impl Future<Output = Result<CallToolResult, String>> + Send;
+}
+
+/// Result of a paid tool call.
+#[derive(Debug, Clone)]
+pub struct PaidToolCallResult {
+    /// Underlying MCP tool result.
+    pub result: CallToolResult,
+    /// Whether a payment was submitted on the retry path.
+    pub payment_made: bool,
+    /// Settlement response from `_meta`, if present.
+    pub payment_response: Option<SettleResponse>,
+}
+
+/// Options for [`X402McpClient`].
+#[derive(Debug, Clone, Copy)]
+pub struct X402McpClientOptions {
+    /// When true (default), automatically sign and retry on payment-required.
+    pub auto_payment: bool,
+}
+
+impl Default for X402McpClientOptions {
+    fn default() -> Self {
+        Self {
+            auto_payment: true,
+        }
+    }
+}
+
+/// Signs a [`PaymentRequired`] into a wire [`McpPaymentPayload`].
+pub trait PaymentSigner: Send + Sync {
+    /// Creates a payment payload for the given requirements envelope.
+    fn sign_payment(
+        &self,
+        required: PaymentRequired,
+    ) -> impl Future<Output = Result<McpPaymentPayload, String>> + Send;
+}
+
+/// x402-aware MCP client wrapper.
+pub struct X402McpClient<C, S> {
+    caller: C,
+    signer: S,
+    options: X402McpClientOptions,
+}
+
+impl<C, S> std::fmt::Debug for X402McpClient<C, S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("X402McpClient")
+            .field("options", &self.options)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<C, S> X402McpClient<C, S>
 where
-    C: FnMut(Option<Value>) -> FutC,
-    FutC: Future<Output = Result<McpCallResult, String>>,
-    S: FnMut(Value) -> FutS,
-    FutS: Future<Output = Result<Value, String>>,
+    C: McpToolCaller,
+    S: PaymentSigner,
 {
-    let first = call(None)
-        .await
-        .map_err(PayAndCallError::Transport)?;
-    if !first.is_payment_required() {
-        return Ok(first);
+    /// Creates a client with default options (`auto_payment: true`).
+    #[must_use]
+    pub const fn new(caller: C, signer: S) -> Self {
+        Self {
+            caller,
+            signer,
+            options: X402McpClientOptions {
+                auto_payment: true,
+            },
+        }
     }
-    let required = first
-        .payment_required_value()
-        .cloned()
-        .ok_or_else(|| PayAndCallError::Payment("missing payment meta".into()))?;
-    let payment = sign_payment(required)
-        .await
-        .map_err(PayAndCallError::Payment)?;
-    let second = call(Some(payment))
-        .await
-        .map_err(PayAndCallError::Transport)?;
-    if second.is_payment_required() {
-        return Err(PayAndCallError::StillRequired);
+
+    /// Sets client options.
+    #[must_use]
+    pub const fn with_options(mut self, options: X402McpClientOptions) -> Self {
+        self.options = options;
+        self
     }
-    Ok(second)
+
+    /// Calls a tool, automatically paying when required.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`McpClientError`] on transport, signing, or persistent 402.
+    pub async fn call_tool(
+        &self,
+        name: impl Into<String>,
+        arguments: Option<Value>,
+    ) -> Result<PaidToolCallResult, McpClientError> {
+        let name = name.into();
+        let mut params = CallToolRequestParams::new(name.clone());
+        if let Some(Value::Object(map)) = arguments {
+            params = params.with_arguments(map);
+        }
+
+        let first = self
+            .caller
+            .call_tool(params.clone())
+            .await
+            .map_err(McpClientError::Transport)?;
+
+        if !is_payment_required_result(&first) {
+            return Ok(PaidToolCallResult {
+                payment_response: extract_settle_response(&first),
+                result: first,
+                payment_made: false,
+            });
+        }
+
+        if !self.options.auto_payment {
+            return Err(McpClientError::AutoPaymentDisabled);
+        }
+
+        let required = extract_payment_required(&first)
+            .ok_or_else(|| McpClientError::Payment("missing PaymentRequired body".into()))?;
+
+        let payload = self
+            .signer
+            .sign_payment(required)
+            .await
+            .map_err(McpClientError::Payment)?;
+
+        let paid_params = attach_payment_to_params(params, &payload);
+        let second = self
+            .caller
+            .call_tool(paid_params)
+            .await
+            .map_err(McpClientError::Transport)?;
+
+        if is_payment_required_result(&second) {
+            return Err(McpClientError::StillRequired);
+        }
+
+        Ok(PaidToolCallResult {
+            payment_response: extract_settle_response(&second),
+            result: second,
+            payment_made: true,
+        })
+    }
 }
 
 #[cfg(test)]
-#[allow(clippy::excessive_nesting, reason = "async test closures nest by nature")]
 mod tests {
-    use super::*;
+    use std::sync::Mutex;
+
+    use r402_core::wire::{PaymentRequired, PaymentRequirements, ResourceInfo};
     use serde_json::json;
 
-    fn unpaid_result() -> McpCallResult {
-        McpCallResult {
-            is_error: true,
-            content: json!([{"type":"text","text":"x402_payment_required"}]),
-            meta: json!({ "x402/payment": { "x402Version": 2 } }),
+    use super::*;
+    use crate::encode::payment_required_tool_result;
+
+    struct MockCaller {
+        calls: Mutex<u8>,
+    }
+
+    impl McpToolCaller for MockCaller {
+        async fn call_tool(
+            &self,
+            params: CallToolRequestParams,
+        ) -> Result<CallToolResult, String> {
+            let unpaid = params.meta.is_none();
+            {
+                let mut n = self.calls.lock().map_err(|e| e.to_string())?;
+                *n = n.saturating_add(1);
+            }
+            if unpaid {
+                let resource = ResourceInfo::new("mcp://tool/demo");
+                let req = PaymentRequirements::new(
+                    "exact".into(),
+                    "eip155:1".parse().unwrap(),
+                    "1".into(),
+                    "0xa".into(),
+                    "0xb".into(),
+                    60,
+                );
+                let pr = PaymentRequired::new(resource).with_accepts(vec![req]);
+                return Ok(payment_required_tool_result(&pr));
+            }
+            Ok(CallToolResult::success(vec![rmcp::model::ContentBlock::text(
+                "ok",
+            )]))
         }
     }
 
-    fn paid_result() -> McpCallResult {
-        McpCallResult {
-            is_error: false,
-            content: json!([{"type":"text","text":"ok"}]),
-            meta: json!({}),
+    struct MockSigner;
+
+    impl PaymentSigner for MockSigner {
+        async fn sign_payment(
+            &self,
+            required: PaymentRequired,
+        ) -> Result<McpPaymentPayload, String> {
+            let accepted = required
+                .accepts
+                .into_iter()
+                .next()
+                .ok_or_else(|| "no accepts".to_owned())?;
+            Ok(McpPaymentPayload::new(accepted, json!({})))
         }
     }
 
     #[tokio::test]
-    async fn retries_once_with_payment() {
-        let mut attempts = 0u8;
-        let result = pay_and_call(
-            |payment| {
-                attempts += 1;
-                let paid = payment.is_some();
-                async move {
-                    Ok(if paid {
-                        paid_result()
-                    } else {
-                        unpaid_result()
-                    })
-                }
-            },
-            |_required| async { Ok(json!({"payload": "signed"})) },
-        )
-        .await
-        .unwrap();
-        assert!(!result.is_error);
-        assert_eq!(attempts, 2);
+    async fn auto_pays_on_second_call() {
+        let client = X402McpClient::new(MockCaller { calls: Mutex::new(0) }, MockSigner);
+        let out = client.call_tool("demo", None).await.unwrap();
+        assert!(out.payment_made);
+        assert!(!out.result.is_error.unwrap_or(false));
     }
 }

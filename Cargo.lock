@@ -4261,6 +4261,7 @@ name = "r402-mcp"
 version = "0.14.0"
 dependencies = [
  "r402-core",
+ "rmcp",
  "serde_json",
  "thiserror 2.0.19",
  "tokio",
@@ -4697,6 +4698,23 @@ checksum = "bb919243f34364b6bd2fc10ef797edbfa75f33c252e7998527479c6d6b47e1ec"
 dependencies = [
  "bytes",
  "rustc-hex",
+]
+
+[[package]]
+name = "rmcp"
+version = "3.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8dddc5b1924b9a59fba420166160ca2c4663a4e01803e52eda33070f56d63c8"
+dependencies = [
+ "chrono",
+ "futures",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

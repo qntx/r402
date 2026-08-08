@@ -49,6 +49,10 @@ reqwest-middleware = "0.5"
 tower = "0.5"
 url = { version = "2", features = ["serde"] }
 
+# Official Model Context Protocol Rust SDK (modelcontextprotocol/rust-sdk).
+# Used by r402-mcp the same way Go uses modelcontextprotocol/go-sdk.
+rmcp = { version = "3.1", default-features = false }
+
 # Utility
 base64 = "0.23"
 blake2 = "0.10"
