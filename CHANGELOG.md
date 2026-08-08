@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Production alignment (ex-chain-breadth program)
+
+- **Scheme markers** — `BatchSettlementScheme` (`"batch-settlement"`) and
+  `AuthCaptureScheme` (`"auth-capture"`) sealed markers in `r402-core`
+  (unblocks EVM scheme crates).
+- **`find_matching_requirements`** — Go `FindMatchingRequirements` semantics
+  in `r402-core` (scheme/network/amount/asset/payTo; ignore maxTimeout/extra).
+- **SVM Path 2 foundation** — opt-in
+  `SolanaExactFacilitatorConfig::enable_smart_wallet_verification` (default
+  `false`, matches TS). Path 1 layout failures fall through to outcome-based
+  TransferChecked matching (`smart_wallet` module). CPI inner-instruction
+  plumbing through the provider remains follow-up for CPI-only wallets.
+- **`r402-mcp` rewrite on official `rmcp` 3.x** (breaking):
+  - Constants match Go/TS (`MCP_PAYMENT_REQUIRED_CODE = 402` i32).
+  - Encode layer implements transport `mcp.md` dual structuredContent+text.
+  - `PaymentWrapper` ports Go `server.go` control flow on `rmcp` types.
+  - `X402McpClient` + `McpToolCaller` / `PaymentSigner` (Go `MCPCaller` shape).
+  - Removed the prior JSON/`Value` shell API.
+
 ### Protocol alignment (x402 foundation / Go / TS)
 
 - **`r402-svm` exact amount rule** now matches `scheme_exact_svm.md` §1.4
@@ -26,7 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - Removed dead `../audit/` links from crate READMEs (no audit tree in-repo).
 - Clarified EVM network table as default stablecoin deployments (not all USDC).
-- Marked `r402-mcp` as a non-production placeholder in the crate catalog.
+- Crate catalog: `r402-mcp` documented as production V2 transport on `rmcp`
+  (no longer a placeholder).
 
 Comprehensive audit pass against `3rdparty/x402/specs/`. **31 P1/P2
 findings** addressed plus four new regression-test suites. The release

@@ -1,10 +1,13 @@
 //! Scheme identifiers, registry, and the extensible payment scheme system.
 //!
 //! An x402 **scheme** is a strategy for transforming a payment requirement
-//! into an on-chain transaction. The two schemes defined by the v2 spec are
-//! [`ExactScheme`] (buyer transfers exactly `maxAmountRequired`) and
-//! [`UptoScheme`] (buyer authorises up to `maxAmountRequired`; facilitator
-//! pulls the actual amount at settle time).
+//! into an on-chain transaction. Workspace markers cover the v2 schemes
+//! r402 implements or is landing:
+//!
+//! - [`ExactScheme`] — transfer of at least `amount` (chain binding defines exactness)
+//! - [`UptoScheme`] — buyer authorises up to a maximum; settle may charge less
+//! - [`BatchSettlementScheme`] — deferred / channel-backed settlement
+//! - [`AuthCaptureScheme`] — authorize / capture / void / refund flows
 //!
 //! Client, server, and facilitator implementations all reference schemes by
 //! their `SchemeId` (namespace + scheme name). The registry module wires
@@ -45,6 +48,19 @@ pub struct ExactScheme;
 /// Unit marker representing the string literal `"upto"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UptoScheme;
+
+/// Unit marker representing the string literal `"batch-settlement"`.
+///
+/// Capital-backed (or credit-backed) deferred settlement; see
+/// `scheme_batch_settlement.md` / EVM binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BatchSettlementScheme;
+
+/// Unit marker representing the string literal `"auth-capture"`.
+///
+/// Authorize / capture / void / refund; see `scheme_auth_capture.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AuthCaptureScheme;
 
 macro_rules! impl_scheme_marker {
     ($ty:ty, $value:literal) => {
@@ -104,6 +120,8 @@ macro_rules! impl_scheme_marker {
 
 impl_scheme_marker!(ExactScheme, "exact");
 impl_scheme_marker!(UptoScheme, "upto");
+impl_scheme_marker!(BatchSettlementScheme, "batch-settlement");
+impl_scheme_marker!(AuthCaptureScheme, "auth-capture");
 
 #[cfg(test)]
 mod marker_tests {
@@ -126,9 +144,27 @@ mod marker_tests {
     }
 
     #[test]
+    fn batch_settlement_serde_roundtrip() {
+        let encoded = serde_json::to_string(&BatchSettlementScheme).unwrap();
+        assert_eq!(encoded, r#""batch-settlement""#);
+        let decoded: BatchSettlementScheme = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, BatchSettlementScheme);
+    }
+
+    #[test]
+    fn auth_capture_serde_roundtrip() {
+        let encoded = serde_json::to_string(&AuthCaptureScheme).unwrap();
+        assert_eq!(encoded, r#""auth-capture""#);
+        let decoded: AuthCaptureScheme = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, AuthCaptureScheme);
+    }
+
+    #[test]
     fn wrong_scheme_rejected() {
         assert!(serde_json::from_str::<ExactScheme>(r#""upto""#).is_err());
         assert!(serde_json::from_str::<UptoScheme>(r#""exact""#).is_err());
+        assert!(serde_json::from_str::<BatchSettlementScheme>(r#""exact""#).is_err());
+        assert!(serde_json::from_str::<AuthCaptureScheme>(r#""batch-settlement""#).is_err());
     }
 
     /// Scheme markers must decode from an owned `serde_json::Value` tree, not
@@ -141,6 +177,12 @@ mod marker_tests {
         assert_eq!(exact, ExactScheme);
         let upto: UptoScheme = serde_json::from_value(serde_json::json!("upto")).unwrap();
         assert_eq!(upto, UptoScheme);
+        let batch: BatchSettlementScheme =
+            serde_json::from_value(serde_json::json!("batch-settlement")).unwrap();
+        assert_eq!(batch, BatchSettlementScheme);
+        let auth: AuthCaptureScheme =
+            serde_json::from_value(serde_json::json!("auth-capture")).unwrap();
+        assert_eq!(auth, AuthCaptureScheme);
         assert!(serde_json::from_value::<ExactScheme>(serde_json::json!("upto")).is_err());
     }
 }

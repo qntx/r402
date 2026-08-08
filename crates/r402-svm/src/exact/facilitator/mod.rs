@@ -5,6 +5,7 @@
 
 mod config;
 mod memo;
+mod smart_wallet;
 mod verify;
 
 use std::collections::HashMap;
@@ -17,6 +18,10 @@ use r402_core::error::VerificationError;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
+pub use smart_wallet::{
+    ObservedTransfer, extract_top_level_transfers, is_path1_layout_recoverable,
+    match_required_transfer, parse_transfer_checked, smart_wallet_enabled,
+};
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
     transfer_amount_meets_requirement, validate_instructions, verify_compute_limit_instruction,

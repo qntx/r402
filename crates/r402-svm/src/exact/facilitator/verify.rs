@@ -262,6 +262,11 @@ pub async fn verify_transfer<P: SolanaChainProviderLike + ChainProvider>(
 
 /// Verifies a base64-encoded transaction against requirements.
 ///
+/// Tries Path 1 (static layout) first. When
+/// [`SolanaExactFacilitatorConfig::enable_smart_wallet_verification`] is set
+/// and Path 1 fails for a recoverable layout reason, falls through to Path 2
+/// (outcome-based matching per `scheme_exact_svm.md` §3.2).
+///
 /// # Errors
 ///
 /// Returns [`VerificationError`] if verification fails.
@@ -277,6 +282,32 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
     let transaction = bincode::deserialize::<VersionedTransaction>(bytes.as_slice())
         .map_err(|e| SolanaExactError::TransactionDecoding(e.to_string()))?;
 
+    match verify_transaction_path1(provider, transaction.clone(), transfer_requirement, config)
+        .await
+    {
+        Ok(ok) => Ok(ok),
+        Err(path1_err)
+            if config.enable_smart_wallet_verification
+                && super::smart_wallet::is_path1_layout_recoverable(&path1_err) =>
+        {
+            #[cfg(feature = "telemetry")]
+            tracing::debug!(
+                path1 = %path1_err,
+                "Path 1 layout failure; attempting Path 2 smart-wallet verification"
+            );
+            verify_transaction_path2(provider, transaction, transfer_requirement).await
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Path 1 — static layout verification (standard wallets).
+async fn verify_transaction_path1<P: SolanaChainProviderLike>(
+    provider: &P,
+    transaction: VersionedTransaction,
+    transfer_requirement: &TransferRequirement<'_>,
+    config: &SolanaExactFacilitatorConfig,
+) -> Result<VerifyTransferResult, VerificationError> {
     let compute_units = verify_compute_limit_instruction(&transaction, 0)?;
     if compute_units > provider.max_compute_unit_limit() {
         return Err(SolanaExactError::MaxComputeUnitLimitExceeded.into());
@@ -291,28 +322,8 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
         verify_transfer_instruction(provider, &transaction, 2, transfer_requirement).await?;
 
     // F-030: always reject transactions that touch the facilitator's fee
-    // payer account in any non-fee-paying role. Without this check a
-    // malicious buyer could craft an instruction transferring SOL or SPL
-    // tokens *out of* the facilitator's keypair while we cover the gas.
-    // This is a fundamental safety property and not user-configurable.
-    let fee_payer_pubkey = provider.pubkey();
-    for instruction in transaction.message.instructions() {
-        for account_idx in &instruction.accounts {
-            let account = transaction
-                .message
-                .static_account_keys()
-                .get(*account_idx as usize)
-                .ok_or(SolanaExactError::NoAccountAtIndex(*account_idx))?;
-
-            #[allow(
-                clippy::excessive_nesting,
-                reason = "nested iteration over instructions and accounts"
-            )]
-            if *account == fee_payer_pubkey {
-                return Err(SolanaExactError::FeePayerIncludedInInstructionAccounts.into());
-            }
-        }
-    }
+    // payer account in any non-fee-paying role.
+    assert_fee_payer_isolated(&transaction, provider.pubkey())?;
 
     let tx = TransactionInt::new(transaction.clone()).sign(provider)?;
     let cfg = RpcSimulateTransactionConfig {
@@ -333,6 +344,90 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
         transaction,
         amount: transfer_instruction.amount,
     })
+}
+
+/// Path 2 — simulation / outcome-based smart-wallet verification.
+///
+/// Matches `TransferChecked` instructions anywhere in the top-level message
+/// (and, once RPC inners are plumbed through the provider, CPI traces).
+/// Full CPI extraction from `simulateTransaction` inner instructions is the
+/// next hardening step; top-level multi-ix wallets already work here.
+async fn verify_transaction_path2<P: SolanaChainProviderLike>(
+    provider: &P,
+    transaction: VersionedTransaction,
+    transfer_requirement: &TransferRequirement<'_>,
+) -> Result<VerifyTransferResult, VerificationError> {
+    assert_fee_payer_isolated(&transaction, provider.pubkey())?;
+
+    let mut transfers = super::smart_wallet::extract_top_level_transfers(&transaction);
+    // Simulate with inner instructions requested so the RPC records CPI
+    // traces (used by operators / future extractors). Path 2 still requires
+    // a successful simulation before accepting the payment.
+    let tx = TransactionInt::new(transaction.clone()).sign(provider)?;
+    let cfg = RpcSimulateTransactionConfig {
+        sig_verify: false,
+        replace_recent_blockhash: false,
+        commitment: Some(CommitmentConfig::confirmed()),
+        encoding: None,
+        accounts: None,
+        inner_instructions: true,
+        min_context_slot: None,
+    };
+    provider
+        .simulate_transaction_with_config(tx.inner(), cfg)
+        .await?;
+
+    // If no top-level TransferChecked was found, surface a clear Path 2 error.
+    // CPI-only wallets need the provider to return sim.inner_instructions
+    // (tracked as follow-up: plumb RpcSimulateTransactionResult through
+    // SolanaChainProviderLike).
+    if transfers.is_empty() {
+        return Err(VerificationError::InvalidFormat(
+            "smart_wallet_no_transfer_in_simulation: no top-level TransferChecked; \
+             CPI-only smart wallets require inner-instruction plumbing (enable \
+             provider detailed simulation)"
+                .into(),
+        ));
+    }
+
+    let fee_payers = [provider.pubkey()];
+    let matched = super::smart_wallet::match_required_transfer(
+        &transfers,
+        transfer_requirement,
+        &fee_payers,
+    )?;
+    // Silence unused_mut if we later push CPI transfers into `transfers`.
+    let _ = &mut transfers;
+
+    Ok(VerifyTransferResult {
+        payer: matched.authority.into(),
+        transaction,
+        amount: matched.amount,
+    })
+}
+
+fn assert_fee_payer_isolated(
+    transaction: &VersionedTransaction,
+    fee_payer_pubkey: Pubkey,
+) -> Result<(), VerificationError> {
+    for instruction in transaction.message.instructions() {
+        for account_idx in &instruction.accounts {
+            let account = transaction
+                .message
+                .static_account_keys()
+                .get(*account_idx as usize)
+                .ok_or(SolanaExactError::NoAccountAtIndex(*account_idx))?;
+
+            #[allow(
+                clippy::excessive_nesting,
+                reason = "nested iteration over instructions and accounts"
+            )]
+            if *account == fee_payer_pubkey {
+                return Err(SolanaExactError::FeePayerIncludedInInstructionAccounts.into());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Verifies the SPL Token transfer instruction at the given index.

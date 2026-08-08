@@ -9,7 +9,7 @@
 | **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate, reqwest client, facilitator client |
-| **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport — **placeholder only** (not production-ready) |
+| **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport on official **`rmcp`** (Go/TS parity) |
 
 See also **[`facilitator`](https://github.com/qntx/facilitator)** — a production-ready facilitator server built on r402.
 
@@ -32,7 +32,7 @@ r402 (umbrella)
   ├── r402-tron          ── r402-core   exact (TronGrid)
   ├── r402-casper        ── r402-core   exact (preflight + remote facilitator)
   ├── r402-http          ── r402-core   Axum gate + reqwest client
-  └── r402-mcp           ── r402-core   MCP transport (placeholder)
+  └── r402-mcp           ── r402-core   MCP transport (rmcp, V2)
 ```
 
 Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-mcp` → `r402`.

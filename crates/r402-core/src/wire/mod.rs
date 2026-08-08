@@ -39,7 +39,7 @@ pub use base64::Base64Bytes;
 pub use extensions::{ExtensionEntry, Extensions};
 pub use payment_payload::PaymentPayload;
 pub use payment_required::PaymentRequired;
-pub use payment_requirements::PaymentRequirements;
+pub use payment_requirements::{PaymentRequirements, find_matching_requirements};
 pub use price_tag::{Enricher, PriceTag};
 pub use request::{SettleRequest, TypedVerifyRequest, VerifyRequest};
 pub use resource_info::ResourceInfo;

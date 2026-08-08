@@ -15,7 +15,7 @@ individual crates when you need a minimal dependency graph.
 | `tron` | [`r402-tron`](https://docs.rs/r402-tron) | Tron exact (TIP-712 / EIP-3009 + Permit2) |
 | `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
-| `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport (placeholder) |
+| `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
 Forwarding features: `client`, `server`, `facilitator`, `telemetry`, `cache`,
 `ext-bazaar`, `ext-payment-id`, `all-extensions`, `full`.
@@ -41,6 +41,7 @@ use r402::svm;    // r402-svm
 use r402::tron;   // r402-tron
 use r402::casper; // r402-casper
 use r402::http;   // r402-http
+use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
 
 ## Features

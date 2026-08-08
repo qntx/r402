@@ -21,3 +21,5 @@ pub use __sealed::Sealed;
 
 impl Sealed for super::ExactScheme {}
 impl Sealed for super::UptoScheme {}
+impl Sealed for super::BatchSettlementScheme {}
+impl Sealed for super::AuthCaptureScheme {}

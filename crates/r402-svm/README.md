@@ -40,11 +40,17 @@ Solana chain support for the [x402 payment protocol][x402], part of the
 - Crate docs: <https://docs.rs/r402-svm>
 - Project README: [`../README.md`](../README.md).
 
-## Known limits vs foundation reference
+## Smart-wallet Path 2
 
-- Top-level `TransferChecked` path only; CPI / smart-wallet Path 2 (TS
-  `smartWalletVerification`) is not implemented yet
-  (`simulate` runs with `inner_instructions: false`).
+Opt in via `SolanaExactFacilitatorConfig::with_smart_wallet_verification(true)`
+(default **off**, matching foundation TS). When enabled, Path 1 layout
+failures fall through to outcome-based `TransferChecked` matching
+(`scheme_exact_svm.md` §3.2).
+
+**Current coverage:** top-level multi-ix TransferChecked + successful
+simulation with `inner_instructions: true`. **Follow-up:** plumb
+`RpcSimulateTransactionResult.inner_instructions` through
+`SolanaChainProviderLike` for CPI-only wallets (Squads/Swig).
 
 ## License
 
