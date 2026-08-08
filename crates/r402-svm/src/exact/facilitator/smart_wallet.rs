@@ -205,9 +205,10 @@ pub const fn smart_wallet_enabled(config: &SolanaExactFacilitatorConfig) -> bool
     reason = "unit tests use fixed-length fixture vectors"
 )]
 mod tests {
+    use solana_pubkey::Pubkey;
+
     use super::*;
     use crate::chain::Address;
-    use solana_pubkey::Pubkey;
 
     fn req(amount: u64) -> (Address, Address, TransferRequirement<'static>) {
         // Fixed keys for ATA derivation stability in tests.
@@ -284,14 +285,14 @@ mod tests {
         assert!(!is_path1_layout_recoverable(
             &VerificationError::InvalidPaymentAmount
         ));
-        assert!(is_path1_layout_recoverable(&VerificationError::SimulationFailed(
-            "Program not in allowed list: Abc".into()
-        )));
-        assert!(!is_path1_layout_recoverable(&VerificationError::SimulationFailed(
-            "some other sim failure".into()
-        )));
-        assert!(is_path1_layout_recoverable(&VerificationError::InvalidFormat(
-            "Too few instructions".into()
-        )));
+        assert!(is_path1_layout_recoverable(
+            &VerificationError::SimulationFailed("Program not in allowed list: Abc".into())
+        ));
+        assert!(!is_path1_layout_recoverable(
+            &VerificationError::SimulationFailed("some other sim failure".into())
+        ));
+        assert!(is_path1_layout_recoverable(
+            &VerificationError::InvalidFormat("Too few instructions".into())
+        ));
     }
 }

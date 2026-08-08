@@ -49,33 +49,28 @@ pub mod server;
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod client;
 
+#[cfg(feature = "client")]
+pub use client::{
+    AfterPaymentContext, ClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
+    PaymentRequiredHookResult, PaymentSigner, X402McpClient, X402McpClientOptions, call_paid_tool,
+};
 pub use constants::{
     MCP_PAYMENT_META_KEY, MCP_PAYMENT_REQUIRED_CODE, MCP_PAYMENT_RESPONSE_META_KEY,
     MCP_TOOL_URL_PREFIX,
 };
-
 #[cfg(any(feature = "server", feature = "client"))]
 pub use encode::{
     McpPaymentPayload, attach_payment_to_params, attach_settle_response, create_tool_resource_url,
     extract_payment_from_params, extract_payment_required, extract_settle_response,
     is_payment_required_result, payment_required_tool_result, settlement_failed_tool_result,
 };
-
 #[cfg(any(feature = "server", feature = "client"))]
 pub use error::{McpClientError, PaymentRequiredError};
-
+// `serde` is a workspace dep used transitively via wire types; silence when
+// no direct path reference exists under the selected feature set.
+use serde as _;
 #[cfg(feature = "server")]
 pub use server::{
     AfterExecutionContext, PaymentWrapper, PaymentWrapperConfig, PaymentWrapperConfigError,
     PaymentWrapperHooks, ServerHookContext, SettlementContext,
 };
-
-#[cfg(feature = "client")]
-pub use client::{
-    AfterPaymentContext, ClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
-    PaymentRequiredHookResult, PaymentSigner, X402McpClient, X402McpClientOptions, call_paid_tool,
-};
-
-// `serde` is a workspace dep used transitively via wire types; silence when
-// no direct path reference exists under the selected feature set.
-use serde as _;
