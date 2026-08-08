@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Protocol alignment (x402 foundation / Go / TS)
+
+- **`r402-svm` exact amount rule** now matches `scheme_exact_svm.md` §1.4
+  and the official Go/TS facilitators: on-chain `TransferChecked` amount
+  must be **`>=` required** (overpayment allowed for wallet fee-rounding).
+  Underpayment still fails with `VerificationError::InvalidPaymentAmount`.
+  **Breaking** relative to the previous strict-equality behaviour.
+- **`SolanaExactFacilitator::settle`** reports the **actual** on-chain
+  transfer amount in `SettleResponse.amount` (not the requirements floor).
+- **`AssetTransferMethod`** rejects unknown wire values (including
+  `erc7710`) with an explicit unsupported-method error. ERC-7710 settle
+  is not implemented (spec-only; not present in foundation Go/TS packages).
+- **`r402-http` Paygate** exposes `Payment-Response` via
+  `Access-Control-Expose-Headers` on sequential and concurrent **success**
+  paths (error paths already did).
+
+### Documentation honesty
+
+- Removed dead `../audit/` links from crate READMEs (no audit tree in-repo).
+- Clarified EVM network table as default stablecoin deployments (not all USDC).
+- Marked `r402-mcp` as a non-production placeholder in the crate catalog.
+
 Comprehensive audit pass against `3rdparty/x402/specs/`. **31 P1/P2
 findings** addressed plus four new regression-test suites. The release
 is fully wire- and behaviour-compatible with the v2 spec; the breaking

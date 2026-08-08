@@ -10,6 +10,10 @@ Solana chain support for the [x402 payment protocol][x402], part of the
 - **Exact scheme** — SPL Token `TransferChecked` with pre-signed
   authorisation, fee-payer-bound facilitator submission, and atomic
   duplicate-settlement guard via `SettlementCache`.
+- **Amount rule** — matches `scheme_exact_svm.md` §1.4 and the Go/TS
+  facilitators: on-chain amount must be **`>=` required** (overpayment
+  allowed; underpayment rejected). Settle reports the **actual**
+  transfer amount.
 - **Wallet adapters** — Phantom Lighthouse, Solflare Lighthouse, and the
   SPL Memo program are pre-allowlisted so on-chain wallet integrations
   work out of the box.
@@ -34,8 +38,13 @@ Solana chain support for the [x402 payment protocol][x402], part of the
 ## Documentation
 
 - Crate docs: <https://docs.rs/r402-svm>
-- Audit reports: [`../audit/`](../audit).
 - Project README: [`../README.md`](../README.md).
+
+## Known limits vs foundation reference
+
+- Top-level `TransferChecked` path only; CPI / smart-wallet Path 2 (TS
+  `smartWalletVerification`) is not implemented yet
+  (`simulate` runs with `inner_instructions: false`).
 
 ## License
 
