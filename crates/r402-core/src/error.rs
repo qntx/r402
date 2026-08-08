@@ -28,8 +28,11 @@ pub enum VerificationError {
     #[error("invalid format: {0}")]
     InvalidFormat(String),
 
-    /// The payment amount does not match the requirements.
-    #[error("payment amount does not match requirements")]
+    /// The payment amount is below the required amount.
+    ///
+    /// For SVM exact, overpayment (`actual >= required`) is allowed per
+    /// `scheme_exact_svm.md` §1.4; only underpayment maps here.
+    #[error("payment amount is below requirements")]
     InvalidPaymentAmount,
 
     /// The payment authorization is not yet valid.

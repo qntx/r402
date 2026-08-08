@@ -19,8 +19,9 @@ use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult, settle_transaction,
-    validate_instructions, verify_compute_limit_instruction, verify_compute_price_instruction,
-    verify_transaction, verify_transfer, verify_transfer_instruction,
+    transfer_amount_meets_requirement, validate_instructions, verify_compute_limit_instruction,
+    verify_compute_price_instruction, verify_transaction, verify_transfer,
+    verify_transfer_instruction,
 };
 
 use crate::chain::provider::SolanaChainProviderLike;
@@ -114,8 +115,10 @@ where
         }
 
         enforce_memo(&request)?;
-        let amount = request.payment_payload.accepted.amount.to_string();
         let verification = verify_transfer(&self.provider, &request, &self.config).await?;
+        // Report the on-chain TransferChecked amount (may exceed requirements
+        // when the buyer overpays — see scheme_exact_svm.md §1.4).
+        let amount = verification.amount.to_string();
         let payer = verification.payer.to_string();
         let tx_sig = settle_transaction(&self.provider, verification).await?;
         Ok(wire::SettleResponse::Success {

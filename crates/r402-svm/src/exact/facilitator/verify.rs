@@ -30,6 +30,25 @@ pub struct VerifyTransferResult {
     pub payer: Address,
     /// The verified transaction.
     pub transaction: VersionedTransaction,
+    /// On-chain `TransferChecked` amount in token base units.
+    ///
+    /// May exceed [`TransferRequirement::amount`] when the buyer overpays
+    /// (allowed by `scheme_exact_svm.md` §1.4 and the Go/TS facilitators).
+    /// Underpayment is rejected before this struct is constructed.
+    pub amount: u64,
+}
+
+/// Returns `true` when `actual` meets the required transfer amount.
+///
+/// Aligns with x402 `scheme_exact_svm.md` §1.4, the Go facilitator
+/// (`verifyTransferInstruction`: reject only when `amount < required`),
+/// and the TypeScript smart-wallet matcher (`t.amount >= requiredAmount`).
+///
+/// Overpayment is tolerated for smart-wallet fee-rounding; underpayment is not.
+#[must_use]
+#[inline]
+pub const fn transfer_amount_meets_requirement(actual: u64, required: u64) -> bool {
+    actual >= required
 }
 
 /// Parsed SPL Token `TransferChecked` instruction fields.
@@ -309,7 +328,11 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
         .simulate_transaction_with_config(tx.inner(), cfg)
         .await?;
     let payer: Address = transfer_instruction.authority.into();
-    Ok(VerifyTransferResult { payer, transaction })
+    Ok(VerifyTransferResult {
+        payer,
+        transaction,
+        amount: transfer_instruction.amount,
+    })
 }
 
 /// Verifies the SPL Token transfer instruction at the given index.
@@ -390,12 +413,12 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
     if is_receiver_missing {
         return Err(VerificationError::RecipientMismatch);
     }
-    // Strict equality: the exact scheme settles the declared amount, no more,
-    // no less. Overpayment is not "close enough" — it silently leaks value to
-    // the recipient and conflicts with the upto scheme's semantics, which is
-    // where variable amounts belong. Matches Go SDK
-    // (`mechanisms/svm/exact/facilitator.go: verifyTransferInstruction`).
-    if transfer_checked_instruction.amount != transfer_requirement.amount {
+    // Spec §1.4 / Go / TS: amount must be at least the required amount.
+    // Overpayment is allowed (wallet fee rounding); underpayment is rejected.
+    if !transfer_amount_meets_requirement(
+        transfer_checked_instruction.amount,
+        transfer_requirement.amount,
+    ) {
         return Err(VerificationError::InvalidPaymentAmount);
     }
     Ok(transfer_checked_instruction)
@@ -422,4 +445,33 @@ pub async fn settle_transaction<P: SolanaChainProviderLike>(
         .send_and_confirm(provider, CommitmentConfig::confirmed())
         .await?;
     Ok(tx_sig)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::transfer_amount_meets_requirement;
+
+    #[test]
+    fn exact_amount_meets_requirement() {
+        assert!(transfer_amount_meets_requirement(1_000_000, 1_000_000));
+    }
+
+    #[test]
+    fn overpayment_meets_requirement() {
+        // scheme_exact_svm.md §1.4 + Go/TS: actual >= required.
+        assert!(transfer_amount_meets_requirement(1_000_001, 1_000_000));
+        assert!(transfer_amount_meets_requirement(u64::MAX, 1));
+    }
+
+    #[test]
+    fn underpayment_fails_requirement() {
+        assert!(!transfer_amount_meets_requirement(999_999, 1_000_000));
+        assert!(!transfer_amount_meets_requirement(0, 1));
+    }
+
+    #[test]
+    fn zero_required_always_meets() {
+        assert!(transfer_amount_meets_requirement(0, 0));
+        assert!(transfer_amount_meets_requirement(1, 0));
+    }
 }

@@ -561,6 +561,8 @@ where
         response
             .headers_mut()
             .insert("Payment-Response", header_value);
+        // Browser clients need Access-Control-Expose-Headers for Payment-Response.
+        super::cors::ensure_expose_headers(response.headers_mut());
         Ok(response)
     }
 }
@@ -624,9 +626,10 @@ where
             .map_err(|e| PaygateError::SettlementAborted(format!("settle task panicked: {e}")))??;
         let header_value = settlement_to_header(&settlement)?;
 
-        let mut res = response;
+        let mut res = response.into_response();
         res.headers_mut().insert("Payment-Response", header_value);
-        Ok(res.into_response())
+        super::cors::ensure_expose_headers(res.headers_mut());
+        Ok(res)
     }
 
     /// Handles an incoming request with **background** (fire-and-forget) settlement.

@@ -36,7 +36,6 @@ HTTP transport for the [x402 payment protocol][x402], part of the
 ## Documentation
 
 - Crate docs: <https://docs.rs/r402-http>
-- Audit reports: [`../audit/`](../audit).
 - Project README: [`../README.md`](../README.md).
 
 ## License
