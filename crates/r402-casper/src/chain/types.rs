@@ -235,6 +235,20 @@ impl Address {
         &self.bytes
     }
 
+    /// Returns the full 33-byte wire form: `tag_byte ‖ hash`.
+    ///
+    /// Used by Casper EIP-712 address encoding (`keccak256` of these bytes).
+    #[must_use]
+    pub fn to_tagged_bytes(self) -> [u8; 33] {
+        let mut out = [0u8; 33];
+        out[0] = match self.kind {
+            AddressKind::Account => 0x00,
+            AddressKind::Hash => 0x01,
+        };
+        out[1..].copy_from_slice(&self.bytes);
+        out
+    }
+
     /// Returns `true` when the address is a `00`-tagged account hash.
     #[must_use]
     pub const fn is_account(&self) -> bool {
@@ -345,7 +359,19 @@ impl KeyAlgorithm {
         }
     }
 
+    /// Single-byte algorithm tag used on the wire for keys and signatures.
+    #[must_use]
+    pub const fn tag_byte(self) -> u8 {
+        match self {
+            Self::Ed25519 => 0x01,
+            Self::Secp256k1 => 0x02,
+        }
+    }
+
     /// Human-readable algorithm name.
+    ///
+    /// Also the prefix string used when deriving an [`Address`] account
+    /// hash from a public key (`name || 0x00 || key_body`).
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -400,6 +426,29 @@ impl PublicKey {
     #[must_use]
     pub fn body(&self) -> &[u8] {
         &self.body
+    }
+
+    /// Derives the `00`-tagged account hash address for this public key.
+    ///
+    /// Casper account hashes are `blake2b-256(algorithm_name || 0x00 ||
+    /// key_body)`, matching `casper-types` / the x402 Casper exact scheme
+    /// (`scheme_exact_casper.md` § Address Format).
+    #[must_use]
+    pub fn account_hash(&self) -> Address {
+        use blake2::Digest as _;
+        use blake2::digest::consts::U32;
+
+        // Fixed 32-byte BLAKE2b output (BLAKE2b-256).
+        type Blake2b256 = blake2::Blake2b<U32>;
+
+        let mut hasher = Blake2b256::new();
+        hasher.update(self.algorithm.name().as_bytes());
+        hasher.update([0u8]);
+        hasher.update(&self.body);
+        let digest = hasher.finalize();
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(&digest);
+        Address::new(AddressKind::Account, bytes)
     }
 
     /// Returns `true` when `value` is a well-formed Casper public key.
@@ -758,6 +807,19 @@ mod tests {
             PublicKeyParseError::InvalidTag(_)
         ));
         assert!(!PublicKey::is_valid("01"));
+    }
+
+    #[test]
+    fn account_hash_matches_scheme_exact_casper_fixture() {
+        // Vector from specs/schemes/exact/scheme_exact_casper.md example payload.
+        let public_key: PublicKey =
+            "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867"
+                .parse()
+                .unwrap();
+        assert_eq!(
+            public_key.account_hash().to_string(),
+            "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3"
+        );
     }
 
     #[test]

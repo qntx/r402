@@ -56,10 +56,6 @@
 //! # fn main() {}
 //! ```
 
-// Consumed by feature-gated modules; quiet the linter when default features
-// disable every consumer.
-#[cfg(not(feature = "facilitator"))]
-use url as _;
 // The `telemetry` feature wires tracing through `r402-core`'s instrumentation;
 // this crate declares the dependency so downstream feature unification works.
 #[cfg(feature = "telemetry")]
@@ -79,6 +75,12 @@ pub mod motes;
 mod networks;
 
 pub use exact::CasperExact;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use exact::{CasperExactClient, CasperSigner, Eip712Domain};
+#[cfg(feature = "http-client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "http-client")))]
+pub use exact::facilitator::ReqwestTransport;
 #[cfg(feature = "facilitator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
 pub use exact::facilitator::{CasperExactFacilitator, CasperFacilitatorConfig};

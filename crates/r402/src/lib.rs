@@ -17,3 +17,6 @@ pub use r402_mcp as mcp;
 #[cfg(feature = "svm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "svm")))]
 pub use r402_svm as svm;
+#[cfg(feature = "tron")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tron")))]
+pub use r402_tron as tron;

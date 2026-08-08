@@ -37,23 +37,17 @@ rather than protocol semantics.
 ### Added
 
 - **`r402-casper` chain crate** — Casper Network support for the x402
-  protocol, structurally mirroring `r402-evm` / `r402-svm`: same
-  `client` / `server` / `facilitator` / `telemetry` / `full` feature
-  flags, same module layout (`chain`, `exact`), and the same error
-  taxonomy mapped onto spec `ErrorReason` values.
+  `exact` scheme (layout aligned with other chain crates; **settlement
+  is remote** via a Casper facilitator, not an in-process RPC stack):
   - Networks `casper:casper` (mainnet) and `casper:casper-test`
     (testnet) with CAIP-2 chain IDs, plus a built-in wCSPR CEP-18
     deployment table and the `WCSPR` accessor.
-  - `exact` scheme over wCSPR CEP-18 transfers with pre-signed
-    EIP-712-style authorizations.
-  - Facilitator client (`verify` / `settle` / `supported`) targeting
-    `https://x402-facilitator.cspr.cloud`, overridable through
-    `R402_CASPER_FACILITATOR_URL`.
+  - Local preflight + facilitator client (`verify` / `settle` /
+    `supported`) targeting `https://x402-facilitator.cspr.cloud`,
+    overridable through `R402_CASPER_FACILITATOR_URL`.
   - 9-decimal mote arithmetic is exact integer math — sub-mote
     precision returns a typed `MotesParseError` rather than silently
     truncating.
-  - Dependency footprint kept comparable to `r402-svm`; no heavy Casper
-    SDK is pulled into the workspace.
 
 - **`BackgroundSettlementTracker`** (F-101 / F-102, `r402-http`). RAII
   in-flight counter + `tokio::sync::Notify` for graceful shutdown of
@@ -110,6 +104,29 @@ rather than protocol semantics.
   if a fixture is added without a matching deserialisation test.
 
 ### Fixed
+
+- **`r402-casper` local preflight hardening** (post-merge):
+  - `paymentPayload.accepted` must match `paymentRequirements` on
+    scheme / network / amount / asset / payTo (EVM/SVM parity).
+  - `publicKey` is bound to `authorization.from` via Casper account-hash
+    derivation (`blake2b-256(name || 0x00 || key)`); signature algorithm
+    tag must match the public-key tag.
+  - Validity window uses strict `validAfter < now < validBefore` and
+    requires remaining time ≥ `maxTimeoutSeconds` (floor
+    `MIN_SETTLEMENT_WINDOW_SECS`).
+  - `CasperFacilitatorConfig.timeout` is forwarded to
+    `FacilitatorTransport` on every request.
+  - Optional `http-client` feature provides `ReqwestTransport` plus
+    `CasperExactFacilitator::hosted_http` / `from_env_http`.
+  - `CasperExactClient` implements `SchemeClient` for `X402Client`
+    registration; CEP-3009 EIP-712 digests follow casper-eip-712 domain
+    fields (`name`, `version`, `chain_name`, `contract_package_hash`).
+  - `Motes::FromStr` parses base-unit integers (wire form), matching
+    `Deserialize` / EVM `TokenAmount` — use `from_cspr_str` for decimals.
+
+- **Docs / facade: surface `r402-tron`.** Root README, umbrella
+  `r402` feature (`tron`), and `crates/r402-tron/README.md` so Tron is
+  discoverable the same way as EVM / SVM / Casper.
 
 - **Scheme markers decode from owned JSON** (`r402-core`).
   `ExactScheme` / `UptoScheme` implemented `Deserialize` via

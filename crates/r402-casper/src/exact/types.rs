@@ -231,13 +231,15 @@ pub mod v2 {
 mod tests {
     use super::*;
 
-    const ACCOUNT: &str = "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    /// Secp256k1 fixture from `scheme_exact_casper.md` (publicKey → from).
+    const ACCOUNT: &str = "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3";
+    const PUBLIC_KEY: &str = "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867";
     const PAYEE: &str = "00fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321";
 
     fn payload_json() -> serde_json::Value {
         serde_json::json!({
-            "signature": "aa".repeat(65),
-            "publicKey": format!("01{}", "bb".repeat(32)),
+            "signature": format!("02{}", "aa".repeat(64)),
+            "publicKey": PUBLIC_KEY,
             "authorization": {
                 "from": ACCOUNT,
                 "to": PAYEE,

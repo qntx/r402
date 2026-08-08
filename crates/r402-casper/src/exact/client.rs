@@ -1,29 +1,33 @@
-//! Client-side payload assembly for the Casper exact scheme.
+//! Client-side payload assembly and `SchemeClient` for the Casper exact scheme.
 //!
-//! The buyer signs an EIP-712 `TransferWithAuthorization` message over the
-//! CEP-18 token's domain with their Casper key; this module builds the
-//! authorisation that gets signed and assembles the resulting x402 v2
-//! payment payload. Key custody stays with the caller — r402 never handles
-//! Casper private keys — so the signature is supplied by the wallet or
-//! signer the application already uses.
+//! The buyer signs a CEP-3009 EIP-712 `TransferWithAuthorization` digest with
+//! their Casper key. Key custody stays with the caller via [`CasperSigner`];
+//! this module builds the digest, authorisation, and x402 v2 envelope.
 
-use r402_core::wire;
+use std::future::Future;
+use std::sync::Arc;
+
+use r402_core::error::ClientError;
+use r402_core::scheme::{
+    PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
+};
+use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
+use rand::RngExt as _;
+use rand::rng;
 
 use crate::chain::{Address, ContractPackageHash, PublicKey};
+use crate::exact::eip712::{
+    Eip712Domain, domain_from_parts, transfer_with_authorization_digest,
+};
 use crate::exact::types::v2;
 use crate::exact::{
-    CasperExactError, ExactCasperAuthorization, ExactCasperPayload, NONCE_LEN,
+    CasperExact, CasperExactError, ExactCasperAuthorization, ExactCasperPayload, NONCE_LEN,
     validate_payload_shape,
 };
 use crate::hex;
 use crate::motes::Motes;
 
-/// The EIP-712 primary type the buyer signs.
-pub const PRIMARY_TYPE: &str = "TransferWithAuthorization";
-
-/// Field names and Solidity-style types of [`PRIMARY_TYPE`], in signing
-/// order. Exposed so callers can drive an EIP-712 hasher without
-/// re-declaring the layout.
+/// Field names and Solidity-style types of [`PRIMARY_TYPE`], in signing order.
 pub const TRANSFER_WITH_AUTHORIZATION_FIELDS: &[(&str, &str)] = &[
     ("from", "address"),
     ("to", "address"),
@@ -33,17 +37,30 @@ pub const TRANSFER_WITH_AUTHORIZATION_FIELDS: &[(&str, &str)] = &[
     ("nonce", "bytes32"),
 ];
 
-/// The EIP-712 domain a Casper CEP-18 contract binds its authorisations to.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Eip712Domain {
-    /// Token contract name, from `requirements.extra.name`.
-    pub name: String,
-    /// Token contract version, from `requirements.extra.version`.
-    pub version: String,
-    /// CAIP-2 network identifier the payment targets.
-    pub network: String,
-    /// CEP-18 contract package hash acting as the verifying contract.
-    pub verifying_contract: ContractPackageHash,
+/// Abstraction over Casper key material used for CEP-3009 signing.
+///
+/// Implement this for ed25519 / secp256k1 wallets. The returned signature
+/// MUST be the full 65-byte wire form: algorithm tag (`0x01` / `0x02`)
+/// followed by 64 signature bytes (matching `publicKey`'s tag).
+pub trait CasperSigner: Send + Sync {
+    /// Tagged public key of the payer.
+    fn public_key(&self) -> PublicKey;
+
+    /// Signs the 32-byte EIP-712 digest, returning a 65-byte tagged signature.
+    fn sign_digest(
+        &self,
+        digest: &[u8; 32],
+    ) -> impl Future<Output = Result<[u8; 65], ClientError>> + Send;
+}
+
+impl<T: CasperSigner + Send + Sync> CasperSigner for Arc<T> {
+    fn public_key(&self) -> PublicKey {
+        (**self).public_key()
+    }
+
+    async fn sign_digest(&self, digest: &[u8; 32]) -> Result<[u8; 65], ClientError> {
+        (**self).sign_digest(digest).await
+    }
 }
 
 /// Builder for a Casper exact payment authorisation.
@@ -59,10 +76,6 @@ pub struct AuthorizationBuilder {
 
 impl AuthorizationBuilder {
     /// Starts an authorisation for `value` motes from `from` to `to`.
-    ///
-    /// The validity window defaults to `[now, now + max_timeout_seconds]`
-    /// taken from the requirements when built via
-    /// [`Self::for_requirements`].
     #[must_use]
     pub const fn new(from: Address, to: Address, value: Motes) -> Self {
         Self {
@@ -76,6 +89,9 @@ impl AuthorizationBuilder {
     }
 
     /// Derives a builder from the requirements the buyer is accepting.
+    ///
+    /// Uses `validAfter = now - 600` and `validBefore = now + maxTimeout`
+    /// (aligned with the JS `ExactCasperScheme` client).
     ///
     /// # Errors
     ///
@@ -91,7 +107,7 @@ impl AuthorizationBuilder {
             .parse::<Address>()
             .map_err(|_| CasperExactError::InvalidPayTo(requirements.pay_to.to_string()))?;
         Ok(Self::new(from, to, requirements.amount)
-            .valid_from(now)
+            .valid_from(now.saturating_sub(600))
             .valid_for(now, requirements.max_timeout_seconds))
     }
 
@@ -137,15 +153,12 @@ impl AuthorizationBuilder {
     }
 }
 
-/// Assembles a signed payment payload.
-///
-/// `signature` is the 65-byte EIP-712 signature produced by the buyer's
-/// Casper key, hex encoded.
+/// Assembles a signed payment payload and validates its shape.
 ///
 /// # Errors
 ///
 /// Returns [`CasperExactError`] when the signature, nonce, or addresses are
-/// malformed — the payload is validated before it can be sent.
+/// malformed.
 pub fn build_payload(
     authorization: ExactCasperAuthorization,
     public_key: PublicKey,
@@ -166,15 +179,14 @@ pub fn build_payment_payload(
     accepted: v2::PaymentRequirements,
     payload: ExactCasperPayload,
 ) -> v2::PaymentPayload {
-    wire::PaymentPayload::new(accepted, payload)
+    r402_core::wire::PaymentPayload::new(accepted, payload)
 }
 
 /// Derives the EIP-712 domain for a set of requirements.
 ///
 /// # Errors
 ///
-/// Returns [`CasperExactError`] when `asset` is not a package hash or when
-/// the `extra` block is missing the token name/version the domain requires.
+/// Returns [`CasperExactError`] when `asset` or domain `extra` fields are invalid.
 pub fn domain_for(
     requirements: &v2::PaymentRequirements,
 ) -> Result<Eip712Domain, CasperExactError> {
@@ -192,12 +204,115 @@ pub fn domain_for(
     if extra.version.trim().is_empty() {
         return Err(CasperExactError::MissingTokenVersion);
     }
-    Ok(Eip712Domain {
-        name: extra.name.to_string(),
-        version: extra.version.to_string(),
-        network: requirements.network.to_string(),
+    Ok(domain_from_parts(
+        extra.name.as_str(),
+        extra.version.as_str(),
+        requirements.network.to_string(),
         verifying_contract,
-    })
+    ))
+}
+
+/// Casper exact-scheme client that plugs into `r402-http`'s `X402Client`.
+#[derive(Clone)]
+pub struct CasperExactClient<S> {
+    signer: S,
+}
+
+impl<S: std::fmt::Debug> std::fmt::Debug for CasperExactClient<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CasperExactClient")
+            .field("signer", &self.signer)
+            .finish()
+    }
+}
+
+impl<S> CasperExactClient<S> {
+    /// Creates a client with the given Casper signer.
+    pub const fn new(signer: S) -> Self {
+        Self { signer }
+    }
+}
+
+impl<S> SchemeId for CasperExactClient<S> {
+    fn namespace(&self) -> &str {
+        CasperExact.namespace()
+    }
+
+    fn scheme(&self) -> &str {
+        CasperExact.scheme()
+    }
+}
+
+impl<S> Sealed for CasperExactClient<S> {}
+
+impl<S> SchemeClient for CasperExactClient<S>
+where
+    S: CasperSigner + Clone + Send + Sync + 'static,
+{
+    fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
+        payment_required
+            .accepts
+            .iter()
+            .filter_map(|v| {
+                let requirements: v2::PaymentRequirements = v.as_concrete()?;
+                // Reject non-casper networks early.
+                let _ = crate::chain::CasperChainReference::try_from(requirements.network.clone())
+                    .ok()?;
+                Some(PaymentCandidate {
+                    chain_id: requirements.network.clone(),
+                    asset: requirements.asset.clone(),
+                    amount: requirements.amount.to_string().into(),
+                    scheme: self.scheme().into(),
+                    pay_to: requirements.pay_to.clone(),
+                    signer: Box::new(V2PayloadSigner {
+                        resource_info: Some(payment_required.resource.clone()),
+                        signer: self.signer.clone(),
+                        requirements,
+                    }),
+                })
+            })
+            .collect()
+    }
+}
+
+struct V2PayloadSigner<S> {
+    signer: S,
+    resource_info: Option<ResourceInfo>,
+    requirements: v2::PaymentRequirements,
+}
+
+impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
+where
+    S: CasperSigner + Sync,
+{
+    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+        Box::pin(async move {
+            let public_key = self.signer.public_key();
+            let from = public_key.account_hash();
+            let now = crate::exact::verify::now_unix();
+            let authorization = AuthorizationBuilder::for_requirements(
+                from,
+                &self.requirements,
+                now,
+            )
+            .map_err(|e| ClientError::Signing(e.to_string()))?
+            .nonce(rng().random())
+            .build();
+
+            let domain =
+                domain_for(&self.requirements).map_err(|e| ClientError::Signing(e.to_string()))?;
+            let digest = transfer_with_authorization_digest(&domain, &authorization);
+            let signature = self.signer.sign_digest(&digest).await?;
+            let signature_hex = hex::encode(&signature);
+
+            let payload = build_payload(authorization, public_key, signature_hex)
+                .map_err(|e| ClientError::Signing(e.to_string()))?;
+            let envelope = build_payment_payload(self.requirements.clone(), payload)
+                .with_optional_resource(self.resource_info.clone());
+            let json = serde_json::to_vec(&envelope)?;
+            Ok(Base64Bytes::encode(&json).to_string())
+        })
+    }
 }
 
 #[allow(
@@ -207,8 +322,11 @@ pub fn domain_for(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::exact::eip712::{PRIMARY_TYPE as EIP712_PRIMARY, TRANSFER_WITH_AUTHORIZATION_TYPE};
 
-    const PAYER: &str = "001234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+    /// Secp256k1 fixture from `scheme_exact_casper.md` (publicKey → from).
+    const PAYER: &str = "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3";
+    const PUBLIC_KEY: &str = "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867";
     const PAYEE: &str = "00fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321";
     const ASSET: &str = "3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e";
 
@@ -226,7 +344,31 @@ mod tests {
     }
 
     fn public_key() -> PublicKey {
-        format!("01{}", "bb".repeat(32)).parse().unwrap()
+        PUBLIC_KEY.parse().unwrap()
+    }
+
+    fn signature_hex() -> String {
+        format!("02{}", "aa".repeat(64))
+    }
+
+    /// Stub signer that returns a fixed signature for plumbing tests.
+    #[derive(Clone, Debug)]
+    struct StubSigner;
+
+    impl CasperSigner for StubSigner {
+        fn public_key(&self) -> PublicKey {
+            public_key()
+        }
+
+        fn sign_digest(
+            &self,
+            _digest: &[u8; 32],
+        ) -> impl Future<Output = Result<[u8; 65], ClientError>> {
+            let mut sig = [0u8; 65];
+            sig[0] = 0x02;
+            sig[1..].fill(0xaa);
+            std::future::ready(Ok(sig))
+        }
     }
 
     #[test]
@@ -236,7 +378,7 @@ mod tests {
                 .unwrap()
                 .nonce([7u8; NONCE_LEN])
                 .build();
-        assert_eq!(auth.valid_after, 1_000);
+        assert_eq!(auth.valid_after, 400);
         assert_eq!(auth.valid_before, 1_300);
         assert_eq!(auth.value, Motes::new(1_500_000_000));
         assert_eq!(auth.to.to_string(), PAYEE);
@@ -261,7 +403,7 @@ mod tests {
             AuthorizationBuilder::for_requirements(PAYER.parse().unwrap(), &requirements(), 1_000)
                 .unwrap()
                 .build();
-        let payload = build_payload(auth.clone(), public_key(), "aa".repeat(65)).unwrap();
+        let payload = build_payload(auth.clone(), public_key(), signature_hex()).unwrap();
         assert_eq!(payload.authorization, auth);
 
         let err = build_payload(auth, public_key(), "aa".repeat(10)).unwrap_err();
@@ -274,7 +416,7 @@ mod tests {
             AuthorizationBuilder::for_requirements(PAYER.parse().unwrap(), &requirements(), 1_000)
                 .unwrap()
                 .build();
-        let payload = build_payload(auth, public_key(), "aa".repeat(65)).unwrap();
+        let payload = build_payload(auth, public_key(), signature_hex()).unwrap();
         let envelope = build_payment_payload(requirements(), payload);
         let json = serde_json::to_value(&envelope).unwrap();
         assert_eq!(json["x402Version"], 2);
@@ -303,7 +445,8 @@ mod tests {
 
     #[test]
     fn primary_type_field_layout_matches_the_reference_sdks() {
-        assert_eq!(PRIMARY_TYPE, "TransferWithAuthorization");
+        assert_eq!(EIP712_PRIMARY, "TransferWithAuthorization");
+        assert!(TRANSFER_WITH_AUTHORIZATION_TYPE.contains("validAfter"));
         let names: Vec<&str> = TRANSFER_WITH_AUTHORIZATION_FIELDS
             .iter()
             .map(|(name, _)| *name)
@@ -312,5 +455,35 @@ mod tests {
             names,
             vec!["from", "to", "value", "validAfter", "validBefore", "nonce"]
         );
+    }
+
+    fn payment_required_json() -> PaymentRequired {
+        serde_json::from_value(serde_json::json!({
+            "x402Version": 2,
+            "resource": { "url": "https://example.com/paid" },
+            "accepts": [serde_json::to_value(requirements()).unwrap()]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn scheme_client_accepts_casper_requirements() {
+        let client = CasperExactClient::new(StubSigner);
+        let candidates = client.accept(&payment_required_json());
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].scheme, "exact");
+        assert_eq!(candidates[0].chain_id.to_string(), "casper:casper-test");
+    }
+
+    #[tokio::test]
+    async fn scheme_client_signs_to_base64_payload() {
+        let client = CasperExactClient::new(StubSigner);
+        let candidates = client.accept(&payment_required_json());
+        let b64 = candidates[0].sign().await.unwrap();
+        assert!(!b64.is_empty());
+        let raw = Base64Bytes(b64.into_bytes()).decode().unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(json["x402Version"], 2);
+        assert_eq!(json["payload"]["publicKey"], PUBLIC_KEY);
     }
 }

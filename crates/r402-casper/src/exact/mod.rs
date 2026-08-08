@@ -39,6 +39,8 @@ pub mod facilitator;
 
 #[cfg(feature = "client")]
 pub mod client;
+#[cfg(feature = "client")]
+pub mod eip712;
 
 pub mod error;
 pub use error::*;
@@ -48,6 +50,11 @@ pub use types::*;
 
 pub mod verify;
 pub use verify::{ValidatedPayment, validate_at, validate_payload_shape, validate_request};
+
+#[cfg(feature = "client")]
+pub use client::{AuthorizationBuilder, CasperExactClient, CasperSigner, build_payload, domain_for};
+#[cfg(feature = "client")]
+pub use eip712::{Eip712Domain, PRIMARY_TYPE, transfer_with_authorization_digest};
 
 /// Casper exact scheme identifier.
 ///

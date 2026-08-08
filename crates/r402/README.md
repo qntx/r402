@@ -9,6 +9,8 @@ individual crates directly:
 - [`r402-core`](https://docs.rs/r402-core) — wire format, `Facilitator` trait, extension framework
 - [`r402-evm`](https://docs.rs/r402-evm) — EVM chain support (EIP-3009 + Permit2 schemes)
 - [`r402-svm`](https://docs.rs/r402-svm) — Solana chain support (SPL Token + Token-2022)
+- [`r402-tron`](https://docs.rs/r402-tron) — Tron chain support (EIP-3009 + Permit2 via `TronGrid`)
+- [`r402-casper`](https://docs.rs/r402-casper) — Casper exact scheme (remote facilitator)
 - [`r402-http`](https://docs.rs/r402-http) — HTTP transport (server middleware + buyer client)
 - [`r402-mcp`](https://docs.rs/r402-mcp) — MCP transport (placeholder, see crate docs)
 
@@ -25,6 +27,8 @@ r402 = { version = "0.14", features = ["evm", "http", "facilitator"] }
 | ---------------- | :-----: | ---------------------------------------------------- |
 | `evm`            |   ✅    | Re-export `r402-evm` as [`evm`]                      |
 | `svm`            |         | Re-export `r402-svm` as [`svm`]                      |
+| `tron`           |         | Re-export `r402-tron` as [`tron`]                    |
+| `casper`         |         | Re-export `r402-casper` as [`casper`]                |
 | `http`           |   ✅    | Re-export `r402-http` as [`http`]                    |
 | `mcp`            |         | Re-export `r402-mcp` as [`mcp`]                      |
 | `client`         |         | Forward `client` feature to all enabled chain crates |

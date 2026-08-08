@@ -26,6 +26,13 @@ pub enum CasperExactError {
         /// Network declared by the seller's requirements.
         requirements: String,
     },
+    /// Core fields of `paymentPayload.accepted` and `paymentRequirements`
+    /// disagree (`scheme` / `network` / `amount` / `asset` / `payTo`).
+    ///
+    /// Mirrors EVM/SVM `assert_requirements_match` and the Go SDK's
+    /// `FindMatchingRequirements`.
+    #[error("accepted requirements do not match payment requirements")]
+    AcceptedRequirementsMismatch,
     /// The network is not a supported Casper chain.
     #[error("unsupported casper network: {0}")]
     UnsupportedNetwork(#[from] CasperChainReferenceFormatError),
@@ -100,6 +107,7 @@ impl From<CasperExactError> for VerificationError {
         match error {
             CasperExactError::InvalidScheme => Self::UnsupportedScheme,
             CasperExactError::NetworkMismatch { .. } => Self::ChainIdMismatch,
+            CasperExactError::AcceptedRequirementsMismatch => Self::AcceptedRequirementsMismatch,
             CasperExactError::UnsupportedNetwork(_) => Self::UnsupportedChain,
             CasperExactError::InvalidAsset(_) => Self::AssetMismatch,
             CasperExactError::PayToMismatch { .. } => Self::RecipientMismatch,
@@ -143,6 +151,10 @@ mod tests {
                 requirements: "casper:casper-test".to_owned(),
             }),
             ErrorReason::InvalidNetwork
+        );
+        assert_eq!(
+            reason(CasperExactError::AcceptedRequirementsMismatch),
+            ErrorReason::InvalidPaymentRequirements
         );
     }
 

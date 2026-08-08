@@ -15,7 +15,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and 44 built-in chain deployments across EVM and Solana.
+r402 provides a production-grade, multi-chain implementation of the x402 protocol with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across EVM, Solana, Casper, and Tron.
 
 ## Crates
 
@@ -24,6 +24,8 @@ r402 provides a production-grade, multi-chain implementation of the x402 protoco
 | **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Core library — protocol types, scheme traits, facilitator abstractions, and hook system |
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 transfer authorization, multi-signer management, nonce tracking |
 | **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL token transfers, program-derived addressing |
+| **[`r402-tron`](crates/r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — EIP-3009 + Permit2 (TIP-712) via TronGrid |
+| **[`r402-casper`](crates/r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme via remote facilitator |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate middleware, reqwest client middleware, facilitator client |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
@@ -32,6 +34,10 @@ r402 provides a production-grade, multi-chain implementation of the x402 protoco
 [r402-evm-crate-url]: https://crates.io/crates/r402-evm
 [r402-svm-crate]: https://img.shields.io/crates/v/r402-svm.svg
 [r402-svm-crate-url]: https://crates.io/crates/r402-svm
+[r402-tron-crate]: https://img.shields.io/crates/v/r402-tron.svg
+[r402-tron-crate-url]: https://crates.io/crates/r402-tron
+[r402-casper-crate]: https://img.shields.io/crates/v/r402-casper.svg
+[r402-casper-crate-url]: https://crates.io/crates/r402-casper
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
 [r402-doc]: https://img.shields.io/docsrs/r402.svg
@@ -40,6 +46,10 @@ r402 provides a production-grade, multi-chain implementation of the x402 protoco
 [r402-evm-doc-url]: https://docs.rs/r402-evm
 [r402-svm-doc]: https://img.shields.io/docsrs/r402-svm.svg
 [r402-svm-doc-url]: https://docs.rs/r402-svm
+[r402-tron-doc]: https://img.shields.io/docsrs/r402-tron.svg
+[r402-tron-doc-url]: https://docs.rs/r402-tron
+[r402-casper-doc]: https://img.shields.io/docsrs/r402-casper.svg
+[r402-casper-doc-url]: https://docs.rs/r402-casper
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
 
@@ -202,15 +212,15 @@ sequenceDiagram
 
 | Aspect | Details |
 | --- | --- |
-| Built-in chains | **44** — 42 EVM (EIP-155) + 2 Solana |
-| Schemes | **`exact`** (fixed amount, ERC-3009 + Permit2) + **`upto`** (usage-based, Permit2-only, EVM) |
-| Transfer methods | **Dual path** — ERC-3009 `transferWithAuthorization` + Permit2 proxy |
+| Built-in chains | EVM (EIP-155), Solana (SVM), Tron, Casper |
+| Schemes | **`exact`** (all chains) + **`upto`** (usage-based, EVM) |
+| Transfer methods | ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 auth (Casper) |
 | Lifecycle hooks | **`FacilitatorHooks`** (verify/settle) + **`ClientHooks`** (payment creation) |
 | Async model | **Zero `async_trait`** in core — RPITIT / `Pin<Box<dyn Future>>` |
 | Facilitator trait | **Unified** — dyn-compatible `Box<dyn Facilitator>` across all schemes |
 | Wire format | **V2-only** server (CAIP-2 chain IDs, `Payment-Signature` header) |
 | Settlement errors | **Explicit** — failed settle returns 402 with structured error |
-| Network definitions | **Decoupled** — per-chain crate (`r402-evm`, `r402-svm`) |
+| Network definitions | **Decoupled** — per-chain crate (`r402-evm`, `r402-svm`, `r402-tron`, `r402-casper`) |
 | Smart wallets | **EIP-6492** (counterfactual) + **EIP-1271** (deployed) + **ERC-2098** (compact signatures) |
 | Linting | **`pedantic` + `nursery` + `correctness`** (deny) |
 
@@ -223,6 +233,8 @@ Each chain and transport crate uses feature flags to minimize compile-time depen
 | `r402-http` | Axum payment gate + facilitator client | Reqwest middleware | — | `tracing` spans |
 | `r402-evm` | Price tag generation | EIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle | `tracing` spans |
 | `r402-svm` | Price tag generation | SPL token signing | On-chain verify & settle | `tracing` spans |
+| `r402-tron` | Price tag generation | TIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle (TronGrid) | `tracing` spans |
+| `r402-casper` | Price tag generation | `SchemeClient` + EIP-712 digest signing | Remote facilitator client | `tracing` spans |
 
 ## Acknowledgments
 
