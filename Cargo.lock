@@ -4261,6 +4261,9 @@ name = "r402-mcp"
 version = "0.14.0"
 dependencies = [
  "r402-core",
+ "serde_json",
+ "thiserror 2.0.19",
+ "tokio",
  "tracing",
 ]
 

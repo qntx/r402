@@ -1,29 +1,33 @@
 # r402-mcp
 
-Model Context Protocol (MCP) transport for the x402 payment protocol.
+Model Context Protocol (MCP) transport for the [x402 payment protocol][x402],
+part of the [`r402`](../r402) workspace.
+
+[x402]: https://www.x402.org
 
 ## Status
 
-**Placeholder.** This crate reserves the `r402-mcp` name and documents the design
-intent for an MCP transport. Concrete implementations (`server` and `client`
-modules) will land in a subsequent release. Track progress in the repository's
-issue tracker.
+**Production-oriented skeleton** aligned with foundation Go (`go/mcp`) and
+TypeScript (`@x402/mcp`) meta keys and flow:
 
-## Design Intent
+| Surface | Feature | Notes |
+| --- | --- | --- |
+| Meta keys / error code | always | Match official `x402/payment`, `x402/payment-response`, `x402_payment_required` |
+| [`server::PaymentWrapper`](src/server.rs) | `server` | Verify (+ optional settle) around a tool handler via any `Facilitator` |
+| [`client::pay_and_call`](src/client.rs) | `client` | One automatic retry after payment-required |
 
-The MCP transport will layer x402 on top of [Model Context Protocol tool calls]:
+Host applications supply their MCP SDK binding; r402 stays SDK-agnostic so
+it does not pin a particular Rust MCP crate.
 
-- **Server side**: wrap tool invocations with a paygate that emits a
-  `PaymentRequired` payload in the tool's `_meta["x402/payment"]` block,
-  producing an `isError: true` response until a valid payment is presented.
-- **Client side**: a middleware that automatically signs and replays tool
-  calls upon receiving a `PaymentRequired` response.
+## Cargo features
 
-The wire-level types are shared with [`r402-core`](https://docs.rs/r402-core);
-only the transport framing differs from the HTTP variant.
-
-[Model Context Protocol tool calls]: https://modelcontextprotocol.io
+| Feature | Surface |
+| --- | --- |
+| `server` | Payment wrapper for tool handlers |
+| `client` | Auto-pay retry helper |
+| `telemetry` | `tracing` hooks |
+| `full` | All of the above |
 
 ## License
 
-Licensed under either of MIT or Apache-2.0, at your option.
+Dual-licensed under MIT and Apache-2.0.

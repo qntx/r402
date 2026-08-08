@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Production alignment (ex-chain-breadth program)
+
+- **Scheme markers** — `BatchSettlementScheme` (`"batch-settlement"`) and
+  `AuthCaptureScheme` (`"auth-capture"`) sealed markers in `r402-core`
+  (unblocks EVM scheme crates).
+- **SVM Path 2 foundation** — opt-in
+  `SolanaExactFacilitatorConfig::enable_smart_wallet_verification` (default
+  `false`, matches TS). Path 1 layout failures fall through to outcome-based
+  TransferChecked matching (`smart_wallet` module). CPI inner-instruction
+  plumbing through the provider is the next hardening step for CPI-only
+  wallets.
+- **`r402-mcp`** — real server `PaymentWrapper` + client `pay_and_call`
+  with foundation meta keys; no longer an empty placeholder.
+
 ### Protocol alignment (x402 foundation / Go / TS)
 
 - **`r402-svm` exact amount rule** now matches `scheme_exact_svm.md` §1.4

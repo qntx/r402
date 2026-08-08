@@ -24,13 +24,18 @@ default = []
 
 telemetry = ["r402-core/telemetry", "dep:tracing"]
 server = []
-client = []
+client = ["dep:thiserror"]
 
 full = ["telemetry", "server", "client"]
 
 [dependencies]
 r402-core = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

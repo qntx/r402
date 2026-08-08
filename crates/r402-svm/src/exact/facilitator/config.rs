@@ -45,6 +45,15 @@ pub struct SolanaExactFacilitatorConfig {
     /// Blocked program IDs (always rejected, takes precedence over allowed).
     #[serde(default)]
     pub blocked_program_ids: Vec<Address>,
+
+    /// Enable Path 2 smart-wallet verification (spec §3.2).
+    ///
+    /// When `true`, Path 1 layout failures fall through to simulation-based
+    /// CPI outcome matching (aligned with TS `enableSmartWalletVerification`).
+    /// Default: `false` (Path 1 only), matching the foundation TypeScript
+    /// facilitator default.
+    #[serde(default)]
+    pub enable_smart_wallet_verification: bool,
 }
 
 const fn default_allow_additional_instructions() -> bool {
@@ -70,11 +79,19 @@ impl Default for SolanaExactFacilitatorConfig {
             max_instruction_count: default_max_instruction_count(),
             allowed_program_ids: default_allowed_program_ids(),
             blocked_program_ids: Vec::new(),
+            enable_smart_wallet_verification: false,
         }
     }
 }
 
 impl SolanaExactFacilitatorConfig {
+    /// Enables Path 2 smart-wallet verification (CPI / simulation outcome path).
+    #[must_use]
+    pub const fn with_smart_wallet_verification(mut self, enabled: bool) -> Self {
+        self.enable_smart_wallet_verification = enabled;
+        self
+    }
+
     /// Check if a program ID is in the blocked list.
     #[must_use]
     pub fn is_blocked(&self, program_id: &Pubkey) -> bool {
