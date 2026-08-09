@@ -33,8 +33,15 @@ metrics = ["dep:metrics"]
 
 ext-bazaar = []
 ext-payment-id = ["cache"]
+ext-eip2612 = []
+ext-erc20-approval = []
 
-all-extensions = ["ext-bazaar", "ext-payment-id"]
+all-extensions = [
+    "ext-bazaar",
+    "ext-payment-id",
+    "ext-eip2612",
+    "ext-erc20-approval",
+]
 
 full = ["telemetry", "cache", "metrics", "all-extensions"]
 

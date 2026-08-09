@@ -20,6 +20,8 @@
 //! - [`chain`] - Core EVM chain types, providers, and configuration
 //! - [`exact`] - EIP-155 "exact" payment scheme
 //! - [`upto`]  - EIP-155 "upto" payment scheme (Permit2, usage-based)
+//! - [`auth_capture`] - authorize / capture / charge (commerce-payments escrow)
+//! - [`batch_settlement`] - capital-backed channel vouchers
 //!
 //! # Feature Flags
 //!
@@ -48,15 +50,39 @@ use {alloy_provider as _, alloy_transport_http as _, tokio as _, url as _};
 /// boundaries (useful for deterministic tests).
 pub const EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS: u64 = 6;
 
+pub mod auth_capture;
+pub mod batch_settlement;
 pub mod chain;
+pub mod eip2612;
+pub mod erc20_approval;
 pub mod exact;
 pub mod upto;
 
 mod networks;
+pub use auth_capture::Eip155AuthCapture;
+#[cfg(feature = "facilitator")]
+pub use auth_capture::Eip155AuthCaptureFacilitator;
+#[cfg(feature = "client")]
+pub use auth_capture::{Eip155AuthCaptureClient, sign_auth_capture};
+pub use batch_settlement::Eip155BatchSettlement;
+#[cfg(feature = "facilitator")]
+pub use batch_settlement::{
+    ChannelStore, Eip155BatchSettlementFacilitator, MemoryChannelStore, compute_channel_id,
+};
+#[cfg(feature = "client")]
+pub use batch_settlement::{Eip155BatchSettlementClient, sign_voucher, sign_voucher_payload};
+pub use eip2612::{
+    EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612ParseError,
+    Eip2612SignedPermit,
+};
+pub use erc20_approval::{
+    ERC20_APPROVAL_GAS_SPONSORING_KEY, ERC20_APPROVAL_GAS_SPONSORING_VERSION,
+    Erc20ApprovalGasSponsoringInfo, Erc20ApprovalParseError,
+};
 pub use exact::Eip155Exact;
 #[cfg(feature = "client")]
 pub use exact::client::{Eip155ExactClient, Eip155ExactClientBuilder, Permit2Approver};
 pub use networks::*;
 pub use upto::Eip155Upto;
 #[cfg(feature = "client")]
-pub use upto::client::Eip155UptoClient;
+pub use upto::client::{Eip155UptoClient, Eip2612SigningParams, sign_eip2612_permit};

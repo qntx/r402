@@ -22,8 +22,10 @@
 //! Feature-gated:
 //!
 //! - `ext-bazaar` — [`bazaar::BazaarExtension`] for resource discovery
-//! - `ext-payment-id` — [`payment_id::PaymentIdentifierExtension`] for
-//!   client-supplied idempotency keys
+//! - `ext-payment-id` — [`payment_id::PaymentIdentifierExtension`]
+//! - `ext-eip2612` — [`eip2612_gas_sponsoring::Eip2612GasSponsoringExtension`]
+//!   (server advertise; EVM payload types in `r402-evm`)
+//! - `ext-erc20-approval` — [`erc20_approval_gas_sponsoring::Erc20ApprovalGasSponsoringExtension`]
 //!
 //! # Implementing Your Own
 //!
@@ -57,6 +59,14 @@ use crate::wire::{
 #[cfg(feature = "ext-bazaar")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-bazaar")))]
 pub mod bazaar;
+
+#[cfg(feature = "ext-eip2612")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ext-eip2612")))]
+pub mod eip2612_gas_sponsoring;
+
+#[cfg(feature = "ext-erc20-approval")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ext-erc20-approval")))]
+pub mod erc20_approval_gas_sponsoring;
 
 #[cfg(feature = "ext-payment-id")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-payment-id")))]

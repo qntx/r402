@@ -4,7 +4,7 @@
 | --- | --- | --- |
 | **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Umbrella crate — feature-gated re-exports of the crates below |
 | **[`r402-core`](r402-core/)** | [![crates.io][r402-core-crate]][r402-core-crate-url] [![docs.rs][r402-core-doc]][r402-core-doc-url] | Protocol types, scheme traits, facilitator abstractions, hooks, extensions |
-| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — ERC-3009 + Permit2, `exact` + `upto`, multi-signer / nonce |
+| **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — `exact` / `upto` / `auth-capture` / `batch-settlement` |
 | **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL Token / Token-2022 exact transfers |
 | **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
@@ -17,21 +17,21 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 
 | Chain crate | CAIP-2 examples | Schemes | Settlement model |
 | --- | --- | --- | --- |
-| [`r402-evm`](r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto` | In-process on-chain facilitator |
+| [`r402-evm`](r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto`, `auth-capture`, `batch-settlement` | In-process on-chain facilitator |
 | [`r402-svm`](r402-svm/) | `solana:…` | `exact` | In-process on-chain facilitator |
-| [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), Nile, Shasta | `exact` | In-process via TronGrid HTTP |
+| [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` | In-process via TronGrid HTTP |
 | [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator |
 
 ## Dependency graph
 
 ```text
 r402 (umbrella)
-  ├── r402-core          (types, schemes, hooks, wire V2)
-  ├── r402-evm           ── r402-core   exact + upto (on-chain)
+  ├── r402-core          (types, schemes, hooks, ResourceServer, PaymentClient, wire V2)
+  ├── r402-evm           ── r402-core   exact + upto + auth-capture + batch-settlement
   ├── r402-svm           ── r402-core   exact (on-chain)
   ├── r402-tron          ── r402-core   exact (TronGrid)
   ├── r402-casper        ── r402-core   exact (preflight + remote facilitator)
-  ├── r402-http          ── r402-core   Axum gate + reqwest client
+  ├── r402-http          ── r402-core   Axum Paygate + reqwest X402Client
   └── r402-mcp           ── r402-core   MCP transport (rmcp, V2)
 ```
 
@@ -54,7 +54,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 | `facilitator` | | Propagate `facilitator` (+ Casper `http-client`) |
 | `telemetry` | | `tracing` spans across enabled crates |
 | `cache` | | Settlement cache in `r402-core` |
-| `ext-bazaar` / `ext-payment-id` / `all-extensions` | | Protocol extensions |
+| `ext-bazaar` / `ext-payment-id` / `ext-eip2612` / `ext-erc20-approval` / `all-extensions` | | Protocol extensions |
 | `full` | | All chains, transports, roles, telemetry, cache, extensions |
 
 ```toml

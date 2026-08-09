@@ -244,7 +244,7 @@ fn assert_eip2612_consistent_with_permit2(
         ));
     }
     let permit2_value: U256 = auth.permitted.amount.into();
-    let eip2612_value: U256 = eip2612.value.into();
+    let eip2612_value: U256 = eip2612.amount.into();
     if permit2_value != eip2612_value {
         return Err(VerificationError::InvalidFormat(format!(
             "eip2612GasSponsoring.value ({eip2612_value}) does not match permit2Authorization.permitted.amount ({permit2_value})"
@@ -372,7 +372,7 @@ pub(super) fn build_eip2612_abi(
         )
     })?;
     Ok(IX402UptoPermit2Proxy::EIP2612Permit {
-        value: eip2612.value.into(),
+        value: eip2612.amount.into(),
         deadline: eip2612.deadline.into(),
         r,
         s,
@@ -844,9 +844,11 @@ mod tests {
                 from: Address::repeat_byte(0xCC),
                 asset: Address::repeat_byte(0xAA),
                 spender: PERMIT2_ADDRESS,
-                value: TokenAmount::from(value),
+                amount: TokenAmount::from(value),
+                nonce: TokenAmount::from(U256::ZERO),
                 deadline: TokenAmount::from(U256::from(UnixTimestamp::now().as_secs() + 300)),
                 signature: Bytes::from(vec![0x42u8; 65]),
+                version: crate::EIP2612_GAS_SPONSORING_VERSION.into(),
             }
         }
 
@@ -903,7 +905,7 @@ mod tests {
         #[test]
         fn shared_check_rejects_value_mismatch() {
             let (payload, reqs) = payload_with_eip2612(U256::from(5_000_000_u64), |e| {
-                e.value = TokenAmount::from(U256::from(1_000_000_u64));
+                e.amount = TokenAmount::from(U256::from(1_000_000_u64));
             });
             let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
             assert!(matches!(err, VerificationError::InvalidFormat(msg) if msg.contains("value")));

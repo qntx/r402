@@ -6,6 +6,107 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Transport parity fixes (SkipHandler body + Settlement-Overrides)
+
+- **`SkipHandlerDirective` body** — HTTP Paygate (sequential / concurrent /
+  background) and MCP `PaymentWrapper` now write the directive `body` /
+  `content_type` (default `application/json`, body `null` when unset), matching
+  foundation Go Gin middleware instead of returning an empty 200 / empty tool
+  result.
+- **`Settlement-Overrides`** — official HTTP header + amount formats (atomic,
+  `"50%"`, `"$0.05"`) via `r402_core::resolve_settlement_override_amount` and
+  `r402_http::set_settlement_overrides`. Sequential settle resolves and strips
+  the header; `UptoActualAmount` remains as in-process atomic precedence.
+  Concurrent rejects partial overrides (use Sequential); background strips the
+  billing header and settles the signed max.
+
+### Resource server lifecycle (official X402ResourceServer V2 parity)
+
+- **`ResourceServerHooks`** in `r402-core` — transport-agnostic server lifecycle:
+  `before_verify` / `after_verify` / `on_verify_failure`,
+  `before_settle` / `after_settle` / `on_settle_failure`,
+  **`on_verified_payment_canceled`** (`handler_threw` | `handler_failed` |
+  `after_verify_aborted`).
+- **`BeforeOpDecision`** — `Continue` | `Abort` | `Skip { result }` (local
+  short-circuit, for batch-settlement vouchers later).
+- **`AfterVerifyDecision`** — `Continue` | `Abort` | **`SkipHandler`**
+  (inline settle without resource handler).
+- **`VerifyPaymentOutcome`** — verify path returns response + optional
+  `skip_handler` directive.
+- **`CancellationGuard`** — fires cancel hooks at most once per payment.
+- **`r402-http` `Paygate`** — holds `ResourceServer` (not a bare facilitator);
+  sequential/concurrent/background paths dispatch cancel on handler failure;
+  `PaygateBuilder::with_resource_hook` registers server hooks.
+- **`r402-mcp` `PaymentWrapper`** — cancel on tool error / before-execution
+  abort; honors `SkipHandler`.
+
+### Facilitator multi-scheme + docs polish
+
+- **Facilitator** registers EVM `exact` / `upto` / `auth-capture` /
+  `batch-settlement` (and Solana `exact`) by scheme id; auto-`[[schemes]]`
+  generates the full EVM set when omitted.
+- **Tron docs**: networks are mainnet + Nile only (Shasta claim removed).
+- **HTTP/MCP READMEs**: aligned with `PaymentClient` / `ResourceServer` surface.
+
+### EVM `batch-settlement` scheme
+
+- **`r402-evm::batch_settlement`** — capital-backed channel micropayments:
+  - CREATE2 addresses: settlement contract + ERC-3009 / Permit2 deposit collectors
+  - Wire: `ChannelConfig`, deposit / voucher / refund payloads, `BatchSettlementExtra`
+  - EIP-712 `compute_channel_id` + cumulative `sign_voucher` / EOA verify
+  - Pluggable [`ChannelStore`] + [`MemoryChannelStore`] (monotonic charge accounting)
+  - Client: `Eip155BatchSettlementClient` / `sign_voucher_payload`
+  - Server: `Eip155BatchSettlement::price_tag`
+  - Facilitator: off-chain verify + settle updates charged totals (`SchemeBuilder`)
+  - On-chain claim/sweep left to operators (store is the request-path contract)
+
+### EVM `auth-capture` scheme
+
+- **`r402-evm::auth_capture`** — full client / server / facilitator path for
+  Base commerce-payments escrow:
+  - Canonical addresses: escrow + EIP-3009 / Permit2 collectors
+  - Wire: `AuthCaptureExtra`, EIP-3009 + Permit2 payloads, `salt`
+  - Payer-agnostic `PaymentInfo` nonce derivation (spec formula)
+  - Client: `sign_auth_capture` / `Eip155AuthCaptureClient` (`SchemeClient`)
+  - Server: `Eip155AuthCapture::price_tag` (+ deployment helper)
+  - Facilitator: off-chain verify + on-chain `authorize` / `charge`
+  - Marker: `Eip155AuthCapture` + `SchemeBuilder` registration
+
+### First-party extensions (official wire)
+
+- **`payment-identifier`** — **breaking** advertise `info.required: bool` +
+  official schema (`required` / `id`); removed non-spec
+  `idempotency` / `maxAgeSeconds` from wire. Local TTL dedup remains config-only.
+  `validate_payload_entry` / `validate_id_format` (16–128, alnum/`-`/`_`).
+- **`ext-eip2612`** — core server advertise helper for `eip2612GasSponsoring`.
+- **`ext-erc20-approval`** — core server advertise helper for
+  `erc20ApprovalGasSponsoring`.
+- **`r402-evm` EIP-2612 wire** — shared crate-root module for exact+upto;
+  official fields `amount` / `nonce` / `version` (removed legacy `value`);
+  `sign_eip2612_permit` re-exported at crate root for both schemes.
+- **`r402-evm` ERC-20 approval wire** — `Erc20ApprovalGasSponsoringInfo`
+  (`signedTransaction`, etc.).
+
+### Client orchestration (official x402Client V2 parity)
+
+- **`PaymentClient`** in `r402-core` — scheme register / selector / policies /
+  lifecycle hooks (V2-only; no V1 path).
+- **`ClientHooks`** — `before_payment_creation`, `after_payment_creation`,
+  `on_payment_creation_failure`, **`on_payment_response`** (corrective
+  recovery signal).
+- **`CreatedPayment` / `PaymentResponseContext`** — transport-agnostic signed
+  payload + settle / corrective-402 context.
+- **`r402-http::X402Client`** — thin adapter over `PaymentClient`; dispatches
+  `on_payment_response` after paid retry and performs **one** corrective
+  recovery retry when hooks set `recovered`.
+- **`r402-mcp`** — `ClientHooks::on_payment_response` +
+  `PaidToolCallResult::recovery_requested` (caller-driven; no auto tool retry).
+
+### Facilitator consumer
+
+- External `facilitator` crate path-depends on local r402 0.15; uses
+  `DynFacilitator` + `wire::*` (no `proto` module); alloy 2.x aligned.
+
 ## [0.15.0] — 2026-08-08
 
 ### Production alignment (ex-chain-breadth program)

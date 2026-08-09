@@ -1,77 +1,10 @@
-//! Lifecycle hooks for the x402 client payment creation pipeline.
+//! HTTP client hooks — re-exports of [`r402_core::client`] lifecycle types.
 //!
-//! Hooks allow applications to intercept and customize the payment
-//! creation lifecycle. This mirrors the Go SDK's `client_hooks.go` design,
-//! using the same `HookDecision` / `FailureRecovery` enums as the
-//! server-side hooks for a consistent API.
-//!
-//! ## Hook Lifecycle
-//!
-//! 1. **`before_payment_creation`** — Run before payment creation; can abort it.
-//! 2. **Payment signing executes**
-//! 3. **`after_payment_creation`** (on success) — Observes the result.
-//! 4. **`on_payment_creation_failure`** (on error) — Can recover with substitute headers.
-//!
-//! ## Usage
-//!
-//! Implement [`ClientHooks`] with only the hooks you need — all methods
-//! have default no-op implementations.
+//! Prefer implementing [`r402_core::ClientHooks`] directly. Payment creation
+//! is transport-agnostic (signed base64 payload); HTTP adapts that into the
+//! `Payment-Signature` header.
 
-use http::HeaderMap;
-use r402_core::facilitator::BoxFuture;
-use r402_core::hooks::{FailureRecovery, HookDecision};
-use r402_core::wire;
-
-/// Context passed to client payment creation lifecycle hooks.
-#[derive(Debug, Clone)]
-pub struct PaymentCreationContext {
-    /// The parsed payment requirements from the 402 response.
-    pub payment_required: wire::PaymentRequired,
-}
-
-/// Lifecycle hooks for client-side payment creation.
-///
-/// All methods have default no-op implementations. Override only the hooks you
-/// need. This trait is dyn-compatible for use in heterogeneous hook lists.
-///
-/// The hook lifecycle mirrors [`r402_core::hooks::FacilitatorHooks`]:
-///
-/// 1. **`before_payment_creation`** — Can abort with [`HookDecision::Abort`].
-/// 2. **Payment signing executes**
-/// 3. **`after_payment_creation`** (on success) — Observes the signed headers.
-/// 4. **`on_payment_creation_failure`** (on error) — Can recover with [`FailureRecovery::Recovered`].
-pub trait ClientHooks: Send + Sync {
-    /// Called before payment creation.
-    ///
-    /// If any hook returns [`HookDecision::Abort`], payment creation is skipped
-    /// and the original 402 response is returned to the caller.
-    fn before_payment_creation<'a>(
-        &'a self,
-        _ctx: &'a PaymentCreationContext,
-    ) -> BoxFuture<'a, HookDecision> {
-        Box::pin(async { HookDecision::Continue })
-    }
-
-    /// Called after successful payment creation.
-    ///
-    /// Receives the signed payment headers. Cannot affect the outcome.
-    fn after_payment_creation<'a>(
-        &'a self,
-        _ctx: &'a PaymentCreationContext,
-        _headers: &'a HeaderMap,
-    ) -> BoxFuture<'a, ()> {
-        Box::pin(async {})
-    }
-
-    /// Called when payment creation fails.
-    ///
-    /// If a hook returns [`FailureRecovery::Recovered`], the provided headers
-    /// replace the error.
-    fn on_payment_creation_failure<'a>(
-        &'a self,
-        _ctx: &'a PaymentCreationContext,
-        _error: &'a str,
-    ) -> BoxFuture<'a, FailureRecovery<HeaderMap>> {
-        Box::pin(async { FailureRecovery::Propagate })
-    }
-}
+pub use r402_core::client::{
+    ClientHooks, CreatedPayment, DynClientHooks, PaymentCreationContext, PaymentResponseContext,
+    PaymentResponseResult,
+};

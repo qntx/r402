@@ -5,6 +5,8 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use r402_core::client::{PaymentResponseContext, PaymentResponseResult};
+use r402_core::wire::Base64Bytes;
 use r402_core::wire::{PaymentRequired, SettleResponse};
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Map, Value};
@@ -42,6 +44,8 @@ pub struct PaidToolCallResult {
     pub payment_made: bool,
     /// Settlement from `_meta`, if present.
     pub payment_response: Option<SettleResponse>,
+    /// `true` when `on_payment_response` asked for a corrective retry.
+    pub recovery_requested: bool,
 }
 
 /// Client options (Go `Options`).
@@ -57,7 +61,7 @@ impl Default for X402McpClientOptions {
     }
 }
 
-/// Client hooks (Go hook fields).
+/// Client hooks (Go hook fields + official `onPaymentResponse`).
 #[derive(Clone, Default)]
 pub struct ClientHooks {
     /// Can abort or supply a custom payload.
@@ -67,8 +71,16 @@ pub struct ClientHooks {
     pub on_payment_requested: Option<Arc<dyn Fn(PaymentRequiredContext) -> bool + Send + Sync>>,
     /// Before signing.
     pub on_before_payment: Option<Arc<dyn Fn(PaymentRequiredContext) + Send + Sync>>,
-    /// After paid call returns.
+    /// After paid call returns (MCP-specific, always fires after settle extract).
     pub on_after_payment: Option<Arc<dyn Fn(AfterPaymentContext) + Send + Sync>>,
+    /// Official transport-agnostic payment-response hook (core shape).
+    ///
+    /// Fired when settle meta is present or the paid call is still a 402.
+    /// Returning [`PaymentResponseResult::recovered`] is recorded on
+    /// [`PaidToolCallResult::recovery_requested`] for the caller to act on
+    /// (MCP does not auto-retry tools).
+    pub on_payment_response:
+        Option<Arc<dyn Fn(PaymentResponseContext) -> PaymentResponseResult + Send + Sync>>,
 }
 
 impl std::fmt::Debug for ClientHooks {
@@ -184,6 +196,7 @@ where
                 payment_response: extract_settle_response(&first),
                 result: first,
                 payment_made: false,
+                recovery_requested: false,
             });
         }
 
@@ -203,7 +216,12 @@ where
             }
             if let Some(payload) = hr.payment {
                 return self
-                    .call_tool_with_payment(name, params.arguments.clone(), payload)
+                    .call_tool_with_payment_and_challenge(
+                        name,
+                        params.arguments.clone(),
+                        payload,
+                        Some(required),
+                    )
                     .await;
             }
         }
@@ -224,11 +242,11 @@ where
 
         let payload = self
             .signer
-            .sign_payment(required)
+            .sign_payment(required.clone())
             .await
             .map_err(McpClientError::Payment)?;
 
-        self.call_tool_with_payment(name, params.arguments, payload)
+        self.call_tool_with_payment_and_challenge(name, params.arguments, payload, Some(required))
             .await
     }
 
@@ -243,6 +261,18 @@ where
         arguments: Option<Map<String, Value>>,
         payload: McpPaymentPayload,
     ) -> Result<PaidToolCallResult, McpClientError> {
+        self.call_tool_with_payment_and_challenge(name, arguments, payload, None)
+            .await
+    }
+
+    /// Paid call with the original challenge for `on_payment_response` context.
+    async fn call_tool_with_payment_and_challenge(
+        &self,
+        name: impl Into<String>,
+        arguments: Option<Map<String, Value>>,
+        payload: McpPaymentPayload,
+        original_challenge: Option<PaymentRequired>,
+    ) -> Result<PaidToolCallResult, McpClientError> {
         let name = name.into();
         let mut params = CallToolRequestParams::new(name.clone());
         if let Some(args) = arguments {
@@ -256,11 +286,39 @@ where
             .await
             .map_err(McpClientError::Transport)?;
 
-        if is_payment_required_result(&result) {
+        let signed_payload = encode_mcp_payload_b64(&payload);
+        let settle = extract_settle_response(&result);
+        let still_required = is_payment_required_result(&result);
+        let corrective = if still_required {
+            extract_payment_required(&result)
+        } else {
+            None
+        };
+
+        let mut recovery_requested = false;
+        if let Some(ref hook) = self.hooks.on_payment_response {
+            let challenge = original_challenge
+                .clone()
+                .or_else(|| corrective.clone())
+                .unwrap_or_else(|| {
+                    PaymentRequired::new(r402_core::wire::ResourceInfo::new("mcp://unknown"))
+                });
+            let mut ctx = PaymentResponseContext::new(challenge, signed_payload);
+            if let Some(ref s) = settle {
+                ctx = ctx.with_settle_response(s.clone());
+            }
+            if let Some(c) = corrective {
+                ctx = ctx.with_corrective_payment_required(c);
+            }
+            if settle.is_some() || still_required {
+                recovery_requested = hook(ctx).recovered;
+            }
+        }
+
+        if still_required {
             return Err(McpClientError::StillRequired);
         }
 
-        let settle = extract_settle_response(&result);
         if let Some(ref after) = self.hooks.on_after_payment {
             after(AfterPaymentContext {
                 tool_name: name,
@@ -274,6 +332,7 @@ where
             payment_response: settle,
             result,
             payment_made: true,
+            recovery_requested,
         })
     }
 
@@ -298,6 +357,13 @@ where
             .map_err(McpClientError::Transport)?;
         Ok(extract_payment_required(&result))
     }
+}
+
+fn encode_mcp_payload_b64(payload: &McpPaymentPayload) -> String {
+    serde_json::to_vec(payload).map_or_else(
+        |_| String::new(),
+        |bytes| Base64Bytes::encode(&bytes).to_string(),
+    )
 }
 
 /// Go `CallPaidTool` free function.

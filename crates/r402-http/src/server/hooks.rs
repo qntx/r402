@@ -60,7 +60,7 @@ pub trait PaygateHooks: Send + Sync {
 /// Dyn-compatible shim over [`PaygateHooks`].
 ///
 /// The generic trait uses AFIT (`-> impl Future`) which prevents its direct
-/// use behind `dyn`. The [`Paygate`](super::paygate::Paygate) needs to hold
+/// use behind `dyn`. The [`super::paygate::Paygate`] needs to hold
 /// hooks as a trait object so the middleware layer remains non-generic; this
 /// shim bridges the gap by boxing the futures.
 pub trait DynPaygateHooks: Send + Sync {

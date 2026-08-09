@@ -33,14 +33,15 @@ use r402_core::scheme::{SchemeId, sealed::Sealed};
 
 #[cfg(feature = "client")]
 pub mod client;
-pub mod eip2612;
 #[cfg(feature = "facilitator")]
 pub mod facilitator;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod types;
-pub use eip2612::{EIP2612_GAS_SPONSORING_KEY, Eip2612ParseError, Eip2612SignedPermit};
 pub use types::*;
+
+/// Re-export shared EIP-2612 wire types (exact + upto).
+pub use crate::eip2612::{EIP2612_GAS_SPONSORING_KEY, Eip2612ParseError, Eip2612SignedPermit};
 
 /// Canonical x402 upto Permit2 proxy address.
 ///

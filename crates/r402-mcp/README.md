@@ -39,7 +39,7 @@ Payment-required tool results set **both** `structuredContent` and
 
 ```toml
 [dependencies]
-r402-core = "0.14"
+r402-core = "0.15"
 r402-mcp = { version = "0.15", features = ["server"] }   # or "client" / "full"
 # optional umbrella:
 # r402 = { version = "0.15", features = ["mcp", "server"] }

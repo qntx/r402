@@ -1,6 +1,10 @@
 # Justfile for Rust project using Cargo
+#
+# Quality bar matches workspace.lints (rust / rustdoc / clippy) in Cargo.toml:
+#   just all   → fmt + clippy (-D warnings) + rustdoc (-D warnings)
+#   just test  → unit + integration + doctests
 
-all: fmt clippy-fix
+all: fmt clippy-fix doc-check
 
 # Build the project with all features enabled in release mode
 build:
@@ -18,7 +22,7 @@ update:
 run:
     cargo run --release --all-features
 
-# Run all tests with all features enabled
+# Run all tests with all features enabled (includes doctests)
 test:
     cargo test --workspace --all-features
 
@@ -50,4 +54,8 @@ fmt:
 
 # Generate documentation for all crates and open it in the browser
 doc:
-    cargo +nightly doc --all-features --no-deps --open
+    cargo +nightly doc --workspace --all-features --no-deps --open
+
+# Rustdoc with warnings denied (missing docs, broken links, rustdoc::* lints)
+doc-check:
+    RUSTDOCFLAGS="-D warnings" cargo +nightly doc --workspace --all-features --no-deps

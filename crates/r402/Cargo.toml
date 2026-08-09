@@ -68,6 +68,8 @@ cache = ["r402-core/cache"]
 
 ext-bazaar = ["r402-core/ext-bazaar"]
 ext-payment-id = ["r402-core/ext-payment-id"]
+ext-eip2612 = ["r402-core/ext-eip2612"]
+ext-erc20-approval = ["r402-core/ext-erc20-approval"]
 all-extensions = ["r402-core/all-extensions"]
 
 full = [

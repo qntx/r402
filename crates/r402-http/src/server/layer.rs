@@ -392,6 +392,13 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
     /// Hooks fire at the HTTP layer (before and after the x402 payment check)
     /// and let integrators bypass payment for API-key holders, enforce
     /// IP allow-lists, or short-circuit with a custom response.
+    ///
+    /// For transport-agnostic verify/settle lifecycle (including
+    /// `on_verified_payment_canceled`), register hooks on a
+    /// [`r402_core::ResourceServer`] and build the paygate with
+    /// [`super::paygate::Paygate::builder_from_server`], or use
+    /// [`super::paygate::PaygateBuilder::with_resource_hook`] on a manual
+    /// [`Paygate`].
     #[must_use]
     pub fn with_hooks<H>(mut self, hooks: H) -> Self
     where

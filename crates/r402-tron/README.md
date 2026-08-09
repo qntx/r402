@@ -10,7 +10,7 @@ Tron chain support for the [x402 payment protocol][x402], part of the
 - **Exact scheme** — EIP-3009 `transferWithAuthorization` (TIP-712
   signing) plus SUN.io Permit2 via `x402ExactPermit2Proxy` for tokens
   without EIP-3009 (e.g. USDT).
-- **CAIP-2 networks** — mainnet / Nile / Shasta (`tron:0x2b6653dc`, …).
+- **CAIP-2 networks** — mainnet (`tron:0x2b6653dc`) and Nile (`tron:0xcd8690dc`).
 - **Base58Check addresses** — native `T…` form with the `0x41` prefix
   handled at the type boundary.
 - **On-chain facilitator** — verify and settle through the TronGrid HTTP
