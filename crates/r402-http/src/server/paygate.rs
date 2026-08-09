@@ -24,7 +24,8 @@ use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
 use http::{HeaderMap, HeaderValue, StatusCode};
-use r402_core::facilitator::Facilitator;
+use r402_core::facilitator::{DynFacilitator, Facilitator};
+use r402_core::resource_server::{CancelReason, ResourceServer, ResourceServerHooks};
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
 use serde_json::json;
@@ -185,17 +186,17 @@ impl ResourceTemplate {
 /// ```
 #[allow(
     missing_debug_implementations,
-    reason = "generic facilitator may not impl Debug"
+    reason = "ResourceServer contains dyn facilitator handles"
 )]
-pub struct PaygateBuilder<TFacilitator> {
-    facilitator: TFacilitator,
+pub struct PaygateBuilder {
+    server: ResourceServer,
     accepts: Vec<wire::PriceTag>,
     resource: Option<wire::ResourceInfo>,
     hooks: Option<Arc<dyn DynPaygateHooks>>,
     settlement_tracker: Option<BackgroundSettlementTracker>,
 }
 
-impl<TFacilitator> PaygateBuilder<TFacilitator> {
+impl PaygateBuilder {
     /// Adds a single accepted payment option.
     #[must_use]
     pub fn accept(mut self, price_tag: wire::PriceTag) -> Self {
@@ -241,6 +242,13 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
         self
     }
 
+    /// Registers a transport-agnostic [`ResourceServerHooks`] lifecycle hook.
+    #[must_use]
+    pub fn with_resource_hook(mut self, hook: impl ResourceServerHooks + 'static) -> Self {
+        self.server.add_hook(hook);
+        self
+    }
+
     /// Attaches a [`BackgroundSettlementTracker`] so background settlement
     /// tasks register with it. Used to await in-flight settlements during
     /// graceful shutdown via [`Paygate::settlement_tracker`] +
@@ -254,9 +262,10 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
     /// Consumes the builder and produces a configured [`Paygate`].
     ///
     /// Uses empty resource info if none was provided.
-    pub fn build(self) -> Paygate<TFacilitator> {
+    #[must_use]
+    pub fn build(self) -> Paygate {
         Paygate {
-            facilitator: self.facilitator,
+            server: self.server,
             accepts: self.accepts.into(),
             resource: self
                 .resource
@@ -279,10 +288,10 @@ impl<TFacilitator> PaygateBuilder<TFacilitator> {
 /// before passing it to the payment gate.
 #[allow(
     missing_debug_implementations,
-    reason = "generic facilitator may not impl Debug"
+    reason = "ResourceServer contains dyn facilitator handles"
 )]
-pub struct Paygate<TFacilitator> {
-    pub(crate) facilitator: TFacilitator,
+pub struct Paygate {
+    pub(crate) server: ResourceServer,
     pub(crate) accepts: Arc<[wire::PriceTag]>,
     pub(crate) resource: wire::ResourceInfo,
     pub(crate) hooks: Option<Arc<dyn DynPaygateHooks>>,
@@ -297,11 +306,11 @@ pub struct Paygate<TFacilitator> {
     pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
 }
 
-impl<TFacilitator> Paygate<TFacilitator> {
+impl Paygate {
     /// Returns a new builder seeded with the given facilitator.
-    pub const fn builder(facilitator: TFacilitator) -> PaygateBuilder<TFacilitator> {
+    pub fn builder(facilitator: impl Facilitator + 'static) -> PaygateBuilder {
         PaygateBuilder {
-            facilitator,
+            server: ResourceServer::new(Arc::new(facilitator)),
             accepts: Vec::new(),
             resource: None,
             hooks: None,
@@ -309,12 +318,44 @@ impl<TFacilitator> Paygate<TFacilitator> {
         }
     }
 
-    /// Returns a reference to the underlying facilitator.
-    pub const fn facilitator(&self) -> &TFacilitator {
-        &self.facilitator
+    /// Returns a new builder over an already-erased facilitator handle.
+    #[must_use]
+    pub fn builder_from_dyn(facilitator: Arc<dyn DynFacilitator>) -> PaygateBuilder {
+        PaygateBuilder {
+            server: ResourceServer::from_dyn(facilitator),
+            accepts: Vec::new(),
+            resource: None,
+            hooks: None,
+            settlement_tracker: None,
+        }
+    }
+
+    /// Returns a new builder from an existing [`ResourceServer`] (hooks included).
+    #[must_use]
+    pub fn builder_from_server(server: ResourceServer) -> PaygateBuilder {
+        PaygateBuilder {
+            server,
+            accepts: Vec::new(),
+            resource: None,
+            hooks: None,
+            settlement_tracker: None,
+        }
+    }
+
+    /// Returns a reference to the resource server (facilitator + hooks).
+    #[must_use]
+    pub const fn resource_server(&self) -> &ResourceServer {
+        &self.server
+    }
+
+    /// Returns a clone of the erased facilitator handle.
+    #[must_use]
+    pub fn facilitator(&self) -> Arc<dyn DynFacilitator> {
+        self.server.facilitator()
     }
 
     /// Returns a reference to the accepted price tags.
+    #[must_use]
     pub fn accepts(&self) -> &[wire::PriceTag] {
         &self.accepts
     }
@@ -342,6 +383,7 @@ impl<TFacilitator> Paygate<TFacilitator> {
     }
 
     /// Returns a reference to the resource information.
+    #[must_use]
     pub const fn resource(&self) -> &wire::ResourceInfo {
         &self.resource
     }
@@ -445,13 +487,13 @@ impl<TFacilitator> Paygate<TFacilitator> {
     }
 }
 
-impl<TFacilitator> Paygate<TFacilitator>
-where
-    TFacilitator: Facilitator + Sync,
-{
+impl Paygate {
     /// Enriches price tags with facilitator capabilities (e.g., fee payer address).
     pub async fn enrich_accepts(&mut self) {
-        let capabilities = self.facilitator.supported().await.unwrap_or_default();
+        let facilitator = self.facilitator();
+        let capabilities = Facilitator::supported(&facilitator)
+            .await
+            .unwrap_or_default();
         let accepts: Vec<_> = self
             .accepts
             .iter()
@@ -467,13 +509,13 @@ where
     /// Verifies the payment from request headers without executing the inner
     /// service or settling on-chain.
     ///
-    /// Returns a [`VerifiedPayment`] token on success, which the caller can
-    /// later [`settle`](VerifiedPayment::settle) at their discretion.
+    /// Runs [`ResourceServer`] lifecycle hooks (before/after verify, failure
+    /// recovery). Returns a [`VerifiedPayment`] token on success.
     ///
     /// # Errors
     ///
     /// Returns [`PaygateError::Verification`] if the payment header is missing,
-    /// malformed, or rejected by the facilitator.
+    /// malformed, or rejected by the facilitator / hooks.
     #[cfg_attr(feature = "telemetry", instrument(name = "x402.verify_only", skip_all))]
     pub async fn verify_only(&self, headers: &HeaderMap) -> Result<VerifiedPayment, PaygateError> {
         let header_bytes = headers
@@ -484,20 +526,28 @@ where
         let payload: PaymentPayload =
             decode_payment_payload(header_bytes).ok_or(VerificationError::InvalidPaymentHeader)?;
 
-        let verify_request = build_verify_request(payload, &self.accepts)?;
-
-        let verify_response = self
-            .facilitator
-            .verify(verify_request.clone())
+        let requirements = match_requirements(&payload, &self.accepts)?;
+        let outcome = self
+            .server
+            .verify_payment(&payload, &requirements)
             .await
             .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
 
-        if let wire::VerifyResponse::Invalid { reason, .. } = verify_response {
+        if let wire::VerifyResponse::Invalid { reason, .. } = &outcome.response {
             return Err(VerificationError::VerificationFailed(reason.to_string()).into());
         }
 
+        // Build settle request from the same payload/requirements pair.
+        let settle_request = build_settle_request(&payload, &requirements).map_err(|e| {
+            VerificationError::VerificationFailed(format!("settle request build failed: {e}"))
+        })?;
+
         Ok(VerifiedPayment {
-            settle_request: verify_request.into(),
+            settle_request,
+            payload,
+            requirements,
+            server: self.server.clone(),
+            skip_handler: outcome.skip_handler,
         })
     }
 
@@ -531,30 +581,47 @@ where
         S::Future: Send,
     {
         let verified = self.verify_only(req.headers()).await?;
+        let cancel = verified.cancellation_guard();
+
+        // After-verify SkipHandler: settle without invoking the resource handler.
+        if let Some(directive) = verified.skip_handler.clone() {
+            let settlement = verified.settle_with_override(None).await?;
+            return skip_handler_response(&directive, &settlement);
+        }
 
         let response = match call_inner(inner, req).await {
             Ok(r) => r,
-            Err(err) => return Ok(err.into_response()),
+            Err(err) => {
+                cancel
+                    .cancel(
+                        CancelReason::HandlerThrew,
+                        Some("inner service error"),
+                        None,
+                    )
+                    .await;
+                return Ok(err.into_response());
+            }
         };
 
         if response.status().is_client_error() || response.status().is_server_error() {
+            cancel
+                .cancel(
+                    CancelReason::HandlerFailed,
+                    Some("handler returned error status"),
+                    Some(response.status().as_u16()),
+                )
+                .await;
             return Ok(response.into_response());
         }
 
         let mut response = response.into_response();
-        // Upto-scheme amount override: handlers insert UptoActualAmount into
-        // the response extensions to tell us the usage-based charge.
-        let override_amount = response
-            .extensions_mut()
-            .remove::<super::upto::UptoActualAmount>();
+        // Upto: Settlement-Overrides header and/or UptoActualAmount extension.
+        let override_amount =
+            super::upto::resolve_response_settlement_amount(&mut response, verified.requirements())
+                .map_err(|e| PaygateError::SettlementAborted(e.to_string()))?;
 
         let settlement = verified
-            .settle_with_override(
-                &self.facilitator,
-                override_amount
-                    .as_ref()
-                    .map(super::upto::UptoActualAmount::as_str),
-            )
+            .settle_with_override(override_amount.as_deref())
             .await?;
         let header_value = settlement_to_header(&settlement)?;
 
@@ -567,10 +634,7 @@ where
     }
 }
 
-impl<TFacilitator> Paygate<TFacilitator>
-where
-    TFacilitator: Facilitator + Clone + Send + Sync + 'static,
-{
+impl Paygate {
     /// Handles an incoming request with **concurrent** settlement.
     ///
     /// ```text
@@ -604,21 +668,57 @@ where
         ReqBody: Send + 'static,
     {
         let verified = self.verify_only(req.headers()).await?;
+        let cancel = verified.cancellation_guard();
 
-        let facilitator = self.facilitator.clone();
-        let settle_handle = tokio::spawn(async move { verified.settle(&facilitator).await });
+        if let Some(directive) = verified.skip_handler.clone() {
+            let settlement = verified.settle().await?;
+            return skip_handler_response(&directive, &settlement);
+        }
+
+        // Concurrent settle runs at the signed maximum in parallel with the
+        // handler. Partial settlement (Settlement-Overrides / UptoActualAmount)
+        // requires Sequential mode — reject rather than silently over-charge.
+        let settle_handle = tokio::spawn(async move { verified.settle().await });
 
         let response = match call_inner(inner, req).await {
             Ok(r) => r,
             Err(err) => {
                 drop(settle_handle);
+                cancel
+                    .cancel(
+                        CancelReason::HandlerThrew,
+                        Some("inner service error"),
+                        None,
+                    )
+                    .await;
                 return Ok(err.into_response());
             }
         };
 
         if response.status().is_client_error() || response.status().is_server_error() {
             drop(settle_handle);
+            cancel
+                .cancel(
+                    CancelReason::HandlerFailed,
+                    Some("handler returned error status"),
+                    Some(response.status().as_u16()),
+                )
+                .await;
             return Ok(response.into_response());
+        }
+
+        let mut res = response.into_response();
+        // Strip billing header even when unused so it never reaches the client.
+        let partial = super::upto::take_settlement_overrides_header(res.headers_mut());
+        let has_ext = res
+            .extensions_mut()
+            .remove::<super::upto::UptoActualAmount>()
+            .is_some();
+        if partial.is_some() || has_ext {
+            drop(settle_handle);
+            return Err(PaygateError::SettlementAborted(
+                "Settlement-Overrides / UptoActualAmount require SettlementMode::Sequential".into(),
+            ));
         }
 
         let settlement = settle_handle
@@ -626,7 +726,6 @@ where
             .map_err(|e| PaygateError::SettlementAborted(format!("settle task panicked: {e}")))??;
         let header_value = settlement_to_header(&settlement)?;
 
-        let mut res = response.into_response();
         res.headers_mut().insert("Payment-Response", header_value);
         super::cors::ensure_expose_headers(res.headers_mut());
         Ok(res)
@@ -672,6 +771,14 @@ where
         ReqBody: Send + 'static,
     {
         let verified = self.verify_only(req.headers()).await?;
+        let cancel = verified.cancellation_guard();
+
+        // SkipHandler: no resource body to stream — settle inline and return
+        // the directive response (same as sequential/concurrent).
+        if let Some(directive) = verified.skip_handler.clone() {
+            let settlement = verified.settle().await?;
+            return skip_handler_response(&directive, &settlement);
+        }
 
         // F-103: spawn the settlement task and a supervisor that awaits the
         // join handle. The supervisor surfaces three failure modes that
@@ -684,8 +791,10 @@ where
         // Two `tokio::spawn` calls cost a single extra heap allocation per
         // request — negligible compared to the on-chain work — and we get
         // observable settlement outcomes in exchange.
-        let facilitator = self.facilitator.clone();
-        let settle_handle = tokio::spawn(async move { verified.settle(&facilitator).await });
+        //
+        // Partial settlement is not available in background mode (settle
+        // starts at the signed maximum before the handler returns).
+        let settle_handle = tokio::spawn(async move { verified.settle().await });
         // F-101/F-102: register with the optional tracker before spawning
         // the supervisor so `wait_for_pending_settlements` observes the
         // task even if the supervisor finishes within microseconds.
@@ -701,43 +810,85 @@ where
             tracker_guard,
         )));
 
-        match call_inner(inner, req).await {
-            Ok(r) => Ok(r.into_response()),
-            Err(err) => Ok(err.into_response()),
+        // Bind the future result before matching so `cancel` outlives the
+        // temporary (Rust 2024 tail-expression drop order).
+        let call_result = call_inner(inner, req).await;
+        match call_result {
+            Ok(r) => {
+                if r.status().is_client_error() || r.status().is_server_error() {
+                    cancel
+                        .cancel(
+                            CancelReason::HandlerFailed,
+                            Some("handler returned error status"),
+                            Some(r.status().as_u16()),
+                        )
+                        .await;
+                }
+                let mut response = r.into_response();
+                // Never leak internal billing headers to the client.
+                drop(super::upto::take_settlement_overrides_header(
+                    response.headers_mut(),
+                ));
+                drop(
+                    response
+                        .extensions_mut()
+                        .remove::<super::upto::UptoActualAmount>(),
+                );
+                Ok(response)
+            }
+            Err(err) => {
+                cancel
+                    .cancel(
+                        CancelReason::HandlerThrew,
+                        Some("inner service error"),
+                        None,
+                    )
+                    .await;
+                Ok(err.into_response())
+            }
         }
     }
 }
 
 /// A verified payment token ready for on-chain settlement.
 ///
-/// Produced by [`Paygate::verify_only`] after the facilitator confirms the
-/// payment signature is valid. [`settle`](Self::settle) **consumes** `self`,
-/// preventing double-settlement at the type level.
+/// Produced by [`Paygate::verify_only`] after the resource server confirms the
+/// payment. [`settle`](Self::settle) **consumes** `self`, preventing
+/// double-settlement at the type level.
 #[derive(Debug)]
 pub struct VerifiedPayment {
     settle_request: wire::SettleRequest,
+    payload: PaymentPayload,
+    requirements: wire::PaymentRequirements,
+    server: ResourceServer,
+    /// When set by after-verify hooks, the resource handler should be skipped.
+    pub skip_handler: Option<r402_core::SkipHandlerDirective>,
 }
 
 impl VerifiedPayment {
-    /// Executes on-chain settlement, consuming `self` to prevent reuse.
+    /// One-shot cancel dispatcher for this verified payment.
+    #[must_use]
+    pub fn cancellation_guard(&self) -> r402_core::CancellationGuard {
+        self.server
+            .cancellation_guard(self.payload.clone(), self.requirements.clone())
+    }
+
+    /// Executes on-chain settlement via the resource server, consuming `self`.
     ///
     /// # Errors
     ///
-    /// Returns [`PaygateError::Settlement`] if the facilitator rejects the
-    /// settlement or if the on-chain transaction fails.
-    pub async fn settle<F: Facilitator>(
-        self,
-        facilitator: &F,
-    ) -> Result<wire::SettleResponse, PaygateError> {
-        self.settle_with_override(facilitator, None).await
+    /// Returns [`PaygateError::Settlement`] if settlement fails.
+    pub async fn settle(self) -> Result<wire::SettleResponse, PaygateError> {
+        self.settle_with_override(None).await
     }
 
     /// Like [`settle`](Self::settle) but overrides
     /// `paymentRequirements.amount` before forwarding the settle request.
     ///
     /// Intended for the **upto** scheme, where the resource server determines
-    /// the actual charge at request time from the inserted
-    /// [`UptoActualAmount`](super::UptoActualAmount) response extension.
+    /// the actual charge at request time via
+    /// [`Settlement-Overrides`](super::SETTLEMENT_OVERRIDES_HEADER) or
+    /// [`UptoActualAmount`](super::UptoActualAmount).
     /// Passing `None` is equivalent to [`settle`](Self::settle).
     ///
     /// # Errors
@@ -745,9 +896,8 @@ impl VerifiedPayment {
     /// Returns [`PaygateError::Settlement`] when the override payload is
     /// malformed, the facilitator rejects the settlement, or the on-chain
     /// transaction fails.
-    pub async fn settle_with_override<F: Facilitator>(
+    pub async fn settle_with_override(
         mut self,
-        facilitator: &F,
         actual_amount: Option<&str>,
     ) -> Result<wire::SettleResponse, PaygateError> {
         if let Some(amount) = actual_amount {
@@ -756,9 +906,22 @@ impl VerifiedPayment {
                 .map_err(|e| {
                     PaygateError::SettlementAborted(format!("upto amount override failed: {e}"))
                 })?;
+            // Keep resource-server settle path in sync when amount is overridden:
+            // settle via facilitator with the mutated request rather than
+            // rebuild from payload (amount override is request-local).
+            let facilitator = self.server.facilitator();
+            let settlement = Facilitator::settle(&facilitator, self.settle_request)
+                .await
+                .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
+            if matches!(settlement, wire::SettleResponse::Failure { .. }) {
+                return Err(PaygateError::Settlement(Box::new(settlement)));
+            }
+            return Ok(settlement);
         }
-        let settlement = facilitator
-            .settle(self.settle_request)
+
+        let settlement = self
+            .server
+            .settle_payment(&self.payload, &self.requirements)
             .await
             .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
 
@@ -767,6 +930,12 @@ impl VerifiedPayment {
         }
 
         Ok(settlement)
+    }
+
+    /// Matched payment requirements (for override resolution).
+    #[must_use]
+    pub const fn requirements(&self) -> &wire::PaymentRequirements {
+        &self.requirements
     }
 
     /// Returns a reference to the underlying settle request.
@@ -987,6 +1156,35 @@ pub fn settlement_to_header(
         .map_err(|e| PaygateError::SettlementAborted(e.to_string()))
 }
 
+/// Builds the HTTP response for an after-verify `SkipHandler` directive.
+///
+/// Matches foundation Go Gin: default `Content-Type: application/json`, body
+/// from `directive.body` (`null` when unset), plus `Payment-Response`.
+fn skip_handler_response(
+    directive: &r402_core::SkipHandlerDirective,
+    settlement: &wire::SettleResponse,
+) -> Result<Response, PaygateError> {
+    let content_type = directive
+        .content_type
+        .as_deref()
+        .unwrap_or("application/json");
+    let body_bytes = directive.body.as_ref().map_or_else(
+        || b"null".to_vec(),
+        |value| serde_json::to_vec(value).unwrap_or_else(|_| b"null".to_vec()),
+    );
+    let header_value = settlement_to_header(settlement)?;
+    let mut response = Response::builder()
+        .status(StatusCode::OK)
+        .header(http::header::CONTENT_TYPE, content_type)
+        .body(Body::from(body_bytes))
+        .unwrap_or_else(|_| Response::new(Body::from(b"null".as_slice())));
+    response
+        .headers_mut()
+        .insert("Payment-Response", header_value);
+    super::cors::ensure_expose_headers(response.headers_mut());
+    Ok(response)
+}
+
 /// Calls the inner service with optional telemetry instrumentation.
 async fn call_inner<
     ReqBody,
@@ -1035,26 +1233,29 @@ fn inferred_status(ve: &VerificationError) -> StatusCode {
     StatusCode::PAYMENT_REQUIRED
 }
 
-fn build_verify_request(
-    payload: PaymentPayload,
+fn match_requirements(
+    payload: &PaymentPayload,
     accepts: &[wire::PriceTag],
-) -> Result<wire::VerifyRequest, VerificationError> {
-    let selected = accepts
+) -> Result<wire::PaymentRequirements, VerificationError> {
+    accepts
         .iter()
         .find(|pt| **pt == payload.accepted)
-        .ok_or(VerificationError::NoPaymentMatching)?;
+        .map(|pt| pt.requirements.clone())
+        .ok_or(VerificationError::NoPaymentMatching)
+}
 
+fn build_settle_request(
+    payload: &PaymentPayload,
+    requirements: &wire::PaymentRequirements,
+) -> Result<wire::SettleRequest, String> {
     let verify: wire::TypedVerifyRequest<2, PaymentPayload, wire::PaymentRequirements> =
         wire::TypedVerifyRequest {
             x402_version: wire::V2,
-            payment_payload: payload,
-            payment_requirements: selected.requirements.clone(),
+            payment_payload: payload.clone(),
+            payment_requirements: requirements.clone(),
         };
-
-    let json = serde_json::to_value(&verify)
-        .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
-
-    Ok(wire::VerifyRequest::from(json))
+    let json = serde_json::to_value(&verify).map_err(|e| e.to_string())?;
+    Ok(wire::SettleRequest::from(json))
 }
 
 #[cfg(test)]

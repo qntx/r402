@@ -1,16 +1,15 @@
 //! Client-side x402 payment handling for reqwest.
 //!
-//! This module provides the [`X402Client`] which orchestrates scheme clients
-//! and payment selection for automatic payment handling.
-
-use std::sync::Arc;
+//! [`X402Client`] is a thin HTTP adapter over [`r402_core::PaymentClient`]:
+//! scheme registration, policies, selection, and lifecycle hooks live in core.
+//! This module maps signed payloads to `Payment-Signature` and dispatches
+//! `on_payment_response` after paid retries (including one corrective recovery).
 
 use http::{Extensions, HeaderMap, StatusCode};
+use r402_core::ClientHooks;
+use r402_core::client::{CreatedPayment, PaymentClient, PaymentResponseContext};
 use r402_core::error::ClientError;
-use r402_core::hooks::{FailureRecovery, HookDecision};
-use r402_core::scheme::{
-    FirstMatch, PaymentCandidate, PaymentPolicy, PaymentSelector, SchemeClient,
-};
+use r402_core::scheme::{FirstMatch, PaymentPolicy, PaymentSelector, SchemeClient};
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
 use reqwest::{Request, Response};
@@ -18,29 +17,20 @@ use reqwest_middleware as rqm;
 #[cfg(feature = "telemetry")]
 use tracing::{debug, info, instrument, trace};
 
-use super::hooks::{ClientHooks, PaymentCreationContext};
-
-/// The main x402 client that orchestrates scheme clients and selection.
+/// HTTP middleware over a core [`PaymentClient`].
 ///
-/// The [`X402Client`] acts as middleware for reqwest, automatically handling
-/// 402 Payment Required responses by extracting payment requirements, signing
-/// payments, and retrying requests.
+/// Automatically handles `402 Payment Required` by signing a payment and
+/// retrying once (or twice if `on_payment_response` signals recovery).
 #[allow(
     missing_debug_implementations,
-    reason = "ClientSchemes contains dyn trait objects"
+    reason = "PaymentClient contains dyn trait objects"
 )]
-pub struct X402Client<TSelector> {
-    schemes: ClientSchemes,
-    selector: TSelector,
-    policies: Vec<Arc<dyn PaymentPolicy>>,
-    hooks: Arc<[Arc<dyn ClientHooks>]>,
+pub struct X402Client<TSelector = FirstMatch> {
+    inner: PaymentClient<TSelector>,
 }
 
 impl X402Client<FirstMatch> {
-    /// Creates a new [`X402Client`] with default settings.
-    ///
-    /// The default client uses [`FirstMatch`] payment selection, which selects
-    /// the first matching payment scheme.
+    /// Creates a new client with [`FirstMatch`] selection.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -50,70 +40,53 @@ impl X402Client<FirstMatch> {
 impl Default for X402Client<FirstMatch> {
     fn default() -> Self {
         Self {
-            schemes: ClientSchemes::default(),
-            selector: FirstMatch,
-            policies: Vec::new(),
-            hooks: Arc::from([]),
+            inner: PaymentClient::new(),
         }
     }
 }
 
 impl<TSelector> X402Client<TSelector> {
-    /// Registers a scheme client for specific chains or networks.
-    ///
-    /// Scheme clients handle the actual payment signing for specific protocols.
-    /// You can register multiple clients for different chains or schemes.
-    ///
-    /// # Arguments
-    ///
-    /// * `scheme` - The scheme client implementation to register
-    ///
-    /// # Returns
-    ///
-    /// A new [`X402Client`] with the additional scheme registered.
+    /// Builds from an existing core payment client.
+    #[must_use]
+    pub const fn from_payment_client(inner: PaymentClient<TSelector>) -> Self {
+        Self { inner }
+    }
+
+    /// Returns a shared reference to the core payment client.
+    #[must_use]
+    pub const fn payment_client(&self) -> &PaymentClient<TSelector> {
+        &self.inner
+    }
+
+    /// Registers a scheme client.
     #[must_use]
     pub fn register<S>(mut self, scheme: S) -> Self
     where
         S: SchemeClient + 'static,
     {
-        self.schemes.push(scheme);
+        self.inner = self.inner.register(scheme);
         self
     }
 
     /// Sets a custom payment selector.
-    ///
-    /// By default, [`FirstMatch`] is used which selects the first matching scheme.
-    /// You can implement custom selection logic by providing your own [`PaymentSelector`].
-    pub fn with_selector<P: PaymentSelector + 'static>(self, selector: P) -> X402Client<P> {
+    #[must_use]
+    pub fn with_selector<P: PaymentSelector>(self, selector: P) -> X402Client<P> {
         X402Client {
-            selector,
-            schemes: self.schemes,
-            policies: self.policies,
-            hooks: self.hooks,
+            inner: self.inner.with_selector(selector),
         }
     }
 
-    /// Adds a payment policy to the filtering pipeline.
-    ///
-    /// Policies are applied in registration order before the selector picks
-    /// the final candidate. Use policies to restrict which networks, schemes,
-    /// or amounts are acceptable.
+    /// Adds a payment policy.
     #[must_use]
     pub fn with_policy<P: PaymentPolicy + 'static>(mut self, policy: P) -> Self {
-        self.policies.push(Arc::new(policy));
+        self.inner = self.inner.with_policy(policy);
         self
     }
 
-    /// Adds a lifecycle hook for payment creation.
-    ///
-    /// Hooks allow intercepting the payment creation pipeline for logging,
-    /// custom validation, or error recovery. Multiple hooks are executed
-    /// in registration order.
+    /// Adds a client lifecycle hook (including `on_payment_response`).
     #[must_use]
     pub fn with_hook(mut self, hook: impl ClientHooks + 'static) -> Self {
-        let mut hooks = (*self.hooks).to_vec();
-        hooks.push(Arc::new(hook));
-        self.hooks = Arc::from(hooks);
+        self.inner = self.inner.with_hook(hook);
         self
     }
 }
@@ -122,29 +95,11 @@ impl<TSelector> X402Client<TSelector>
 where
     TSelector: PaymentSelector,
 {
-    /// Creates payment headers from a 402 response.
-    ///
-    /// This method extracts the payment requirements from the response,
-    /// selects the best payment option, signs the payment, and returns
-    /// the appropriate headers to include in the retry request.
-    ///
-    /// # Arguments
-    ///
-    /// * `res` - The 402 Payment Required response
-    ///
-    /// # Returns
-    ///
-    /// A [`HeaderMap`] containing the payment signature header, or an error.
+    /// Creates `Payment-Signature` headers from a 402 response.
     ///
     /// # Errors
     ///
-    /// Returns [`ClientError::Parse`] if the response cannot be parsed.
-    /// Returns [`ClientError::NoMatchingPaymentOption`] if no registered scheme
-    /// can handle the payment requirements.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the signed payload is not a valid HTTP header value.
+    /// Parse, selection, signing, or before-hook abort.
     #[cfg_attr(
         feature = "telemetry",
         instrument(name = "x402.reqwest.make_payment_headers", skip_all, err)
@@ -153,121 +108,44 @@ where
         let payment_required = parse_payment_required(res)
             .await
             .ok_or_else(|| ClientError::Parse("Invalid 402 response".to_owned()))?;
-
-        let hook_ctx = PaymentCreationContext {
-            payment_required: payment_required.clone(),
-        };
-
-        // Phase 1: Before hooks — first abort wins
-        for hook in self.hooks.iter() {
-            if let HookDecision::Abort { reason, .. } =
-                hook.before_payment_creation(&hook_ctx).await
-            {
-                return Err(ClientError::Parse(reason));
-            }
-        }
-
-        let creation_result = self.create_payment_headers_inner(&payment_required).await;
-
-        match creation_result {
-            Ok(headers) => {
-                // Phase 3a: After hooks (fire-and-forget)
-                for hook in self.hooks.iter() {
-                    hook.after_payment_creation(&hook_ctx, &headers).await;
-                }
-                Ok(headers)
-            }
-            Err(err) => {
-                // Phase 3b: Failure hooks — first recovery wins
-                let err_msg = err.to_string();
-                for hook in self.hooks.iter() {
-                    if let FailureRecovery::Recovered(headers) =
-                        hook.on_payment_creation_failure(&hook_ctx, &err_msg).await
-                    {
-                        return Ok(headers);
-                    }
-                }
-                Err(err)
-            }
-        }
+        let created = self.inner.create_payment(&payment_required).await?;
+        Ok(payment_signature_headers(&created))
     }
 
-    /// Internal helper that performs the actual payment header creation.
-    async fn create_payment_headers_inner(
+    /// Creates a payment for an already-parsed challenge.
+    ///
+    /// # Errors
+    ///
+    /// Selection, signing, or before-hook abort.
+    pub async fn create_payment(
         &self,
         payment_required: &wire::PaymentRequired,
-    ) -> Result<HeaderMap, ClientError> {
-        let candidates = self.schemes.candidates(payment_required);
-
-        // Apply policies to filter candidates
-        let mut filtered: Vec<&PaymentCandidate> = candidates.iter().collect();
-        for policy in &self.policies {
-            filtered = policy.apply(filtered);
-            if filtered.is_empty() {
-                return Err(ClientError::NoMatchingPaymentOption);
-            }
-        }
-
-        // Select the best candidate from filtered list
-        let selected = self
-            .selector
-            .select(&filtered)
-            .ok_or(ClientError::NoMatchingPaymentOption)?;
-
-        #[cfg(feature = "telemetry")]
-        debug!(
-            scheme = %selected.scheme,
-            chain_id = %selected.chain_id,
-            "Selected payment scheme"
-        );
-
-        let signed_payload = selected.sign().await?;
-        let headers = {
-            let mut headers = HeaderMap::new();
-            #[allow(
-                clippy::expect_used,
-                reason = "base64-encoded payload is always valid ASCII header"
-            )]
-            headers.insert(
-                "Payment-Signature",
-                signed_payload
-                    .parse()
-                    .expect("signed payload is valid header value"),
-            );
-            headers
-        };
-
-        Ok(headers)
+    ) -> Result<CreatedPayment, ClientError> {
+        self.inner.create_payment(payment_required).await
     }
 }
 
-/// Internal collection of registered scheme clients.
-#[derive(Default)]
-#[allow(
-    missing_debug_implementations,
-    reason = "dyn trait objects do not impl Debug"
-)]
-pub(super) struct ClientSchemes(Vec<Arc<dyn SchemeClient>>);
-
-impl ClientSchemes {
-    /// Adds a scheme client to the collection.
-    pub(super) fn push<T: SchemeClient + 'static>(&mut self, client: T) {
-        self.0.push(Arc::new(client));
-    }
-
-    /// Finds all payment candidates that can handle the given payment requirements.
-    #[must_use]
-    pub(super) fn candidates(
-        &self,
-        payment_required: &wire::PaymentRequired,
-    ) -> Vec<PaymentCandidate> {
-        let mut candidates = vec![];
-        for client in &self.0 {
-            let accepted = client.accept(payment_required);
-            candidates.extend(accepted);
-        }
-        candidates
-    }
+/// Builds the `Payment-Signature` header map from a created payment.
+///
+/// # Panics
+///
+/// Panics if the signed payload is not a valid HTTP header value. Signed
+/// base64 payloads from scheme clients are always ASCII.
+#[must_use]
+pub fn payment_signature_headers(created: &CreatedPayment) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    #[allow(
+        clippy::expect_used,
+        reason = "base64-encoded payload is always valid ASCII header"
+    )]
+    headers.insert(
+        "Payment-Signature",
+        created
+            .signed_payload
+            .parse()
+            .expect("signed payload is valid header value"),
+    );
+    headers
 }
 
 /// Runs the next middleware or HTTP client with optional telemetry instrumentation.
@@ -290,14 +168,11 @@ where
 {
     /// Handles a request, automatically handling 402 responses.
     ///
-    /// When a 402 response is received, this middleware:
-    /// 1. Extracts payment requirements from the response
-    /// 2. Signs a payment using registered scheme clients
-    /// 3. Retries the request with the payment header
-    ///
-    /// If the request body is not cloneable (e.g. streaming), the middleware
-    /// cannot auto-retry after a 402. In that case the original 402 response
-    /// is returned as-is so the caller can handle it manually.
+    /// When a 402 is received:
+    /// 1. Extract requirements, create signed payment (hooks)
+    /// 2. Retry with `Payment-Signature`
+    /// 3. Dispatch `on_payment_response` on settle / corrective 402
+    /// 4. If recovered, rebuild payment and retry once more
     #[cfg_attr(
         feature = "telemetry",
         instrument(name = "x402.reqwest.handle", skip_all, err)
@@ -308,7 +183,7 @@ where
         extensions: &mut Extensions,
         next: rqm::Next<'_>,
     ) -> rqm::Result<Response> {
-        let retry_req = req.try_clone();
+        let retry_template = req.try_clone();
         let res = run_next(next.clone(), req, extensions).await?;
 
         if res.status() != StatusCode::PAYMENT_REQUIRED {
@@ -320,34 +195,121 @@ where
         #[cfg(feature = "telemetry")]
         info!(url = ?res.url(), "Received 402 Payment Required, processing payment");
 
-        // If the original request is not cloneable (streaming body), we cannot
-        // auto-retry. Return the 402 response for manual handling by the caller.
-        let Some(mut retry) = retry_req else {
+        let Some(template) = retry_template else {
             #[cfg(feature = "telemetry")]
             tracing::warn!("Cannot auto-retry 402: request body not cloneable, returning raw 402");
             return Ok(res);
         };
 
-        let headers = self
-            .make_payment_headers(res)
+        let payment_required = parse_payment_required(res).await.ok_or_else(|| {
+            rqm::Error::Middleware(ClientError::Parse("Invalid 402 response".into()).into())
+        })?;
+
+        let created = self
+            .inner
+            .create_payment(&payment_required)
             .await
             .map_err(|e| rqm::Error::Middleware(e.into()))?;
 
-        retry.headers_mut().extend(headers);
+        let paid = clone_with_payment(&template, &created)
+            .map_err(|e| rqm::Error::Middleware(e.into()))?;
 
         #[cfg(feature = "telemetry")]
-        trace!(url = ?retry.url(), "Retrying request with payment headers");
+        trace!(url = ?paid.url(), "Retrying request with payment headers");
 
-        run_next(next, retry, extensions).await
+        let response = run_next(next.clone(), paid, extensions).await?;
+
+        let Some(recovered) = self
+            .dispatch_and_maybe_recover(&payment_required, &created, &response)
+            .await
+            .map_err(|e| rqm::Error::Middleware(e.into()))?
+        else {
+            return Ok(response);
+        };
+
+        let second = clone_with_payment(&template, &recovered)
+            .map_err(|e| rqm::Error::Middleware(e.into()))?;
+        let second_response = run_next(next, second, extensions).await?;
+        // Fire hooks on the second response without further recovery.
+        let ctx = build_response_context(&payment_required, &recovered, &second_response);
+        if ctx.settle_response.is_some() || ctx.corrective_payment_required.is_some() {
+            let _ = self.inner.handle_payment_response(&ctx).await;
+        }
+        Ok(second_response)
     }
+}
+
+impl<TSelector: PaymentSelector> X402Client<TSelector> {
+    /// Returns `Some(new_created)` when hooks signal recovery and a fresh
+    /// payment can be built from the corrective challenge (or original).
+    async fn dispatch_and_maybe_recover(
+        &self,
+        original: &wire::PaymentRequired,
+        created: &CreatedPayment,
+        response: &Response,
+    ) -> Result<Option<CreatedPayment>, ClientError> {
+        let ctx = build_response_context(original, created, response);
+        if ctx.settle_response.is_none() && ctx.corrective_payment_required.is_none() {
+            return Ok(None);
+        }
+
+        let result = self.inner.handle_payment_response(&ctx).await;
+        if !result.recovered {
+            return Ok(None);
+        }
+
+        let challenge = ctx.corrective_payment_required.as_ref().unwrap_or(original);
+        let fresh = self.inner.create_payment(challenge).await?;
+        Ok(Some(fresh))
+    }
+}
+
+fn build_response_context(
+    original: &wire::PaymentRequired,
+    created: &CreatedPayment,
+    response: &Response,
+) -> PaymentResponseContext {
+    let settle_response = response
+        .headers()
+        .get("Payment-Response")
+        .and_then(|h| Base64Bytes::from(h.as_bytes()).decode().ok())
+        .and_then(|b| serde_json::from_slice(&b).ok());
+
+    let corrective_payment_required =
+        if settle_response.is_none() && response.status() == StatusCode::PAYMENT_REQUIRED {
+            response
+                .headers()
+                .get("Payment-Required")
+                .and_then(|h| Base64Bytes::from(h.as_bytes()).decode().ok())
+                .and_then(|b| serde_json::from_slice(&b).ok())
+        } else {
+            None
+        };
+
+    let mut ctx = PaymentResponseContext::new(original.clone(), created.signed_payload.clone());
+    if let Some(settle) = settle_response {
+        ctx = ctx.with_settle_response(settle);
+    }
+    if let Some(required) = corrective_payment_required {
+        ctx = ctx.with_corrective_payment_required(required);
+    }
+    ctx
+}
+
+fn clone_with_payment(
+    template: &Request,
+    created: &CreatedPayment,
+) -> Result<Request, ClientError> {
+    let mut req = template
+        .try_clone()
+        .ok_or(ClientError::RequestNotCloneable)?;
+    req.headers_mut().extend(payment_signature_headers(created));
+    Ok(req)
 }
 
 /// Parses a 402 Payment Required response into a [`wire::PaymentRequired`].
 ///
-/// Tries to extract V2 payment requirements from the `Payment-Required` header
-/// (base64-encoded JSON) first, then falls back to parsing the response body as
-/// plain JSON. This matches the Go SDK's `handleV2Payment` which also tries
-/// header first then body.
+/// Tries `Payment-Required` header (base64 JSON) first, then response body.
 #[cfg_attr(
     feature = "telemetry",
     instrument(name = "x402.reqwest.parse_payment_required", skip(response))
@@ -365,7 +327,6 @@ pub async fn parse_payment_required(response: Response) -> Option<wire::PaymentR
         return Some(v2_payment_required);
     }
 
-    // Fall back to body (some servers send PaymentRequired as JSON body)
     if let Ok(body_bytes) = response.bytes().await
         && let Ok(v2_from_body) = serde_json::from_slice::<wire::PaymentRequired>(&body_bytes)
     {

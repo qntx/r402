@@ -9,9 +9,10 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use r402_core::resource_server::ResourceServer;
+use r402_core::resource_server::{ResourceServer, SkipHandlerDirective};
 use r402_core::wire::{Extensions, PaymentRequired, PaymentRequirements, ResourceInfo};
-use rmcp::model::{CallToolRequestParams, CallToolResult};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
+use serde_json::Value;
 
 use crate::encode::{
     McpPaymentPayload, attach_settle_response, extract_payment_from_params,
@@ -24,6 +25,18 @@ pub enum PaymentWrapperConfigError {
     /// `accepts` must be non-empty (Go panics; we return an error).
     #[error("PaymentWrapperConfig.accepts must have at least one payment requirement")]
     EmptyAccepts,
+}
+
+/// Builds a successful tool result from a [`SkipHandlerDirective`].
+///
+/// JSON bodies become `structuredContent`; string bodies become text content;
+/// empty directives yield a `null` structured success (mirrors HTTP JSON body).
+fn skip_handler_tool_result(directive: &SkipHandlerDirective) -> CallToolResult {
+    match &directive.body {
+        Some(Value::String(s)) => CallToolResult::success(vec![ContentBlock::text(s.clone())]),
+        Some(value) => CallToolResult::structured(value.clone()),
+        None => CallToolResult::structured(Value::Null),
+    }
 }
 
 /// Server-side lifecycle hooks (Go `PaymentWrapperHooks`).
@@ -53,7 +66,7 @@ pub struct ServerHookContext {
     /// Tool name.
     pub tool_name: String,
     /// Tool arguments (JSON object keys).
-    pub arguments: serde_json::Map<String, serde_json::Value>,
+    pub arguments: serde_json::Map<String, Value>,
     /// Matched requirements.
     pub payment_requirements: PaymentRequirements,
     /// Client payment payload.
@@ -200,10 +213,10 @@ impl PaymentWrapper {
             return self.payment_required_result("No matching payment requirements found");
         };
 
-        match self.server.verify_payment(&payload, &requirements).await {
-            Ok(resp) if resp.is_valid() => {}
-            Ok(resp) => {
-                let reason = match resp {
+        let verify_out = match self.server.verify_payment(&payload, &requirements).await {
+            Ok(out) if out.response.is_valid() => out,
+            Ok(out) => {
+                let reason = match out.response {
                     r402_core::wire::VerifyResponse::Invalid {
                         reason, message, ..
                     } => message.map_or_else(|| reason.to_string(), |m| m.to_string()),
@@ -216,7 +229,11 @@ impl PaymentWrapper {
             Err(err) => {
                 return self.payment_required_result(format!("Payment verification error: {err}"));
             }
-        }
+        };
+
+        let cancel = self
+            .server
+            .cancellation_guard(payload.clone(), requirements.clone());
 
         let arguments = params.arguments.clone().unwrap_or_default();
         let tool_name = params.name.to_string();
@@ -227,16 +244,36 @@ impl PaymentWrapper {
             payment_payload: payload.clone(),
         };
 
-        if let Some(ref before) = self.config.hooks.on_before_execution
-            && !before(hook_ctx.clone())
-        {
-            return self.payment_required_result("Execution aborted by OnBeforeExecution hook");
-        }
+        // SkipHandler: settle without running the tool (official after-verify path).
+        let result = if let Some(ref directive) = verify_out.skip_handler {
+            skip_handler_tool_result(directive)
+        } else {
+            if let Some(ref before) = self.config.hooks.on_before_execution
+                && !before(hook_ctx.clone())
+            {
+                cancel
+                    .cancel(
+                        r402_core::CancelReason::AfterVerifyAborted,
+                        Some("Execution aborted by OnBeforeExecution hook"),
+                        None,
+                    )
+                    .await;
+                return self.payment_required_result("Execution aborted by OnBeforeExecution hook");
+            }
 
-        let result = handler(params).await;
-        if result.is_error.unwrap_or(false) {
-            return result;
-        }
+            let result = handler(params).await;
+            if result.is_error.unwrap_or(false) {
+                cancel
+                    .cancel(
+                        r402_core::CancelReason::HandlerFailed,
+                        Some("tool returned isError"),
+                        None,
+                    )
+                    .await;
+                return result;
+            }
+            result
+        };
 
         if let Some(ref after) = self.config.hooks.on_after_execution {
             after(AfterExecutionContext {
@@ -304,6 +341,7 @@ mod tests {
 
     use r402_core::FacilitatorError;
     use r402_core::facilitator::Facilitator;
+    use r402_core::resource_server::ResourceServerHooks;
     use r402_core::wire::{
         PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse, SupportedResponse,
         VerifyRequest, VerifyResponse,
@@ -493,6 +531,49 @@ mod tests {
             .unwrap();
         assert!(text.text.contains("Settlement failed"));
         assert!(extract_settle_response(&result).is_none());
+    }
+
+    struct SkipHandlerHook;
+
+    impl ResourceServerHooks for SkipHandlerHook {
+        fn after_verify<'a>(
+            &'a self,
+            _ctx: &'a r402_core::VerifyResultContext,
+        ) -> impl Future<Output = r402_core::AfterVerifyDecision> + Send + 'a {
+            std::future::ready(r402_core::AfterVerifyDecision::SkipHandler {
+                response: SkipHandlerDirective::empty()
+                    .with_body(json!({"skipped": true, "source": "hook"})),
+            })
+        }
+    }
+
+    async fn never_run_tool(_params: CallToolRequestParams) -> CallToolResult {
+        CallToolResult::success(vec![ContentBlock::text("should not run")])
+    }
+
+    #[tokio::test]
+    async fn skip_handler_settles_with_directive_body() {
+        let fac = Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            verify_ok: true,
+            settle_ok: true,
+        });
+        let settles = Arc::clone(&fac);
+        let server = ResourceServer::new(fac).with_hook(SkipHandlerHook);
+        let config = PaymentWrapperConfig::try_new(accepts(), None).unwrap();
+        let w = PaymentWrapper::try_new(server, config).unwrap();
+        let params =
+            attach_payment_to_params(CallToolRequestParams::new("demo"), &sample_payload());
+        let result = w.invoke(params, never_run_tool).await;
+        assert_eq!(settles.settles.load(Ordering::SeqCst), 1);
+        assert!(!result.is_error.unwrap_or(false));
+        assert!(extract_settle_response(&result).is_some());
+        let sc = result
+            .structured_content
+            .as_ref()
+            .expect("skip body as structured");
+        assert_eq!(sc.get("skipped"), Some(&json!(true)));
     }
 
     #[test]

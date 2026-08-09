@@ -1,0 +1,699 @@
+//! Resource-server orchestration shared by HTTP and MCP transports.
+//!
+//! Mirrors the official Go/TS `X402ResourceServer` **V2** surface used by
+//! transports: match requirements, verify, settle, and lifecycle hooks
+//! including verified-payment cancellation.
+//!
+//! This type does **not** own pricing or route maps; scheme handlers live in
+//! [`crate::scheme::SchemeRegistry`] (or a remote facilitator). The resource
+//! server only sequences wire construction and hooks against a [`Facilitator`].
+
+mod hooks;
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub use hooks::{
+    AfterVerifyDecision, BeforeOpDecision, CancelReason, DynResourceServerHooks,
+    PaymentHookContext, ResourceServerHooks, SettleResultContext, SkipHandlerDirective,
+    VerifiedPaymentCanceledContext, VerifyResultContext, WirePaymentPayload,
+};
+use serde::Serialize;
+
+use crate::error::FacilitatorError;
+use crate::facilitator::{DynFacilitator, Facilitator};
+use crate::hooks::FailureRecovery;
+use crate::wire::{
+    PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2, VerifyRequest,
+    VerifyResponse, find_matching_requirements,
+};
+
+/// Successful verify path outcome (after hooks).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct VerifyPaymentOutcome {
+    /// Facilitator (or skipped/recovered) verify response.
+    pub response: VerifyResponse,
+    /// When set, the transport must skip the resource handler and settle inline.
+    pub skip_handler: Option<SkipHandlerDirective>,
+}
+
+/// Server-side payment orchestrator (official `X402ResourceServer`, V2-only).
+pub struct ResourceServer {
+    facilitator: Arc<dyn DynFacilitator>,
+    hooks: Vec<Arc<dyn DynResourceServerHooks>>,
+}
+
+impl Clone for ResourceServer {
+    fn clone(&self) -> Self {
+        Self {
+            facilitator: Arc::clone(&self.facilitator),
+            hooks: self.hooks.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ResourceServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResourceServer")
+            .field("hooks", &self.hooks.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl ResourceServer {
+    /// Creates a resource server over any [`Facilitator`].
+    #[must_use]
+    pub fn new<F>(facilitator: Arc<F>) -> Self
+    where
+        F: Facilitator + 'static,
+    {
+        let erased: Arc<dyn DynFacilitator> = facilitator;
+        Self {
+            facilitator: erased,
+            hooks: Vec::new(),
+        }
+    }
+
+    /// Creates from an already-erased facilitator handle.
+    #[must_use]
+    pub fn from_dyn(facilitator: Arc<dyn DynFacilitator>) -> Self {
+        Self {
+            facilitator,
+            hooks: Vec::new(),
+        }
+    }
+
+    /// Registers a lifecycle hook. Returns `self` for builder chaining.
+    #[must_use]
+    pub fn with_hook(mut self, hook: impl ResourceServerHooks + 'static) -> Self {
+        self.hooks.push(Arc::new(hook));
+        self
+    }
+
+    /// Registers a lifecycle hook after construction.
+    pub fn add_hook(&mut self, hook: impl ResourceServerHooks + 'static) {
+        self.hooks.push(Arc::new(hook));
+    }
+
+    /// Number of registered resource-server hooks.
+    #[must_use]
+    pub fn hook_count(&self) -> usize {
+        self.hooks.len()
+    }
+
+    /// Returns a clone of the inner facilitator handle.
+    #[must_use]
+    pub fn facilitator(&self) -> Arc<dyn DynFacilitator> {
+        Arc::clone(&self.facilitator)
+    }
+
+    /// Official `FindMatchingRequirements`.
+    ///
+    /// Method form matches the Go `X402ResourceServer` surface even though
+    /// matching is pure over the arguments.
+    #[must_use]
+    #[allow(
+        clippy::unused_self,
+        reason = "API parity with Go X402ResourceServer.FindMatchingRequirements"
+    )]
+    pub fn find_matching_requirements<'a>(
+        &self,
+        available: &'a [PaymentRequirements],
+        payload: &WirePaymentPayload,
+    ) -> Option<&'a PaymentRequirements> {
+        find_matching_requirements(available, &payload.accepted)
+    }
+
+    /// Official `VerifyPayment`: before hooks → facilitator → after hooks.
+    ///
+    /// # Errors
+    ///
+    /// Propagates facilitator errors (unless recovered), before-hook aborts,
+    /// and after-verify aborts (`FacilitatorError::Aborted`).
+    pub async fn verify_payment(
+        &self,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<VerifyPaymentOutcome, FacilitatorError> {
+        let payment = PaymentHookContext {
+            payload: payload.clone(),
+            requirements: requirements.clone(),
+        };
+
+        // before_verify: first Abort / Skip wins
+        let mut skipped: Option<VerifyResponse> = None;
+        for hook in &self.hooks {
+            match hook.before_verify(&payment).await {
+                BeforeOpDecision::Continue => {}
+                BeforeOpDecision::Abort { reason, message } => {
+                    return Err(FacilitatorError::Aborted { reason, message });
+                }
+                BeforeOpDecision::Skip { result } => {
+                    skipped = Some(result);
+                    break;
+                }
+            }
+        }
+
+        let response = if let Some(local) = skipped {
+            local
+        } else {
+            self.call_verify_with_failure_hooks(&payment, payload, requirements)
+                .await?
+        };
+
+        // Invalid verify responses do not run after_verify (official: after
+        // fires on successful verification path including skip/recover).
+        if !response.is_valid() {
+            return Ok(VerifyPaymentOutcome {
+                response,
+                skip_handler: None,
+            });
+        }
+
+        let result_ctx = VerifyResultContext {
+            payment: payment.clone(),
+            result: response.clone(),
+        };
+
+        let mut skip_handler: Option<SkipHandlerDirective> = None;
+        for hook in &self.hooks {
+            match hook.after_verify(&result_ctx).await {
+                AfterVerifyDecision::Continue => {}
+                AfterVerifyDecision::Abort { reason, message } => {
+                    self.notify_verified_payment_canceled(
+                        payload,
+                        requirements,
+                        CancelReason::AfterVerifyAborted,
+                        Some(message.as_str()),
+                        None,
+                    )
+                    .await;
+                    return Err(FacilitatorError::Aborted { reason, message });
+                }
+                AfterVerifyDecision::SkipHandler {
+                    response: directive,
+                } => {
+                    // Last SkipHandler wins (matches Go).
+                    skip_handler = Some(directive);
+                }
+            }
+        }
+
+        Ok(VerifyPaymentOutcome {
+            response,
+            skip_handler,
+        })
+    }
+
+    /// Official `SettlePayment`: before hooks → facilitator → after hooks.
+    ///
+    /// # Errors
+    ///
+    /// Propagates facilitator / abort errors unless a failure hook recovers.
+    pub async fn settle_payment(
+        &self,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<SettleResponse, FacilitatorError> {
+        let payment = PaymentHookContext {
+            payload: payload.clone(),
+            requirements: requirements.clone(),
+        };
+
+        let mut skipped: Option<SettleResponse> = None;
+        for hook in &self.hooks {
+            match hook.before_settle(&payment).await {
+                BeforeOpDecision::Continue => {}
+                BeforeOpDecision::Abort { reason, message } => {
+                    return Err(FacilitatorError::Aborted { reason, message });
+                }
+                BeforeOpDecision::Skip { result } => {
+                    skipped = Some(result);
+                    break;
+                }
+            }
+        }
+
+        let response = if let Some(local) = skipped {
+            local
+        } else {
+            self.call_settle_with_failure_hooks(&payment, payload, requirements)
+                .await?
+        };
+
+        if response.is_success() {
+            let result_ctx = SettleResultContext {
+                payment,
+                result: response.clone(),
+            };
+            for hook in &self.hooks {
+                hook.after_settle(&result_ctx).await;
+            }
+        }
+
+        Ok(response)
+    }
+
+    /// Fires `on_verified_payment_canceled` for every registered hook.
+    ///
+    /// Transports call this when a handler fails after a successful verify
+    /// (or when an after-verify abort already did — safe to call again via
+    /// [`CancellationGuard`]).
+    pub async fn notify_verified_payment_canceled(
+        &self,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+        reason: CancelReason,
+        error: Option<&str>,
+        response_status: Option<u16>,
+    ) {
+        if self.hooks.is_empty() {
+            return;
+        }
+        let ctx = VerifiedPaymentCanceledContext {
+            payment: PaymentHookContext {
+                payload: payload.clone(),
+                requirements: requirements.clone(),
+            },
+            reason,
+            error: error.map(str::to_owned),
+            response_status,
+        };
+        for hook in &self.hooks {
+            hook.on_verified_payment_canceled(&ctx).await;
+        }
+    }
+
+    /// Builds a one-shot cancellation dispatcher (first call wins).
+    #[must_use]
+    pub fn cancellation_guard(
+        &self,
+        payload: WirePaymentPayload,
+        requirements: PaymentRequirements,
+    ) -> CancellationGuard {
+        CancellationGuard {
+            server: self.clone(),
+            payload,
+            requirements,
+            fired: AtomicBool::new(false),
+        }
+    }
+
+    async fn call_verify_with_failure_hooks(
+        &self,
+        payment: &PaymentHookContext,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<VerifyResponse, FacilitatorError> {
+        let request = build_verify_request(payload, requirements)?;
+        match DynFacilitator::verify(self.facilitator.as_ref(), request).await {
+            Ok(r) => Ok(r),
+            Err(error) => self.recover_verify(payment, error).await,
+        }
+    }
+
+    async fn recover_verify(
+        &self,
+        payment: &PaymentHookContext,
+        error: FacilitatorError,
+    ) -> Result<VerifyResponse, FacilitatorError> {
+        for hook in &self.hooks {
+            if let FailureRecovery::Recovered(r) = hook.on_verify_failure(payment, &error).await {
+                return Ok(r);
+            }
+        }
+        Err(error)
+    }
+
+    async fn call_settle_with_failure_hooks(
+        &self,
+        payment: &PaymentHookContext,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+    ) -> Result<SettleResponse, FacilitatorError> {
+        let request = build_settle_request(payload, requirements)?;
+        match DynFacilitator::settle(self.facilitator.as_ref(), request).await {
+            Ok(r) => Ok(r),
+            Err(error) => self.recover_settle(payment, error).await,
+        }
+    }
+
+    async fn recover_settle(
+        &self,
+        payment: &PaymentHookContext,
+        error: FacilitatorError,
+    ) -> Result<SettleResponse, FacilitatorError> {
+        for hook in &self.hooks {
+            if let FailureRecovery::Recovered(r) = hook.on_settle_failure(payment, &error).await {
+                return Ok(r);
+            }
+        }
+        Err(error)
+    }
+}
+
+/// Ensures `on_verified_payment_canceled` runs at most once for a payment.
+#[derive(Debug)]
+pub struct CancellationGuard {
+    server: ResourceServer,
+    payload: WirePaymentPayload,
+    requirements: PaymentRequirements,
+    fired: AtomicBool,
+}
+
+impl CancellationGuard {
+    /// Fires cancel hooks if not already fired.
+    pub async fn cancel(
+        &self,
+        reason: CancelReason,
+        error: Option<&str>,
+        response_status: Option<u16>,
+    ) {
+        if self
+            .fired
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return;
+        }
+        self.server
+            .notify_verified_payment_canceled(
+                &self.payload,
+                &self.requirements,
+                reason,
+                error,
+                response_status,
+            )
+            .await;
+    }
+
+    /// Returns `true` when cancel has already been dispatched.
+    #[must_use]
+    pub fn has_fired(&self) -> bool {
+        self.fired.load(Ordering::SeqCst)
+    }
+}
+
+fn build_verify_request(
+    payload: &WirePaymentPayload,
+    requirements: &PaymentRequirements,
+) -> Result<VerifyRequest, FacilitatorError> {
+    let typed = TypedVerifyRequest {
+        x402_version: V2,
+        payment_payload: payload.clone(),
+        payment_requirements: requirements.clone(),
+    };
+    to_verify_request(&typed)
+}
+
+fn build_settle_request(
+    payload: &WirePaymentPayload,
+    requirements: &PaymentRequirements,
+) -> Result<SettleRequest, FacilitatorError> {
+    let typed = TypedVerifyRequest {
+        x402_version: V2,
+        payment_payload: payload.clone(),
+        payment_requirements: requirements.clone(),
+    };
+    let verify = to_verify_request(&typed)?;
+    Ok(SettleRequest::from(verify.into_json()))
+}
+
+fn to_verify_request<T: Serialize>(typed: &T) -> Result<VerifyRequest, FacilitatorError> {
+    let json = serde_json::to_value(typed).map_err(FacilitatorError::internal)?;
+    Ok(VerifyRequest::from(json))
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::excessive_nesting,
+    reason = "hook + mock facilitator tests nest async bodies"
+)]
+mod tests {
+    use std::future::Future;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use super::*;
+    use crate::wire::{Extensions, SupportedResponse};
+
+    struct MockFacilitator {
+        verifies: AtomicUsize,
+        settles: AtomicUsize,
+        fail_verify: bool,
+        fail_settle: bool,
+    }
+
+    impl Facilitator for MockFacilitator {
+        fn verify(
+            &self,
+            _request: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            self.verifies.fetch_add(1, Ordering::SeqCst);
+            let result = if self.fail_verify {
+                Err(FacilitatorError::Onchain("mock verify".into()))
+            } else {
+                Ok(VerifyResponse::valid("0xpayer"))
+            };
+            std::future::ready(result)
+        }
+
+        fn settle(
+            &self,
+            _request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            self.settles.fetch_add(1, Ordering::SeqCst);
+            let result = if self.fail_settle {
+                Err(FacilitatorError::Onchain("mock settle".into()))
+            } else {
+                Ok(SettleResponse::Success {
+                    payer: "0xpayer".into(),
+                    transaction: "0xtx".into(),
+                    network: "eip155:1".into(),
+                    amount: Some("1".into()),
+                    extensions: Extensions::new(),
+                })
+            };
+            std::future::ready(result)
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
+
+    fn sample_payload() -> WirePaymentPayload {
+        let req = PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            60,
+        );
+        WirePaymentPayload::new(req, serde_json::json!({"k": 1}))
+    }
+
+    fn mock_ok() -> Arc<MockFacilitator> {
+        Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            fail_verify: false,
+            fail_settle: false,
+        })
+    }
+
+    #[tokio::test]
+    async fn verify_and_settle_invoke_facilitator() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let out = rs.verify_payment(&payload, &req).await.unwrap();
+        assert!(out.response.is_valid());
+        assert!(out.skip_handler.is_none());
+        assert!(
+            rs.settle_payment(&payload, &req)
+                .await
+                .unwrap()
+                .is_success()
+        );
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn find_matching_delegates_to_core() {
+        let rs = ResourceServer::new(mock_ok());
+        let payload = sample_payload();
+        let available = [payload.accepted.clone()];
+        assert!(
+            rs.find_matching_requirements(&available, &payload)
+                .is_some()
+        );
+    }
+
+    struct AbortBeforeVerify;
+    impl ResourceServerHooks for AbortBeforeVerify {
+        fn before_verify<'a>(
+            &'a self,
+            _: &PaymentHookContext,
+        ) -> impl Future<Output = BeforeOpDecision<VerifyResponse>> + Send + 'a {
+            std::future::ready(BeforeOpDecision::Abort {
+                reason: "blocked".into(),
+                message: "test".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn before_verify_abort() {
+        let rs = ResourceServer::new(mock_ok()).with_hook(AbortBeforeVerify);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
+    }
+
+    struct SkipVerify;
+    impl ResourceServerHooks for SkipVerify {
+        fn before_verify<'a>(
+            &'a self,
+            _: &PaymentHookContext,
+        ) -> impl Future<Output = BeforeOpDecision<VerifyResponse>> + Send + 'a {
+            std::future::ready(BeforeOpDecision::Skip {
+                result: VerifyResponse::valid("0xskip"),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn before_verify_skip_bypasses_facilitator() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock)).with_hook(SkipVerify);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let out = rs.verify_payment(&payload, &req).await.unwrap();
+        assert!(out.response.is_valid());
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    struct AfterAbort;
+    impl ResourceServerHooks for AfterAbort {
+        fn after_verify<'a>(
+            &'a self,
+            _: &VerifyResultContext,
+        ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+            std::future::ready(AfterVerifyDecision::Abort {
+                reason: "post".into(),
+                message: "nope".into(),
+            })
+        }
+    }
+
+    struct CancelHook(Arc<AtomicUsize>);
+    impl ResourceServerHooks for CancelHook {
+        fn on_verified_payment_canceled<'a>(
+            &'a self,
+            ctx: &'a VerifiedPaymentCanceledContext,
+        ) -> impl Future<Output = ()> + Send + 'a {
+            assert_eq!(ctx.reason, CancelReason::AfterVerifyAborted);
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(())
+        }
+    }
+
+    #[tokio::test]
+    async fn after_verify_abort_fires_cancel() {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let rs = ResourceServer::new(mock_ok())
+            .with_hook(AfterAbort)
+            .with_hook(CancelHook(Arc::clone(&cancels)));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "post"));
+        assert_eq!(cancels.load(Ordering::SeqCst), 1);
+    }
+
+    struct SkipHandlerHook;
+    impl ResourceServerHooks for SkipHandlerHook {
+        fn after_verify<'a>(
+            &'a self,
+            _: &VerifyResultContext,
+        ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+            std::future::ready(AfterVerifyDecision::SkipHandler {
+                response: SkipHandlerDirective::empty().with_body(serde_json::json!({"ok": true})),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn after_verify_skip_handler() {
+        let rs = ResourceServer::new(mock_ok()).with_hook(SkipHandlerHook);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let out = rs.verify_payment(&payload, &req).await.unwrap();
+        assert!(out.skip_handler.is_some());
+    }
+
+    struct RecoverVerify;
+    impl ResourceServerHooks for RecoverVerify {
+        fn on_verify_failure<'a>(
+            &'a self,
+            _: &PaymentHookContext,
+            _: &FacilitatorError,
+        ) -> impl Future<Output = FailureRecovery<VerifyResponse>> + Send + 'a {
+            std::future::ready(FailureRecovery::Recovered(VerifyResponse::valid("0xrec")))
+        }
+    }
+
+    #[tokio::test]
+    async fn verify_failure_recovers() {
+        let mock = Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            fail_verify: true,
+            fail_settle: false,
+        });
+        let rs = ResourceServer::new(mock).with_hook(RecoverVerify);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        assert!(
+            rs.verify_payment(&payload, &req)
+                .await
+                .unwrap()
+                .response
+                .is_valid()
+        );
+    }
+
+    struct CancelCountHook(Arc<AtomicUsize>);
+    impl ResourceServerHooks for CancelCountHook {
+        fn on_verified_payment_canceled<'a>(
+            &'a self,
+            _: &VerifiedPaymentCanceledContext,
+        ) -> impl Future<Output = ()> + Send + 'a {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(())
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_guard_fires_once() {
+        let count = Arc::new(AtomicUsize::new(0));
+        let rs = ResourceServer::new(mock_ok()).with_hook(CancelCountHook(Arc::clone(&count)));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let guard = rs.cancellation_guard(payload, req);
+        guard
+            .cancel(CancelReason::HandlerFailed, Some("4xx"), Some(400))
+            .await;
+        guard.cancel(CancelReason::HandlerThrew, None, None).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert!(guard.has_fired());
+    }
+}

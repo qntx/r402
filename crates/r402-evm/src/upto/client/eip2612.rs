@@ -20,9 +20,9 @@ use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain, sol};
 use r402_core::error::ClientError;
 
 use crate::chain::TokenAmount;
+use crate::eip2612::{EIP2612_GAS_SPONSORING_VERSION, Eip2612SignedPermit};
 use crate::exact::PERMIT2_ADDRESS;
 use crate::exact::client::SignerLike;
-use crate::upto::Eip2612SignedPermit;
 
 sol! {
     /// EIP-2612 typed-data layout (`Permit(...)`), identical across every
@@ -73,8 +73,10 @@ pub struct Eip2612SigningParams {
 ///
 /// The returned [`Eip2612SignedPermit`] is ready for insertion into
 /// `payload.extensions` under the
-/// [`EIP2612_GAS_SPONSORING_KEY`](crate::upto::EIP2612_GAS_SPONSORING_KEY)
+/// [`EIP2612_GAS_SPONSORING_KEY`](crate::EIP2612_GAS_SPONSORING_KEY)
 /// slot via [`Eip2612SignedPermit::to_extension_entry`].
+///
+/// Usable for both **exact** and **upto** Permit2 flows.
 ///
 /// # Errors
 ///
@@ -103,9 +105,11 @@ pub async fn sign_eip2612_permit<S: SignerLike + Sync>(
         from: params.owner,
         asset: params.asset_address,
         spender: PERMIT2_ADDRESS,
-        value: TokenAmount::from(params.value),
+        amount: TokenAmount::from(params.value),
+        nonce: TokenAmount::from(params.nonce),
         deadline: TokenAmount::from(params.deadline),
         signature: Bytes::from(signature.as_bytes().to_vec()),
+        version: EIP2612_GAS_SPONSORING_VERSION.into(),
     })
 }
 
@@ -150,7 +154,9 @@ mod tests {
         assert_eq!(permit.from, signer.address());
         assert_eq!(permit.asset, params.asset_address);
         assert_eq!(permit.spender, PERMIT2_ADDRESS);
-        assert_eq!(permit.value.0, params.value);
+        assert_eq!(permit.amount.0, params.value);
+        assert_eq!(permit.nonce.0, params.nonce);
+        assert_eq!(permit.version, EIP2612_GAS_SPONSORING_VERSION);
         assert_eq!(permit.deadline.0, params.deadline);
     }
 

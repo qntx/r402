@@ -31,6 +31,13 @@ pub use paygate::{
     BackgroundSettlementTracker, Paygate, PaygateBuilder, PaygateError, ResourceTemplate,
     VerificationError, VerifiedPayment, settlement_to_header,
 };
+// Resource-server hooks are re-exported from core for integrators wiring
+// `PaygateBuilder::with_resource_hook`.
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use status::reason_to_status;
-pub use upto::UptoActualAmount;
+pub use upto::{
+    SETTLEMENT_OVERRIDES_HEADER, SettlementOverrides, UptoActualAmount,
+    marshal_settlement_overrides, resolve_response_settlement_amount, set_settlement_overrides,
+    set_settlement_overrides_on_response, settlement_overrides_header_name,
+    take_settlement_overrides_header,
+};

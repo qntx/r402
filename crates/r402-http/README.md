@@ -7,20 +7,16 @@ HTTP transport for the [x402 payment protocol][x402], part of the
 
 ## Highlights
 
-- **Server `Paygate` middleware** — axum-style layer enforcing payments
-  with three settlement modes (sequential, concurrent, background) and
-  pluggable hooks for KYT / API keys / observability.
-- **Client `X402Middleware`** — `reqwest_middleware` adapter that handles
-  402 challenges, signs payments, and retries the protected request.
-- **Remote `FacilitatorClient`** — talks to a remote facilitator's
-  `/verify`, `/settle`, and `/supported` endpoints with a 30-second
-  default timeout, exponential-backoff retry on `429`/5xx, and a
-  10-minute cache for `/supported` shared across clones.
-- **CORS-aware** — automatically appends `Access-Control-Expose-Headers`
-  for the `Payment-Required` and `Payment-Response` headers.
-- **Structured 4xx parsing** — facilitator clients deserialise structured
-  `VerifyResponse::Invalid` / `SettleResponse::Failure` bodies regardless
-  of HTTP status code, preserving spec §9 error reasons end-to-end.
+- **Server `Paygate` + `X402Middleware`** — Axum layer enforcing payments
+  via `ResourceServer` (verify/settle hooks, cancel on handler failure),
+  three settlement modes (sequential, concurrent, background), and
+  HTTP-only `PaygateHooks` (API keys / KYT).
+- **Client `X402Client`** — thin `reqwest_middleware` adapter over
+  `r402_core::PaymentClient`: 402 → sign → retry, plus
+  `on_payment_response` with one corrective recovery.
+- **Remote `FacilitatorClient`** — `/verify`, `/settle`, `/supported`
+  with 30s timeout, 429/5xx backoff, 10-minute `/supported` cache.
+- **CORS** — exposes `Payment-Required` and `Payment-Response`.
 
 ## Cargo Features
 
