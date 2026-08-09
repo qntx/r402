@@ -78,7 +78,10 @@ pub fn verify_offchain(
     let state = store.get(&voucher.channel_id);
 
     match body {
-        BatchSettlementPayload::Voucher { .. } | BatchSettlementPayload::Deposit { .. } => {
+        BatchSettlementPayload::Deposit { .. } => Err(VerificationError::InvalidFormat(
+            "batch-settlement deposit settle requires on-chain deposit (not implemented on request path; use voucher after external funding)".into(),
+        )),
+        BatchSettlementPayload::Voucher { .. } => {
             let needed = state.charged_cumulative.0.saturating_add(request_amount.0);
             if voucher.max_claimable_amount.0 < needed {
                 return Err(VerificationError::InvalidFormat(

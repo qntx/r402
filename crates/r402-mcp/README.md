@@ -186,7 +186,7 @@ Hooks (`ClientHooks`): `on_payment_required` (abort / supply payload),
 | ---- | ----- |
 | V1 | Not supported |
 | SEP-1036 / JSON-RPC `-32042` | TS-only path; not in Go pin |
-| Paid retry still 402 | Returns `McpClientError::StillRequired` (stricter than Go) |
+| Paid retry still 402 | `StillRequired { payment_required, recovery_requested }` for caller retry |
 | Live e2e example binary | Not shipped; use unit tests under `src/{server,client,encode}.rs` |
 
 ## License

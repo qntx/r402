@@ -882,46 +882,28 @@ impl VerifiedPayment {
         self.settle_with_override(None).await
     }
 
-    /// Like [`settle`](Self::settle) but overrides
-    /// `paymentRequirements.amount` before forwarding the settle request.
+    /// Like [`settle`](Self::settle) but applies an optional atomic amount
+    /// override through [`ResourceServer::settle_payment`] (hooks included).
     ///
-    /// Intended for the **upto** scheme, where the resource server determines
-    /// the actual charge at request time via
-    /// [`Settlement-Overrides`](super::SETTLEMENT_OVERRIDES_HEADER) or
+    /// Intended for the **upto** scheme after resolving
+    /// [`Settlement-Overrides`](super::SETTLEMENT_OVERRIDES_HEADER) /
     /// [`UptoActualAmount`](super::UptoActualAmount).
     /// Passing `None` is equivalent to [`settle`](Self::settle).
     ///
     /// # Errors
     ///
-    /// Returns [`PaygateError::Settlement`] when the override payload is
-    /// malformed, the facilitator rejects the settlement, or the on-chain
-    /// transaction fails.
+    /// Returns [`PaygateError::Settlement`] when the override is rejected, the
+    /// facilitator fails settlement, or settle hooks abort.
     pub async fn settle_with_override(
-        mut self,
+        self,
         actual_amount: Option<&str>,
     ) -> Result<wire::SettleResponse, PaygateError> {
-        if let Some(amount) = actual_amount {
-            self.settle_request
-                .set_settlement_amount(amount)
-                .map_err(|e| {
-                    PaygateError::SettlementAborted(format!("upto amount override failed: {e}"))
-                })?;
-            // Keep resource-server settle path in sync when amount is overridden:
-            // settle via facilitator with the mutated request rather than
-            // rebuild from payload (amount override is request-local).
-            let facilitator = self.server.facilitator();
-            let settlement = Facilitator::settle(&facilitator, self.settle_request)
-                .await
-                .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
-            if matches!(settlement, wire::SettleResponse::Failure { .. }) {
-                return Err(PaygateError::Settlement(Box::new(settlement)));
-            }
-            return Ok(settlement);
-        }
+        use r402_core::SettlementOverrides;
 
+        let overrides = actual_amount.map(SettlementOverrides::amount);
         let settlement = self
             .server
-            .settle_payment(&self.payload, &self.requirements)
+            .settle_payment(&self.payload, &self.requirements, overrides.as_ref())
             .await
             .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
 

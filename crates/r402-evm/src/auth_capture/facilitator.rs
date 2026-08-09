@@ -194,28 +194,33 @@ where
 
         let escrow = IAuthCaptureEscrow::new(AUTH_CAPTURE_ESCROW_ADDRESS, self.provider.inner());
         let amount = requirements.amount.0;
-        let tx_hash = if extra.auto_capture() {
+        let receipt = if extra.auto_capture() {
             let pending = escrow
                 .charge(payment_info, amount, collector, collector_data)
                 .send()
                 .await
                 .map_err(|e| FacilitatorError::Onchain(format!("auth-capture charge: {e}")))?;
-            let receipt = pending.get_receipt().await.map_err(|e| {
+            pending.get_receipt().await.map_err(|e| {
                 FacilitatorError::Onchain(format!("auth-capture charge receipt: {e}"))
-            })?;
-            receipt.transaction_hash
+            })?
         } else {
             let pending = escrow
                 .authorize(payment_info, amount, collector, collector_data)
                 .send()
                 .await
                 .map_err(|e| FacilitatorError::Onchain(format!("auth-capture authorize: {e}")))?;
-            let receipt = pending.get_receipt().await.map_err(|e| {
+            pending.get_receipt().await.map_err(|e| {
                 FacilitatorError::Onchain(format!("auth-capture authorize receipt: {e}"))
-            })?;
-            receipt.transaction_hash
+            })?
         };
 
+        if !receipt.status() {
+            return Err(FacilitatorError::Onchain(
+                "auth-capture transaction reverted".into(),
+            ));
+        }
+
+        let tx_hash = receipt.transaction_hash;
         Ok(SettleResponse::Success {
             payer: format!("{payer:#x}").into(),
             transaction: format!("{tx_hash:#x}").into(),

@@ -20,9 +20,12 @@ pub use hooks::{
 };
 use serde::Serialize;
 
-use crate::error::FacilitatorError;
+use crate::error::{FacilitatorError, VerificationError};
 use crate::facilitator::{DynFacilitator, Facilitator};
 use crate::hooks::FailureRecovery;
+use crate::settlement_override::{
+    SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
+};
 use crate::wire::{
     PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2, VerifyRequest,
     VerifyResponse, find_matching_requirements,
@@ -163,8 +166,9 @@ impl ResourceServer {
                 .await?
         };
 
-        // Invalid verify responses do not run after_verify (official: after
-        // fires on successful verification path including skip/recover).
+        // Official Go: isValid:false is a hard verify failure that runs
+        // onVerifyFailure (security: reachable facilitator ≠ payment valid).
+        // Unrecovered invalids skip after_verify.
         if !response.is_valid() {
             return Ok(VerifyPaymentOutcome {
                 response,
@@ -207,19 +211,27 @@ impl ResourceServer {
         })
     }
 
-    /// Official `SettlePayment`: before hooks → facilitator → after hooks.
+    /// Official `SettlePayment`: optional amount overrides → before hooks →
+    /// facilitator → after hooks.
+    ///
+    /// `overrides` applies partial settlement (upto): atomic / percent / dollar
+    /// amounts are resolved against `requirements.amount` before hooks see the
+    /// payment context (matches Go `SettlePaymentWithExtensions`).
     ///
     /// # Errors
     ///
-    /// Propagates facilitator / abort errors unless a failure hook recovers.
+    /// Propagates facilitator / abort / invalid-override errors unless a
+    /// failure hook recovers.
     pub async fn settle_payment(
         &self,
         payload: &WirePaymentPayload,
         requirements: &PaymentRequirements,
+        overrides: Option<&SettlementOverrides>,
     ) -> Result<SettleResponse, FacilitatorError> {
+        let effective = apply_settlement_overrides(requirements, overrides)?;
         let payment = PaymentHookContext {
             payload: payload.clone(),
-            requirements: requirements.clone(),
+            requirements: effective.clone(),
         };
 
         let mut skipped: Option<SettleResponse> = None;
@@ -239,18 +251,18 @@ impl ResourceServer {
         let response = if let Some(local) = skipped {
             local
         } else {
-            self.call_settle_with_failure_hooks(&payment, payload, requirements)
+            self.call_settle_with_failure_hooks(&payment, payload, &effective)
                 .await?
         };
 
-        if response.is_success() {
-            let result_ctx = SettleResultContext {
-                payment,
-                result: response.clone(),
-            };
-            for hook in &self.hooks {
-                hook.after_settle(&result_ctx).await;
-            }
+        // Official: afterSettle fires for settle results returned as Ok
+        // (including unsuccessful settle responses from the facilitator).
+        let result_ctx = SettleResultContext {
+            payment,
+            result: response.clone(),
+        };
+        for hook in &self.hooks {
+            hook.after_settle(&result_ctx).await;
         }
 
         Ok(response)
@@ -309,7 +321,11 @@ impl ResourceServer {
     ) -> Result<VerifyResponse, FacilitatorError> {
         let request = build_verify_request(payload, requirements)?;
         match DynFacilitator::verify(self.facilitator.as_ref(), request).await {
-            Ok(r) => Ok(r),
+            Ok(r) if r.is_valid() => Ok(r),
+            Ok(invalid) => {
+                let error = facilitator_error_from_invalid(&invalid);
+                self.recover_verify(payment, error).await.or(Ok(invalid))
+            }
             Err(error) => self.recover_verify(payment, error).await,
         }
     }
@@ -426,6 +442,50 @@ fn to_verify_request<T: Serialize>(typed: &T) -> Result<VerifyRequest, Facilitat
     Ok(VerifyRequest::from(json))
 }
 
+/// Applies official settlement overrides onto a clone of `requirements`.
+fn apply_settlement_overrides(
+    requirements: &PaymentRequirements,
+    overrides: Option<&SettlementOverrides>,
+) -> Result<PaymentRequirements, FacilitatorError> {
+    let Some(overrides) = overrides else {
+        return Ok(requirements.clone());
+    };
+    let Some(raw) = overrides
+        .amount
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    else {
+        return Ok(requirements.clone());
+    };
+    let decimals = asset_decimals_from_extra(requirements.extra.as_ref());
+    let resolved = resolve_settlement_override_amount(raw, requirements.amount.as_str(), decimals)
+        .map_err(|e| {
+            FacilitatorError::Verification(VerificationError::InvalidFormat(format!(
+                "invalid settlement override: {e}"
+            )))
+        })?;
+    let mut effective = requirements.clone();
+    effective.amount = resolved.into();
+    Ok(effective)
+}
+
+fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError {
+    match invalid {
+        VerifyResponse::Invalid {
+            reason, message, ..
+        } => {
+            let detail = message
+                .as_ref()
+                .map_or_else(|| reason.to_string(), |m| format!("{reason}: {m}"));
+            FacilitatorError::Verification(VerificationError::InvalidFormat(detail))
+        }
+        VerifyResponse::Valid { .. } => FacilitatorError::Verification(
+            VerificationError::InvalidFormat("expected invalid verify response".into()),
+        ),
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::excessive_nesting,
@@ -516,7 +576,7 @@ mod tests {
         assert!(out.response.is_valid());
         assert!(out.skip_handler.is_none());
         assert!(
-            rs.settle_payment(&payload, &req)
+            rs.settle_payment(&payload, &req, None)
                 .await
                 .unwrap()
                 .is_success()

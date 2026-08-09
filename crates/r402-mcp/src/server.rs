@@ -282,7 +282,11 @@ impl PaymentWrapper {
             });
         }
 
-        let settle = match self.server.settle_payment(&payload, &requirements).await {
+        let settle = match self
+            .server
+            .settle_payment(&payload, &requirements, None)
+            .await
+        {
             Ok(s) if s.is_success() => s,
             Ok(s) => {
                 let reason = match s {

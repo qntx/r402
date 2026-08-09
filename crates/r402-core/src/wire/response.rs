@@ -260,9 +260,9 @@ struct SettleResponseWire {
     error_message: Option<CompactString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     payer: Option<CompactString>,
-    /// Always serialized per x402 v2 spec §5.3.2: empty string on failure,
-    /// transaction hash on success. Deserialization tolerates omission for
-    /// legacy clients but the success path enforces non-empty in `try_from`.
+    /// Always serialized per x402 v2 §5.3.2: empty string on failure, and
+    /// empty string on success for off-chain / deferred schemes (e.g.
+    /// batch-settlement vouchers). On-chain schemes set a transaction hash.
     #[serde(default)]
     transaction: CompactString,
     network: CompactString,
@@ -316,9 +316,6 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
     fn try_from(wire: SettleResponseWire) -> Result<Self, Self::Error> {
         if wire.success {
             let payer = wire.payer.ok_or("missing field: payer")?;
-            if wire.transaction.is_empty() {
-                return Err("missing field: transaction".to_owned());
-            }
             Ok(Self::Success {
                 payer,
                 transaction: wire.transaction,
@@ -424,14 +421,19 @@ mod tests {
     }
 
     #[test]
-    fn settle_success_missing_transaction_rejects() {
+    fn settle_success_empty_transaction_allowed() {
+        // Off-chain / deferred schemes (batch-settlement vouchers) use "".
         let json = json!({
             "success": true,
             "payer": "0xABC",
             "transaction": "",
             "network": "eip155:1"
         });
-        assert!(serde_json::from_value::<SettleResponse>(json).is_err());
+        let back: SettleResponse = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            back,
+            SettleResponse::Success { ref transaction, .. } if transaction.is_empty()
+        ));
     }
 
     #[test]

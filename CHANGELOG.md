@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Settle pipeline hardening (SettlementMode **unchanged**)
+
+- **Three settlement modes kept**: Sequential / Concurrent / Background
+  (verify-then-settle timing as originally designed; Concurrent and Background
+  still start settlement before or alongside the handler for stream/latency use).
+- **`ResourceServer::settle_payment(..., overrides)`** — amount overrides
+  (atomic / `%` / `$`) apply before settle hooks on the Sequential path.
+- **`isValid: false`** runs `on_verify_failure` recovery (Go security semantics).
+- **`SettleResponse` success may use empty `transaction`** (batch-settlement vouchers).
+- **batch-settlement**: reject deposit on request path; EOA 65-byte voucher sigs
+  only; atomic `MemoryChannelStore::try_charge`.
+- **auth-capture**: reject settled txs with `receipt.status() == false`.
+- **MCP** `StillRequired` carries corrective challenge + `recovery_requested`.
+
 ### Transport parity fixes (SkipHandler body + Settlement-Overrides)
 
 - **`SkipHandlerDirective` body** — HTTP Paygate (sequential / concurrent /
