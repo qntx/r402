@@ -44,9 +44,17 @@ pub enum McpClientError {
     /// Building a payment payload failed.
     #[error("payment creation: {0}")]
     Payment(String),
-    /// Server still required payment after a signed retry.
-    #[error("payment still required after retry")]
-    StillRequired,
+    /// Server still required payment after a signed attempt.
+    ///
+    /// Carries the corrective challenge (when present) and whether
+    /// `on_payment_response` requested recovery so callers can retry.
+    #[error("payment still required after attempt")]
+    StillRequired {
+        /// Corrective `PaymentRequired` from the tool result, if parsed.
+        payment_required: Option<Box<PaymentRequired>>,
+        /// `true` when payment-response hooks signalled recovery.
+        recovery_requested: bool,
+    },
     /// Auto-payment disabled or user denied — includes 402 data when available.
     #[error(transparent)]
     PaymentRequired(#[from] Box<PaymentRequiredError>),

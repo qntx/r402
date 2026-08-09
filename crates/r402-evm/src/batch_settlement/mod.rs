@@ -1,13 +1,10 @@
-//! EIP-155 `batch-settlement` scheme (capital-backed payment channels).
+//! EIP-155 `batch-settlement` scheme (request-path voucher accounting).
 //!
-//! Implements voucher-based micropayments over unidirectional channels:
-//! clients sign cumulative vouchers; servers verify ECDSA and charge within
-//! the voucher ceiling via a pluggable [`ChannelStore`].
-//!
-//! On-chain deposit collectors / claim batches use the CREATE2 addresses in
-//! [`types`]; request-path settle updates local charged totals so the next
-//! voucher remains monotonic. Operators submit claim/sweep transactions
-//! separately.
+//! **Scope (current):** cumulative EOA voucher verify/settle against a
+//! pluggable [`ChannelStore`]. Deposit request-path settle is **rejected**
+//! until on-chain deposit is implemented; claim/sweep remain operator-side.
+//! Treat as experimental for production capital unless the store is durable
+//! and channels are funded off-band.
 //!
 //! Spec: `specs/schemes/batch-settlement/scheme_batch_settlement_evm.md`.
 

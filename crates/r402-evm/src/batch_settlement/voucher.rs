@@ -93,8 +93,11 @@ pub fn verify_voucher_signature(
     };
 
     if voucher.signature.len() != 65 {
-        // Smart-wallet signatures: accept structure; on-chain claim enforces.
-        return Ok(expected);
+        // Request-path settle never goes on-chain; accepting non-EOA blobs
+        // would allow free access. Smart-wallet EIP-1271 belongs on claim.
+        return Err(VerificationError::InvalidSignature(
+            "batch-settlement request path requires 65-byte EOA voucher signature".into(),
+        ));
     }
 
     let sig = Signature::from_raw(voucher.signature.as_ref())

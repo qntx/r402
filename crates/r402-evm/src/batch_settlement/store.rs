@@ -74,6 +74,26 @@ impl ChannelStore for MemoryChannelStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(channel_id, state);
     }
+
+    fn try_charge(
+        &self,
+        channel_id: B256,
+        charge: TokenAmount,
+        max_claimable: TokenAmount,
+    ) -> bool {
+        let mut guard = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = guard.entry(channel_id).or_default();
+        let next = entry.charged_cumulative.0.saturating_add(charge.0);
+        if next > max_claimable.0 {
+            return false;
+        }
+        entry.charged_cumulative = TokenAmount::from(next);
+        drop(guard);
+        true
+    }
 }
 
 #[cfg(test)]

@@ -307,8 +307,8 @@ where
             if let Some(ref s) = settle {
                 ctx = ctx.with_settle_response(s.clone());
             }
-            if let Some(c) = corrective {
-                ctx = ctx.with_corrective_payment_required(c);
+            if let Some(ref c) = corrective {
+                ctx = ctx.with_corrective_payment_required(c.clone());
             }
             if settle.is_some() || still_required {
                 recovery_requested = hook(ctx).recovered;
@@ -316,7 +316,10 @@ where
         }
 
         if still_required {
-            return Err(McpClientError::StillRequired);
+            return Err(McpClientError::StillRequired {
+                payment_required: corrective.map(Box::new),
+                recovery_requested,
+            });
         }
 
         if let Some(ref after) = self.hooks.on_after_payment {
