@@ -56,7 +56,7 @@ rmcp = { version = "3.1", default-features = false }
 # Utility
 base64 = "0.23"
 blake2 = "0.10"
-sha3 = "0.10"
+sha3 = "0.11"
 # Solana's entire ecosystem still ships bincode 1 (legacy serde wire
 # format). Upgrading to bincode 3 here would split the workspace across
 # two incompatible serialization stacks — keep v1 until upstream moves.
