@@ -245,7 +245,14 @@ fn recover_payer(
     signature: &alloy_primitives::Bytes,
     expected: Address,
 ) -> Result<(), VerificationError> {
-    if signature.len() < 64 {
+    if signature.len() < 65 {
+        // This off-chain recovery path only handles 65-byte EOA signatures
+        // (below). A shorter signature — including a 64-byte ERC-2098 compact
+        // signature — is not recovered here, so it must be rejected rather than
+        // fall through to `Ok(())` unverified. (The `exact` scheme opts into
+        // ERC-2098 via `Signature::from_erc2098`; adding that to auth-capture
+        // would be a feature, not this fix.) This matches the batch-settlement
+        // scheme, which likewise rejects non-65-byte signatures.
         return Err(VerificationError::InvalidSignature(
             "signature too short".into(),
         ));
