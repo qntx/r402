@@ -88,7 +88,7 @@ alloy-transport-http = "2.0"
 
 # Solana (SVM)
 solana-account = "3"
-solana-client = "3"
+solana-client = "4"
 solana-commitment-config = "3"
 solana-compute-budget-interface = "3"
 solana-keypair = "3"
