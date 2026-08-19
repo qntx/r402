@@ -88,7 +88,9 @@ impl SettlementBatcher {
                     flush_interval_seconds
                         .unwrap_or(DEFAULT_SETTLEMENT_BATCH_FLUSH_INTERVAL_SECONDS),
                 ),
-                batch_flush_size: batch_flush_size.unwrap_or(DEFAULT_SETTLEMENT_BATCH_FLUSH_SIZE),
+                batch_flush_size: batch_flush_size
+                    .unwrap_or(DEFAULT_SETTLEMENT_BATCH_FLUSH_SIZE)
+                    .min(DEFAULT_SETTLEMENT_BATCH_MAX_SIZE),
                 confirmation_timeout_seconds: confirmation_timeout_seconds
                     .unwrap_or(DEFAULT_TRACE_CONFIRMATION_TIMEOUT_SECONDS),
                 queues: Mutex::new(HashMap::new()),
@@ -159,65 +161,72 @@ impl SettlementBatcher {
 
     async fn flush_network(&self, network: &str) {
         self.clear_timer(network);
-        let batch: Vec<Pending> = {
-            let mut queues = match self.inner.queues.lock() {
-                Ok(g) => g,
-                Err(_) => return,
+        loop {
+            let (batch, had_remainder): (Vec<Pending>, bool) = {
+                let mut queues = match self.inner.queues.lock() {
+                    Ok(g) => g,
+                    Err(_) => return,
+                };
+                let Some(queue) = queues.get_mut(network) else {
+                    return;
+                };
+                let take = queue.len().min(DEFAULT_SETTLEMENT_BATCH_MAX_SIZE);
+                let batch = queue.drain(..take).collect();
+                let had_remainder = !queue.is_empty();
+                if !had_remainder {
+                    queues.remove(network);
+                }
+                (batch, had_remainder)
             };
-            let Some(queue) = queues.get_mut(network) else {
+            if batch.is_empty() {
                 return;
-            };
-            let take = queue.len().min(DEFAULT_SETTLEMENT_BATCH_MAX_SIZE);
-            let batch = queue.drain(..take).collect();
-            if queue.is_empty() {
-                queues.remove(network);
             }
-            batch
-        };
-        if batch.is_empty() {
-            return;
-        }
-        let relays: Vec<TvmRelayRequest> = batch
-            .iter()
-            .map(|p| p.queued.relay_request.clone())
-            .collect();
-        let send_result = async {
-            let boc = self
-                .inner
-                .provider
-                .build_relay_external_boc_batch(&relays, false)
-                .await?;
-            let hash = self.inner.provider.send_external_message(&boc).await?;
-            self.inner
-                .provider
-                .wait_for_trace_confirmation(&hash, self.inner.confirmation_timeout_seconds)
-                .await
-        }
-        .await;
-        match send_result {
-            Ok(trace) => {
-                for pending in batch {
-                    let result = match (self.inner.verifier)(&trace, &pending.queued.settlement) {
-                        Ok(transaction) => BatchResult {
-                            success: true,
-                            transaction: Some(transaction),
-                            error_reason: None,
-                            error_message: None,
-                        },
-                        Err(err) => BatchResult {
-                            success: false,
-                            transaction: None,
-                            error_reason: Some(ERR_EXACT_TVM_TRANSACTION_FAILED.to_owned()),
-                            error_message: Some(err),
-                        },
-                    };
-                    drop(pending.resolve.send(result));
+            let relays: Vec<TvmRelayRequest> = batch
+                .iter()
+                .map(|p| p.queued.relay_request.clone())
+                .collect();
+            let send_result = async {
+                let boc = self
+                    .inner
+                    .provider
+                    .build_relay_external_boc_batch(&relays, false)
+                    .await?;
+                let hash = self.inner.provider.send_external_message(&boc).await?;
+                self.inner
+                    .provider
+                    .wait_for_trace_confirmation(&hash, self.inner.confirmation_timeout_seconds)
+                    .await
+            }
+            .await;
+            match send_result {
+                Ok(trace) => {
+                    for pending in batch {
+                        let result = match (self.inner.verifier)(&trace, &pending.queued.settlement)
+                        {
+                            Ok(transaction) => BatchResult {
+                                success: true,
+                                transaction: Some(transaction),
+                                error_reason: None,
+                                error_message: None,
+                            },
+                            Err(err) => BatchResult {
+                                success: false,
+                                transaction: None,
+                                error_reason: Some(ERR_EXACT_TVM_TRANSACTION_FAILED.to_owned()),
+                                error_message: Some(err),
+                            },
+                        };
+                        drop(pending.resolve.send(result));
+                    }
+                }
+                Err(err) => {
+                    for pending in batch {
+                        drop(pending.resolve.send(fail(&err.to_string())));
+                    }
                 }
             }
-            Err(err) => {
-                for pending in batch {
-                    drop(pending.resolve.send(fail(&err.to_string())));
-                }
+            if !had_remainder {
+                return;
             }
         }
     }

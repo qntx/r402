@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
-use tonlib_core::cell::dict::predefined_readers::val_reader_cell;
-use tonlib_core::cell::{Cell, CellBuilder, TonCellError};
+use tonlib_core::cell::dict::predefined_readers::val_reader_ref_cell;
+use tonlib_core::cell::{ArcCell, Cell, CellBuilder, TonCellError};
 
 use super::common::{BocError, cell_hash_hex, code_from_hex};
 use super::w5::StateInitCells;
@@ -24,10 +24,10 @@ pub const MAX_USABLE_QUERY_SEQNO: u32 = MAX_SHIFT * 1023 + (MAX_BIT_NUMBER - 1);
 /// On-chain Highload V3 query bitmaps.
 #[derive(Debug, Clone, Default)]
 pub struct HighloadQueryState {
-    /// Previous window.
-    pub old_queries: HashMap<u16, Cell>,
-    /// Current window.
-    pub queries: HashMap<u16, Cell>,
+    /// Previous window (`HashmapE 13 ^Cell`).
+    pub old_queries: HashMap<u16, ArcCell>,
+    /// Current window (`HashmapE 13 ^Cell`).
+    pub queries: HashMap<u16, ArcCell>,
 }
 
 /// Converts a monotonic seqno into a Highload V3 `query_id`.
@@ -109,8 +109,10 @@ pub fn load_highload_query_state(data: &Cell, now: u64) -> Result<HighloadQueryS
     let mut parser = data.parser();
     let _pubkey = parser.load_bytes(32)?;
     let _subwallet = parser.load_u32(32)?;
-    let mut old_queries = parser.load_dict(13, key_reader_u13, val_reader_cell)?;
-    let mut queries = parser.load_dict(13, key_reader_u13, val_reader_cell)?;
+    // Contract stores HashmapE 13 ^Cell (`udict_set_ref`). Inline
+    // `val_reader_cell` wraps the leaf and makes every bitmap look empty.
+    let mut old_queries = parser.load_dict(13, key_reader_u13, val_reader_ref_cell)?;
+    let mut queries = parser.load_dict(13, key_reader_u13, val_reader_ref_cell)?;
     let last_clean_time = parser.load_u64(64)?;
     let timeout = u64::from(parser.load_u32(22)?);
 
@@ -143,7 +145,7 @@ fn key_reader_u13(raw_key: &BigUint) -> Result<u16, TonCellError> {
     })
 }
 
-fn bitmap_contains(bitmap: Option<&Cell>, bit_number: u32) -> bool {
+fn bitmap_contains(bitmap: Option<&ArcCell>, bit_number: u32) -> bool {
     let Some(bitmap) = bitmap else {
         return false;
     };
@@ -217,5 +219,46 @@ mod tests {
     fn highload_code_hash_matches_constant() {
         let code = code_from_hex(HIGHLOAD_V3_CODE_HEX).unwrap();
         assert_eq!(cell_hash_hex(&code), HIGHLOAD_V3_CODE_HASH);
+    }
+
+    #[test]
+    fn query_id_is_processed_reads_ref_cell_bitmaps() {
+        use std::collections::HashMap;
+
+        use tonlib_core::cell::dict::predefined_writers::val_writer_ref_cell;
+
+        let query_id = seqno_to_query_id(5).unwrap();
+        let shift = (query_id >> 10) as u16;
+        let bit_number = query_id & 1023;
+        assert_eq!(shift, 0);
+        assert_eq!(bit_number, 5);
+
+        let mut bitmap = CellBuilder::new();
+        for i in 0..1023u32 {
+            bitmap.store_bit(i == bit_number).unwrap();
+        }
+        let bitmap = bitmap.build().unwrap().to_arc();
+
+        let mut queries = HashMap::new();
+        queries.insert(shift, bitmap);
+
+        let mut data = CellBuilder::new();
+        data.store_slice(&[0u8; 32]).unwrap();
+        data.store_u32(32, DEFAULT_HIGHLOAD_SUBWALLET_ID).unwrap();
+        data.store_bit(false).unwrap();
+        data.store_dict(13, val_writer_ref_cell, queries).unwrap();
+        data.store_u64(64, 1_700_000_000).unwrap();
+        data.store_u32(22, DEFAULT_HIGHLOAD_TIMEOUT).unwrap();
+        let data = data.build().unwrap();
+
+        let state = load_highload_query_state(&data, 1_700_000_000).unwrap();
+        assert!(
+            query_id_is_processed(&state, query_id),
+            "set bit in ^Cell bitmap must be visible"
+        );
+        assert!(
+            !query_id_is_processed(&state, seqno_to_query_id(6).unwrap()),
+            "unset bit must stay free"
+        );
     }
 }

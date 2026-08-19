@@ -384,35 +384,15 @@ impl TvmChainProvider {
                 .map_err(|_| TvmRpcError::Parse("deployed lock poisoned".to_owned()))?;
             *deployed = Some(query_state.is_some());
         }
-        let mut next = {
-            let guard = self
-                .query_seqno
-                .lock()
-                .map_err(|_| TvmRpcError::Parse("query_seqno lock poisoned".to_owned()))?;
-            *guard
-        };
-        for _ in 0..=MAX_USABLE_QUERY_SEQNO {
-            let seqno = next;
-            next = next.saturating_add(1) % (MAX_USABLE_QUERY_SEQNO + 1);
-            let query_id =
-                seqno_to_query_id(seqno).map_err(|e| TvmRpcError::Parse(e.to_string()))?;
-            let used = query_state
-                .as_ref()
-                .is_some_and(|s| query_id_is_processed(s, query_id));
-            if !used {
-                if !for_emulation {
-                    let mut guard = self
-                        .query_seqno
-                        .lock()
-                        .map_err(|_| TvmRpcError::Parse("query_seqno lock poisoned".to_owned()))?;
-                    *guard = next;
-                }
-                return Ok(query_id);
-            }
+        let mut guard = self
+            .query_seqno
+            .lock()
+            .map_err(|_| TvmRpcError::Parse("query_seqno lock poisoned".to_owned()))?;
+        let (query_id, next) = take_free_query_id(*guard, query_state.as_ref())?;
+        if !for_emulation {
+            *guard = next;
         }
-        Err(TvmRpcError::Parse(
-            "No free Highload V3 query_id available".to_owned(),
-        ))
+        Ok(query_id)
     }
 
     fn pack_actions_message(&self, actions: &[Cell], query_id: u32) -> Result<Cell, TvmRpcError> {
@@ -549,12 +529,92 @@ fn initial_query_seqno() -> u32 {
     rand::rng().random_range(0..=MAX_USABLE_QUERY_SEQNO)
 }
 
-fn is_retryable_trace_error(err: &TvmRpcError) -> bool {
+/// Reserves the first unused Highload `query_id` starting at `start_seqno`.
+///
+/// Returns `(query_id, next_seqno)`. `next_seqno` is the cursor after this
+/// reservation so concurrent callers cannot pick the same id.
+pub(crate) fn take_free_query_id(
+    start_seqno: u32,
+    query_state: Option<&crate::codecs::highload_v3::HighloadQueryState>,
+) -> Result<(u32, u32), TvmRpcError> {
+    let mut next = start_seqno;
+    for _ in 0..=MAX_USABLE_QUERY_SEQNO {
+        let seqno = next;
+        next = next.saturating_add(1) % (MAX_USABLE_QUERY_SEQNO + 1);
+        let query_id = seqno_to_query_id(seqno).map_err(|e| TvmRpcError::Parse(e.to_string()))?;
+        let used = query_state.is_some_and(|s| query_id_is_processed(s, query_id));
+        if !used {
+            return Ok((query_id, next));
+        }
+    }
+    Err(TvmRpcError::Parse(
+        "No free Highload V3 query_id available".to_owned(),
+    ))
+}
+
+pub(crate) fn is_retryable_trace_error(err: &TvmRpcError) -> bool {
     let msg = err.to_string();
-    msg.contains("no trace") || msg.contains(" 429") || msg.contains(" 5")
+    if msg.contains("no trace") {
+        return true;
+    }
+    parse_http_status(&msg)
+        .is_some_and(|status| matches!(status, 404 | 429 | 500 | 502 | 503 | 504))
+}
+
+fn parse_http_status(msg: &str) -> Option<u16> {
+    let after = msg.rsplit_once(": ")?.1;
+    let digits: String = after
+        .bytes()
+        .take_while(u8::is_ascii_digit)
+        .map(char::from)
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 /// Encodes a cell as base64 BoC.
 pub fn cell_to_b64(cell: &Cell) -> Result<String, BocError> {
     encode_base64_boc(cell)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, reason = "test assertions")]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn take_free_query_id_advances_cursor() {
+        let (first, next) = take_free_query_id(7, None).unwrap();
+        assert_eq!(first, seqno_to_query_id(7).unwrap());
+        let (second, _) = take_free_query_id(next, None).unwrap();
+        assert_ne!(first, second);
+        assert_eq!(second, seqno_to_query_id(8).unwrap());
+    }
+
+    #[test]
+    fn trace_404_and_no_trace_are_retryable() {
+        assert!(is_retryable_trace_error(&TvmRpcError::Parse(
+            "Toncenter returned no trace for message hash abc".to_owned()
+        )));
+        assert!(is_retryable_trace_error(&TvmRpcError::Rpc(
+            "/v2/traces/abc: 404 Not Found".to_owned()
+        )));
+        assert!(is_retryable_trace_error(&TvmRpcError::Rpc(
+            "/api/v3/traces: 429 Too Many Requests".to_owned()
+        )));
+        assert!(is_retryable_trace_error(&TvmRpcError::Rpc(
+            "/api/v3/traces: 503 Service Unavailable".to_owned()
+        )));
+        assert!(!is_retryable_trace_error(&TvmRpcError::Rpc(
+            "/v2/traces/abc: 401 Unauthorized".to_owned()
+        )));
+        assert!(!is_retryable_trace_error(&TvmRpcError::Parse(
+            "invalid traces response".to_owned()
+        )));
+        assert!(!is_retryable_trace_error(&TvmRpcError::Rpc(
+            "account 0:abc balance 5 nanotons".to_owned()
+        )));
+    }
 }

@@ -7,7 +7,7 @@ Status of official TS mechanism families versus r402 crates.
 | EVM | `@x402/evm` | `r402-evm` | Parity (exact, upto, auth-capture, batch-settlement) |
 | SVM | `@x402/svm` | `r402-solana` | exact only (upto escrow out of scope) |
 | NEAR | `@x402/near` | `r402-near` | exact E2E shipped |
-| TVM (TON) | `@x402/tvm` | — | Missing |
+| TVM (TON) | `@x402/tvm` | `r402-tvm` | exact E2E shipped |
 | Aptos | `@x402/aptos` | — | Missing (after MSRV 1.95) |
 | Algorand | `@x402/avm` | — | Missing |
 | Hedera | `@x402/hedera` | `r402-hedera` | exact E2E shipped |
