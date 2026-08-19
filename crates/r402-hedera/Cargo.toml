@@ -47,7 +47,6 @@ tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }
 
 [dev-dependencies]
-hedera = { workspace = true }
 reqwest = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }

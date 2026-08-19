@@ -25,6 +25,16 @@ use base64 as _;
 #[cfg(feature = "telemetry")]
 use tracing_core as _;
 
+#[cfg(test)]
+mod unused_dev_deps {
+    #[cfg(not(feature = "facilitator"))]
+    use reqwest as _;
+    #[cfg(not(any(feature = "client", feature = "facilitator")))]
+    use tokio as _;
+    #[cfg(not(feature = "facilitator"))]
+    use wiremock as _;
+}
+
 pub mod chain;
 pub mod exact;
 

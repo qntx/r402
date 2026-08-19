@@ -27,6 +27,11 @@ cargo test --workspace --all-features
 The MSRV is **Rust 1.93** (`workspace.package.rust-version` in `Cargo.toml`).
 CI builds on stable; match that locally with `rustup`.
 
+`--all-features` (and `r402-hedera` `client`/`facilitator`/`full`) needs
+`protoc` on `PATH` and OpenSSL headers (`brew install protobuf openssl` /
+`apt-get install protobuf-compiler libssl-dev pkg-config`). The Hiero SDK
+compiles `hedera-proto` at build time; there is no vendored `protoc`.
+
 The quality bar in [`Justfile`](Justfile) uses `cargo +nightly` for
 `fmt`, `clippy`, and rustdoc. Install nightly once (`rustup toolchain
 install nightly`) if you run those recipes.

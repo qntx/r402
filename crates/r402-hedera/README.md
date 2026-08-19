@@ -17,6 +17,24 @@ Hedera chain support for the [x402 payment protocol][x402], part of the
   token association) plus Hiero SDK execute. Duplicate settle is blocked
   by `SettlementCache` keyed by the base64 transaction.
 
+## Host tools
+
+`client`, `facilitator`, and `full` depend on the Hiero SDK (`hedera` 0.43),
+which compiles `hedera-proto` with `protoc` and links OpenSSL. These are
+required host tools, same class as a C compiler — `hedera-proto` 0.20 has
+no vendored-`protoc` feature.
+
+```bash
+# macOS
+brew install protobuf openssl
+
+# Debian / Ubuntu
+sudo apt-get install protobuf-compiler libssl-dev pkg-config
+```
+
+`protoc` must be on `PATH`. Workspace `--all-features` builds (including
+`just test`) need the same toolchain.
+
 ## Cargo Features
 
 | Feature       | Surface                                                |
