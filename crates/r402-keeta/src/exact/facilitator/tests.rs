@@ -8,10 +8,12 @@
     clippy::clone_on_copy,
     clippy::needless_pass_by_value,
     clippy::excessive_nesting,
+    clippy::let_underscore_must_use,
     reason = "test assertions with known JSON structure"
 )]
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use keetanetwork_account::{
     Account, Accountable, GenericAccount, KeyED25519, KeyPairType, Keyable,
@@ -812,6 +814,210 @@ async fn settle_duplicate_in_flight() {
     assert!(first.await.unwrap().is_ok());
 }
 
+#[tokio::test]
+async fn dropped_enqueue_does_not_pin_hash_after_worker_finishes() {
+    let actors = actors();
+    let encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        AMOUNT,
+        None,
+        testnet(),
+    );
+    let decoded = super::decode_block(&encoded).unwrap();
+    let started = Arc::new(tokio::sync::Notify::new());
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let release_rx = Arc::new(std::sync::Mutex::new(Some(release_rx)));
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+    let done_tx = Arc::new(std::sync::Mutex::new(Some(done_tx)));
+    let started_cb = Arc::clone(&started);
+    let queue = Arc::new(SettlementQueue::mock(
+        vec!["fee-payer".to_owned()],
+        move |_addr, block| {
+            let started_inner = Arc::clone(&started_cb);
+            let release_rx = Arc::clone(&release_rx);
+            let done_tx = Arc::clone(&done_tx);
+            Box::pin(async move {
+                started_inner.notify_one();
+                let release = release_rx
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(rx) = release {
+                    let _ = rx.await;
+                }
+                let done = done_tx
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                if let Some(tx) = done {
+                    let _ = tx.send(());
+                }
+                Ok(block.hash().to_string())
+            })
+        },
+    ));
+    let queue_first = Arc::clone(&queue);
+    let first_block = decoded.clone();
+    let first = tokio::spawn(async move { queue_first.enqueue("fee-payer", first_block).await });
+    started.notified().await;
+    first.abort();
+    let in_flight = queue.enqueue("fee-payer", decoded.clone()).await;
+    assert!(matches!(in_flight, Err(super::QueueError::Duplicate)));
+    let _ = release_tx.send(());
+    let _ = done_rx.await;
+    let retried = tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            match queue.enqueue("fee-payer", decoded.clone()).await {
+                Ok(hash) => return Ok(hash),
+                Err(super::QueueError::Duplicate) => tokio::task::yield_now().await,
+                Err(err) => return Err(err),
+            }
+        }
+    })
+    .await
+    .expect("worker must drop the hash after transmit");
+    assert!(
+        retried.is_ok(),
+        "abandoned waiter must not pin the hash: {retried:?}"
+    );
+}
+
+#[tokio::test]
+async fn same_payer_jobs_do_not_overlap_submit() {
+    let actors = actors();
+    let first_encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        "100",
+        None,
+        testnet(),
+    );
+    let second_encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        "200",
+        None,
+        testnet(),
+    );
+    let first_block = super::decode_block(&first_encoded).unwrap();
+    let second_block = super::decode_block(&second_encoded).unwrap();
+    let first_hash = first_block.hash();
+    let first_started = Arc::new(tokio::sync::Notify::new());
+    let first_release = Arc::new(tokio::sync::Notify::new());
+    let second_started = Arc::new(tokio::sync::Notify::new());
+    let second_release = Arc::new(tokio::sync::Notify::new());
+    let first_started_cb = Arc::clone(&first_started);
+    let first_release_cb = Arc::clone(&first_release);
+    let second_started_cb = Arc::clone(&second_started);
+    let second_release_cb = Arc::clone(&second_release);
+    let queue = Arc::new(SettlementQueue::mock(
+        vec!["fee-payer".to_owned()],
+        move |_addr, block| {
+            if block.hash() == first_hash {
+                hold_until(
+                    Arc::clone(&first_started_cb),
+                    Arc::clone(&first_release_cb),
+                    block,
+                )
+            } else {
+                hold_until(
+                    Arc::clone(&second_started_cb),
+                    Arc::clone(&second_release_cb),
+                    block,
+                )
+            }
+        },
+    ));
+    let queue_a = Arc::clone(&queue);
+    let job_a = tokio::spawn(async move { queue_a.enqueue("fee-payer", first_block).await });
+    first_started.notified().await;
+    let queue_b = Arc::clone(&queue);
+    let job_b = tokio::spawn(async move { queue_b.enqueue("fee-payer", second_block).await });
+    let second_started_early =
+        tokio::time::timeout(Duration::from_millis(50), second_started.notified()).await;
+    assert!(
+        second_started_early.is_err(),
+        "same-payer second submit must wait for the first transmit"
+    );
+    first_release.notify_one();
+    second_started.notified().await;
+    second_release.notify_one();
+    assert!(job_a.await.unwrap().is_ok());
+    assert!(job_b.await.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn different_payers_submit_in_parallel() {
+    let actors = actors();
+    let first_encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        "100",
+        None,
+        testnet(),
+    );
+    let second_encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        "200",
+        None,
+        testnet(),
+    );
+    let first_block = super::decode_block(&first_encoded).unwrap();
+    let second_block = super::decode_block(&second_encoded).unwrap();
+    let first_started = Arc::new(tokio::sync::Notify::new());
+    let first_release = Arc::new(tokio::sync::Notify::new());
+    let second_started = Arc::new(tokio::sync::Notify::new());
+    let second_release = Arc::new(tokio::sync::Notify::new());
+    let first_started_cb = Arc::clone(&first_started);
+    let first_release_cb = Arc::clone(&first_release);
+    let second_started_cb = Arc::clone(&second_started);
+    let second_release_cb = Arc::clone(&second_release);
+    let queue = Arc::new(SettlementQueue::mock(
+        vec!["fee-payer-1".to_owned(), "fee-payer-2".to_owned()],
+        move |addr, block| {
+            if addr == "fee-payer-1" {
+                hold_until(
+                    Arc::clone(&first_started_cb),
+                    Arc::clone(&first_release_cb),
+                    block,
+                )
+            } else {
+                hold_until(
+                    Arc::clone(&second_started_cb),
+                    Arc::clone(&second_release_cb),
+                    block,
+                )
+            }
+        },
+    ));
+    let queue_a = Arc::clone(&queue);
+    let job_a = tokio::spawn(async move { queue_a.enqueue("fee-payer-1", first_block).await });
+    let queue_b = Arc::clone(&queue);
+    let job_b = tokio::spawn(async move { queue_b.enqueue("fee-payer-2", second_block).await });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        first_started.notified().await;
+        second_started.notified().await;
+    })
+    .await
+    .expect("different payers must start transmit concurrently");
+    first_release.notify_one();
+    second_release.notify_one();
+    assert!(job_a.await.unwrap().is_ok());
+    assert!(job_b.await.unwrap().is_ok());
+}
+
 fn hold_until(
     started: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
@@ -822,12 +1028,4 @@ fn hold_until(
         release.notified().await;
         Ok(block.hash().to_string())
     })
-}
-
-#[test]
-fn spec_payload_json_has_block() {
-    let raw = include_str!("../fixtures/ts_payment_payload.json");
-    let v: Value = serde_json::from_str(raw).unwrap();
-    assert_eq!(v["accepted"]["network"], "keeta:1413829460");
-    assert!(v["payload"]["block"].as_str().unwrap().len() > 16);
 }

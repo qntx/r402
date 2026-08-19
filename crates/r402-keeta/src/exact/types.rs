@@ -92,4 +92,25 @@ mod tests {
             "Block::to_bytes must round-trip the TS/spec DER"
         );
     }
+
+    #[test]
+    fn spec_payment_payload_round_trips() {
+        let raw = include_str!("fixtures/ts_payment_payload.json");
+        let payload: v2::PaymentPayload = serde_json::from_str(raw).expect("wire PaymentPayload");
+        assert_eq!(payload.accepted.network.to_string(), "keeta:1413829460");
+        assert_eq!(payload.accepted.scheme.to_string(), "exact");
+        assert_eq!(payload.accepted.amount.as_str(), "1000000000");
+        assert_eq!(
+            payload.accepted.asset.as_str(),
+            "keeta_anyiff4v34alvumupagmdyosydeq24lc4def5mrpmmyhx3j6vj2uucckeqn52"
+        );
+        assert_eq!(
+            payload.accepted.pay_to.as_str(),
+            "keeta_aabravistgwbrkpl4euafuiualiwcemgvv2hnu7ci66i76naj4vm6tmeahmzria"
+        );
+        assert_eq!(payload.accepted.max_timeout_seconds, 60);
+        assert!(payload.accepted.extra.is_none());
+        let expected_block = include_str!("fixtures/ts_block.b64").trim();
+        assert_eq!(payload.payload.block, expected_block);
+    }
 }

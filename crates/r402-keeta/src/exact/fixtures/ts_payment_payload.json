@@ -1,5 +1,4 @@
 {
-  "source": "vendor/x402/specs/schemes/exact/scheme_exact_keeta.md",
   "x402Version": 2,
   "resource": {
     "url": "https://example.com/weather",

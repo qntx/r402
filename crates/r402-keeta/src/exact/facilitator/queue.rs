@@ -30,7 +30,29 @@ pub enum QueueError {
 
 struct Job {
     block: Block,
-    reply: oneshot::Sender<Result<String, String>>,
+    reply: Option<oneshot::Sender<Result<String, String>>>,
+    pending: Arc<Mutex<HashSet<BlockHash>>>,
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        lock(&self.pending).remove(&self.block.hash());
+    }
+}
+
+/// Removes `hash` from `pending` unless the job was handed to a worker.
+struct EnqueueGuard {
+    pending: Arc<Mutex<HashSet<BlockHash>>>,
+    hash: BlockHash,
+    transferred: bool,
+}
+
+impl Drop for EnqueueGuard {
+    fn drop(&mut self) {
+        if !self.transferred {
+            lock(&self.pending).remove(&self.hash);
+        }
+    }
 }
 
 type SubmitFn =
@@ -44,7 +66,7 @@ enum Backend {
 /// Serializes settle per fee payer and fans out across payers.
 pub struct SettlementQueue {
     senders: Mutex<HashMap<String, mpsc::Sender<Job>>>,
-    pending: Mutex<HashSet<BlockHash>>,
+    pending: Arc<Mutex<HashSet<BlockHash>>>,
     fee_payers: Vec<(String, Option<AccountRef>)>,
     next: AtomicUsize,
     backend: Backend,
@@ -93,7 +115,7 @@ impl SettlementQueue {
     fn from_parts(fee_payers: Vec<(String, Option<AccountRef>)>, backend: Backend) -> Self {
         Self {
             senders: Mutex::new(HashMap::new()),
-            pending: Mutex::new(HashSet::new()),
+            pending: Arc::new(Mutex::new(HashSet::new())),
             fee_payers,
             next: AtomicUsize::new(0),
             backend,
@@ -129,32 +151,29 @@ impl SettlementQueue {
             pending.insert(hash);
         }
 
-        let sender = match self.worker(fee_payer) {
-            Ok(sender) => sender,
-            Err(err) => {
-                lock(&self.pending).remove(&hash);
-                return Err(err);
-            }
+        let mut guard = EnqueueGuard {
+            pending: Arc::clone(&self.pending),
+            hash,
+            transferred: false,
         };
 
+        let sender = self.worker(fee_payer)?;
+
         let (reply_tx, reply_rx) = oneshot::channel();
-        if sender
-            .send(Job {
-                block,
-                reply: reply_tx,
-            })
-            .await
-            .is_err()
-        {
-            lock(&self.pending).remove(&hash);
+        let job = Job {
+            block,
+            reply: Some(reply_tx),
+            pending: Arc::clone(&self.pending),
+        };
+        if sender.send(job).await.is_err() {
             return Err(QueueError::Transmit("settlement worker stopped".to_owned()));
         }
+        guard.transferred = true;
 
-        let result = reply_rx
+        reply_rx
             .await
-            .unwrap_or_else(|_| Err("settlement worker dropped".to_owned()));
-        lock(&self.pending).remove(&hash);
-        result.map_err(QueueError::Transmit)
+            .unwrap_or_else(|_| Err("settlement worker dropped".to_owned()))
+            .map_err(QueueError::Transmit)
     }
 
     fn worker(&self, fee_payer: &str) -> Result<mpsc::Sender<Job>, QueueError> {
@@ -211,13 +230,17 @@ impl Drop for DestroyOnDrop {
     }
 }
 
+fn complete_job(mut job: Job, result: Result<String, String>) {
+    lock(&job.pending).remove(&job.block.hash());
+    if let Some(reply) = job.reply.take() {
+        drop(reply.send(result));
+    }
+}
+
 async fn live_worker(mut rx: mpsc::Receiver<Job>, fee_payer: AccountRef, network: Network) {
     let Ok(client) = UserClient::from_network(network, Some(Arc::clone(&fee_payer))) else {
         while let Some(job) = rx.recv().await {
-            drop(
-                job.reply
-                    .send(Err("failed to bind fee-payer UserClient".to_owned())),
-            );
+            complete_job(job, Err("failed to bind fee-payer UserClient".to_owned()));
         }
         return;
     };
@@ -233,14 +256,14 @@ async fn live_worker(mut rx: mpsc::Receiver<Job>, fee_payer: AccountRef, network
             Ok(false) => Err("transaction_failed".to_owned()),
             Err(err) => Err(err.to_string()),
         };
-        drop(job.reply.send(result));
+        complete_job(job, result);
     }
 }
 
 async fn mock_worker(mut rx: mpsc::Receiver<Job>, addr: String, submit: SubmitFn) {
     while let Some(job) = rx.recv().await {
-        let result = submit(addr.clone(), job.block).await;
-        drop(job.reply.send(result));
+        let result = submit(addr.clone(), job.block.clone()).await;
+        complete_job(job, result);
     }
 }
 
