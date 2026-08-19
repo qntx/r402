@@ -194,6 +194,33 @@ pub fn is_stellar_network(network: &str) -> bool {
     network == "stellar:pubnet" || network == "stellar:testnet"
 }
 
+/// Ed25519 payload of a G-account or muxed M-account strkey.
+///
+/// Contract (`C…`) and other strkey types return `None`. Used so facilitator
+/// safety checks treat `G…` and `M…` of the same key as the same account.
+#[must_use]
+pub fn ed25519_account_payload(address: &str) -> Option<[u8; 32]> {
+    match Strkey::from_string(address).ok()? {
+        Strkey::PublicKeyEd25519(pk) => Some(pk.0),
+        Strkey::MuxedAccountEd25519(muxed) => Some(muxed.ed25519),
+        _ => None,
+    }
+}
+
+/// Returns `true` when `candidate` is the same G/M ed25519 key as any
+/// facilitator address.
+#[must_use]
+pub fn is_facilitator_account(facilitator_addresses: &[String], candidate: &str) -> bool {
+    ed25519_account_payload(candidate).map_or_else(
+        || facilitator_addresses.iter().any(|addr| addr == candidate),
+        |key| {
+            facilitator_addresses
+                .iter()
+                .any(|addr| ed25519_account_payload(addr) == Some(key))
+        },
+    )
+}
+
 /// A Stellar address: G-account, C-account, or muxed M-account.
 ///
 /// Stored as [`CompactString`]. Validation uses [`stellar_strkey`].
@@ -474,6 +501,21 @@ mod tests {
         assert_eq!(back, StellarChainReference::TESTNET);
         assert!(is_stellar_network("stellar:pubnet"));
         assert!(!is_stellar_network("eip155:1"));
+        let g = "GBBO4ZDDZTSM2IUKQYBAST3CFHNPFXECGEFTGWTA2WELR2BIWDK57UVE";
+        let payload = ed25519_account_payload(g).unwrap();
+        let muxed = format!(
+            "{}",
+            stellar_strkey::ed25519::MuxedAccount {
+                ed25519: payload,
+                id: 7,
+            }
+        );
+        assert_eq!(ed25519_account_payload(&muxed), Some(payload));
+        assert!(is_facilitator_account(&[g.to_owned()], &muxed));
+        assert!(!is_facilitator_account(
+            &[g.to_owned()],
+            "GCQAXB2D77Y4C66CTGVH25H2RMUKMQJGOWUPK7UXGG5MAQBONUEKFQ4P"
+        ));
         assert!(StellarChainReference::PUBNET.rpc_url(None).is_err());
         assert!(
             StellarChainReference::PUBNET

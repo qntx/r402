@@ -1,11 +1,14 @@
 //! JSON-RPC + Horizon client for Stellar.
 
 use std::future::Future;
+use std::str::FromStr;
 use std::time::Duration;
 
-use serde::Deserialize;
-use stellar_rpc_client::{Client, GetTransactionResponse, SimulateTransactionResponse};
-use stellar_xdr::{AccountEntry, Hash, TransactionEnvelope};
+use serde::{Deserialize, Serialize};
+use stellar_rpc_client::{
+    Client, GetTransactionResponse, SendTransactionResponse, SimulateTransactionResponse,
+};
+use stellar_xdr::{AccountEntry, Hash, Limits, TransactionEnvelope, WriteXdr};
 
 use super::types::{StellarChainReference, StellarRpcUrlError};
 use crate::{DEFAULT_ESTIMATED_LEDGER_SECONDS, HORIZON_LEDGERS_SAMPLE_SIZE};
@@ -16,17 +19,77 @@ pub enum StellarRpcError {
     /// Operator must supply a pubnet RPC URL.
     #[error(transparent)]
     RpcUrl(#[from] StellarRpcUrlError),
-    /// RPC client construction or request failed.
-    #[error("stellar rpc error: {0}")]
-    Rpc(String),
+    /// Official `stellar-rpc-client` error, preserved 1:1.
+    #[error(transparent)]
+    Client(Box<stellar_rpc_client::Error>),
     /// Horizon request failed; callers should fall back to the default estimate.
     #[error("stellar horizon error: {0}")]
     Horizon(String),
+    /// Local JSON-RPC / XDR request failed before a typed client error.
+    #[error("stellar rpc request failed: {0}")]
+    Request(String),
+    /// `sendTransaction` returned a status other than `PENDING` / `DUPLICATE`.
+    #[error("stellar sendTransaction status {status} (hash={hash:?}): {detail}")]
+    SendRejected {
+        /// RPC `status` field (`ERROR`, `TRY_AGAIN_LATER`, …).
+        status: String,
+        /// Transaction hash when the RPC included one.
+        hash: Option<String>,
+        /// `errorResultXdr` or a short status note.
+        detail: String,
+    },
+    /// Poll observed on-chain `FAILED`.
+    #[error("stellar transaction failed (hash={hash}): {detail}")]
+    TransactionFailed {
+        /// Submitted transaction hash.
+        hash: String,
+        /// SDK / result detail.
+        detail: String,
+    },
+    /// Poll timed out before `SUCCESS` / `FAILED`.
+    #[error("stellar transaction timeout (hash={hash})")]
+    TransactionTimeout {
+        /// Submitted transaction hash.
+        hash: String,
+    },
 }
 
 impl From<stellar_rpc_client::Error> for StellarRpcError {
     fn from(value: stellar_rpc_client::Error) -> Self {
-        Self::Rpc(value.to_string())
+        Self::Client(Box::new(value))
+    }
+}
+
+impl StellarRpcError {
+    /// Wire `errorReason` for a settle-time RPC failure.
+    #[must_use]
+    pub fn settle_reason(&self) -> &'static str {
+        match self {
+            Self::TransactionTimeout { .. } | Self::TransactionFailed { .. } => {
+                "settle_exact_stellar_transaction_failed"
+            }
+            Self::SendRejected { .. } => "settle_exact_stellar_transaction_submission_failed",
+            Self::Client(err) => match err.as_ref() {
+                stellar_rpc_client::Error::TransactionSubmissionTimeout => {
+                    "settle_exact_stellar_transaction_failed"
+                }
+                stellar_rpc_client::Error::TransactionSubmissionFailed(_) => {
+                    "settle_exact_stellar_transaction_submission_failed"
+                }
+                _ => "unexpected_settle_error",
+            },
+            _ => "unexpected_settle_error",
+        }
+    }
+
+    /// Transaction hash to surface on settle failure, when known.
+    #[must_use]
+    pub fn transaction_hash(&self) -> Option<&str> {
+        match self {
+            Self::TransactionTimeout { hash } | Self::TransactionFailed { hash, .. } => Some(hash),
+            Self::SendRejected { hash, .. } => hash.as_deref(),
+            _ => None,
+        }
     }
 }
 
@@ -92,7 +155,7 @@ impl StellarJsonRpc {
         rpc_url: Option<&str>,
     ) -> Result<Self, StellarRpcError> {
         let url = chain.rpc_url(rpc_url)?;
-        let rpc = Client::new(&url).map_err(|e| StellarRpcError::Rpc(e.to_string()))?;
+        let rpc = Client::new(&url)?;
         Ok(Self {
             chain,
             rpc,
@@ -152,9 +215,10 @@ impl StellarRpc for StellarJsonRpc {
         &self,
         tx: &TransactionEnvelope,
     ) -> impl Future<Output = Result<Hash, StellarRpcError>> + Send {
-        let rpc = self.rpc.clone();
+        let http = self.http.clone();
+        let url = self.rpc.base_url().to_owned();
         let tx = tx.clone();
-        async move { Ok(rpc.send_transaction(&tx).await?) }
+        async move { send_transaction_pending(&http, &url, &tx).await }
     }
 
     fn get_transaction(
@@ -176,7 +240,20 @@ impl StellarRpc for StellarJsonRpc {
         async move {
             rpc.get_transaction_polling(&hash, Some(timeout))
                 .await
-                .map_err(StellarRpcError::from)
+                .map_err(|err| match err {
+                    stellar_rpc_client::Error::TransactionSubmissionTimeout => {
+                        StellarRpcError::TransactionTimeout {
+                            hash: hash.to_string(),
+                        }
+                    }
+                    stellar_rpc_client::Error::TransactionSubmissionFailed(detail) => {
+                        StellarRpcError::TransactionFailed {
+                            hash: hash.to_string(),
+                            detail,
+                        }
+                    }
+                    other => StellarRpcError::from(other),
+                })
         }
     }
 
@@ -184,6 +261,70 @@ impl StellarRpc for StellarJsonRpc {
         let http = self.http.clone();
         let horizon_url = self.horizon_url.clone();
         async move { estimate_ledger_seconds(&http, &horizon_url).await }
+    }
+}
+
+#[derive(Serialize)]
+struct SendTransactionRpcRequest {
+    jsonrpc: &'static str,
+    id: u8,
+    method: &'static str,
+    params: SendTransactionRpcParams,
+}
+
+#[derive(Serialize)]
+struct SendTransactionRpcParams {
+    transaction: String,
+}
+
+#[derive(Deserialize)]
+struct JsonRpcResponse<T> {
+    result: Option<T>,
+    error: Option<serde_json::Value>,
+}
+
+/// Submits via `sendTransaction` and requires `PENDING` (or `DUPLICATE`, poll-only).
+async fn send_transaction_pending(
+    http: &reqwest::Client,
+    rpc_url: &str,
+    tx: &TransactionEnvelope,
+) -> Result<Hash, StellarRpcError> {
+    let xdr = tx
+        .to_xdr_base64(Limits::none())
+        .map_err(|e| StellarRpcError::Request(e.to_string()))?;
+    let body = SendTransactionRpcRequest {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "sendTransaction",
+        params: SendTransactionRpcParams { transaction: xdr },
+    };
+    let response = http
+        .post(rpc_url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| StellarRpcError::Request(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| StellarRpcError::Request(e.to_string()))?
+        .json::<JsonRpcResponse<SendTransactionResponse>>()
+        .await
+        .map_err(|e| StellarRpcError::Request(e.to_string()))?;
+    if let Some(err) = response.error {
+        return Err(StellarRpcError::Request(err.to_string()));
+    }
+    let result = response
+        .result
+        .ok_or_else(|| StellarRpcError::Request("sendTransaction missing result".to_owned()))?;
+    let hash = result.hash;
+    match result.status.as_str() {
+        "PENDING" | "DUPLICATE" => {
+            Hash::from_str(&hash).map_err(|e| StellarRpcError::Request(e.to_string()))
+        }
+        other => Err(StellarRpcError::SendRejected {
+            status: other.to_owned(),
+            hash: (!hash.is_empty()).then_some(hash),
+            detail: result.error_result_xdr.unwrap_or_else(|| other.to_owned()),
+        }),
     }
 }
 

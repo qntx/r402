@@ -98,6 +98,15 @@ pub fn muxed_account_to_string(account: &MuxedAccount) -> String {
     account.to_string()
 }
 
+/// Underlying ed25519 payload of a G or muxed-G account.
+#[must_use]
+pub const fn muxed_account_ed25519(account: &MuxedAccount) -> [u8; 32] {
+    match account {
+        MuxedAccount::Ed25519(Uint256(bytes)) => *bytes,
+        MuxedAccount::MuxedEd25519(med) => med.ed25519.0,
+    }
+}
+
 /// Parses a G/M address as a muxed account.
 ///
 /// # Errors

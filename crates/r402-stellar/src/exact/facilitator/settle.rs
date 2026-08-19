@@ -116,15 +116,16 @@ where
             Some(payer),
         ),
         Err(StellarFacilitatorError::Rpc(err)) => {
-            let text = err.to_string();
-            let reason = if text.contains("timeout") || text.contains("FAILED") {
-                "settle_exact_stellar_transaction_failed"
-            } else {
-                "settle_exact_stellar_transaction_submission_failed"
-            };
+            let reason = ErrorReason::from_wire(err.settle_reason());
+            let mut message = err.to_string();
+            if let Some(hash) = err.transaction_hash()
+                && !message.contains(hash)
+            {
+                message = format!("{hash}: {message}");
+            }
             SettleResponse::Failure {
-                reason: ErrorReason::from_wire(reason),
-                message: Some(text.into()),
+                reason,
+                message: Some(message.into()),
                 payer: Some(payer),
                 network: network.into(),
                 extensions: Extensions::new(),

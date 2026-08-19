@@ -244,7 +244,9 @@ where
 {
     fn sign_payment(&self) -> BoxFuture<'_, Result<String, ClientError>> {
         Box::pin(async move {
-            let extra = self.requirements.extra.unwrap_or_default();
+            let extra = self.requirements.extra.ok_or_else(|| {
+                ClientError::Signing("Exact scheme requires areFeesSponsored to be true".to_owned())
+            })?;
             let amount = self
                 .requirements
                 .amount
@@ -290,23 +292,115 @@ pub fn decode_payment_transaction(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
+#[allow(
+    clippy::unwrap_used,
+    clippy::unreachable,
+    clippy::manual_async_fn,
+    clippy::panic,
+    reason = "test assertions"
+)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
     use crate::exact::StellarExtra;
 
-    #[test]
-    fn rejects_unsponsored_extra_without_rpc() {
-        // Structural: create_signed_payment_transaction checks extra first.
-        // A dummy signer is enough; RPC is not reached.
-        let secret = "SCKB3ECHCPVM4HJPNCQWTQWJJ5XRL6UNKLTTCIH4B7TB22NKJ5GUFMIV";
-        if StellarSigner::from_secret(secret).is_err() {
-            return;
+    struct UnreachableRpc;
+
+    impl StellarRpc for UnreachableRpc {
+        fn latest_ledger(
+            &self,
+        ) -> impl Future<Output = Result<u32, crate::chain::StellarRpcError>> + Send {
+            async { unreachable!("extra is checked before RPC") }
         }
+
+        fn get_account(
+            &self,
+            _address: &str,
+        ) -> impl Future<Output = Result<stellar_xdr::AccountEntry, crate::chain::StellarRpcError>> + Send
+        {
+            async { unreachable!("extra is checked before RPC") }
+        }
+
+        fn simulate_transaction(
+            &self,
+            _tx: &stellar_xdr::TransactionEnvelope,
+        ) -> impl Future<
+            Output = Result<
+                stellar_rpc_client::SimulateTransactionResponse,
+                crate::chain::StellarRpcError,
+            >,
+        > + Send {
+            async { unreachable!("extra is checked before RPC") }
+        }
+
+        fn send_transaction(
+            &self,
+            _tx: &stellar_xdr::TransactionEnvelope,
+        ) -> impl Future<Output = Result<stellar_xdr::Hash, crate::chain::StellarRpcError>> + Send
+        {
+            async { unreachable!("extra is checked before RPC") }
+        }
+
+        fn get_transaction(
+            &self,
+            _hash: &stellar_xdr::Hash,
+        ) -> impl Future<
+            Output = Result<
+                stellar_rpc_client::GetTransactionResponse,
+                crate::chain::StellarRpcError,
+            >,
+        > + Send {
+            async { unreachable!("extra is checked before RPC") }
+        }
+
+        fn poll_transaction(
+            &self,
+            _hash: &stellar_xdr::Hash,
+            _timeout: std::time::Duration,
+        ) -> impl Future<
+            Output = Result<
+                stellar_rpc_client::GetTransactionResponse,
+                crate::chain::StellarRpcError,
+            >,
+        > + Send {
+            async { unreachable!("extra is checked before RPC") }
+        }
+
+        fn estimated_ledger_seconds(&self) -> impl Future<Output = u64> + Send {
+            async { unreachable!("extra is checked before RPC") }
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_unsponsored_extra_without_rpc() {
+        let signer =
+            StellarSigner::from_secret("SCKB3ECHCPVM4HJPNCQWTQWJJ5XRL6UNKLTTCIH4B7TB22NKJ5GUFMIV")
+                .unwrap();
         let extra = StellarExtra {
             are_fees_sponsored: false,
         };
-        assert!(!extra.are_fees_sponsored);
+        let err = create_signed_payment_transaction(
+            &signer,
+            &UnreachableRpc,
+            StellarChainReference::TESTNET,
+            "GCHEI4PQEFJOA27MNZRPQNLGURS6KASW76X5UZCUZIXCOJLKXYCXOR2W",
+            crate::USDC_TESTNET_ADDRESS,
+            1,
+            60,
+            &extra,
+        )
+        .await
+        .unwrap_err();
+        match err {
+            ClientError::Signing(msg) => {
+                assert!(
+                    msg.contains("areFeesSponsored"),
+                    "unexpected signing error: {msg}"
+                );
+            }
+            other => panic!("expected Signing, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -9,9 +9,12 @@
     clippy::shadow_unrelated,
     clippy::match_same_arms,
     clippy::manual_async_fn,
+    clippy::too_many_lines,
     reason = "test assertions with known JSON structure"
 )]
 
+use std::future::Future;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,8 +35,8 @@ use crate::USDC_TESTNET_ADDRESS;
 use crate::chain::StellarFacilitatorError;
 use crate::chain::rpc::{StellarRpc, StellarRpcError};
 use crate::chain::xdr::{
-    build_transfer_envelope, encode_transaction_envelope, inner_transaction_mut,
-    sc_address_from_str, unsigned_address_auth,
+    build_transfer_envelope, decode_transaction_envelope, encode_transaction_envelope,
+    inner_transaction_mut, muxed_account_from_str, sc_address_from_str, unsigned_address_auth,
 };
 use crate::{BASE_FEE_STROOPS, DEFAULT_MAX_TRANSACTION_FEE_STROOPS, NULL_ACCOUNT};
 
@@ -107,7 +110,7 @@ impl StellarRpc for MockRpc {
         let sim = self.simulate.clone();
         async move {
             if let Some(err) = err {
-                return Err(StellarRpcError::Rpc(err));
+                return Err(StellarRpcError::Request(err));
             }
             Ok(sim)
         }
@@ -117,7 +120,9 @@ impl StellarRpc for MockRpc {
         &self,
         _tx: &TransactionEnvelope,
     ) -> impl Future<Output = Result<Hash, StellarRpcError>> + Send {
-        async move { Hash::from_str(&"11".repeat(32)).map_err(|e| StellarRpcError::Rpc(e.to_string())) }
+        async move {
+            Hash::from_str(&"11".repeat(32)).map_err(|e| StellarRpcError::Request(e.to_string()))
+        }
     }
 
     fn get_transaction(
@@ -125,7 +130,7 @@ impl StellarRpc for MockRpc {
         _hash: &Hash,
     ) -> impl Future<Output = Result<GetTransactionResponse, StellarRpcError>> + Send {
         let submit = self.submit.clone();
-        async move { submit.map_err(StellarRpcError::Rpc) }
+        async move { submit.map_err(StellarRpcError::Request) }
     }
 
     fn poll_transaction(
@@ -134,7 +139,7 @@ impl StellarRpc for MockRpc {
         _timeout: Duration,
     ) -> impl Future<Output = Result<GetTransactionResponse, StellarRpcError>> + Send {
         let submit = self.submit.clone();
-        async move { submit.map_err(StellarRpcError::Rpc) }
+        async move { submit.map_err(StellarRpcError::Request) }
     }
 
     fn estimated_ledger_seconds(&self) -> impl Future<Output = u64> + Send {
@@ -749,5 +754,453 @@ async fn settle_success_and_duplicate() {
     }
 }
 
-use std::future::Future;
-use std::str::FromStr;
+#[tokio::test]
+async fn settle_maps_poll_failed_and_send_rejected() {
+    let rpc = MockRpc::default();
+    let cache = SettlementCache::new();
+    let failed = settle_request(
+        &rpc,
+        &facilitator(),
+        &cache,
+        DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+        &request(&valid_tx()),
+        0,
+        |_verified, _timeout, _now| async move {
+            Err(StellarFacilitatorError::Rpc(
+                StellarRpcError::TransactionFailed {
+                    hash: "aa".repeat(32),
+                    detail: "result none".to_owned(),
+                },
+            ))
+        },
+    )
+    .await;
+    match failed {
+        SettleResponse::Failure {
+            reason, message, ..
+        } => {
+            assert_eq!(reason.as_str(), "settle_exact_stellar_transaction_failed");
+            assert!(
+                message
+                    .as_ref()
+                    .is_some_and(|m| m.contains(&"aa".repeat(32))),
+                "{message:?}"
+            );
+        }
+        _ => panic!("expected failure"),
+    }
+
+    let cache = SettlementCache::new();
+    let rejected = settle_request(
+        &rpc,
+        &facilitator(),
+        &cache,
+        DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+        &request(&valid_tx()),
+        0,
+        |_verified, _timeout, _now| async move {
+            Err(StellarFacilitatorError::Rpc(
+                StellarRpcError::SendRejected {
+                    status: "ERROR".to_owned(),
+                    hash: Some("bb".repeat(32)),
+                    detail: "tx failed".to_owned(),
+                },
+            ))
+        },
+    )
+    .await;
+    match rejected {
+        SettleResponse::Failure { reason, .. } => {
+            assert_eq!(
+                reason.as_str(),
+                "settle_exact_stellar_transaction_submission_failed"
+            );
+        }
+        _ => panic!("expected submission failure"),
+    }
+
+    let cache = SettlementCache::new();
+    let timed_out = settle_request(
+        &rpc,
+        &facilitator(),
+        &cache,
+        DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+        &request(&valid_tx()),
+        0,
+        |_verified, _timeout, _now| async move {
+            Err(StellarFacilitatorError::Rpc(
+                StellarRpcError::TransactionTimeout {
+                    hash: "cc".repeat(32),
+                },
+            ))
+        },
+    )
+    .await;
+    match timed_out {
+        SettleResponse::Failure { reason, .. } => {
+            assert_eq!(reason.as_str(), "settle_exact_stellar_transaction_failed");
+        }
+        _ => panic!("expected timeout as transaction_failed"),
+    }
+}
+
+#[tokio::test]
+async fn reject_wrong_function_name() {
+    let rpc = MockRpc::default();
+    let host =
+        crate::chain::xdr::transfer_host_function(USDC_TESTNET_ADDRESS, PAYER, PAY_TO, AMOUNT)
+            .unwrap();
+    let mut envelope = decode_transaction_envelope(&transfer_xdr(
+        NULL_ACCOUNT,
+        PAYER,
+        PAY_TO,
+        USDC_TESTNET_ADDRESS,
+        AMOUNT,
+        vec![signed_auth(PAYER, &host, AUTH_EXPIRATION)],
+    ))
+    .unwrap();
+    {
+        let tx = inner_transaction_mut(&mut envelope).unwrap();
+        let op = crate::chain::xdr::invoke_host_function_op_mut(tx).unwrap();
+        if let HostFunction::InvokeContract(ref mut args) = op.host_function {
+            args.function_name = stellar_xdr::ScSymbol("mint".try_into().unwrap());
+        }
+    }
+    let xdr = encode_transaction_envelope(&envelope).unwrap();
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_wrong_function_name"
+    );
+}
+
+#[tokio::test]
+async fn reject_unsupported_credential_type() {
+    let rpc = MockRpc::default();
+    let host =
+        crate::chain::xdr::transfer_host_function(USDC_TESTNET_ADDRESS, PAYER, PAY_TO, AMOUNT)
+            .unwrap();
+    let mut entry = unsigned_address_auth(PAYER, 1, AUTH_EXPIRATION, &host).unwrap();
+    entry.credentials = stellar_xdr::SorobanCredentials::SourceAccount;
+    let xdr = transfer_xdr(
+        NULL_ACCOUNT,
+        PAYER,
+        PAY_TO,
+        USDC_TESTNET_ADDRESS,
+        AMOUNT,
+        vec![entry],
+    );
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_unsupported_credential_type"
+    );
+}
+
+#[tokio::test]
+async fn reject_facilitator_in_auth_and_subinvocations() {
+    let rpc = MockRpc::default();
+    let host =
+        crate::chain::xdr::transfer_host_function(USDC_TESTNET_ADDRESS, PAYER, PAY_TO, AMOUNT)
+            .unwrap();
+    let xdr = transfer_xdr(
+        NULL_ACCOUNT,
+        PAYER,
+        PAY_TO,
+        USDC_TESTNET_ADDRESS,
+        AMOUNT,
+        vec![signed_auth(FACILITATOR, &host, AUTH_EXPIRATION)],
+    );
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_facilitator_in_auth"
+    );
+
+    let mut nested = signed_auth(PAYER, &host, AUTH_EXPIRATION);
+    let child = nested.root_invocation.clone();
+    nested.root_invocation.sub_invocations = vec![child].try_into().unwrap();
+    let xdr = transfer_xdr(
+        NULL_ACCOUNT,
+        PAYER,
+        PAY_TO,
+        USDC_TESTNET_ADDRESS,
+        AMOUNT,
+        vec![nested],
+    );
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_has_subinvocations"
+    );
+}
+
+#[tokio::test]
+async fn reject_op_source_and_muxed_facilitator() {
+    let rpc = MockRpc::default();
+    let mut envelope = decode_transaction_envelope(&valid_tx()).unwrap();
+    {
+        let tx = inner_transaction_mut(&mut envelope).unwrap();
+        let op = tx.operations.iter_mut().next().unwrap();
+        op.source_account = Some(muxed_account_from_str(FACILITATOR).unwrap());
+    }
+    let xdr = encode_transaction_envelope(&envelope).unwrap();
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_unsafe_tx_or_op_source"
+    );
+
+    let payload = crate::chain::types::ed25519_account_payload(FACILITATOR).unwrap();
+    let muxed = format!(
+        "{}",
+        stellar_strkey::ed25519::MuxedAccount {
+            ed25519: payload,
+            id: 9,
+        }
+    );
+    let mut envelope = decode_transaction_envelope(&valid_tx()).unwrap();
+    {
+        let tx = inner_transaction_mut(&mut envelope).unwrap();
+        let op = tx.operations.iter_mut().next().unwrap();
+        op.source_account = Some(muxed_account_from_str(&muxed).unwrap());
+    }
+    let xdr = encode_transaction_envelope(&envelope).unwrap();
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_unsafe_tx_or_op_source"
+    );
+}
+
+#[tokio::test]
+async fn reject_simulation_event_variants() {
+    let host =
+        crate::chain::xdr::transfer_host_function(USDC_TESTNET_ADDRESS, PAYER, PAY_TO, AMOUNT)
+            .unwrap();
+    let xdr = transfer_xdr(
+        NULL_ACCOUNT,
+        PAYER,
+        PAY_TO,
+        USDC_TESTNET_ADDRESS,
+        AMOUNT,
+        vec![signed_auth(PAYER, &host, AUTH_EXPIRATION)],
+    );
+
+    let mut rpc = MockRpc::default();
+    rpc.simulate.events.clear();
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_no_transfer_events"
+    );
+
+    let mut rpc = MockRpc::default();
+    let transfer = transfer_event(PAYER, PAY_TO, AMOUNT, USDC_TESTNET_ADDRESS);
+    rpc.simulate.events = vec![
+        transfer.to_xdr_base64(Limits::none()).unwrap(),
+        transfer.to_xdr_base64(Limits::none()).unwrap(),
+    ];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_multiple_transfers"
+    );
+
+    let mut rpc = MockRpc::default();
+    let mut mint = transfer.clone();
+    {
+        let ContractEventBody::V0(ref mut body) = mint.event.body;
+        body.topics = vec![ScVal::Symbol(stellar_xdr::ScSymbol(
+            "mint".try_into().unwrap(),
+        ))]
+        .try_into()
+        .unwrap();
+    }
+    rpc.simulate.events = vec![mint.to_xdr_base64(Limits::none()).unwrap()];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_not_transfer"
+    );
+
+    let mut rpc = MockRpc::default();
+    let mut missing = transfer.clone();
+    missing.event.contract_id = None;
+    rpc.simulate.events = vec![missing.to_xdr_base64(Limits::none()).unwrap()];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_missing_contract_id"
+    );
+
+    let mut rpc = MockRpc::default();
+    rpc.simulate.events = vec![
+        transfer_event(
+            PAYER,
+            PAY_TO,
+            AMOUNT,
+            "CDNVQW44C3HALYNVQ4SOBXY5EWYTGVYXX6JPESOLQDABJI5FC5LTRRUE",
+        )
+        .to_xdr_base64(Limits::none())
+        .unwrap(),
+    ];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_wrong_asset"
+    );
+
+    let mut rpc = MockRpc::default();
+    rpc.simulate.events = vec![
+        transfer_event(PAY_TO, PAY_TO, AMOUNT, USDC_TESTNET_ADDRESS)
+            .to_xdr_base64(Limits::none())
+            .unwrap(),
+    ];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_wrong_from"
+    );
+
+    let mut rpc = MockRpc::default();
+    rpc.simulate.events = vec![
+        transfer_event(PAYER, PAYER, AMOUNT, USDC_TESTNET_ADDRESS)
+            .to_xdr_base64(Limits::none())
+            .unwrap(),
+    ];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_wrong_to"
+    );
+
+    let mut rpc = MockRpc::default();
+    rpc.simulate.events = vec![
+        transfer_event(PAYER, PAY_TO, AMOUNT + 1, USDC_TESTNET_ADDRESS)
+            .to_xdr_base64(Limits::none())
+            .unwrap(),
+    ];
+    assert_eq!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                &facilitator(),
+                DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+                &request(&xdr)
+            )
+            .await
+        ),
+        "invalid_exact_stellar_payload_event_wrong_amount"
+    );
+}
+
+#[tokio::test]
+async fn golden_ts_transaction_xdr_decodes() {
+    let raw = include_str!("../fixtures/ts_transaction.b64").trim();
+    let envelope = decode_transaction_envelope(raw).unwrap();
+    assert!(matches!(envelope, TransactionEnvelope::Tx(_)));
+    let rpc = MockRpc::default();
+    let response = verify_request_json(
+        &rpc,
+        &facilitator(),
+        DEFAULT_MAX_TRANSACTION_FEE_STROOPS,
+        &request(raw),
+    )
+    .await;
+    assert!(
+        response.is_valid() || matches!(response, VerifyResponse::Invalid { .. }),
+        "{response:?}"
+    );
+}

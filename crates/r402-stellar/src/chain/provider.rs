@@ -176,7 +176,7 @@ impl StellarChainProvider {
         let seq = SequenceNumber(account.seq_num.0.saturating_add(1));
         let soroban = sim
             .transaction_data()
-            .map_err(|e| StellarFacilitatorError::Rpc(StellarRpcError::Rpc(e.to_string())))?;
+            .map_err(|e| StellarFacilitatorError::Rpc(StellarRpcError::Request(e.to_string())))?;
         let resource_fee = u64::try_from(soroban.resource_fee.max(0)).unwrap_or(0);
         let fee = u32::try_from(u64::from(BASE_FEE_STROOPS).saturating_add(resource_fee))
             .map_err(|_| StellarFacilitatorError::FeeOverflow)?;

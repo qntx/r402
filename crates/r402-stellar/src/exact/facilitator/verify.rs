@@ -7,11 +7,11 @@ use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{SorobanCredentials, TransactionEnvelope};
 
 use crate::chain::rpc::StellarRpc;
-use crate::chain::types::is_stellar_network;
+use crate::chain::types::{ed25519_account_payload, is_facilitator_account, is_stellar_network};
 use crate::chain::xdr::{
     StellarXdrError, auth_entry_address, decode_transaction_envelope,
     gather_auth_entry_signature_status, inner_transaction, invoke_host_function_op,
-    muxed_account_to_string, parse_transfer_event, parse_transfer_invocation,
+    muxed_account_ed25519, parse_transfer_event, parse_transfer_invocation,
 };
 use crate::exact::StellarExtra;
 use crate::exact::error::{StellarInvalid, invalid};
@@ -136,8 +136,7 @@ async fn verify_inner<R: StellarRpc>(
         return Err(invalid("invalid_exact_stellar_payload_wrong_operation"));
     };
 
-    let tx_source = muxed_account_to_string(&tx.source_account);
-    if contains_addr(facilitator_addresses, &tx_source) {
+    if is_facilitator_muxed(facilitator_addresses, &tx.source_account) {
         return Err(invalid(
             "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
         ));
@@ -146,13 +145,11 @@ async fn verify_inner<R: StellarRpc>(
         .operations
         .first()
         .and_then(|op| op.source_account.as_ref())
+        && is_facilitator_muxed(facilitator_addresses, op_source)
     {
-        let op_source = muxed_account_to_string(op_source);
-        if contains_addr(facilitator_addresses, &op_source) {
-            return Err(invalid(
-                "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
-            ));
-        }
+        return Err(invalid(
+            "invalid_exact_stellar_payload_unsafe_tx_or_op_source",
+        ));
     }
 
     let invocation = match parse_transfer_invocation(&invoke.host_function) {
@@ -172,7 +169,7 @@ async fn verify_inner<R: StellarRpc>(
     }
 
     let from = CompactString::from(invocation.from.as_str());
-    if contains_addr(facilitator_addresses, from.as_str()) {
+    if is_facilitator_account(facilitator_addresses, from.as_str()) {
         return Err(invalid(
             "invalid_exact_stellar_payload_facilitator_is_payer",
         ));
@@ -254,8 +251,14 @@ fn extra_is_sponsored(extra: Option<&Value>) -> bool {
         .is_some_and(|e| e.are_fees_sponsored)
 }
 
-fn contains_addr(addresses: &[String], candidate: &str) -> bool {
-    addresses.iter().any(|a| a == candidate)
+fn is_facilitator_muxed(
+    facilitator_addresses: &[String],
+    account: &stellar_xdr::MuxedAccount,
+) -> bool {
+    let key = muxed_account_ed25519(account);
+    facilitator_addresses
+        .iter()
+        .any(|addr| ed25519_account_payload(addr) == Some(key))
 }
 
 fn validate_simulation_events(
@@ -328,7 +331,7 @@ fn validate_auth_entries(
             );
         }
         if let Some(address) = auth_entry_address(entry)
-            && contains_addr(facilitator_addresses, &address)
+            && is_facilitator_account(facilitator_addresses, &address)
         {
             return Err(
                 invalid("invalid_exact_stellar_payload_facilitator_in_auth").with_payer(from)

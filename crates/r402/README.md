@@ -36,7 +36,8 @@ r402 = { version = "0.16", features = ["evm", "http", "client", "server", "facil
 
 # Multi-chain
 r402 = { version = "0.16", features = [
-  "evm", "solana", "tron", "casper", "near", "keeta",
+  "evm", "solana", "tron", "casper", "near", "tvm", "xrpl",
+  "hedera", "algorand", "keeta", "stellar",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -53,6 +54,7 @@ use r402::hedera; // r402-hedera
 use r402::algorand; // r402-algorand
 use r402::keeta;  // r402-keeta
 use r402::tvm;    // r402-tvm
+use r402::stellar; // r402-stellar
 use r402::http;   // r402-http
 use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
@@ -70,6 +72,8 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `hedera` | | Re-export `r402-hedera` as [`hedera`] |
 | `algorand` | | Re-export `r402-algorand` as [`algorand`] |
 | `tvm` | | Re-export `r402-tvm` as [`tvm`] |
+| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
+| `stellar` | | Re-export `r402-stellar` as [`stellar`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |
