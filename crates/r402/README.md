@@ -38,7 +38,7 @@ r402 = { version = "0.16", features = ["evm", "http", "client", "server", "facil
 # Multi-chain
 r402 = { version = "0.16", features = [
   "evm", "solana", "tron", "casper", "near", "tvm", "xrpl",
-  "hedera", "algorand", "keeta", "stellar",
+  "hedera", "algorand", "aptos", "keeta", "stellar",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -74,6 +74,7 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `hedera` | | Re-export `r402-hedera` as [`hedera`] |
 | `algorand` | | Re-export `r402-algorand` as [`algorand`] |
 | `tvm` | | Re-export `r402-tvm` as [`tvm`] |
+| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
 | `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `stellar` | | Re-export `r402-stellar` as [`stellar`] |
 | `aptos` | | Re-export `r402-aptos` as [`aptos`] |
