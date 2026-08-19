@@ -76,10 +76,6 @@ pub use signature::StructuredSignatureFormatError;
 pub(crate) use verify::assert_time;
 use verify::{verify_payment, verify_permit2_payment};
 
-// Re-export the canonical signature-validator address for source compatibility
-// with crates that imported it from this path before the move to `exact::types`.
-pub use crate::exact::types::VALIDATOR_ADDRESS;
-
 /// A fully specified ERC-3009 authorization payload for EVM settlement.
 #[derive(Debug)]
 pub struct Eip3009Payment {
@@ -122,17 +118,6 @@ pub struct Permit2Payment {
     pub signature: Bytes,
 }
 
-/// Default clock skew tolerance in seconds for time validation.
-///
-/// Applied as a grace buffer when checking `validBefore` / `deadline` expiration
-/// and `validAfter` early-arrival, to account for clock drift between the
-/// facilitator host and the blockchain network.
-///
-/// Re-exported from the crate root for shared use with the upto facilitator;
-/// kept as a `const` alias here for backwards compatibility with downstream
-/// code that imports the module-private constant.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
-
 /// Facilitator for EIP-155 exact scheme payments.
 ///
 /// Supports both EIP-3009 and Permit2 transfer methods. The transfer method
@@ -174,7 +159,7 @@ impl<P> Eip155ExactFacilitator<P> {
     pub const fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
         Self {
             provider,
-            clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+            clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
         }
     }

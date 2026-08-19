@@ -25,14 +25,13 @@ pub mod status;
 pub mod upto;
 
 pub use cors::{X402_EXPOSED_HEADERS, ensure_expose_headers};
+pub use facilitator::{FacilitatorClient, FacilitatorClientError};
 pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 pub use layer::{SettlementMode, X402LayerBuilder, X402Middleware};
 pub use paygate::{
     BackgroundSettlementTracker, Paygate, PaygateBuilder, PaygateError, ResourceTemplate,
     VerificationError, VerifiedPayment, settlement_to_header,
 };
-// Resource-server hooks are re-exported from core for integrators wiring
-// `PaygateBuilder::with_resource_hook`.
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use status::reason_to_status;
 pub use upto::{

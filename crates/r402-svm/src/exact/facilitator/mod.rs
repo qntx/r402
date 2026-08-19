@@ -13,6 +13,7 @@ use std::future::Future;
 
 use compact_str::CompactString;
 pub use config::SolanaExactFacilitatorConfig;
+use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
 use r402_core::error::VerificationError;
 use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
@@ -32,7 +33,6 @@ pub use verify::{
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::types;
 use crate::exact::{ExactScheme, SolanaExact, SupportedPaymentKindExtra};
-use crate::settlement_cache::{Duplicate, SettlementCache};
 
 /// Facilitator for Solana exact scheme payments.
 pub struct SolanaExactFacilitator<P> {

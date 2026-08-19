@@ -576,6 +576,8 @@ fn with_span<F: Future>(fut: F, span: Span) -> impl Future<Output = F::Output> {
 #[cfg(test)]
 #[allow(
     clippy::indexing_slicing,
+    clippy::expect_used,
+    clippy::panic,
     reason = "test assertions with known-length slices"
 )]
 mod tests {
@@ -584,6 +586,43 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+
+    #[test]
+    fn try_from_str_stores_normalized_base_url() {
+        let client = FacilitatorClient::try_from("https://facilitator.example.com")
+            .expect("valid facilitator URL");
+        assert_eq!(
+            client.base_url().as_str(),
+            "https://facilitator.example.com/"
+        );
+        assert_eq!(
+            client.verify_url().as_str(),
+            "https://facilitator.example.com/verify"
+        );
+        assert_eq!(
+            client.settle_url().as_str(),
+            "https://facilitator.example.com/settle"
+        );
+        assert_eq!(
+            client.supported_url().as_str(),
+            "https://facilitator.example.com/supported"
+        );
+    }
+
+    #[test]
+    fn try_from_str_rejects_invalid_url() {
+        let err = FacilitatorClient::try_from("not a url");
+        assert!(
+            err.is_err(),
+            "invalid facilitator URL must return Err, not panic"
+        );
+        match err {
+            Err(FacilitatorClientError::UrlParse { context, .. }) => {
+                assert_eq!(context, "Failed to parse base url");
+            }
+            other => panic!("expected UrlParse, got {other:?}"),
+        }
+    }
 
     fn create_test_supported_response() -> SupportedResponse {
         SupportedResponse::new().with_kinds(vec![SupportedPaymentKind::new(1, "eip155-exact", "1")])

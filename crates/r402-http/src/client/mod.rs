@@ -23,15 +23,9 @@
 //!
 //! See [`X402Client::with_selector`] for custom payment selection.
 
-pub mod hooks;
 mod middleware;
 
-pub use hooks::{
-    ClientHooks, CreatedPayment, DynClientHooks, PaymentCreationContext, PaymentResponseContext,
-    PaymentResponseResult,
-};
 pub use middleware::{X402Client, parse_payment_required, payment_signature_headers};
-pub use r402_core::PaymentClient;
 use reqwest::Client;
 use reqwest_middleware as rqm;
 

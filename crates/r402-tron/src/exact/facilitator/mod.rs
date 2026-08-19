@@ -35,13 +35,6 @@ use settle::{settle_payment, settle_permit2_payment};
 pub use signature::TronSignatureError;
 use verify::{verify_payment, verify_permit2_payment};
 
-/// Default clock skew tolerance in seconds for Tron time validation.
-///
-/// Tron produces blocks approximately every 3 seconds; we use 6 seconds
-/// (2 blocks) to align with the EVM default and provide a reasonable
-/// grace window for clock drift.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::TRON_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
-
 /// A fully specified EIP-3009 authorization payload for Tron settlement.
 #[derive(Debug)]
 pub struct Eip3009Payment {
@@ -117,7 +110,7 @@ impl TronExactFacilitator {
     ) -> Self {
         Self {
             provider,
-            clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+            clock_skew_tolerance: crate::TRON_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
         }
     }

@@ -167,3 +167,20 @@ fn unknown_field_rejection_for_top_level_envelopes() {
     });
     assert!(serde_json::from_value::<SupportedPaymentKind>(kind_typo).is_err());
 }
+
+/// Settlement-cache callers (every chain facilitator) use this public type.
+/// A representative Solana-style key (base64 transaction payload) must
+/// reserve once and then report a duplicate — the remaining API after the
+/// `r402-svm::settlement_cache` compatibility module was removed.
+#[cfg(feature = "cache")]
+#[test]
+fn settlement_cache_reserve_then_duplicate() {
+    use r402_core::cache::{Duplicate, SettlementCache};
+
+    let cache = SettlementCache::new();
+    let key = "solana:mainnet:AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAED";
+    assert_eq!(cache.reserve(key), Duplicate::No);
+    assert_eq!(cache.reserve(key), Duplicate::Yes);
+    assert_eq!(cache.reserve("eip155:8453:0xabc"), Duplicate::No);
+    assert_eq!(cache.reserve("eip155:8453:0xabc"), Duplicate::Yes);
+}

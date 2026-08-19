@@ -43,7 +43,7 @@ use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
-use super::facilitator::FacilitatorClient;
+use super::facilitator::{FacilitatorClient, FacilitatorClientError};
 use super::hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 use super::paygate::{Paygate, ResourceTemplate};
 use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
@@ -126,30 +126,14 @@ impl<F> X402Middleware<F> {
 }
 
 impl X402Middleware<Arc<FacilitatorClient>> {
-    /// Creates a new middleware instance with a default facilitator URL.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the facilitator URL is invalid.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        reason = "constructor panics on invalid URL by design"
-    )]
-    pub fn new(url: &str) -> Self {
-        let facilitator = FacilitatorClient::try_from(url).expect("Invalid facilitator URL");
-        Self {
-            facilitator: Arc::new(facilitator),
-            base_url: None,
-        }
-    }
-
     /// Creates a new middleware instance with a facilitator URL.
     ///
     /// # Errors
     ///
-    /// Returns an error if the URL is invalid.
-    pub fn try_new(url: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Returns [`FacilitatorClientError`] if the URL cannot be parsed or the
+    /// derived `/verify`, `/settle`, and `/supported` endpoints cannot be
+    /// constructed.
+    pub fn try_new(url: &str) -> Result<Self, FacilitatorClientError> {
         let facilitator = FacilitatorClient::try_from(url)?;
         Ok(Self {
             facilitator: Arc::new(facilitator),
@@ -196,7 +180,7 @@ impl X402Middleware<Arc<FacilitatorClient>> {
 }
 
 impl TryFrom<&str> for X402Middleware<Arc<FacilitatorClient>> {
-    type Error = Box<dyn std::error::Error>;
+    type Error = FacilitatorClientError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         Self::try_new(value)
@@ -204,7 +188,7 @@ impl TryFrom<&str> for X402Middleware<Arc<FacilitatorClient>> {
 }
 
 impl TryFrom<String> for X402Middleware<Arc<FacilitatorClient>> {
-    type Error = Box<dyn std::error::Error>;
+    type Error = FacilitatorClientError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::try_new(&value)
@@ -549,4 +533,62 @@ fn build_abort_response(status: http::StatusCode, body: Option<String>) -> Respo
     }
     super::cors::ensure_expose_headers(response.headers_mut());
     response
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::panic,
+    reason = "test assertions on known-valid fixtures"
+)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_new_stores_parsed_facilitator_url() {
+        let input = "https://facilitator.example.com";
+        let middleware = X402Middleware::try_new(input).expect("valid facilitator URL");
+        let expected = Url::parse("https://facilitator.example.com/").expect("fixture URL");
+        assert_eq!(
+            middleware.facilitator_url(),
+            &expected,
+            "stored base URL must equal the parsed, slash-normalized input"
+        );
+        assert_eq!(
+            middleware.facilitator_url().as_str(),
+            "https://facilitator.example.com/"
+        );
+
+        let slashed = X402Middleware::try_new("https://facilitator.example.com/")
+            .expect("valid facilitator URL with trailing slash");
+        assert_eq!(slashed.facilitator_url(), middleware.facilitator_url());
+    }
+
+    #[test]
+    fn try_new_rejects_invalid_url() {
+        let err = X402Middleware::try_new("not a url");
+        assert!(
+            err.is_err(),
+            "invalid facilitator URL must return Err, not panic"
+        );
+        match err {
+            Err(FacilitatorClientError::UrlParse { context, .. }) => {
+                assert_eq!(context, "Failed to parse base url");
+            }
+            other => panic!("expected UrlParse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn try_from_str_matches_try_new() {
+        let via_try_new =
+            X402Middleware::try_new("https://facilitator.example.com").expect("try_new");
+        let via_try_from =
+            X402Middleware::try_from("https://facilitator.example.com").expect("TryFrom<&str>");
+        assert_eq!(
+            via_try_new.facilitator_url(),
+            via_try_from.facilitator_url()
+        );
+    }
 }
