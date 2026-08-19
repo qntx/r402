@@ -20,6 +20,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   checks, simulation, `tesSUCCESS` settle, and `SettlementCache` keyed by
   transaction hash (TTL floor 120s). `getSigners` is empty. Umbrella
   feature `xrpl` is optional and is included in `full`.
+- **`r402-hedera`** — Hedera `exact` E2E: payer-signed `TransferTransaction`
+  (HBAR `0.0.0` / HTS USDC), server `price_tag` (`USDC::hedera()` /
+  `USDC::hedera_testnet()`, `feePayer` enricher), in-process facilitator
+  with `aliasPolicy` config (default `reject`) and `SettlementCache` keyed
+  by the base64 transaction. Umbrella feature `hedera` is optional and is
+  included in `full`.
 
 ### Changed
 

@@ -24,6 +24,7 @@ r402-core = { version = "0.16.0", path = "crates/r402-core" }
 r402-evm = { version = "0.16.0", path = "crates/r402-evm" }
 r402-http = { version = "0.16.0", path = "crates/r402-http" }
 r402-mcp = { version = "0.16.0", path = "crates/r402-mcp" }
+r402-hedera = { version = "0.16.0", path = "crates/r402-hedera" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
 r402-tron = { version = "0.16.0", path = "crates/r402-tron" }
@@ -129,6 +130,8 @@ borsh = "1.3"
 # default-features = false; crates enable core + models only. Do not enable
 # wallet, websocket, std, or json-rpc.
 xrpl-rust = { version = "1.3.0", default-features = false }
+# Hedera (Hiero Rust SDK). No rust-version advertised; 0.43.x is Apache-2.0.
+hedera = "0.43"
 
 # Telemetry
 tracing = "0.1"

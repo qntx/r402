@@ -8,6 +8,9 @@ pub use r402_core::*;
 #[cfg(feature = "evm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "evm")))]
 pub use r402_evm as evm;
+#[cfg(feature = "hedera")]
+#[cfg_attr(docsrs, doc(cfg(feature = "hedera")))]
+pub use r402_hedera as hedera;
 #[cfg(feature = "http")]
 #[cfg_attr(docsrs, doc(cfg(feature = "http")))]
 pub use r402_http as http;

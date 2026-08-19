@@ -16,6 +16,7 @@ individual crates when you need a minimal dependency graph.
 | `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
 | `near` | [`r402-near`](https://docs.rs/r402-near) | NEAR exact (NEP-141 / NEP-366) |
 | `xrpl` | [`r402-xrpl`](https://docs.rs/r402-xrpl) | XRPL exact (XRP / RLUSD) |
+| `hedera` | [`r402-hedera`](https://docs.rs/r402-hedera) | Hedera exact (HBAR / HTS) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
@@ -44,6 +45,7 @@ use r402::tron;   // r402-tron
 use r402::casper; // r402-casper
 use r402::near;   // r402-near
 use r402::xrpl;   // r402-xrpl
+use r402::hedera; // r402-hedera
 use r402::http;   // r402-http
 use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
@@ -58,6 +60,7 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `casper` | | Re-export `r402-casper` as [`casper`] |
 | `near` | | Re-export `r402-near` as [`near`] |
 | `xrpl` | | Re-export `r402-xrpl` as [`xrpl`] |
+| `hedera` | | Re-export `r402-hedera` as [`hedera`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |
