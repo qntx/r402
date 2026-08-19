@@ -21,10 +21,10 @@
 //! - **[`X402Middleware::with_dynamic_price`]** sets a callback for dynamic pricing based on request context.
 //! - **[`X402Middleware::with_base_url`]** sets the base URL for computing full resource URLs.
 //!   If not set, defaults to `http://localhost/` (avoid in production).
-//! - **[`X402LayerBuilder::with_settlement_mode`]** selects sequential or concurrent settlement.
-//! - **[`X402LayerBuilder::with_description`]** is optional but helps the payer understand what is being paid for.
-//! - **[`X402LayerBuilder::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
-//! - **[`X402LayerBuilder::with_resource`]** explicitly sets the full URI of the protected resource.
+//! - **[`X402Layer::with_settlement_mode`]** selects sequential or concurrent settlement.
+//! - **[`X402Layer::with_description`]** is optional but helps the payer understand what is being paid for.
+//! - **[`X402Layer::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
+//! - **[`X402Layer::with_resource`]** explicitly sets the full URI of the protected resource.
 //!
 
 use std::convert::Infallible;
@@ -201,7 +201,7 @@ where
 {
     /// Sets the base URL used to construct resource URLs dynamically.
     ///
-    /// If [`X402LayerBuilder::with_resource`] is not called, this base URL is combined with
+    /// If [`X402Layer::with_resource`] is not called, this base URL is combined with
     /// each request's path/query to compute the resource. If not set, defaults to `http://localhost/`.
     ///
     /// In production, prefer calling `with_resource` or setting a precise `base_url`.
@@ -225,8 +225,8 @@ where
     pub fn with_price_tag(
         &self,
         price_tag: wire::PriceTag,
-    ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
-        X402LayerBuilder {
+    ) -> X402Layer<StaticPriceTags, TFacilitator> {
+        X402Layer {
             facilitator: self.facilitator.clone(),
             price_source: StaticPriceTags::new(vec![price_tag]),
             base_url: self.base_url.clone().map(Arc::new),
@@ -246,8 +246,8 @@ where
     pub fn with_price_tags(
         &self,
         price_tags: Vec<wire::PriceTag>,
-    ) -> X402LayerBuilder<StaticPriceTags, TFacilitator> {
-        X402LayerBuilder {
+    ) -> X402Layer<StaticPriceTags, TFacilitator> {
+        X402Layer {
             facilitator: self.facilitator.clone(),
             price_source: StaticPriceTags::new(price_tags),
             base_url: self.base_url.clone().map(Arc::new),
@@ -265,12 +265,12 @@ where
     pub fn with_dynamic_price<F, Fut>(
         &self,
         callback: F,
-    ) -> X402LayerBuilder<DynamicPriceTags, TFacilitator>
+    ) -> X402Layer<DynamicPriceTags, TFacilitator>
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Vec<wire::PriceTag>> + Send + 'static,
     {
-        X402LayerBuilder {
+        X402Layer {
             facilitator: self.facilitator.clone(),
             price_source: DynamicPriceTags::new(callback),
             base_url: self.base_url.clone().map(Arc::new),
@@ -290,7 +290,7 @@ where
     missing_debug_implementations,
     reason = "generic types may not impl Debug"
 )]
-pub struct X402LayerBuilder<TSource, TFacilitator> {
+pub struct X402Layer<TSource, TFacilitator> {
     facilitator: TFacilitator,
     base_url: Option<Arc<Url>>,
     price_source: TSource,
@@ -299,7 +299,7 @@ pub struct X402LayerBuilder<TSource, TFacilitator> {
     hooks: Option<Arc<dyn DynPaygateHooks>>,
 }
 
-impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
+impl<TFacilitator> X402Layer<StaticPriceTags, TFacilitator> {
     /// Adds another payment option.
     ///
     /// Allows specifying multiple accepted payment methods (e.g., different networks).
@@ -316,7 +316,7 @@ impl<TFacilitator> X402LayerBuilder<StaticPriceTags, TFacilitator> {
     missing_debug_implementations,
     reason = "generic types may not impl Debug"
 )]
-impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
+impl<TSource, TFacilitator> X402Layer<TSource, TFacilitator> {
     /// Sets a description of what the payment grants access to.
     ///
     /// This is included in 402 responses to inform clients what they're paying for.
@@ -393,7 +393,7 @@ impl<TSource, TFacilitator> X402LayerBuilder<TSource, TFacilitator> {
     }
 }
 
-impl<S, TSource, TFacilitator> Layer<S> for X402LayerBuilder<TSource, TFacilitator>
+impl<S, TSource, TFacilitator> Layer<S> for X402Layer<TSource, TFacilitator>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,

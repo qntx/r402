@@ -21,8 +21,8 @@ use r402_core::error::ClientError;
 
 use crate::chain::TokenAmount;
 use crate::eip2612::{EIP2612_GAS_SPONSORING_VERSION, Eip2612SignedPermit};
-use crate::exact::PERMIT2_ADDRESS;
-use crate::exact::client::SignerLike;
+use crate::permit2::PERMIT2_ADDRESS;
+use crate::signer::SignerLike;
 
 sol! {
     /// EIP-2612 typed-data layout (`Permit(...)`), identical across every

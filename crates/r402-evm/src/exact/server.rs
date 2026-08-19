@@ -7,8 +7,9 @@ use alloy_primitives::U256;
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
 
+use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
-use crate::exact::{AssetTransferMethod, Eip155Exact, ExactScheme, PaymentRequirementsExtra};
+use crate::exact::{Eip155Exact, ExactScheme, PaymentRequirementsExtra};
 
 impl Eip155Exact {
     /// Creates a price tag for an EVM exact payment.

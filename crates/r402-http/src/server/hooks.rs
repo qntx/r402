@@ -95,10 +95,3 @@ where
         Box::pin(<T as PaygateHooks>::on_payment_verified(self, req))
     }
 }
-
-/// No-op [`PaygateHooks`] implementation used as the default when no hooks
-/// are configured.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NoopPaygateHooks;
-
-impl PaygateHooks for NoopPaygateHooks {}

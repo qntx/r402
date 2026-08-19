@@ -15,6 +15,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Removed
 
+- **`r402-svm` crate** — renamed to **`r402-solana`**. Umbrella feature
+  `svm` is `solana`; `r402::svm` is `r402::solana`. crates.io stops
+  publishing `r402-svm`.
+- **`r402_evm::exact::{PERMIT2_ADDRESS, VALIDATOR_ADDRESS, AssetTransferMethod, Permit2TokenPermissions, X402_UPTO_PERMIT2_PROXY}`**
+  and **`exact::client::{SignerLike, Permit2Approver}`** —
+  shared primitives live at crate root (`SignerLike`, `Permit2Approver`,
+  `PERMIT2_ADDRESS`, `AssetTransferMethod`, `VALIDATOR_ADDRESS`,
+  `StructuredSignatureFormatError`). The upto Permit2 proxy is only
+  `upto::X402_UPTO_PERMIT2_PROXY`. `exact/client/` is `exact/client.rs`.
+- **`r402_core::payment`** — unused `Payment<S>` typestate deleted.
+  `SettlementOverrides` and amount-resolution helpers live on `wire` /
+  crate root.
+- **`r402_core::scheme::SchemeServer`** — unused sealed server trait
+  deleted. Scheme sealing is `SchemeId` + `SchemeClient`.
+- **`r402_http::client/` directory** — client is `src/client.rs`.
+- **`r402_http::server::NoopPaygateHooks`** — use `()`; `PaygateHooks`
+  is implemented for `()`.
+- **`r402_http::server::X402LayerBuilder`** — the Tower `Layer` type is
+  `X402Layer`.
+- **`r402_mcp::constants`** — MCP wire constants live on the crate root.
+- **`PAYGATE_REQUEST_TOTAL`** — unused metrics counter deleted.
 - **`r402_http::server::{cors, status, layer}`** — CORS/status helpers live
   on `server` / `paygate`; Tower adapter is `server::middleware`. HTTP
   `VerificationError` is gone; variants sit on `PaygateError`.
@@ -23,7 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - **`r402_mcp::ClientHooks`** — renamed to `McpClientHooks`.
 - **`r402_core` module paths** `error_reason`, `hooks`, `settlement_override`,
   and `scheme::sealed`. Types live at crate root and in `error`, `facilitator`,
-  `payment`, and `scheme` respectively (`ErrorReason`, `HookedFacilitator`,
+  `wire`, and `scheme` respectively (`ErrorReason`, `HookedFacilitator`,
   `SettlementOverrides`, `scheme::Sealed`). Extension modules
   `eip2612_gas_sponsoring` / `erc20_approval_gas_sponsoring` are
   `extensions::eip2612` / `extensions::erc20_approval`.
@@ -32,7 +53,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `DEFAULT_SETTLEMENT_TTL` / `DEFAULT_SETTLEMENT_CAPACITY`) from
   `r402_core::cache`.
 - **`r402_evm::exact::facilitator::VALIDATOR_ADDRESS`** — import
-  `r402_evm::exact::VALIDATOR_ADDRESS`.
+  `r402_evm::VALIDATOR_ADDRESS`.
 - **`X402Middleware::new`** — panicking constructor. Use
   `X402Middleware::try_new`, which returns `FacilitatorClientError`
   on an invalid facilitator URL.
@@ -41,6 +62,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `r402_core::PaymentClient` from core.
 
 ### Changed
+
+- **Vendor tree** — gitignore `3rdparty/` is `vendor/`.
+- **`deny.toml`** — replaced the cargo-deny template dump with the
+  workspace license / advisory / source policy.
 
 - **Dependencies** — `http` 1.5, `sha3` 0.12, alloy stack 2.1 /
   `alloy-primitives`/`alloy-sol-types` 1.6, `rmcp` 3.1.3,

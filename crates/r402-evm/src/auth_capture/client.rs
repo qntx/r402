@@ -19,9 +19,10 @@ use super::types::{
     AuthCapturePayload, AuthCapturePermit2Authorization, AuthCapturePermit2Payload,
     EIP3009_TOKEN_COLLECTOR_ADDRESS, PERMIT2_TOKEN_COLLECTOR_ADDRESS, PaymentInfo,
 };
+use crate::asset::AssetTransferMethod;
 use crate::chain::TokenAmount;
-use crate::exact::client::SignerLike;
-use crate::exact::{AssetTransferMethod, PERMIT2_ADDRESS};
+use crate::permit2::PERMIT2_ADDRESS;
+use crate::signer::SignerLike;
 
 sol! {
     struct ReceiveWithAuthorization {

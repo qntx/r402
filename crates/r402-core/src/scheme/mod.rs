@@ -15,17 +15,15 @@
 
 mod client;
 mod registry;
-mod server;
 
 pub use client::*;
 pub use registry::*;
-pub use server::*;
 
 /// Internal sealed-trait marker. **Do not implement** outside this workspace.
 ///
 /// x402 schemes are protocol-critical: an unsanctioned implementation would
 /// fragment the network. Only crates in this workspace implement
-/// [`SchemeClient`] / [`SchemeServer`].
+/// [`SchemeClient`].
 #[doc(hidden)]
 pub trait Sealed {}
 

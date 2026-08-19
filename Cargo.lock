@@ -4263,7 +4263,7 @@ dependencies = [
  "r402-evm",
  "r402-http",
  "r402-mcp",
- "r402-svm",
+ "r402-solana",
  "r402-tron",
 ]
 
@@ -4370,7 +4370,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "r402-svm"
+name = "r402-solana"
 version = "0.15.0"
 dependencies = [
  "base64 0.23.1",

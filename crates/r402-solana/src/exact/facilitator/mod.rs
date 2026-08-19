@@ -15,8 +15,9 @@ use compact_str::CompactString;
 pub use config::SolanaExactFacilitatorConfig;
 use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
+use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
-use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
+use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
 pub use smart_wallet::{

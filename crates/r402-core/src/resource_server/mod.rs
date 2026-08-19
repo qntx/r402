@@ -23,12 +23,12 @@ use serde::Serialize;
 use crate::error::{FacilitatorError, VerificationError};
 use crate::facilitator::FailureRecovery;
 use crate::facilitator::{DynFacilitator, Facilitator};
-use crate::payment::{
-    SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
-};
 use crate::wire::{
     PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2, VerifyRequest,
     VerifyResponse, find_matching_requirements,
+};
+use crate::wire::{
+    SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
 };
 
 /// Successful verify path outcome (after hooks).

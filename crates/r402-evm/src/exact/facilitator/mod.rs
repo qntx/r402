@@ -18,8 +18,9 @@ use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::Provider;
 use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::chain::ChainProvider;
+use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
-use r402_core::facilitator::{DynFacilitator, Facilitator, FacilitatorError};
+use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
 use r402_core::wire::UnixTimestamp;
@@ -70,8 +71,6 @@ pub(crate) mod signature;
 mod verify;
 
 use settle::{settle_payment, settle_permit2_payment};
-pub use signature::StructuredSignatureFormatError;
-pub(crate) use verify::assert_time;
 use verify::{verify_payment, verify_permit2_payment};
 
 use crate::error::Eip155ExactError;

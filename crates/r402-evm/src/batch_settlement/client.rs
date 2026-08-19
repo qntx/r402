@@ -12,7 +12,7 @@ use r402_core::wire::{Base64Bytes, PaymentRequired};
 use super::channel::{build_channel_config, compute_channel_id};
 use super::types::{BatchSettlementExtra, BatchSettlementPayload, ChannelConfig};
 use super::voucher::sign_voucher;
-use crate::exact::client::SignerLike;
+use crate::signer::SignerLike;
 
 /// Client that signs cumulative vouchers for batch-settlement channels.
 ///

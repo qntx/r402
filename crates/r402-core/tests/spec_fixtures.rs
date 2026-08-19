@@ -18,7 +18,7 @@
 //!
 //! Each fixture under `tests/fixtures/spec_v2/` is a verbatim JSON
 //! example pulled from
-//! [`3rdparty/x402/specs/x402-specification-v2.md`]. r402 must:
+//! [`vendor/x402/specs/x402-specification-v2.md`]. r402 must:
 //!
 //! 1. **Deserialize** every fixture into the corresponding wire type
 //!    without losing fields.

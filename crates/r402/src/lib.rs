@@ -14,9 +14,9 @@ pub use r402_http as http;
 #[cfg(feature = "mcp")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mcp")))]
 pub use r402_mcp as mcp;
-#[cfg(feature = "svm")]
-#[cfg_attr(docsrs, doc(cfg(feature = "svm")))]
-pub use r402_svm as svm;
+#[cfg(feature = "solana")]
+#[cfg_attr(docsrs, doc(cfg(feature = "solana")))]
+pub use r402_solana as solana;
 #[cfg(feature = "tron")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tron")))]
 pub use r402_tron as tron;

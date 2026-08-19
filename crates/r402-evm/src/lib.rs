@@ -18,6 +18,7 @@
 //! The crate is organized into several modules:
 //!
 //! - [`chain`] - Core EVM chain types, providers, and configuration
+//! - [`signer`] / [`permit2`] / [`asset`] / [`signature`] - primitives shared by every scheme
 //! - [`exact`] - EIP-155 "exact" payment scheme
 //! - [`upto`]  - EIP-155 "upto" payment scheme (Permit2, usage-based)
 //! - [`auth_capture`] - authorize / capture / charge (commerce-payments escrow)
@@ -50,6 +51,7 @@ use {alloy_provider as _, alloy_transport_http as _, tokio as _, url as _};
 /// boundaries (useful for deterministic tests).
 pub const EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS: u64 = 6;
 
+pub mod asset;
 pub mod auth_capture;
 pub mod batch_settlement;
 pub mod chain;
@@ -59,12 +61,20 @@ pub mod erc20_approval;
 #[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
 pub mod error;
 pub mod exact;
+pub mod permit2;
+#[cfg(feature = "facilitator")]
+#[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
+pub mod signature;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub mod signer;
 pub mod upto;
 
 #[cfg(feature = "facilitator")]
 pub use error::Eip155ExactError;
 
 mod networks;
+pub use asset::{AssetTransferMethod, VALIDATOR_ADDRESS};
 pub use auth_capture::Eip155AuthCapture;
 #[cfg(feature = "facilitator")]
 pub use auth_capture::Eip155AuthCaptureFacilitator;
@@ -87,8 +97,15 @@ pub use erc20_approval::{
 };
 pub use exact::Eip155Exact;
 #[cfg(feature = "client")]
-pub use exact::client::{Eip155ExactClient, Eip155ExactClientBuilder, Permit2Approver};
+pub use exact::client::{Eip155ExactClient, Eip155ExactClientBuilder};
 pub use networks::*;
+pub use permit2::{PERMIT2_ADDRESS, Permit2TokenPermissions};
+#[cfg(feature = "client")]
+pub use permit2::{Permit2Approver, permit2_allowance_calldata, permit2_approval_calldata};
+#[cfg(feature = "facilitator")]
+pub use signature::StructuredSignatureFormatError;
+#[cfg(feature = "client")]
+pub use signer::SignerLike;
 pub use upto::Eip155Upto;
 #[cfg(feature = "client")]
 pub use upto::client::{Eip155UptoClient, Eip2612SigningParams, sign_eip2612_permit};

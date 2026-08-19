@@ -15,7 +15,7 @@ use super::types::{
 #[cfg(feature = "client")]
 use crate::chain::TokenAmount;
 #[cfg(feature = "client")]
-use crate::exact::client::SignerLike;
+use crate::signer::SignerLike;
 
 sol! {
     /// `Voucher(bytes32 channelId, uint128 maxClaimableAmount)`.

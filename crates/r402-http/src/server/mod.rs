@@ -24,8 +24,8 @@ pub mod tracker;
 pub mod upto;
 
 pub use facilitator::{FacilitatorClient, FacilitatorClientError};
-pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
-pub use middleware::{SettlementMode, X402LayerBuilder, X402Middleware};
+pub use hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
+pub use middleware::{SettlementMode, X402Layer, X402Middleware};
 pub use paygate::{
     Paygate, PaygateBuilder, PaygateError, ResourceTemplate, VerifiedPayment, X402_EXPOSED_HEADERS,
     ensure_expose_headers, reason_to_status, settlement_to_header,

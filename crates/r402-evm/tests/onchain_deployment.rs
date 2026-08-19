@@ -52,8 +52,9 @@ use std::time::Duration;
 use alloy_primitives::Address;
 use alloy_provider::{Provider, ProviderBuilder};
 use r402_evm::EVM_NETWORKS;
-use r402_evm::exact::{PERMIT2_ADDRESS, VALIDATOR_ADDRESS, X402_EXACT_PERMIT2_PROXY};
+use r402_evm::exact::X402_EXACT_PERMIT2_PROXY;
 use r402_evm::upto::X402_UPTO_PERMIT2_PROXY;
+use r402_evm::{PERMIT2_ADDRESS, VALIDATOR_ADDRESS};
 use url::Url;
 
 /// Canonical contracts r402 expects on every supported EVM chain.

@@ -8,7 +8,8 @@ use rand::RngExt;
 use rand::rng;
 
 use crate::chain::TokenAmount;
-use crate::exact::{PERMIT2_ADDRESS, Permit2TokenPermissions, client::SignerLike};
+use crate::permit2::{PERMIT2_ADDRESS, Permit2TokenPermissions};
+use crate::signer::SignerLike;
 use crate::upto::{
     PermitWitnessTransferFrom as SolPermitWitnessTransferFrom,
     TokenPermissions as SolTokenPermissions, UptoPermit2Authorization, UptoPermit2Payload,

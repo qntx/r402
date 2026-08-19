@@ -53,13 +53,6 @@ pub const FACILITATOR_SETTLE_DURATION_SECONDS: &str = "r402_facilitator_settle_d
 /// - `outcome` — `inserted` for newly seen keys, `duplicate` for hits.
 pub const SETTLEMENT_CACHE_RESERVE_TOTAL: &str = "r402_settlement_cache_reserve_total";
 
-/// Counter incremented per paygate request.
-///
-/// Labels:
-/// - `outcome` — `paid` (settlement complete), `denied` (verify failure),
-///   `aborted` (internal error before settlement could be attempted).
-pub const PAYGATE_REQUEST_TOTAL: &str = "r402_paygate_request_total";
-
 /// Counter incremented when the background settlement supervisor records
 /// an outcome.
 ///

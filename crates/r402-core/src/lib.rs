@@ -26,7 +26,6 @@ pub mod client;
 pub mod error;
 pub mod extensions;
 pub mod facilitator;
-pub mod payment;
 pub mod resource_server;
 pub mod scheme;
 pub mod wire;
@@ -60,12 +59,11 @@ pub use error::{
 };
 pub use facilitator::{
     BoxFuture, DynFacilitator, DynFacilitatorHooks, Facilitator, FacilitatorHooks, FailureRecovery,
-    HookDecision, HookedFacilitator, SettleContext as HookSettleContext,
-    VerifyContext as HookVerifyContext,
-};
-pub use payment::{
-    DEFAULT_ASSET_DECIMALS, SettlementOverrideError, SettlementOverrides,
-    asset_decimals_from_extra, resolve_settlement_override_amount,
+    HookDecision, HookedFacilitator,
 };
 #[cfg(test)]
 use proptest as _;
+pub use wire::{
+    DEFAULT_ASSET_DECIMALS, SettlementOverrideError, SettlementOverrides,
+    asset_decimals_from_extra, resolve_settlement_override_amount,
+};

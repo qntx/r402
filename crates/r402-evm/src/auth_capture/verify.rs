@@ -11,7 +11,7 @@ use super::types::{
     EIP3009_TOKEN_COLLECTOR_ADDRESS, PERMIT2_TOKEN_COLLECTOR_ADDRESS, PaymentInfo,
 };
 use crate::auth_capture::types::v2;
-use crate::exact::PERMIT2_ADDRESS;
+use crate::permit2::PERMIT2_ADDRESS;
 
 sol! {
     struct ReceiveWithAuthorization {

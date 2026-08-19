@@ -83,7 +83,7 @@ pub struct UptoPermit2Authorization {
     /// Signer / owner address.
     pub from: Address,
     /// Token and authorized maximum amount.
-    pub permitted: crate::exact::Permit2TokenPermissions,
+    pub permitted: crate::permit2::Permit2TokenPermissions,
     /// Must be the [`x402UptoPermit2Proxy`](super::X402_UPTO_PERMIT2_PROXY) address.
     pub spender: Address,
     /// Unique nonce (uint256 as decimal string).

@@ -11,7 +11,7 @@ use r402_core::wire::{
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, RequestMetaObject};
 use serde_json::Value;
 
-use crate::constants::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX};
+use crate::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX};
 
 /// Wire payment payload shape used on MCP `_meta` (opaque scheme payload).
 pub type McpPaymentPayload = PaymentPayload<PaymentRequirements, Value>;
