@@ -14,7 +14,7 @@ Status of official TS mechanism families versus r402 crates.
 | Algorand | `@x402/avm` | `r402-algorand` | exact E2E shipped |
 | Hedera | `@x402/hedera` | — | Missing |
 | Keeta | `@x402/keeta` | `r402-keeta` | exact E2E shipped |
-| Stellar | `@x402/stellar` | — | Missing (after MSRV 1.95) |
+| Stellar | `@x402/stellar` | `r402-stellar` | exact E2E shipped |
 | XRPL | `@x402/xrpl` | `r402-xrpl` | exact E2E shipped |
 | Concordium | `@x402/concordium` | — | Deferred (no SPDX-clean SDK) |
 | Tron | — | `r402-tron` | r402-only |

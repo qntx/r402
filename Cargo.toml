@@ -29,6 +29,7 @@ r402-keeta = { version = "0.16.0", path = "crates/r402-keeta" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
 r402-algorand = { version = "0.16.0", path = "crates/r402-algorand" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
+r402-stellar = { version = "0.16.0", path = "crates/r402-stellar" }
 r402-tron = { version = "0.16.0", path = "crates/r402-tron" }
 r402-xrpl = { version = "0.16.0", path = "crates/r402-xrpl" }
 r402-tvm = { version = "0.16.0", path = "crates/r402-tvm" }
@@ -148,6 +149,20 @@ keetanetwork-crypto = { version = "0.3", features = ["std"] }
 # Cell/BoC only. Never depend on tonlib-client or tonlib-sys.
 tonlib-core = { version = "0.26", default-features = false }
 ed25519-dalek = "2"
+
+# Stellar
+#
+# stellar-rpc-client 27.0.0 declares rust-version 1.93 (covered by workspace
+# 1.95). Pin XDR 27.x to the same generation as the RPC client. Do not pull
+# soroban-sdk (contract wasm). Do not pin 23.x.
+stellar-rpc-client = "27.0.0"
+stellar-xdr = { version = "27", default-features = false, features = [
+    "std",
+    "serde",
+    "base64",
+] }
+stellar-strkey = "0.0.16"
+sha2 = "0.10"
 
 # Telemetry
 tracing = "0.1"

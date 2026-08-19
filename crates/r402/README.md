@@ -20,6 +20,7 @@ individual crates when you need a minimal dependency graph.
 | `algorand` | [`r402-algorand`](https://docs.rs/r402-algorand) | Algorand exact (ASA / algod REST) |
 | `keeta` | [`r402-keeta`](https://docs.rs/r402-keeta) | Keeta exact (signed `SEND` block) |
 | `tvm` | [`r402-tvm`](https://docs.rs/r402-tvm) | TON exact (TEP-74 / W5R1) |
+| `stellar` | [`r402-stellar`](https://docs.rs/r402-stellar) | Stellar exact (SEP-41 auth entries) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 

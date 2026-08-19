@@ -44,6 +44,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   reserve-only (120s, keyed by settlement BoC hash). Umbrella feature `tvm`
   is optional and is included in `full`. CAIP-2 `tvm:-239` / `tvm:-3`
   round-trip through `ChainId`.
+- **`r402-stellar`** — Stellar `exact` E2E: client signs Soroban auth
+  entries only (`stellar-rpc-client` 27 / `stellar-xdr` 27), server
+  `price_tag` (`USDC::stellar()` / `USDC::stellar_testnet()`,
+  `areFeesSponsored: true` only), in-process facilitator rebuilds the
+  transaction as source / optional fee bump, simulates, and submits.
+  Pubnet requires an operator RPC URL. Umbrella feature `stellar` is
+  optional and is included in `full`.
 
 ### Changed
 

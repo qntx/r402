@@ -29,6 +29,9 @@ pub use r402_near as near;
 #[cfg(feature = "solana")]
 #[cfg_attr(docsrs, doc(cfg(feature = "solana")))]
 pub use r402_solana as solana;
+#[cfg(feature = "stellar")]
+#[cfg_attr(docsrs, doc(cfg(feature = "stellar")))]
+pub use r402_stellar as stellar;
 #[cfg(feature = "tron")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tron")))]
 pub use r402_tron as tron;

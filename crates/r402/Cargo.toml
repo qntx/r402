@@ -33,6 +33,7 @@ hedera = ["dep:r402-hedera"]
 algorand = ["dep:r402-algorand"]
 keeta = ["dep:r402-keeta"]
 tvm = ["dep:r402-tvm"]
+stellar = ["dep:r402-stellar"]
 http = ["dep:r402-http"]
 mcp = ["dep:r402-mcp"]
 
@@ -47,6 +48,7 @@ client = [
     "r402-algorand?/client",
     "r402-keeta?/client",
     "r402-tvm?/client",
+    "r402-stellar?/client",
     "r402-http?/client",
     "r402-mcp?/client",
 ]
@@ -61,6 +63,7 @@ server = [
     "r402-algorand?/server",
     "r402-keeta?/server",
     "r402-tvm?/server",
+    "r402-stellar?/server",
     "r402-http?/server",
     "r402-mcp?/server",
 ]
@@ -76,6 +79,7 @@ facilitator = [
     "r402-algorand?/facilitator",
     "r402-keeta?/facilitator",
     "r402-tvm?/facilitator",
+    "r402-stellar?/facilitator",
 ]
 
 telemetry = [
@@ -90,6 +94,7 @@ telemetry = [
     "r402-algorand?/telemetry",
     "r402-keeta?/telemetry",
     "r402-tvm?/telemetry",
+    "r402-stellar?/telemetry",
     "r402-http?/telemetry",
     "r402-mcp?/telemetry",
 ]
@@ -113,6 +118,7 @@ full = [
     "algorand",
     "keeta",
     "tvm",
+    "stellar",
     "http",
     "mcp",
     "client",
@@ -135,6 +141,7 @@ r402-hedera = { workspace = true, optional = true }
 r402-algorand = { workspace = true, optional = true }
 r402-keeta = { workspace = true, optional = true }
 r402-tvm = { workspace = true, optional = true }
+r402-stellar = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }
 r402-mcp = { workspace = true, optional = true }
 
