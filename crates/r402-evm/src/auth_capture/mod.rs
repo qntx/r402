@@ -7,7 +7,7 @@
 //!
 //! Spec: `specs/schemes/auth-capture/scheme_auth_capture_evm.md`.
 
-use r402_core::scheme::{AuthCaptureScheme, SchemeId, sealed::Sealed};
+use r402_core::scheme::{AuthCaptureScheme, SchemeId, Sealed};
 
 #[cfg(feature = "client")]
 pub mod client;

@@ -23,9 +23,9 @@
 //!
 //! - `ext-bazaar` — [`bazaar::BazaarExtension`] for resource discovery
 //! - `ext-payment-id` — [`payment_id::PaymentIdentifierExtension`]
-//! - `ext-eip2612` — [`eip2612_gas_sponsoring::Eip2612GasSponsoringExtension`]
+//! - `ext-eip2612` — [`eip2612::Eip2612GasSponsoringExtension`]
 //!   (server advertise; EVM payload types in `r402-evm`)
-//! - `ext-erc20-approval` — [`erc20_approval_gas_sponsoring::Erc20ApprovalGasSponsoringExtension`]
+//! - `ext-erc20-approval` — [`erc20_approval::Erc20ApprovalGasSponsoringExtension`]
 //!
 //! # Implementing Your Own
 //!
@@ -62,11 +62,11 @@ pub mod bazaar;
 
 #[cfg(feature = "ext-eip2612")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-eip2612")))]
-pub mod eip2612_gas_sponsoring;
+pub mod eip2612;
 
 #[cfg(feature = "ext-erc20-approval")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-erc20-approval")))]
-pub mod erc20_approval_gas_sponsoring;
+pub mod erc20_approval;
 
 #[cfg(feature = "ext-payment-id")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-payment-id")))]

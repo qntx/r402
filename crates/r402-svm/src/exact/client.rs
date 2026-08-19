@@ -350,7 +350,7 @@ impl<S, R> SchemeId for SolanaExactClient<S, R> {
     }
 }
 
-impl<S, R> r402_core::scheme::sealed::Sealed for SolanaExactClient<S, R> {}
+impl<S, R> r402_core::scheme::Sealed for SolanaExactClient<S, R> {}
 
 impl<S, R> SchemeClient for SolanaExactClient<S, R>
 where

@@ -24,14 +24,11 @@ pub mod amount;
 pub mod chain;
 pub mod client;
 pub mod error;
-pub mod error_reason;
 pub mod extensions;
 pub mod facilitator;
-pub mod hooks;
 pub mod payment;
 pub mod resource_server;
 pub mod scheme;
-pub mod settlement_override;
 pub mod wire;
 
 pub use resource_server::{
@@ -57,16 +54,18 @@ pub use client::{
     ClientHooks, CreatedPayment, DynClientHooks, PaymentClient, PaymentCreationContext,
     PaymentResponseContext, PaymentResponseResult,
 };
-pub use error::{ClientError, FacilitatorError, SettlementError, VerificationError};
-pub use error_reason::{AsPaymentProblem, ErrorReason, PaymentProblem};
-pub use facilitator::{BoxFuture, DynFacilitator, Facilitator};
-pub use hooks::{
-    DynFacilitatorHooks, FacilitatorHooks, FailureRecovery, HookDecision, HookedFacilitator,
-    SettleContext as HookSettleContext, VerifyContext as HookVerifyContext,
+pub use error::{
+    AsPaymentProblem, ClientError, ErrorReason, FacilitatorError, PaymentProblem, SettlementError,
+    VerificationError,
 };
-#[cfg(test)]
-use proptest as _;
-pub use settlement_override::{
+pub use facilitator::{
+    BoxFuture, DynFacilitator, DynFacilitatorHooks, Facilitator, FacilitatorHooks, FailureRecovery,
+    HookDecision, HookedFacilitator, SettleContext as HookSettleContext,
+    VerifyContext as HookVerifyContext,
+};
+pub use payment::{
     DEFAULT_ASSET_DECIMALS, SettlementOverrideError, SettlementOverrides,
     asset_decimals_from_extra, resolve_settlement_override_amount,
 };
+#[cfg(test)]
+use proptest as _;

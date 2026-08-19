@@ -131,7 +131,7 @@ impl From<CasperExactError> for VerificationError {
 
 #[cfg(test)]
 mod tests {
-    use r402_core::error_reason::{AsPaymentProblem, ErrorReason};
+    use r402_core::error::{AsPaymentProblem, ErrorReason};
 
     use super::*;
 

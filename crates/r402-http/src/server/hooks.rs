@@ -1,6 +1,6 @@
 //! Paygate-level lifecycle hooks.
 //!
-//! Unlike facilitator-level [`FacilitatorHooks`](r402_core::hooks::FacilitatorHooks)
+//! Unlike facilitator-level [`FacilitatorHooks`](r402_core::facilitator::FacilitatorHooks)
 //! which fire **inside** `verify` / `settle`, these hooks fire at the HTTP
 //! paygate layer and let integrators:
 //!

@@ -1,17 +1,259 @@
-//! Verify and settle response bodies.
-//!
-//! Both responses use a boolean discriminator on the wire (`isValid` /
-//! `success`) and convert to/from a Rust enum via a private "wire" struct.
-//! Successful responses may now carry an `extensions` block returned by the
-//! facilitator; settlement success also carries the actual amount settled
-//! (required by the `upto` scheme).
+//! Facilitator RPC envelopes: verify, settle, and `/supported`.
+
+use std::collections::HashMap;
+use std::str::FromStr;
 
 use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
+use serde_with::{VecSkipError, serde_as};
 
-use super::{Base64Bytes, Extensions};
-use crate::error::FacilitatorError;
-use crate::error_reason::{AsPaymentProblem, ErrorReason};
+use super::{Base64Bytes, Extensions, Version, Version2};
+use crate::chain::ChainId;
+use crate::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
+use crate::scheme::SchemeSlug;
+
+/// A protocol-versioned verify request parameterized by payload and
+/// requirements types.
+///
+/// The const parameter `V` selects the version marker. Client and
+/// facilitator code that knows the concrete shape decodes a raw
+/// [`VerifyRequest`] into [`TypedVerifyRequest`] via [`Self::from_verify`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypedVerifyRequest<const V: u8, TPayload, TRequirements> {
+    /// Protocol version marker.
+    pub x402_version: Version<V>,
+    /// The signed payment authorization.
+    pub payment_payload: TPayload,
+    /// The payment terms being verified.
+    pub payment_requirements: TRequirements,
+}
+
+impl<const V: u8, TPayload, TRequirements> TypedVerifyRequest<V, TPayload, TRequirements>
+where
+    Self: serde::de::DeserializeOwned,
+{
+    /// Decodes a raw [`VerifyRequest`] into this typed variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::InvalidFormat`] when deserialisation fails.
+    pub fn from_verify(request: VerifyRequest) -> Result<Self, VerificationError> {
+        serde_json::from_value(request.into_json())
+            .map_err(|e| VerificationError::InvalidFormat(e.to_string()))
+    }
+
+    /// Decodes a raw [`SettleRequest`] into this typed variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::InvalidFormat`] when deserialisation fails.
+    pub fn from_settle(request: SettleRequest) -> Result<Self, VerificationError> {
+        serde_json::from_value(request.into_json())
+            .map_err(|e| VerificationError::InvalidFormat(e.to_string()))
+    }
+}
+
+impl<const V: u8, TPayload, TRequirements> TryFrom<TypedVerifyRequest<V, TPayload, TRequirements>>
+    for VerifyRequest
+where
+    TPayload: Serialize,
+    TRequirements: Serialize,
+{
+    type Error = serde_json::Error;
+    fn try_from(
+        value: TypedVerifyRequest<V, TPayload, TRequirements>,
+    ) -> Result<Self, Self::Error> {
+        let json = serde_json::to_value(value)?;
+        Ok(Self(json))
+    }
+}
+
+/// Wire-level verify request, stored as opaque JSON.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VerifyRequest(serde_json::Value);
+
+impl VerifyRequest {
+    /// Consumes the request and returns the raw JSON.
+    #[must_use]
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
+    }
+
+    /// Inspects the request for scheme routing purposes without full decoding.
+    #[must_use]
+    pub fn scheme_slug(&self) -> Option<SchemeSlug> {
+        scheme_slug_from_json(&self.0)
+    }
+
+    /// Returns the CAIP-2 network identifier from `paymentRequirements.network`.
+    #[must_use]
+    pub fn network(&self) -> &str {
+        network_from_json(&self.0)
+    }
+}
+
+impl From<serde_json::Value> for VerifyRequest {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+/// Wire-level settle request. Identical structure to [`VerifyRequest`] but
+/// distinguished at the type level to prevent accidental misuse.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettleRequest(serde_json::Value);
+
+impl SettleRequest {
+    /// Consumes the request and returns the raw JSON.
+    #[must_use]
+    pub fn into_json(self) -> serde_json::Value {
+        self.0
+    }
+
+    /// Inspects the request for scheme routing purposes.
+    #[must_use]
+    pub fn scheme_slug(&self) -> Option<SchemeSlug> {
+        scheme_slug_from_json(&self.0)
+    }
+
+    /// Returns the CAIP-2 network identifier from `paymentRequirements.network`.
+    #[must_use]
+    pub fn network(&self) -> &str {
+        network_from_json(&self.0)
+    }
+
+    /// Overrides `paymentRequirements.amount` in-place.
+    ///
+    /// Intended for the **upto** scheme, where the resource server decides
+    /// the actual settlement amount at request time (≤ the signed maximum).
+    /// For the exact scheme this is a no-op: the amount must already equal
+    /// what the buyer signed.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VerificationError::InvalidFormat`] when the JSON does not
+    /// have a `paymentRequirements` object.
+    pub fn set_settlement_amount(&mut self, amount: &str) -> Result<(), VerificationError> {
+        let req = self
+            .0
+            .get_mut("paymentRequirements")
+            .and_then(serde_json::Value::as_object_mut)
+            .ok_or_else(|| {
+                VerificationError::InvalidFormat(
+                    "settle request missing paymentRequirements object".into(),
+                )
+            })?;
+        let _ = req.insert(
+            "amount".to_owned(),
+            serde_json::Value::String(amount.to_owned()),
+        );
+        Ok(())
+    }
+}
+
+impl From<serde_json::Value> for SettleRequest {
+    fn from(value: serde_json::Value) -> Self {
+        Self(value)
+    }
+}
+
+impl From<VerifyRequest> for SettleRequest {
+    fn from(request: VerifyRequest) -> Self {
+        Self(request.into_json())
+    }
+}
+
+fn scheme_slug_from_json(json: &serde_json::Value) -> Option<SchemeSlug> {
+    let version = json.get("x402Version")?.as_u64()?;
+    let version: u8 = version.try_into().ok()?;
+    if version != Version2::VALUE {
+        return None;
+    }
+    let accepted = json.get("paymentPayload")?.get("accepted")?;
+    let chain_id = ChainId::from_str(accepted.get("network")?.as_str()?).ok()?;
+    let scheme = accepted.get("scheme")?.as_str()?;
+    Some(SchemeSlug::new(chain_id, scheme.into()))
+}
+
+fn network_from_json(json: &serde_json::Value) -> &str {
+    json.get("paymentRequirements")
+        .and_then(|r| r.get("network"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::*;
+
+    fn v2_json(network: &str, scheme: &str) -> serde_json::Value {
+        serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": {
+                "accepted": { "network": network, "scheme": scheme }
+            },
+            "paymentRequirements": { "network": network }
+        })
+    }
+
+    #[test]
+    fn verify_request_scheme_slug_evm() {
+        let req = VerifyRequest::from(v2_json("eip155:8453", "exact"));
+        let slug = req.scheme_slug().unwrap();
+        assert_eq!(slug.to_string(), "eip155:8453:exact");
+    }
+
+    #[test]
+    fn settle_request_from_verify_preserves_slug() {
+        let verify = VerifyRequest::from(v2_json("eip155:42161", "exact"));
+        let settle: SettleRequest = verify.into();
+        assert_eq!(
+            settle.scheme_slug().unwrap().to_string(),
+            "eip155:42161:exact"
+        );
+    }
+
+    #[test]
+    fn settle_request_network_missing_returns_empty() {
+        let settle = SettleRequest::from(serde_json::json!({}));
+        assert_eq!(settle.network(), "");
+    }
+
+    #[test]
+    fn slug_rejects_wrong_version() {
+        let mut json = v2_json("eip155:1", "exact");
+        json["x402Version"] = serde_json::json!(99);
+        assert!(scheme_slug_from_json(&json).is_none());
+    }
+
+    #[test]
+    fn slug_rejects_invalid_caip2() {
+        assert!(scheme_slug_from_json(&v2_json("not-a-caip2", "exact")).is_none());
+    }
+
+    #[test]
+    fn settle_amount_override_rewrites_payment_requirements() {
+        let mut settle = SettleRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": { "accepted": { "network": "eip155:8453", "scheme": "upto" } },
+            "paymentRequirements": { "network": "eip155:8453", "amount": "5000000" }
+        }));
+        settle.set_settlement_amount("1500000").unwrap();
+        let json = settle.into_json();
+        assert_eq!(
+            json["paymentRequirements"]["amount"].as_str(),
+            Some("1500000")
+        );
+    }
+
+    #[test]
+    fn settle_amount_override_errors_when_requirements_missing() {
+        let mut settle = SettleRequest::from(serde_json::json!({}));
+        let err = settle.set_settlement_amount("1").unwrap_err();
+        assert!(matches!(err, VerificationError::InvalidFormat(_)));
+    }
+}
 
 /// Verification outcome returned by a facilitator.
 ///
@@ -336,7 +578,7 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
 }
 
 #[cfg(test)]
-mod tests {
+mod response_tests {
     use serde_json::json;
 
     use super::*;
@@ -488,5 +730,124 @@ mod tests {
             extensions: Extensions::new(),
         };
         assert!(failure.encode_base64().is_none());
+    }
+}
+
+/// A single payment kind advertised by a facilitator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
+pub struct SupportedPaymentKind {
+    /// x402 protocol version (`2`).
+    pub x402_version: u8,
+    /// Scheme name (e.g. `"exact"`, `"upto"`).
+    pub scheme: CompactString,
+    /// CAIP-2 network identifier.
+    pub network: CompactString,
+    /// Optional scheme-specific extras (fee payer, memo, ...).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Value>,
+}
+
+impl SupportedPaymentKind {
+    /// Constructs a kind from the three required fields. Use [`Self::with_extra`]
+    /// to attach scheme-specific extras (fee payer, memo, etc.).
+    #[must_use]
+    pub fn new(
+        x402_version: u8,
+        scheme: impl Into<CompactString>,
+        network: impl Into<CompactString>,
+    ) -> Self {
+        Self {
+            x402_version,
+            scheme: scheme.into(),
+            network: network.into(),
+            extra: None,
+        }
+    }
+
+    /// Builder: attaches an `extra` JSON blob.
+    #[must_use]
+    pub fn with_extra(mut self, extra: serde_json::Value) -> Self {
+        self.extra = Some(extra);
+        self
+    }
+
+    /// Builder: attaches an optional `extra` blob, useful when the value is
+    /// produced via `Option::map` upstream.
+    #[must_use]
+    pub fn with_optional_extra(mut self, extra: Option<serde_json::Value>) -> Self {
+        self.extra = extra;
+        self
+    }
+}
+
+/// Response body of a facilitator's `/supported` endpoint.
+///
+/// Describes the full set of capabilities: payment kinds, known extensions,
+/// and signer addresses keyed by CAIP-2 chain pattern.
+#[serde_as]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[non_exhaustive]
+pub struct SupportedResponse {
+    /// Supported payment kinds. Invalid entries are silently skipped.
+    #[serde_as(as = "VecSkipError<_>")]
+    pub kinds: Vec<SupportedPaymentKind>,
+    /// Supported extension identifiers.
+    #[serde(default)]
+    pub extensions: Vec<CompactString>,
+    /// Signer addresses indexed by CAIP-2 pattern
+    /// (`"eip155:8453"`, `"solana:*"`, ...).
+    #[serde(default)]
+    pub signers: HashMap<CompactString, Vec<CompactString>>,
+}
+
+impl SupportedResponse {
+    /// Constructs an empty response. Equivalent to [`Default::default`] but
+    /// recommended for explicit construction sites where the field set will
+    /// grow over time.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Builder: replaces the `kinds` list.
+    #[must_use]
+    pub fn with_kinds(mut self, kinds: Vec<SupportedPaymentKind>) -> Self {
+        self.kinds = kinds;
+        self
+    }
+
+    /// Builder: replaces the `extensions` identifier list.
+    #[must_use]
+    pub fn with_extensions(mut self, extensions: Vec<CompactString>) -> Self {
+        self.extensions = extensions;
+        self
+    }
+
+    /// Builder: replaces the per-pattern signer map.
+    #[must_use]
+    pub fn with_signers(mut self, signers: HashMap<CompactString, Vec<CompactString>>) -> Self {
+        self.signers = signers;
+        self
+    }
+
+    /// Returns all signer addresses that match the given chain.
+    ///
+    /// Matches both the exact pattern (`"eip155:8453"`) and the namespace
+    /// wildcard (`"eip155:*"`).
+    #[must_use]
+    pub fn signers_for_chain(&self, chain_id: &ChainId) -> Vec<&str> {
+        let exact = CompactString::from(chain_id.to_string());
+        let wildcard = CompactString::from(format!("{}:*", chain_id.namespace()));
+        let mut out = Vec::new();
+        if let Some(list) = self.signers.get(&exact) {
+            out.extend(list.iter().map(CompactString::as_str));
+        }
+        if let Some(list) = self.signers.get(&wildcard) {
+            out.extend(list.iter().map(CompactString::as_str));
+        }
+        out
     }
 }
