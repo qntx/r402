@@ -96,7 +96,7 @@ pub struct AuthCaptureEip3009Authorization {
 pub struct AuthCaptureEip3009Payload {
     /// Authorization that was signed.
     pub authorization: AuthCaptureEip3009Authorization,
-    /// ECDSA / EIP-1271 / EIP-6492 signature.
+    /// 65-byte ECDSA signature (r, s, v).
     pub signature: Bytes,
     /// Fresh client salt (bytes32).
     pub salt: B256,
@@ -133,7 +133,7 @@ pub struct AuthCapturePermit2Authorization {
 pub struct AuthCapturePermit2Payload {
     /// Permit2 fields that were signed.
     pub permit2_authorization: AuthCapturePermit2Authorization,
-    /// Signature bytes.
+    /// 65-byte ECDSA signature (r, s, v).
     pub signature: Bytes,
     /// Fresh client salt.
     pub salt: B256,
