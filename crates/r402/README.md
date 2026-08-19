@@ -25,10 +25,10 @@ Forwarding features: `client`, `server`, `facilitator`, `telemetry`, `cache`,
 ```toml
 [dependencies]
 # Minimal EVM HTTP server/client
-r402 = { version = "0.15", features = ["evm", "http", "client", "server", "facilitator"] }
+r402 = { version = "0.16", features = ["evm", "http", "client", "server", "facilitator"] }
 
 # Multi-chain
-r402 = { version = "0.15", features = [
+r402 = { version = "0.16", features = [
   "evm", "solana", "tron", "casper",
   "http", "client", "server", "facilitator",
 ] }

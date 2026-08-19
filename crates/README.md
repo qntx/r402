@@ -59,7 +59,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 
 ```toml
 [dependencies]
-r402 = { version = "0.15", features = [
+r402 = { version = "0.16", features = [
   "evm", "solana", "tron", "casper",
   "http", "client", "server", "facilitator",
 ] }
