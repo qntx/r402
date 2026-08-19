@@ -27,6 +27,7 @@ evm = ["dep:r402-evm"]
 solana = ["dep:r402-solana"]
 casper = ["dep:r402-casper"]
 tron = ["dep:r402-tron"]
+near = ["dep:r402-near"]
 http = ["dep:r402-http"]
 mcp = ["dep:r402-mcp"]
 
@@ -35,6 +36,7 @@ client = [
     "r402-solana?/client",
     "r402-casper?/client",
     "r402-tron?/client",
+    "r402-near?/client",
     "r402-http?/client",
     "r402-mcp?/client",
 ]
@@ -43,6 +45,7 @@ server = [
     "r402-solana?/server",
     "r402-casper?/server",
     "r402-tron?/server",
+    "r402-near?/server",
     "r402-http?/server",
     "r402-mcp?/server",
 ]
@@ -52,6 +55,7 @@ facilitator = [
     "r402-casper?/facilitator",
     "r402-casper?/http-client",
     "r402-tron?/facilitator",
+    "r402-near?/facilitator",
 ]
 
 telemetry = [
@@ -60,6 +64,7 @@ telemetry = [
     "r402-solana?/telemetry",
     "r402-casper?/telemetry",
     "r402-tron?/telemetry",
+    "r402-near?/telemetry",
     "r402-http?/telemetry",
     "r402-mcp?/telemetry",
 ]
@@ -77,6 +82,7 @@ full = [
     "solana",
     "casper",
     "tron",
+    "near",
     "http",
     "mcp",
     "client",
@@ -93,6 +99,7 @@ r402-casper = { workspace = true, optional = true }
 r402-evm = { workspace = true, optional = true }
 r402-solana = { workspace = true, optional = true }
 r402-tron = { workspace = true, optional = true }
+r402-near = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }
 r402-mcp = { workspace = true, optional = true }
 

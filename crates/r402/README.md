@@ -14,6 +14,7 @@ individual crates when you need a minimal dependency graph.
 | `solana` | [`r402-solana`](https://docs.rs/r402-solana) | Solana exact (SPL Token / Token-2022) |
 | `tron` | [`r402-tron`](https://docs.rs/r402-tron) | Tron exact (TIP-712 / EIP-3009 + Permit2) |
 | `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
+| `near` | [`r402-near`](https://docs.rs/r402-near) | NEAR exact (NEP-141 / NEP-366) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
@@ -40,6 +41,7 @@ use r402::evm;    // r402-evm
 use r402::solana; // r402-solana
 use r402::tron;   // r402-tron
 use r402::casper; // r402-casper
+use r402::near;   // r402-near
 use r402::http;   // r402-http
 use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
@@ -52,6 +54,7 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `solana` | | Re-export `r402-solana` as [`solana`] |
 | `tron` | | Re-export `r402-tron` as [`tron`] |
 | `casper` | | Re-export `r402-casper` as [`casper`] |
+| `near` | | Re-export `r402-near` as [`near`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |

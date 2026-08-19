@@ -14,6 +14,9 @@ pub use r402_http as http;
 #[cfg(feature = "mcp")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mcp")))]
 pub use r402_mcp as mcp;
+#[cfg(feature = "near")]
+#[cfg_attr(docsrs, doc(cfg(feature = "near")))]
+pub use r402_near as near;
 #[cfg(feature = "solana")]
 #[cfg_attr(docsrs, doc(cfg(feature = "solana")))]
 pub use r402_solana as solana;

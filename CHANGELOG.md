@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **`r402-near`** — NEAR `exact` E2E: NEP-366 `SignedDelegate` client, server
+  `price_tag` (`USDC::near()` / `USDC::near_testnet()`, `enricher: None`),
+  in-process facilitator with the official TS `invalidReason` table and
+  `SettlementCache` (120s, keyed by the base64 delegate). Umbrella feature
+  `near` is optional and is included in `full`.
+
 ## [0.16.0] — 2026-08-19
 
 ### Security
