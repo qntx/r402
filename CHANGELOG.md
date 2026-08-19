@@ -38,6 +38,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `Block::try_from` verify, per-fee-payer `mpsc` settle with
   `TransmitOptions::with_fee_signer`. Umbrella feature `keeta` is optional
   and is included in `full`.
+- **`r402-tvm`** — TON `exact` E2E: W5R1 client settlement BoC, server
+  `price_tag` (`USDT::tvm()` / `USDT::tvm_testnet()`, `areFeesSponsored: true`),
+  Highload V3 facilitator batcher (1s / 100 / max 185) and `SettlementCache`
+  reserve-only (120s, keyed by settlement BoC hash). Umbrella feature `tvm`
+  is optional and is included in `full`. CAIP-2 `tvm:-239` / `tvm:-3`
+  round-trip through `ChainId`.
 
 ### Changed
 

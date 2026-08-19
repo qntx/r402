@@ -13,6 +13,7 @@
 | **[`r402-hedera`](r402-hedera/)** | [![crates.io][r402-hedera-crate]][r402-hedera-crate-url] [![docs.rs][r402-hedera-doc]][r402-hedera-doc-url] | Hedera — HBAR / HTS exact transfers |
 | **[`r402-algorand`](r402-algorand/)** | [![crates.io][r402-algorand-crate]][r402-algorand-crate-url] [![docs.rs][r402-algorand-doc]][r402-algorand-doc-url] | Algorand — ASA exact transfers via algod REST |
 | **[`r402-keeta`](r402-keeta/)** | [![crates.io][r402-keeta-crate]][r402-keeta-crate-url] [![docs.rs][r402-keeta-doc]][r402-keeta-doc-url] | Keeta — exact `SEND` (fee-payer sponsored) |
+| **[`r402-tvm`](r402-tvm/)** | [![crates.io][r402-tvm-crate]][r402-tvm-crate-url] [![docs.rs][r402-tvm-doc]][r402-tvm-doc-url] | TON — TEP-74 / W5R1 exact transfers (Highload V3 facilitator) |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate, reqwest client, facilitator client |
 | **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport on official **`rmcp`** (Go/TS parity) |
 
@@ -31,6 +32,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | [`r402-hedera`](r402-hedera/) | `hedera:mainnet`, `hedera:testnet` | `exact` | In-process via Mirror REST + Hiero SDK (fee-payer-sponsored) |
 | [`r402-algorand`](r402-algorand/) | `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k`, `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe` | `exact` | In-process via algod REST (fee-payer-sponsored) |
 | [`r402-keeta`](r402-keeta/) | `keeta:21378`, `keeta:1413829460` | `exact` | In-process via `keetanetwork-client` (fee-payer sponsored) |
+| [`r402-tvm`](r402-tvm/) | `tvm:-239`, `tvm:-3` | `exact` | In-process via REST (Highload V3 relay) |
 
 ## Dependency graph
 
@@ -46,6 +48,7 @@ r402 (umbrella)
   ├── r402-hedera        ── r402-core   exact (HBAR / HTS fee payer)
   ├── r402-algorand      ── r402-core   exact (algod REST + fee payer)
   ├── r402-keeta         ── r402-core   exact (Keeta SEND + fee payer)
+  ├── r402-tvm           ── r402-core   exact (W5R1 / Highload V3)
   ├── r402-http          ── r402-core   Axum Paygate + reqwest X402Client
   └── r402-mcp           ── r402-core   MCP transport (rmcp, V2)
 ```
@@ -68,6 +71,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 | `hedera` | | Enable `r402-hedera` |
 | `algorand` | | Enable `r402-algorand` |
 | `keeta` | | Enable `r402-keeta` |
+| `tvm` | | Enable `r402-tvm` |
 | `mcp` | | Enable `r402-mcp` |
 | `client` | | Propagate `client` to enabled crates |
 | `server` | | Propagate `server` to enabled crates |
@@ -99,6 +103,7 @@ r402 = { version = "0.16", features = [
 | `r402-hedera` | Price tag generation | Payer-signed `TransferTransaction` | On-chain verify & settle (Mirror + Hiero) | `tracing` spans |
 | `r402-algorand` | Price tag generation | Atomic group + ASA transfer signing | On-chain verify & settle (algod REST) | `tracing` spans |
 | `r402-keeta` | Price tag generation | Signed `SEND` block | On-chain verify & settle (`UserClient::transmit`) | `tracing` spans |
+| `r402-tvm` | Price tag generation | W5R1 settlement BoC signing | On-chain verify & Highload V3 settle | `tracing` spans |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
@@ -122,6 +127,8 @@ r402 = { version = "0.16", features = [
 [r402-algorand-crate-url]: https://crates.io/crates/r402-algorand
 [r402-keeta-crate]: https://img.shields.io/crates/v/r402-keeta.svg
 [r402-keeta-crate-url]: https://crates.io/crates/r402-keeta
+[r402-tvm-crate]: https://img.shields.io/crates/v/r402-tvm.svg
+[r402-tvm-crate-url]: https://crates.io/crates/r402-tvm
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
 [r402-mcp-crate]: https://img.shields.io/crates/v/r402-mcp.svg
@@ -148,6 +155,8 @@ r402 = { version = "0.16", features = [
 [r402-algorand-doc-url]: https://docs.rs/r402-algorand
 [r402-keeta-doc]: https://img.shields.io/docsrs/r402-keeta.svg
 [r402-keeta-doc-url]: https://docs.rs/r402-keeta
+[r402-tvm-doc]: https://img.shields.io/docsrs/r402-tvm.svg
+[r402-tvm-doc-url]: https://docs.rs/r402-tvm
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
 [r402-mcp-doc]: https://img.shields.io/docsrs/r402-mcp.svg

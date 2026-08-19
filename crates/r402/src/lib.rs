@@ -35,3 +35,6 @@ pub use r402_tron as tron;
 #[cfg(feature = "xrpl")]
 #[cfg_attr(docsrs, doc(cfg(feature = "xrpl")))]
 pub use r402_xrpl as xrpl;
+#[cfg(feature = "tvm")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tvm")))]
+pub use r402_tvm as tvm;

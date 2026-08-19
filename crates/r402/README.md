@@ -19,6 +19,7 @@ individual crates when you need a minimal dependency graph.
 | `hedera` | [`r402-hedera`](https://docs.rs/r402-hedera) | Hedera exact (HBAR / HTS) |
 | `algorand` | [`r402-algorand`](https://docs.rs/r402-algorand) | Algorand exact (ASA / algod REST) |
 | `keeta` | [`r402-keeta`](https://docs.rs/r402-keeta) | Keeta exact (signed `SEND` block) |
+| `tvm` | [`r402-tvm`](https://docs.rs/r402-tvm) | TON exact (TEP-74 / W5R1) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
@@ -50,6 +51,7 @@ use r402::xrpl;   // r402-xrpl
 use r402::hedera; // r402-hedera
 use r402::algorand; // r402-algorand
 use r402::keeta;  // r402-keeta
+use r402::tvm;    // r402-tvm
 use r402::http;   // r402-http
 use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
@@ -66,6 +68,7 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `xrpl` | | Re-export `r402-xrpl` as [`xrpl`] |
 | `hedera` | | Re-export `r402-hedera` as [`hedera`] |
 | `algorand` | | Re-export `r402-algorand` as [`algorand`] |
+| `tvm` | | Re-export `r402-tvm` as [`tvm`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |

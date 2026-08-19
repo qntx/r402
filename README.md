@@ -25,6 +25,7 @@ r402 is a production-grade, multi-chain implementation of x402 with dual-path ER
 r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Hedera**.
 r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Algorand**.
 r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Keeta**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and TON**.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
