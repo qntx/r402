@@ -23,6 +23,10 @@
 //! on-chain. The facilitator pays the gas fees and is reimbursed through the payment.
 pub mod types;
 
+/// Shared Solidity interfaces used by more than one scheme facilitator.
+#[cfg(feature = "facilitator")]
+pub mod contracts;
+
 /// Pending nonce management for EVM transactions.
 #[cfg(feature = "facilitator")]
 pub mod nonce;

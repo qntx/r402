@@ -50,10 +50,10 @@ use compact_str::CompactString;
 use http::{HeaderMap, HeaderName, HeaderValue};
 /// Official partial-settlement overrides (`amount` atomic / percent / dollar).
 pub use r402_core::SettlementOverrides;
-use r402_core::payment::{
+use r402_core::wire::PaymentRequirements;
+use r402_core::wire::{
     SettlementOverrideError, asset_decimals_from_extra, resolve_settlement_override_amount,
 };
-use r402_core::wire::PaymentRequirements;
 
 /// Official HTTP header for partial settlement (`Settlement-Overrides`).
 pub const SETTLEMENT_OVERRIDES_HEADER: &str = "Settlement-Overrides";

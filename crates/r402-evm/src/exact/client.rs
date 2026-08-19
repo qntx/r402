@@ -25,17 +25,10 @@
 //! payment and sends an `approve` transaction if needed, making the experience
 //! as seamless as EIP-3009.
 
-pub(crate) mod permit2;
-
-use std::future::Future;
 use std::sync::Arc;
 
-use alloy_primitives::{Address, FixedBytes, Signature, U256};
-use alloy_signer_local::PrivateKeySigner;
+use alloy_primitives::{Address, FixedBytes, U256};
 use alloy_sol_types::{SolStruct, eip712_domain};
-#[cfg(feature = "client-provider")]
-use permit2::BuiltinPermit2Approver;
-pub use permit2::{Permit2Approver, permit2_allowance_calldata, permit2_approval_calldata};
 use r402_core::error::ClientError;
 use r402_core::scheme::SchemeId;
 use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
@@ -46,51 +39,20 @@ use r402_core::wire::UnixTimestamp;
 use rand::RngExt;
 use rand::rng;
 
+use crate::asset::AssetTransferMethod;
 use crate::chain::Eip155ChainReference;
 use crate::chain::TokenAmount;
 use crate::exact::types;
 use crate::exact::types::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
-    AssetTransferMethod, Eip155Exact, Eip3009Authorization, Eip3009Payload, ExactPayload,
-    PERMIT2_ADDRESS, PaymentRequirementsExtra, Permit2Authorization, Permit2Payload,
-    Permit2TokenPermissions, Permit2Witness, PermitWitnessTransferFrom, TransferWithAuthorization,
-    X402_EXACT_PERMIT2_PROXY,
+    Eip155Exact, Eip3009Authorization, Eip3009Payload, ExactPayload, PaymentRequirementsExtra,
+    Permit2Authorization, Permit2Payload, Permit2Witness, PermitWitnessTransferFrom,
+    TransferWithAuthorization, X402_EXACT_PERMIT2_PROXY,
 };
-
-/// A trait that abstracts signing operations, allowing both owned signers and Arc-wrapped signers.
-///
-/// This is necessary because Alloy's `Signer` trait is not implemented for `Arc<T>`,
-/// but users may want to share signers via `Arc` (especially when `PrivateKeySigner` doesn't implement `Clone`).
-pub trait SignerLike: Send + Sync {
-    /// Returns the address of the signer.
-    fn address(&self) -> Address;
-
-    /// Signs the given hash.
-    fn sign_hash(
-        &self,
-        hash: &FixedBytes<32>,
-    ) -> impl Future<Output = Result<Signature, alloy_signer::Error>> + Send;
-}
-
-impl SignerLike for PrivateKeySigner {
-    fn address(&self) -> Address {
-        Self::address(self)
-    }
-
-    async fn sign_hash(&self, hash: &FixedBytes<32>) -> Result<Signature, alloy_signer::Error> {
-        alloy_signer::Signer::sign_hash(self, hash).await
-    }
-}
-
-impl<T: SignerLike + Send + Sync> SignerLike for Arc<T> {
-    fn address(&self) -> Address {
-        (**self).address()
-    }
-
-    async fn sign_hash(&self, hash: &FixedBytes<32>) -> Result<Signature, alloy_signer::Error> {
-        (**self).sign_hash(hash).await
-    }
-}
+#[cfg(feature = "client-provider")]
+use crate::permit2::BuiltinPermit2Approver;
+use crate::permit2::{PERMIT2_ADDRESS, Permit2Approver, Permit2TokenPermissions};
+use crate::signer::SignerLike;
 
 /// Shared EIP-712 signing parameters for ERC-3009 authorization.
 ///

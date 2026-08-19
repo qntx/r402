@@ -7,8 +7,8 @@ use r402_core::wire;
 
 use super::Eip155AuthCapture;
 use super::types::AuthCaptureExtra;
+use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
-use crate::exact::AssetTransferMethod;
 
 impl Eip155AuthCapture {
     /// Builds a price tag for auth-capture payments.

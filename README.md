@@ -21,7 +21,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana (SVM), Tron, and Casper**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, and Casper**.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
@@ -105,7 +105,7 @@ Handlers opt in by inserting `UptoActualAmount` into the response extensions; th
 
 ## Settlement Modes
 
-`X402Middleware` supports three settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402LayerBuilder.html#method.with_settlement_mode):
+`X402Middleware` supports three settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402Layer.html#method.with_settlement_mode):
 
 ### Sequential (default)
 
@@ -189,7 +189,7 @@ sequenceDiagram
 
 ## Design
 
-- **Four built-in chains** — EVM (EIP-155), Solana (SVM), Tron, Casper
+- **Four built-in chains** — EVM (EIP-155), Solana, Tron, Casper
 - **Schemes** — **`exact`** (all chains) + **`upto`** (usage-based, EVM)
 - **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 auth (Casper)
 - **Lifecycle hooks** — `FacilitatorHooks` (verify/settle) + `ClientHooks` (payment creation)

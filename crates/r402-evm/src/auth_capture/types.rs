@@ -9,8 +9,8 @@ use r402_core::scheme::AuthCaptureScheme;
 use r402_core::wire::UnixTimestamp;
 use serde::{Deserialize, Serialize};
 
+use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, TokenAmount};
-use crate::exact::AssetTransferMethod;
 
 /// Canonical `AuthCaptureEscrow` (base/commerce-payments), same on all chains.
 pub const AUTH_CAPTURE_ESCROW_ADDRESS: Address =

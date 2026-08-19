@@ -4,16 +4,15 @@ Core types, traits, and wire formats for the x402 payment protocol.
 
 This crate is blockchain-agnostic. It defines the shared data model used by
 client, server, and facilitator implementations across every chain. Chain
-specific behavior lives in sibling crates (`r402-evm`, `r402-svm`,
+specific behavior lives in sibling crates (`r402-evm`, `r402-solana`,
 `r402-tron`, `r402-casper`).
 
 ## Modules
 
-- [`wire`] — On-the-wire JSON types (offer, facilitator RPC, codecs)
+- [`wire`] — On-the-wire JSON types (offer, facilitator RPC, codecs) and settlement overrides
 - [`facilitator`] — `Facilitator` trait, `DynFacilitator` erasure, verify/settle hooks
 - [`scheme`] — Payment scheme registry and builder traits
 - [`extensions`] — Extension framework for x402 protocol extensions
-- [`payment`] — `Payment<State>` typestate and settlement amount overrides
 - [`client`] — `PaymentClient` orchestration
 - [`resource_server`] — Transport-agnostic verify → execute → settle
 - [`chain`] — CAIP-2 chain identifiers, address, provider abstractions

@@ -27,6 +27,7 @@ pub use offer::{
     find_matching_requirements,
 };
 pub use rpc::{
-    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, TypedVerifyRequest,
-    VerifyRequest, VerifyResponse,
+    DEFAULT_ASSET_DECIMALS, SettleRequest, SettleResponse, SettlementOverrideError,
+    SettlementOverrides, SupportedPaymentKind, SupportedResponse, TypedVerifyRequest,
+    VerifyRequest, VerifyResponse, asset_decimals_from_extra, resolve_settlement_override_amount,
 };

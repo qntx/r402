@@ -9,6 +9,6 @@ jobs:
     uses: qntx/workflows/.github/workflows/publish-crates.yml@main
     with:
       # Publish order: leaf crates first, umbrella `r402` last.
-      packages: "r402-core r402-evm r402-svm r402-tron r402-casper r402-http r402-mcp r402"
+      packages: "r402-core r402-evm r402-solana r402-tron r402-casper r402-http r402-mcp r402"
     secrets:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

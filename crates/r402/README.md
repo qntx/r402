@@ -11,7 +11,7 @@ individual crates when you need a minimal dependency graph.
 | --- | --- | --- |
 | *(always)* | [`r402-core`](https://docs.rs/r402-core) | Wire types, `Facilitator`, schemes, hooks, extensions |
 | `evm` (default) | [`r402-evm`](https://docs.rs/r402-evm) | EVM exact + upto (ERC-3009 / Permit2) |
-| `svm` | [`r402-svm`](https://docs.rs/r402-svm) | Solana exact (SPL Token / Token-2022) |
+| `solana` | [`r402-solana`](https://docs.rs/r402-solana) | Solana exact (SPL Token / Token-2022) |
 | `tron` | [`r402-tron`](https://docs.rs/r402-tron) | Tron exact (TIP-712 / EIP-3009 + Permit2) |
 | `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
@@ -29,7 +29,7 @@ r402 = { version = "0.15", features = ["evm", "http", "client", "server", "facil
 
 # Multi-chain
 r402 = { version = "0.15", features = [
-  "evm", "svm", "tron", "casper",
+  "evm", "solana", "tron", "casper",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -37,7 +37,7 @@ r402 = { version = "0.15", features = [
 ```rust,ignore
 // After enabling the matching features:
 use r402::evm;    // r402-evm
-use r402::svm;    // r402-svm
+use r402::solana; // r402-solana
 use r402::tron;   // r402-tron
 use r402::casper; // r402-casper
 use r402::http;   // r402-http
@@ -49,7 +49,7 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | Flag | Default | What it enables |
 | --- | :---: | --- |
 | `evm` | yes | Re-export `r402-evm` as [`evm`] |
-| `svm` | | Re-export `r402-svm` as [`svm`] |
+| `solana` | | Re-export `r402-solana` as [`solana`] |
 | `tron` | | Re-export `r402-tron` as [`tron`] |
 | `casper` | | Re-export `r402-casper` as [`casper`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |

@@ -1,11 +1,6 @@
-//! Solidity interface definitions for on-chain interactions.
+//! Exact-scheme Solidity interfaces (ERC-3009 + exact Permit2 proxy).
 //!
-//! Contains the minimal ABI surface needed by the facilitator:
-//! - [`IEIP3009`] — ERC-3009 + ERC-20 subset for USDC-style tokens
-//! - [`IX402Permit2Proxy`] — x402 Permit2 proxy for settling Permit2 payments
-//! - [`IERC20`] — Minimal ERC-20 interface for allowance/balance checks
-//! - [`Validator6492`] — EIP-6492 universal signature validator
-//! - [`Sig6492`] — ABI-decodable prefix of an EIP-6492 wrapped signature
+//! Shared ERC-20 / EIP-6492 ABIs live in [`crate::chain::contracts`].
 
 use alloy_sol_types::sol;
 
@@ -51,31 +46,6 @@ sol! {
 }
 
 sol! {
-    /// EIP-6492 universal signature validator interface.
-    ///
-    /// Reference: <https://eips.ethereum.org/EIPS/eip-6492>
-    #[allow(missing_docs, reason = "sol! generated interface")]
-    #[derive(Debug)]
-    #[sol(rpc)]
-    interface Validator6492 {
-        function isValidSig(address signer, bytes32 hash, bytes calldata signature) external returns (bool);
-        function isValidSigWithSideEffects(address signer, bytes32 hash, bytes calldata signature) external returns (bool);
-        error ERC1271Revert(bytes error);
-        error ERC6492DeployFailed(bytes error);
-    }
-}
-
-sol! {
-    /// Solidity-compatible struct for decoding the prefix of an EIP-6492 signature.
-    #[derive(Debug)]
-    struct Sig6492 {
-        address factory;
-        bytes   factoryCalldata;
-        bytes   innerSig;
-    }
-}
-
-sol! {
     /// x402 exact payment Permit2 proxy interface.
     ///
     /// Deployed at the canonical address [`X402_EXACT_PERMIT2_PROXY`](super::super::types::X402_EXACT_PERMIT2_PROXY)
@@ -116,16 +86,5 @@ sol! {
         /// Useful for runtime integrity checks (verify the deployed address really
         /// is the x402 proxy and not an arbitrary EOA).
         function PERMIT2() external view returns (address);
-    }
-}
-
-sol! {
-    /// Minimal ERC-20 interface for allowance and balance checks.
-    #[allow(missing_docs, reason = "sol! generated interface")]
-    #[derive(Debug)]
-    #[sol(rpc)]
-    interface IERC20 {
-        function balanceOf(address account) external view returns (uint256);
-        function allowance(address owner, address spender) external view returns (uint256);
     }
 }

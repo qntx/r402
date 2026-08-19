@@ -14,7 +14,7 @@ use super::verify::{
 };
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::error::Eip155ExactError;
-use crate::exact::facilitator::signature::StructuredSignature;
+use crate::signature::StructuredSignature;
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
 
 /// Macro mirrored from the exact facilitator so telemetry spans share shape.

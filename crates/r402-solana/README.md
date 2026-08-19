@@ -1,4 +1,4 @@
-# r402-svm
+# r402-solana
 
 Solana chain support for the [x402 payment protocol][x402], part of the
 [`r402`](../r402) workspace.
@@ -37,7 +37,7 @@ Solana chain support for the [x402 payment protocol][x402], part of the
 
 ## Documentation
 
-- Crate docs: <https://docs.rs/r402-svm>
+- Crate docs: <https://docs.rs/r402-solana>
 - Project README: [`../README.md`](../README.md).
 
 ## Smart-wallet Path 2

@@ -171,7 +171,7 @@ fn unknown_field_rejection_for_top_level_envelopes() {
 /// Settlement-cache callers (every chain facilitator) use this public type.
 /// A representative Solana-style key (base64 transaction payload) must
 /// reserve once and then report a duplicate — the remaining API after the
-/// `r402-svm::settlement_cache` compatibility module was removed.
+/// `r402_solana` no longer re-exports `r402_core::cache`.
 #[cfg(feature = "cache")]
 #[test]
 fn settlement_cache_reserve_then_duplicate() {

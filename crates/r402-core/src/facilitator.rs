@@ -15,7 +15,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub use crate::error::FacilitatorError;
+use crate::error::FacilitatorError;
 use crate::wire::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };

@@ -24,7 +24,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use http::{HeaderMap, StatusCode};
-use r402_core::facilitator::{Facilitator, FacilitatorError};
+use r402_core::error::FacilitatorError;
+use r402_core::facilitator::Facilitator;
 use r402_core::wire::{
     SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };

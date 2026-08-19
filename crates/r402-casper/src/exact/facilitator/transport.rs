@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 
+use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
-use r402_core::facilitator::FacilitatorError;
 
 use super::FacilitatorTransport;
 

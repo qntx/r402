@@ -23,13 +23,12 @@ use tracing::instrument;
 
 use super::contract::IX402UptoPermit2Proxy;
 use super::contract::IX402UptoPermit2Proxy::IX402UptoPermit2ProxyErrors;
+use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::Eip155ChainReference;
+use crate::chain::contracts::{IERC20, Validator6492};
 use crate::error::Eip155ExactError;
-use crate::exact::PERMIT2_ADDRESS;
-use crate::exact::VALIDATOR_ADDRESS;
-use crate::exact::facilitator::assert_time;
-use crate::exact::facilitator::contract::{IERC20, Validator6492};
-use crate::exact::facilitator::signature::StructuredSignature;
+use crate::permit2::PERMIT2_ADDRESS;
+use crate::signature::{StructuredSignature, assert_time};
 use crate::upto::types::{
     self, PermitWitnessTransferFrom as SolPermitWitnessTransferFrom,
     TokenPermissions as SolTokenPermissions, Witness as SolWitness,
@@ -653,7 +652,7 @@ mod tests {
 
     use super::*;
     use crate::chain::{ChecksummedAddress, TokenAmount};
-    use crate::exact::Permit2TokenPermissions;
+    use crate::permit2::Permit2TokenPermissions;
     use crate::upto::{
         UptoPaymentRequirementsExtra, UptoPermit2Authorization, UptoPermit2Witness, UptoScheme,
     };

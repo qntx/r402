@@ -23,8 +23,9 @@ pub use config::{
     CasperFacilitatorConfig, CasperFacilitatorConfigError, DEFAULT_FACILITATOR_URL,
     FACILITATOR_URL_ENV,
 };
+use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
-use r402_core::facilitator::{Facilitator, FacilitatorError};
+use r402_core::facilitator::Facilitator;
 use r402_core::wire;
 #[cfg(feature = "http-client")]
 pub use transport::ReqwestTransport;

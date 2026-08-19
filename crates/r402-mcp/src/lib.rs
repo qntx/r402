@@ -28,7 +28,26 @@
 //! | `client` | [`X402McpClient`], [`call_paid_tool`] |
 //! | `full` | both + telemetry |
 
-pub mod constants;
+/// JSON-RPC / MCP error code for payment required (x402). Official value is **402**.
+pub const MCP_PAYMENT_REQUIRED_CODE: i32 = 402;
+/// MCP `_meta` key for the client → server payment payload.
+pub const MCP_PAYMENT_META_KEY: &str = "x402/payment";
+/// MCP `_meta` key for the server → client settlement response.
+pub const MCP_PAYMENT_RESPONSE_META_KEY: &str = "x402/payment-response";
+/// Default tool resource URL prefix (`mcp://tool/{name}`).
+pub const MCP_TOOL_URL_PREFIX: &str = "mcp://tool/";
+
+#[cfg(test)]
+mod constants_tests {
+    use super::*;
+
+    #[test]
+    fn constants_match_foundation_go_and_ts() {
+        assert_eq!(MCP_PAYMENT_REQUIRED_CODE, 402);
+        assert_eq!(MCP_PAYMENT_META_KEY, "x402/payment");
+        assert_eq!(MCP_PAYMENT_RESPONSE_META_KEY, "x402/payment-response");
+    }
+}
 
 #[cfg(feature = "telemetry")]
 use tracing as _;
@@ -53,10 +72,6 @@ pub mod client;
 pub use client::{
     AfterPaymentContext, McpClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
     PaymentRequiredHookResult, PaymentSigner, X402McpClient, X402McpClientOptions, call_paid_tool,
-};
-pub use constants::{
-    MCP_PAYMENT_META_KEY, MCP_PAYMENT_REQUIRED_CODE, MCP_PAYMENT_RESPONSE_META_KEY,
-    MCP_TOOL_URL_PREFIX,
 };
 #[cfg(any(feature = "server", feature = "client"))]
 pub use encode::{

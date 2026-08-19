@@ -7,8 +7,8 @@ use r402_core::wire;
 
 use super::Eip155BatchSettlement;
 use super::types::BatchSettlementExtra;
+use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
-use crate::exact::AssetTransferMethod;
 
 impl Eip155BatchSettlement {
     /// Builds a price tag advertising batch-settlement terms.

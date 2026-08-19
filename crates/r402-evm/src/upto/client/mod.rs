@@ -26,8 +26,8 @@ use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
 pub use signing::{Permit2UptoSigningParams, sign_permit2_upto_authorization};
 
 use crate::chain::Eip155ChainReference;
-use crate::exact::PERMIT2_ADDRESS;
-use crate::exact::client::{Permit2Approver, SignerLike};
+use crate::permit2::{PERMIT2_ADDRESS, Permit2Approver};
+use crate::signer::SignerLike;
 use crate::upto::{Eip155Upto, types};
 
 /// Client for signing EIP-155 upto scheme payments (Permit2 only).
@@ -137,7 +137,7 @@ impl<S> Eip155UptoClientBuilder<S> {
     ) -> Self {
         // Re-use the exact scheme's built-in approver; the shape is identical
         // (check_permit2_allowance + approve_permit2).
-        self.approver(crate::exact::client::permit2::BuiltinPermit2Approver { provider })
+        self.approver(crate::permit2::BuiltinPermit2Approver { provider })
     }
 
     /// Builds the configured [`Eip155UptoClient`].

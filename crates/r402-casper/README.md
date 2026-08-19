@@ -75,7 +75,7 @@ Override the facilitator URL with `R402_CASPER_FACILITATOR_URL`.
 
 ## References
 
-- Scheme spec: [`scheme_exact_casper.md`](../../3rdparty/x402/specs/schemes/exact/scheme_exact_casper.md)
+- Scheme spec: [`scheme_exact_casper.md`](../../vendor/x402/specs/schemes/exact/scheme_exact_casper.md)
 - Casper x402 reference: <https://github.com/make-software/casper-x402>
 - Facilitator docs: <https://docs.cspr.cloud>
 

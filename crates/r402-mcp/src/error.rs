@@ -2,7 +2,7 @@
 
 use r402_core::wire::PaymentRequired;
 
-use crate::constants::MCP_PAYMENT_REQUIRED_CODE;
+use crate::MCP_PAYMENT_REQUIRED_CODE;
 
 /// Go `PaymentRequiredError` — JSON-RPC style code **402** with payment data.
 #[derive(Debug, Clone)]

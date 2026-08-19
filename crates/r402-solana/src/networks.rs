@@ -70,7 +70,7 @@ pub fn usdc_solana_deployment(
 /// [`SolanaTokenDeployment::amount`] for a fluent pricing API:
 ///
 /// ```ignore
-/// use r402_svm::{SolanaExact, USDC};
+/// use r402_solana::{SolanaExact, USDC};
 ///
 /// let tag = SolanaExact::price_tag(pay_to, USDC::solana().amount(1_000_000u64));
 /// ```

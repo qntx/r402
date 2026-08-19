@@ -6,7 +6,7 @@ use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
 
 use crate::chain::MetaTransactionSendError;
-use crate::exact::facilitator::signature::StructuredSignatureFormatError;
+use crate::signature::StructuredSignatureFormatError;
 
 /// Errors specific to EIP-155 exact scheme operations.
 #[derive(Debug, thiserror::Error)]

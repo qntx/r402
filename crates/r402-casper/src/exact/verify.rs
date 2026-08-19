@@ -13,7 +13,7 @@
 //! facilitator, which holds the signing key and the node connection.
 //!
 //! Rules follow `specs/schemes/exact/scheme_exact_casper.md` and match the
-//! five-field `assert_requirements_match` used by `r402-evm` / `r402-svm`.
+//! five-field `assert_requirements_match` used by `r402-evm` / `r402-solana`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

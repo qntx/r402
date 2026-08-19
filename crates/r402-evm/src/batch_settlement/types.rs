@@ -7,8 +7,8 @@ use alloy_primitives::{Address, B256, Bytes, address};
 use r402_core::scheme::BatchSettlementScheme;
 use serde::{Deserialize, Serialize};
 
+use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, TokenAmount};
-use crate::exact::AssetTransferMethod;
 
 /// CREATE2 address of `x402BatchSettlement` (all chains).
 pub const BATCH_SETTLEMENT_ADDRESS: Address =

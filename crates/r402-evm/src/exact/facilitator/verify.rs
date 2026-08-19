@@ -15,19 +15,22 @@ use r402_core::wire::UnixTimestamp;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
-use super::contract::{IEIP3009, IERC20, IX402Permit2Proxy, Validator6492};
+use super::contract::{IEIP3009, IX402Permit2Proxy};
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
-use super::signature::{SignedMessage, StructuredSignature};
+use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
+use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::Eip155ChainReference;
+use crate::chain::contracts::{IERC20, Validator6492};
 use crate::error::Eip155ExactError;
-use crate::exact::VALIDATOR_ADDRESS;
 use crate::exact::types::TokenPermissions as SolTokenPermissions;
 use crate::exact::types::Witness as SolWitness;
 use crate::exact::{
-    Eip3009Payload, PERMIT2_ADDRESS, PaymentRequirementsExtra, PermitWitnessTransferFrom,
-    X402_EXACT_PERMIT2_PROXY, types,
+    Eip3009Payload, PaymentRequirementsExtra, PermitWitnessTransferFrom, X402_EXACT_PERMIT2_PROXY,
+    types,
 };
+use crate::permit2::PERMIT2_ADDRESS;
+use crate::signature::{StructuredSignature, assert_time};
 
 /// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
@@ -138,28 +141,6 @@ pub(super) async fn assert_nonce_unused<P: Provider>(
 
 /// Validates that the current time is within the `validAfter` and `validBefore` bounds.
 ///
-/// Applies `clock_skew_tolerance` seconds of grace when checking both expiration
-/// and early-arrival to account for clock drift between nodes.
-///
-/// # Errors
-///
-/// Returns [`VerificationError::Expired`] or [`VerificationError::Early`].
-#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
-pub(crate) fn assert_time(
-    valid_after: UnixTimestamp,
-    valid_before: UnixTimestamp,
-    clock_skew_tolerance: u64,
-) -> Result<(), VerificationError> {
-    let now = UnixTimestamp::now();
-    if valid_before < now + clock_skew_tolerance {
-        return Err(VerificationError::Expired);
-    }
-    if valid_after > now + clock_skew_tolerance {
-        return Err(VerificationError::Early);
-    }
-    Ok(())
-}
-
 /// Constructs the correct EIP-712 domain for signature verification.
 ///
 /// # Errors

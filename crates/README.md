@@ -5,7 +5,7 @@
 | **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Umbrella crate — feature-gated re-exports of the crates below |
 | **[`r402-core`](r402-core/)** | [![crates.io][r402-core-crate]][r402-core-crate-url] [![docs.rs][r402-core-doc]][r402-core-doc-url] | Protocol types, scheme traits, facilitator abstractions, hooks, extensions |
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — `exact` / `upto` / `auth-capture` / `batch-settlement` |
-| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | Solana (SVM) — SPL Token / Token-2022 exact transfers |
+| **[`r402-solana`](r402-solana/)** | [![crates.io][r402-solana-crate]][r402-solana-crate-url] [![docs.rs][r402-solana-doc]][r402-solana-doc-url] | Solana — SPL Token / Token-2022 exact transfers |
 | **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate, reqwest client, facilitator client |
@@ -18,7 +18,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | Chain crate | CAIP-2 examples | Schemes | Settlement model |
 | --- | --- | --- | --- |
 | [`r402-evm`](r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto`, `auth-capture`, `batch-settlement` | In-process on-chain facilitator |
-| [`r402-svm`](r402-svm/) | `solana:…` | `exact` | In-process on-chain facilitator |
+| [`r402-solana`](r402-solana/) | `solana:…` | `exact` | In-process on-chain facilitator |
 | [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` | In-process via TronGrid HTTP |
 | [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator |
 
@@ -28,7 +28,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 r402 (umbrella)
   ├── r402-core          (types, schemes, hooks, ResourceServer, PaymentClient, wire V2)
   ├── r402-evm           ── r402-core   exact + upto + auth-capture + batch-settlement
-  ├── r402-svm           ── r402-core   exact (on-chain)
+  ├── r402-solana        ── r402-core   exact (on-chain)
   ├── r402-tron          ── r402-core   exact (TronGrid)
   ├── r402-casper        ── r402-core   exact (preflight + remote facilitator)
   ├── r402-http          ── r402-core   Axum Paygate + reqwest X402Client
@@ -45,7 +45,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 | --- | --- | --- |
 | `evm` | ✅ | Enable `r402-evm` |
 | `http` | ✅ | Enable `r402-http` |
-| `svm` | | Enable `r402-svm` |
+| `solana` | | Enable `r402-solana` |
 | `tron` | | Enable `r402-tron` |
 | `casper` | | Enable `r402-casper` |
 | `mcp` | | Enable `r402-mcp` |
@@ -60,7 +60,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 ```toml
 [dependencies]
 r402 = { version = "0.15", features = [
-  "evm", "svm", "tron", "casper",
+  "evm", "solana", "tron", "casper",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -71,7 +71,7 @@ r402 = { version = "0.15", features = [
 | --- | --- | --- | --- | --- |
 | `r402-http` | Axum payment gate + facilitator client | Reqwest middleware | — | `tracing` spans |
 | `r402-evm` | Price tag generation | EIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle | `tracing` spans |
-| `r402-svm` | Price tag generation | SPL token signing | On-chain verify & settle | `tracing` spans |
+| `r402-solana` | Price tag generation | SPL token signing | On-chain verify & settle | `tracing` spans |
 | `r402-tron` | Price tag generation | TIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle (TronGrid) | `tracing` spans |
 | `r402-casper` | Price tag generation | `SchemeClient` + EIP-712 digest signing | Remote facilitator client | `tracing` spans |
 
@@ -81,8 +81,8 @@ r402 = { version = "0.15", features = [
 [r402-core-crate-url]: https://crates.io/crates/r402-core
 [r402-evm-crate]: https://img.shields.io/crates/v/r402-evm.svg
 [r402-evm-crate-url]: https://crates.io/crates/r402-evm
-[r402-svm-crate]: https://img.shields.io/crates/v/r402-svm.svg
-[r402-svm-crate-url]: https://crates.io/crates/r402-svm
+[r402-solana-crate]: https://img.shields.io/crates/v/r402-solana.svg
+[r402-solana-crate-url]: https://crates.io/crates/r402-solana
 [r402-tron-crate]: https://img.shields.io/crates/v/r402-tron.svg
 [r402-tron-crate-url]: https://crates.io/crates/r402-tron
 [r402-casper-crate]: https://img.shields.io/crates/v/r402-casper.svg
@@ -97,8 +97,8 @@ r402 = { version = "0.15", features = [
 [r402-core-doc-url]: https://docs.rs/r402-core
 [r402-evm-doc]: https://img.shields.io/docsrs/r402-evm.svg
 [r402-evm-doc-url]: https://docs.rs/r402-evm
-[r402-svm-doc]: https://img.shields.io/docsrs/r402-svm.svg
-[r402-svm-doc-url]: https://docs.rs/r402-svm
+[r402-solana-doc]: https://img.shields.io/docsrs/r402-solana.svg
+[r402-solana-doc-url]: https://docs.rs/r402-solana
 [r402-tron-doc]: https://img.shields.io/docsrs/r402-tron.svg
 [r402-tron-doc-url]: https://docs.rs/r402-tron
 [r402-casper-doc]: https://img.shields.io/docsrs/r402-casper.svg

@@ -12,7 +12,7 @@ use r402_core::error::ClientError;
 use r402_core::scheme::{FirstMatch, PaymentPolicy, PaymentSelector, SchemeClient};
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
-use reqwest::{Request, Response};
+use reqwest::{Client, Request, Response};
 use reqwest_middleware as rqm;
 #[cfg(feature = "telemetry")]
 use tracing::{debug, info, instrument, trace};
@@ -339,4 +339,48 @@ pub async fn parse_payment_required(response: Response) -> Option<wire::PaymentR
     debug!("Could not parse payment required from response");
 
     None
+}
+
+impl<S> X402Client<S>
+where
+    Self: rqm::Middleware,
+{
+    /// Wraps a reqwest [`Client`] with x402 payment middleware.
+    ///
+    /// Returns a [`rqm::ClientWithMiddleware`] that automatically handles
+    /// 402 Payment Required responses using registered scheme clients.
+    #[must_use]
+    pub fn wrap(self, client: Client) -> rqm::ClientWithMiddleware {
+        rqm::ClientBuilder::new(client).with(self).build()
+    }
+
+    /// Wraps a reqwest [`Client`] and returns the middleware builder
+    /// for further customization (e.g., adding more middleware).
+    #[must_use]
+    pub fn wrap_builder(self, client: Client) -> rqm::ClientBuilder {
+        rqm::ClientBuilder::new(client).with(self)
+    }
+}
+
+/// Extension trait for adding x402 payment handling to a reqwest [`Client`].
+///
+/// ```rust,ignore
+/// use r402_http::client::{WithPayments, X402Client};
+///
+/// let client = reqwest::Client::new().with_payments(x402);
+/// ```
+pub trait WithPayments {
+    /// Adds x402 payment middleware, returning a ready-to-use client.
+    fn with_payments<S>(self, x402: X402Client<S>) -> rqm::ClientWithMiddleware
+    where
+        X402Client<S>: rqm::Middleware;
+}
+
+impl WithPayments for Client {
+    fn with_payments<S>(self, x402: X402Client<S>) -> rqm::ClientWithMiddleware
+    where
+        X402Client<S>: rqm::Middleware,
+    {
+        x402.wrap(self)
+    }
 }
