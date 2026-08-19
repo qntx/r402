@@ -158,7 +158,7 @@ mod client_verify_tests {
         // the unpatched code it is skipped, so verify returns the attacker's
         // chosen address.
         let AuthCapturePayload::Eip3009(mut p) = scheme_payload else {
-            panic!("expected eip3009 payload");
+            unreachable!("sign_auth_capture returns an EIP-3009 payload for this input")
         };
         p.authorization.from = Address::repeat_byte(0xCC);
         p.signature = alloy_primitives::Bytes::from(vec![0u8; 64]);
