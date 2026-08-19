@@ -9,10 +9,16 @@ use std::str::FromStr;
 use r402_core::amount::{MoneyAmount, MoneyAmountParseError};
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use solana_pubkey::Pubkey;
+use solana_pubkey::{Pubkey, pubkey};
 
 /// The CAIP-2 namespace for Solana chains.
 pub const SOLANA_NAMESPACE: &str = "solana";
+
+/// Legacy SPL Token program. Same address on every Solana cluster.
+pub const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+/// Token-2022 program. Same address on every Solana cluster.
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 /// A Solana chain reference consisting of 32 ASCII characters.
 ///
@@ -24,6 +30,7 @@ pub const SOLANA_NAMESPACE: &str = "solana";
 ///
 /// - Mainnet: `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
 /// - Devnet: `EtWTRABZaYq6iMfeYKouRu166VU2xqa1`
+/// - Testnet: `4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SolanaChainReference([u8; 32]);
 
@@ -33,6 +40,9 @@ impl SolanaChainReference {
 
     /// Solana devnet (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`).
     pub const SOLANA_DEVNET: Self = Self::new(*b"EtWTRABZaYq6iMfeYKouRu166VU2xqa1");
+
+    /// Solana testnet (`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`).
+    pub const SOLANA_TESTNET: Self = Self::new(*b"4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z");
 
     /// Creates a new [`SolanaChainReference`] from a 32-byte ASCII array.
     ///
@@ -150,8 +160,8 @@ pub enum SolanaChainReferenceFormatError {
 /// Information about an SPL token deployment on a Solana network.
 ///
 /// This type contains all the information needed to interact with a specific
-/// token on a specific Solana network, including the mint address and decimal
-/// precision.
+/// token on a specific Solana network, including the mint address, decimal
+/// precision, and owning token program.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct SolanaTokenDeployment {
     /// The Solana network where this token is deployed.
@@ -160,6 +170,9 @@ pub struct SolanaTokenDeployment {
     pub address: Address,
     /// The number of decimal places for this token.
     pub decimals: u8,
+    /// Program that owns the mint. `$` amounts use this so Token-2022 mints
+    /// are not treated as legacy SPL Token.
+    pub token_program: Pubkey,
 }
 
 impl SolanaTokenDeployment {
@@ -169,11 +182,13 @@ impl SolanaTokenDeployment {
         chain_reference: SolanaChainReference,
         address: Address,
         decimals: u8,
+        token_program: Pubkey,
     ) -> Self {
         Self {
             chain_reference,
             address,
             decimals,
+            token_program,
         }
     }
 
@@ -290,7 +305,17 @@ mod tests {
         let chain_ref = SolanaChainReference::SOLANA;
         // Use a well-known test address (USDC on Solana devnet)
         let address = Address::from_str("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZ5nc4pb").unwrap();
-        SolanaTokenDeployment::new(chain_ref, address, decimals)
+        SolanaTokenDeployment::new(chain_ref, address, decimals, TOKEN_PROGRAM_ID)
+    }
+
+    #[test]
+    fn parse_preserves_token_program() {
+        let chain_ref = SolanaChainReference::SOLANA;
+        let address = Address::from_str("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZ5nc4pb").unwrap();
+        let deployment = SolanaTokenDeployment::new(chain_ref, address, 6, TOKEN_2022_PROGRAM_ID);
+        let result = deployment.parse("$10.50").unwrap();
+        assert_eq!(result.amount, 10_500_000);
+        assert_eq!(result.token.token_program, TOKEN_2022_PROGRAM_ID);
     }
 
     #[test]

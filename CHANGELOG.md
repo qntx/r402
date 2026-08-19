@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   in-process facilitator with the official TS `invalidReason` table and
   `SettlementCache` (120s, keyed by the base64 delegate). Umbrella feature
   `near` is optional and is included in `full`.
+- **`r402-solana`**: `solana-testnet` (`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`); `SolanaTokenDeployment.token_program` (legacy SPL Token vs Token-2022); default mints for USDT, USDG, PYUSD, and CASH. Testnet USDC uses the Circle devnet mint.
 
 ### Changed
 
