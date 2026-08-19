@@ -13,10 +13,10 @@ use alloy_transport::TransportError;
 use tracing_core::Level;
 
 use super::contract::{IEIP3009, IX402Permit2Proxy};
-use super::error::Eip155ExactError;
 use super::signature::{SignedMessage, StructuredSignature};
 use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+use crate::error::Eip155ExactError;
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 
 /// Prepared `transferWithAuthorization` call using a raw bytes signature.

@@ -51,7 +51,7 @@ pub mod client;
 
 #[cfg(feature = "client")]
 pub use client::{
-    AfterPaymentContext, ClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
+    AfterPaymentContext, McpClientHooks, McpToolCaller, PaidToolCallResult, PaymentRequiredContext,
     PaymentRequiredHookResult, PaymentSigner, X402McpClient, X402McpClientOptions, call_paid_tool,
 };
 pub use constants::{

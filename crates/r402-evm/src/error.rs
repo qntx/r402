@@ -1,19 +1,12 @@
-//! Error types for EIP-155 facilitator operations.
-//!
-//! Despite the name `Eip155ExactError`, this error is functionally
-//! EVM-generic (RPC transport / tx revert / contract call / verification)
-//! and is intentionally shared between the `exact` and `upto` schemes to
-//! avoid error-plumbing duplication. A rename to `Eip155EvmError` may
-//! happen in a future breaking release once the full rename footprint is
-//! accepted.
+//! Shared EVM facilitator errors (`exact` and `upto`).
 
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;
 use r402_core::error::FacilitatorError;
 use r402_core::error::VerificationError;
 
-use super::signature::StructuredSignatureFormatError;
 use crate::chain::MetaTransactionSendError;
+use crate::exact::facilitator::signature::StructuredSignatureFormatError;
 
 /// Errors specific to EIP-155 exact scheme operations.
 #[derive(Debug, thiserror::Error)]

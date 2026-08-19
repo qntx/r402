@@ -43,7 +43,7 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 # Web
 axum-core = "0.5"
-http = "1.4"
+http = "1.5"
 reqwest = { version = "0.13", features = ["json"] }
 reqwest-middleware = "0.5"
 tower = "0.5"
@@ -56,7 +56,7 @@ rmcp = { version = "3.1", default-features = false }
 # Utility
 base64 = "0.23"
 blake2 = "0.10"
-sha3 = "0.11"
+sha3 = "0.12"
 # Solana's entire ecosystem still ships bincode 1 (legacy serde wire
 # format). Upgrading to bincode 3 here would split the workspace across
 # two incompatible serialization stacks — keep v1 until upstream moves.
@@ -70,23 +70,29 @@ wiremock = "0.6"
 
 # Alloy (EVM)
 #
-# alloy-core (primitives, sol-types) is on its own 1.5 release train and
-# stays there. The upper alloy stack (network, provider, transport,
-# signer, rpc-*) is on the 2.x line as of the Glamsterdam-hardfork
-# preparation release (alloy-rs/alloy v2.0.0).
-alloy-contract = "2.0"
-alloy-network = "2.0"
-alloy-primitives = { version = "1.5", features = ["k256", "serde"] }
-alloy-provider = "2.0"
-alloy-rpc-client = "2.0"
-alloy-rpc-types-eth = "2.0"
-alloy-signer = "2.0"
-alloy-signer-local = "2.0"
-alloy-sol-types = "1.5"
-alloy-transport = { version = "2.0", features = ["throttle"] }
-alloy-transport-http = "2.0"
+# alloy-core (primitives, sol-types) is on its own 1.x release train.
+# The upper alloy stack (network, provider, transport, signer, rpc-*)
+# is on the 2.x line as of the Glamsterdam-hardfork preparation release.
+alloy-contract = "2.1"
+alloy-network = "2.1"
+alloy-primitives = { version = "1.6", features = ["k256", "serde"] }
+alloy-provider = "2.1"
+alloy-rpc-client = "2.1"
+alloy-rpc-types-eth = "2.1"
+alloy-signer = "2.1"
+alloy-signer-local = "2.1"
+alloy-sol-types = "1.6"
+alloy-transport = { version = "2.1", features = ["throttle"] }
+alloy-transport-http = "2.1"
 
 # Solana (SVM)
+#
+# Modular Anza crates are mid-split: `solana-client` 4.2 wants
+# `solana-pubkey` 4.2.x, while `solana-compute-budget-interface` 3.1
+# (latest) pulls `solana-pubkey` 4.3 via `solana-instruction` 3.5.
+# `solana-message` 4.5 / `solana-transaction` 4.2 also disagree on
+# `wincode` 0.5 vs 0.6. Stay on the 3.x client/tx line until the
+# compute-budget interface publishes a matching 4.x.
 solana-account = "3"
 solana-client = "3"
 solana-commitment-config = "3"
@@ -103,7 +109,7 @@ spl-token = { version = "9", features = ["no-entrypoint"] }
 # all of which live here without dragging in the processor (and the broken
 # `token_group/processor.rs` in `spl-token-2022 v10.0.0`), confidential
 # transfer, or ZK proof code. Drops dozens of transitive deps too.
-spl-token-2022-interface = "2.1"
+spl-token-2022-interface = "3.1"
 
 # Telemetry
 tracing = "0.1"

@@ -39,7 +39,7 @@ impl TronExact {
             asset.amount.to_string().into(),
             pay_to.into().to_string().into(),
             asset.token.address.to_string().into(),
-            60,
+            300, // same authorization window as EVM / Solana exact price tags
         )
         .with_optional_extra(extra.and_then(|e| serde_json::to_value(e).ok()));
         wire::PriceTag {

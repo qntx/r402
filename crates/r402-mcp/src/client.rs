@@ -61,9 +61,9 @@ impl Default for X402McpClientOptions {
     }
 }
 
-/// Client hooks (Go hook fields + official `onPaymentResponse`).
+/// MCP client hooks (Go hook fields + official `onPaymentResponse`).
 #[derive(Clone, Default)]
-pub struct ClientHooks {
+pub struct McpClientHooks {
     /// Can abort or supply a custom payload.
     pub on_payment_required:
         Option<Arc<dyn Fn(PaymentRequiredContext) -> PaymentRequiredHookResult + Send + Sync>>,
@@ -83,9 +83,9 @@ pub struct ClientHooks {
         Option<Arc<dyn Fn(PaymentResponseContext) -> PaymentResponseResult + Send + Sync>>,
 }
 
-impl std::fmt::Debug for ClientHooks {
+impl std::fmt::Debug for McpClientHooks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ClientHooks").finish_non_exhaustive()
+        f.debug_struct("McpClientHooks").finish_non_exhaustive()
     }
 }
 
@@ -127,7 +127,7 @@ pub struct X402McpClient<C, S> {
     caller: C,
     signer: S,
     options: X402McpClientOptions,
-    hooks: ClientHooks,
+    hooks: McpClientHooks,
 }
 
 impl<C, S> std::fmt::Debug for X402McpClient<C, S> {
@@ -150,7 +150,7 @@ where
             caller,
             signer,
             options: X402McpClientOptions::default(),
-            hooks: ClientHooks::default(),
+            hooks: McpClientHooks::default(),
         }
     }
 
@@ -163,7 +163,7 @@ where
 
     /// Sets hooks.
     #[must_use]
-    pub fn with_hooks(mut self, hooks: ClientHooks) -> Self {
+    pub fn with_hooks(mut self, hooks: McpClientHooks) -> Self {
         self.hooks = hooks;
         self
     }

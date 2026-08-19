@@ -65,16 +65,16 @@ macro_rules! transfer_span {
 }
 
 pub(crate) mod contract;
-mod error;
 mod settle;
 pub(crate) mod signature;
 mod verify;
 
-pub use error::Eip155ExactError;
 use settle::{settle_payment, settle_permit2_payment};
 pub use signature::StructuredSignatureFormatError;
 pub(crate) use verify::assert_time;
 use verify::{verify_payment, verify_permit2_payment};
+
+use crate::error::Eip155ExactError;
 
 /// A fully specified ERC-3009 authorization payload for EVM settlement.
 #[derive(Debug)]

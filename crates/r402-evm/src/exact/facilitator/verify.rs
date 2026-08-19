@@ -16,11 +16,11 @@ use r402_core::wire::UnixTimestamp;
 use tracing::instrument;
 
 use super::contract::{IEIP3009, IERC20, IX402Permit2Proxy, Validator6492};
-use super::error::Eip155ExactError;
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
 use super::signature::{SignedMessage, StructuredSignature};
 use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::Eip155ChainReference;
+use crate::error::Eip155ExactError;
 use crate::exact::VALIDATOR_ADDRESS;
 use crate::exact::types::TokenPermissions as SolTokenPermissions;
 use crate::exact::types::Witness as SolWitness;

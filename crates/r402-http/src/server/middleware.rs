@@ -531,7 +531,7 @@ fn build_abort_response(status: http::StatusCode, body: Option<String>) -> Respo
             .headers_mut()
             .insert(http::header::CONTENT_TYPE, ct);
     }
-    super::cors::ensure_expose_headers(response.headers_mut());
+    super::paygate::ensure_expose_headers(response.headers_mut());
     response
 }
 
