@@ -274,7 +274,7 @@ impl<S> SchemeId for TronExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::sealed::Sealed for TronExactClient<S> {}
+impl<S> r402_core::scheme::Sealed for TronExactClient<S> {}
 
 impl<S> SchemeClient for TronExactClient<S>
 where

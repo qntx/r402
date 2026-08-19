@@ -15,12 +15,19 @@
 
 mod client;
 mod registry;
-pub mod sealed;
 mod server;
 
 pub use client::*;
 pub use registry::*;
 pub use server::*;
+
+/// Internal sealed-trait marker. **Do not implement** outside this workspace.
+///
+/// x402 schemes are protocol-critical: an unsanctioned implementation would
+/// fragment the network. Only crates in this workspace implement
+/// [`SchemeClient`] / [`SchemeServer`].
+#[doc(hidden)]
+pub trait Sealed {}
 
 /// Identity trait for scheme markers.
 ///
@@ -122,6 +129,11 @@ impl_scheme_marker!(ExactScheme, "exact");
 impl_scheme_marker!(UptoScheme, "upto");
 impl_scheme_marker!(BatchSettlementScheme, "batch-settlement");
 impl_scheme_marker!(AuthCaptureScheme, "auth-capture");
+
+impl Sealed for ExactScheme {}
+impl Sealed for UptoScheme {}
+impl Sealed for BatchSettlementScheme {}
+impl Sealed for AuthCaptureScheme {}
 
 #[cfg(test)]
 mod marker_tests {

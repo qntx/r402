@@ -5,46 +5,28 @@
 //! and identifier strings use [`compact_str::CompactString`] to avoid
 //! allocations on the hot path.
 //!
-//! # Layout
+//! Files follow protocol layers, not one-type-per-file:
 //!
-//! - [`Base64Bytes`] — raw bytes with base64 encode/decode helpers
-//! - [`UnixTimestamp`] — stringified Unix seconds
-//! - [`U64String`] — stringified `u64` for JSON-safe integer transport
-//! - [`Version<N>`] — protocol-version marker (`N = 2`)
-//! - [`Extensions`] / [`ExtensionEntry`] — canonical extension envelope
-//! - [`ResourceInfo`] — resource metadata (`description` / `mimeType` optional)
-//! - [`PaymentRequirements`] — seller-declared terms
-//! - [`PaymentRequired`] — HTTP 402 body
-//! - [`PaymentPayload`] — signed buyer authorization (includes accepted terms)
-//! - [`VerifyRequest`] / [`VerifyResponse`]
-//! - [`SettleRequest`] / [`SettleResponse`] — Success now carries an `amount`
-//! - [`SupportedResponse`] / [`SupportedPaymentKind`]
-//! - [`PriceTag`] — seller-side builder with enrichment hook
+//! - **codec** — JSON-safe primitives ([`Base64Bytes`], [`U64String`],
+//!   [`UnixTimestamp`], [`Version`])
+//! - **extensions** — [`Extensions`] / [`ExtensionEntry`]
+//! - **offer** — 402 challenge and buyer payload ([`ResourceInfo`],
+//!   [`PaymentRequirements`], [`PaymentRequired`], [`PaymentPayload`],
+//!   [`PriceTag`])
+//! - **rpc** — facilitator verify / settle / `/supported`
 
-mod base64;
+mod codec;
 mod extensions;
-mod payment_payload;
-mod payment_required;
-mod payment_requirements;
-mod price_tag;
-mod request;
-mod resource_info;
-mod response;
-mod supported;
-mod timestamp;
-mod u64_string;
-mod version;
+mod offer;
+mod rpc;
 
-pub use base64::Base64Bytes;
+pub use codec::{Base64Bytes, U64String, UnixTimestamp, V2, Version, Version2};
 pub use extensions::{ExtensionEntry, Extensions};
-pub use payment_payload::PaymentPayload;
-pub use payment_required::PaymentRequired;
-pub use payment_requirements::{PaymentRequirements, find_matching_requirements};
-pub use price_tag::{Enricher, PriceTag};
-pub use request::{SettleRequest, TypedVerifyRequest, VerifyRequest};
-pub use resource_info::ResourceInfo;
-pub use response::{SettleResponse, VerifyResponse};
-pub use supported::{SupportedPaymentKind, SupportedResponse};
-pub use timestamp::UnixTimestamp;
-pub use u64_string::U64String;
-pub use version::{V2, Version, Version2};
+pub use offer::{
+    Enricher, PaymentPayload, PaymentRequired, PaymentRequirements, PriceTag, ResourceInfo,
+    find_matching_requirements,
+};
+pub use rpc::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, TypedVerifyRequest,
+    VerifyRequest, VerifyResponse,
+};

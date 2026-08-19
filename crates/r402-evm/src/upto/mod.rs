@@ -29,7 +29,7 @@
 //! [spec]: https://github.com/x402-foundation/x402/blob/main/specs/schemes/upto/scheme_upto_evm.md
 
 use alloy_primitives::{Address, address};
-use r402_core::scheme::{SchemeId, sealed::Sealed};
+use r402_core::scheme::{SchemeId, Sealed};
 
 #[cfg(feature = "client")]
 pub mod client;

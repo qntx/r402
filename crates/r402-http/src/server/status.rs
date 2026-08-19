@@ -9,10 +9,10 @@
 //! | [`Permit2AllowanceRequired`]    | `412 Precondition Failed`|
 //! | anything else                   | `402 Payment Required`   |
 //!
-//! [`Permit2AllowanceRequired`]: r402_core::error_reason::ErrorReason::Permit2AllowanceRequired
+//! [`Permit2AllowanceRequired`]: r402_core::error::ErrorReason::Permit2AllowanceRequired
 
 use http::StatusCode;
-use r402_core::error_reason::ErrorReason;
+use r402_core::error::ErrorReason;
 
 /// Returns the HTTP status corresponding to an [`ErrorReason`].
 #[must_use]

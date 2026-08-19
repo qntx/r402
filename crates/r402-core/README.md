@@ -8,15 +8,16 @@ specific behavior lives in sibling crates (`r402-evm`, `r402-svm`).
 
 ## Modules
 
-- [`wire`] — On-the-wire JSON types (versioned: `wire::v2`)
-- [`facilitator`] — `Facilitator` trait and `DynFacilitator` erasure
-- [`scheme`] — Payment scheme registry and `sealed` builder traits
-- [`hooks`] — Lifecycle hooks for `verify`/`settle`
+- [`wire`] — On-the-wire JSON types (offer, facilitator RPC, codecs)
+- [`facilitator`] — `Facilitator` trait, `DynFacilitator` erasure, verify/settle hooks
+- [`scheme`] — Payment scheme registry and builder traits
 - [`extensions`] — Extension framework for x402 protocol extensions
-- [`payment`] — `Payment<State>` typestate for compile-time lifecycle safety
+- [`payment`] — `Payment<State>` typestate and settlement amount overrides
+- [`client`] — `PaymentClient` orchestration
+- [`resource_server`] — Transport-agnostic verify → execute → settle
 - [`chain`] — CAIP-2 chain identifiers, address, provider abstractions
 - [`amount`] — Human-readable currency amount parsing (`"$0.01"` etc.)
-- [`error`] — Layered error types (`FacilitatorError`, `VerificationError`, ...)
+- [`error`] — Layered errors and machine-readable [`ErrorReason`] wire codes
 
 ## Feature Flags
 

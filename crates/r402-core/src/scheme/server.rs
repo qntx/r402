@@ -6,8 +6,8 @@
 
 use compact_str::CompactString;
 
+use super::Sealed;
 use crate::chain::ChainId;
-use crate::scheme::sealed::Sealed;
 use crate::wire::PaymentRequirements;
 
 /// A resolved asset amount ready for insertion into

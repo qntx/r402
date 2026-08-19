@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Removed
 
+- **`r402_core` module paths** `error_reason`, `hooks`, `settlement_override`,
+  and `scheme::sealed`. Types live at crate root and in `error`, `facilitator`,
+  `payment`, and `scheme` respectively (`ErrorReason`, `HookedFacilitator`,
+  `SettlementOverrides`, `scheme::Sealed`). Extension modules
+  `eip2612_gas_sponsoring` / `erc20_approval_gas_sponsoring` are
+  `extensions::eip2612` / `extensions::erc20_approval`.
 - **`r402_svm::settlement_cache`** — compatibility re-export of
   `r402_core::cache`. Import `SettlementCache` / `Duplicate` (and
   `DEFAULT_SETTLEMENT_TTL` / `DEFAULT_SETTLEMENT_CAPACITY`) from

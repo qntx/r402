@@ -1,6 +1,6 @@
 //! Resource-server lifecycle hooks (official `X402ResourceServer` V2 surface).
 //!
-//! Distinct from [`crate::hooks::FacilitatorHooks`] (chain-node verify/settle)
+//! Distinct from [`crate::facilitator::FacilitatorHooks`] (chain-node verify/settle)
 //! and HTTP-only paygate hooks. These fire for every payment the resource
 //! server orchestrates, regardless of transport (HTTP / MCP).
 //!
@@ -28,7 +28,7 @@ use std::pin::Pin;
 
 use crate::error::FacilitatorError;
 use crate::facilitator::BoxFuture;
-use crate::hooks::FailureRecovery;
+use crate::facilitator::FailureRecovery;
 use crate::wire::{PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse};
 
 /// Wire payment payload with typed requirements and opaque scheme body.

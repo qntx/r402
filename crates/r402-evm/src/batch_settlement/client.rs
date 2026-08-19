@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, B256, U256};
 use r402_core::error::ClientError;
-use r402_core::scheme::{
-    PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
-};
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
 use r402_core::wire::{Base64Bytes, PaymentRequired};
 
 use super::channel::{build_channel_config, compute_channel_id};

@@ -8,7 +8,7 @@
 //!
 //! Spec: `specs/schemes/batch-settlement/scheme_batch_settlement_evm.md`.
 
-use r402_core::scheme::{BatchSettlementScheme, SchemeId, sealed::Sealed};
+use r402_core::scheme::{BatchSettlementScheme, SchemeId, Sealed};
 
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub mod channel;

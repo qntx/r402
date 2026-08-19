@@ -21,9 +21,9 @@ pub use hooks::{
 use serde::Serialize;
 
 use crate::error::{FacilitatorError, VerificationError};
+use crate::facilitator::FailureRecovery;
 use crate::facilitator::{DynFacilitator, Facilitator};
-use crate::hooks::FailureRecovery;
-use crate::settlement_override::{
+use crate::payment::{
     SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
 };
 use crate::wire::{

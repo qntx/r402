@@ -8,9 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use r402_core::error::ClientError;
-use r402_core::scheme::{
-    PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
-};
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
 use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
 use rand::RngExt;
 use rand::rng;

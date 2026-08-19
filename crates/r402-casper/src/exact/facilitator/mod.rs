@@ -176,7 +176,7 @@ where
 mod tests {
     use std::sync::Mutex;
 
-    use r402_core::error_reason::ErrorReason;
+    use r402_core::error::ErrorReason;
 
     use super::*;
 

@@ -477,7 +477,7 @@ impl<S> SchemeId for Eip155ExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::sealed::Sealed for Eip155ExactClient<S> {}
+impl<S> r402_core::scheme::Sealed for Eip155ExactClient<S> {}
 
 impl<S> SchemeClient for Eip155ExactClient<S>
 where

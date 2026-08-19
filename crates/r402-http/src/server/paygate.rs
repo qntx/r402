@@ -284,7 +284,7 @@ impl PaygateBuilder {
 /// Construct via [`PaygateBuilder`] (obtained from [`Paygate::builder`]).
 ///
 /// To add lifecycle hooks (before/after verify and settle), wrap your
-/// facilitator with [`HookedFacilitator`](r402_core::hooks::HookedFacilitator)
+/// facilitator with [`HookedFacilitator`](r402_core::facilitator::HookedFacilitator)
 /// before passing it to the payment gate.
 #[allow(
     missing_debug_implementations,

@@ -5,9 +5,9 @@ use std::future::Future;
 
 use compact_str::CompactString;
 
+use super::Sealed;
 use crate::chain::{ChainId, ChainIdPattern};
 use crate::error::ClientError;
-use crate::scheme::sealed::Sealed;
 use crate::wire::PaymentRequired;
 
 /// Client-side scheme interface.

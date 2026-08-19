@@ -7,9 +7,7 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_sol_types::{SolStruct, eip712_domain, sol};
 use r402_core::error::ClientError;
-use r402_core::scheme::{
-    PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, sealed::Sealed,
-};
+use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
 use r402_core::wire::{Base64Bytes, PaymentRequired, UnixTimestamp};
 use rand::RngExt;
 use rand::rng;
