@@ -30,7 +30,7 @@ use self::verify::{
     PreparedUptoPermit2, assert_offchain_valid_settle, verify_permit2_upto_payment,
 };
 use crate::chain::Eip155MetaTransactionProvider;
-use crate::exact::facilitator::Eip155ExactError;
+use crate::error::Eip155ExactError;
 use crate::upto::{Eip155Upto, UptoScheme, types};
 
 /// Facilitator for the EIP-155 upto scheme (Permit2 only).

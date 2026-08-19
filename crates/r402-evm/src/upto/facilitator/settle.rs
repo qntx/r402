@@ -13,7 +13,7 @@ use super::verify::{
     PreparedUptoPermit2, assert_eip2612_supported_signature_kind, build_eip2612_abi,
 };
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
-use crate::exact::facilitator::Eip155ExactError;
+use crate::error::Eip155ExactError;
 use crate::exact::facilitator::signature::StructuredSignature;
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
 

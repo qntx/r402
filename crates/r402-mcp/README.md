@@ -166,7 +166,7 @@ assert!(out.payment_made);
 
 Free function: `call_paid_tool(caller, signer, name, args)`.
 
-Hooks (`ClientHooks`): `on_payment_required` (abort / supply payload),
+Hooks (`McpClientHooks`): `on_payment_required` (abort / supply payload),
 `on_payment_requested` (approve/deny), `on_before_payment`, `on_after_payment`.
 
 ## Encode helpers (shared)

@@ -17,31 +17,71 @@
 //!   streaming responses where the client should receive data immediately.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Duration;
 
 use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
+use http::header::ACCESS_CONTROL_EXPOSE_HEADERS;
 use http::{HeaderMap, HeaderValue, StatusCode};
+use r402_core::error::ErrorReason;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::resource_server::{CancelReason, ResourceServer, ResourceServerHooks};
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
 use serde_json::json;
-use tokio::sync::Notify;
 use tower::Service;
 #[cfg(feature = "telemetry")]
 use tracing::{Instrument, instrument};
 use url::Url;
 
 use super::hooks::DynPaygateHooks;
+use super::tracker::{BackgroundSettlementTracker, SettlementInFlightGuard};
 
 const PAYMENT_HEADER: &str = "Payment-Signature";
 
-/// Verification errors for the payment gate.
+/// The canonical list of x402 response headers clients need to see.
+pub const X402_EXPOSED_HEADERS: &str = "Payment-Required, Payment-Response";
+
+/// Ensures `Access-Control-Expose-Headers` advertises the x402 response
+/// headers. Idempotent.
+pub fn ensure_expose_headers(headers: &mut HeaderMap) {
+    let x402 = HeaderValue::from_static(X402_EXPOSED_HEADERS);
+    match headers.get(ACCESS_CONTROL_EXPOSE_HEADERS) {
+        None => {
+            let _ = headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, x402);
+        }
+        Some(existing) => {
+            let Ok(existing_str) = existing.to_str() else {
+                let _ = headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, x402);
+                return;
+            };
+            if existing_str.contains("Payment-Required")
+                && existing_str.contains("Payment-Response")
+            {
+                return;
+            }
+            let merged = format!("{existing_str}, {X402_EXPOSED_HEADERS}");
+            if let Ok(value) = HeaderValue::from_str(&merged) {
+                let _ = headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, value);
+            }
+        }
+    }
+}
+
+/// Returns the HTTP status corresponding to an [`ErrorReason`].
+///
+/// `Permit2AllowanceRequired` maps to `412`; everything else to `402`.
+#[must_use]
+pub const fn reason_to_status(reason: &ErrorReason) -> StatusCode {
+    match reason {
+        ErrorReason::Permit2AllowanceRequired => StatusCode::PRECONDITION_FAILED,
+        _ => StatusCode::PAYMENT_REQUIRED,
+    }
+}
+
+/// Payment gate error encompassing header, verification, and settlement failures.
 #[derive(Debug, thiserror::Error)]
-pub enum VerificationError {
+pub enum PaygateError {
     /// The `Payment-Signature` header is missing from the request.
     #[error("Payment-Signature header is required")]
     PaymentHeaderMissing,
@@ -54,14 +94,6 @@ pub enum VerificationError {
     /// The facilitator rejected the payment.
     #[error("Verification failed: {0}")]
     VerificationFailed(String),
-}
-
-/// Payment gate error encompassing verification and settlement failures.
-#[derive(Debug, thiserror::Error)]
-pub enum PaygateError {
-    /// Payment verification failed.
-    #[error(transparent)]
-    Verification(#[from] VerificationError),
     /// Facilitator returned a structured `SettleResponse::Failure`.
     ///
     /// The failure body is preserved end-to-end so the paygate can emit it
@@ -414,13 +446,14 @@ impl Paygate {
     )]
     pub fn error_response(&self, err: PaygateError) -> Response {
         match err {
-            PaygateError::Verification(ve) => {
+            PaygateError::PaymentHeaderMissing
+            | PaygateError::InvalidPaymentHeader
+            | PaygateError::NoPaymentMatching
+            | PaygateError::VerificationFailed(_) => {
                 let (status, payment_required) = {
-                    // Fix-5: derive HTTP status from the inner ErrorReason when
-                    // known — Permit2 allowance failures map to 412, others to 402.
-                    let status = inferred_status(&ve);
+                    let status = inferred_status(&err);
                     let payment_required = wire::PaymentRequired::new(self.resource.clone())
-                        .with_error(ve.to_string())
+                        .with_error(err.to_string())
                         .with_accepts(
                             self.accepts
                                 .iter()
@@ -443,7 +476,7 @@ impl Paygate {
                     .expect("failed to construct response");
                 // Fix-6: expose Payment-Required / Payment-Response headers to
                 // browser clients via CORS.
-                super::cors::ensure_expose_headers(response.headers_mut());
+                ensure_expose_headers(response.headers_mut());
                 response
             }
             PaygateError::Settlement(failure) => {
@@ -463,7 +496,7 @@ impl Paygate {
                 let mut response = builder
                     .body(Body::from(body_bytes))
                     .expect("failed to construct response");
-                super::cors::ensure_expose_headers(response.headers_mut());
+                ensure_expose_headers(response.headers_mut());
                 response
             }
             PaygateError::SettlementAborted(ref detail) => {
@@ -480,7 +513,7 @@ impl Paygate {
                     .header("Content-Type", "application/json")
                     .body(Body::from(body))
                     .expect("failed to construct response");
-                super::cors::ensure_expose_headers(response.headers_mut());
+                ensure_expose_headers(response.headers_mut());
                 response
             }
         }
@@ -514,32 +547,32 @@ impl Paygate {
     ///
     /// # Errors
     ///
-    /// Returns [`PaygateError::Verification`] if the payment header is missing,
+    /// Returns a verification [`PaygateError`] if the payment header is missing,
     /// malformed, or rejected by the facilitator / hooks.
     #[cfg_attr(feature = "telemetry", instrument(name = "x402.verify_only", skip_all))]
     pub async fn verify_only(&self, headers: &HeaderMap) -> Result<VerifiedPayment, PaygateError> {
         let header_bytes = headers
             .get(PAYMENT_HEADER)
             .map(HeaderValue::as_bytes)
-            .ok_or(VerificationError::PaymentHeaderMissing)?;
+            .ok_or(PaygateError::PaymentHeaderMissing)?;
 
         let payload: PaymentPayload =
-            decode_payment_payload(header_bytes).ok_or(VerificationError::InvalidPaymentHeader)?;
+            decode_payment_payload(header_bytes).ok_or(PaygateError::InvalidPaymentHeader)?;
 
         let requirements = match_requirements(&payload, &self.accepts)?;
         let outcome = self
             .server
             .verify_payment(&payload, &requirements)
             .await
-            .map_err(|e| VerificationError::VerificationFailed(format!("{e}")))?;
+            .map_err(|e| PaygateError::VerificationFailed(format!("{e}")))?;
 
         if let wire::VerifyResponse::Invalid { reason, .. } = &outcome.response {
-            return Err(VerificationError::VerificationFailed(reason.to_string()).into());
+            return Err(PaygateError::VerificationFailed(reason.to_string()));
         }
 
         // Build settle request from the same payload/requirements pair.
         let settle_request = build_settle_request(&payload, &requirements).map_err(|e| {
-            VerificationError::VerificationFailed(format!("settle request build failed: {e}"))
+            PaygateError::VerificationFailed(format!("settle request build failed: {e}"))
         })?;
 
         Ok(VerifiedPayment {
@@ -629,7 +662,7 @@ impl Paygate {
             .headers_mut()
             .insert("Payment-Response", header_value);
         // Browser clients need Access-Control-Expose-Headers for Payment-Response.
-        super::cors::ensure_expose_headers(response.headers_mut());
+        ensure_expose_headers(response.headers_mut());
         Ok(response)
     }
 }
@@ -727,7 +760,7 @@ impl Paygate {
         let header_value = settlement_to_header(&settlement)?;
 
         res.headers_mut().insert("Payment-Response", header_value);
-        super::cors::ensure_expose_headers(res.headers_mut());
+        ensure_expose_headers(res.headers_mut());
         Ok(res)
     }
 
@@ -749,7 +782,7 @@ impl Paygate {
     ///
     /// # Errors
     ///
-    /// Returns [`PaygateError::Verification`] if payment verification fails.
+    /// Returns a verification [`PaygateError`] if payment verification fails.
     /// Settlement errors are logged but do not propagate.
     #[cfg_attr(
         feature = "telemetry",
@@ -927,116 +960,6 @@ impl VerifiedPayment {
     }
 }
 
-/// Shared in-flight counter for background settlement tasks.
-///
-/// Created by the operator at startup, attached to a [`Paygate`] via
-/// [`PaygateBuilder::with_settlement_tracker`], and drained at shutdown
-/// via [`Paygate::settlement_tracker`] + [`Self::wait_for_drain`]. The
-/// implementation is
-/// lock-free in the steady state: a single [`AtomicUsize`] for the
-/// counter and a [`tokio::sync::Notify`] for the drain wake-up.
-///
-/// Cloning the tracker is cheap and shares state, so it can be passed to
-/// multiple paygates serving the same shutdown channel (for example,
-/// when one process hosts several routes behind different price tags).
-#[derive(Clone, Debug)]
-pub struct BackgroundSettlementTracker {
-    inner: Arc<TrackerInner>,
-}
-
-#[derive(Debug)]
-struct TrackerInner {
-    in_flight: AtomicUsize,
-    drained: Notify,
-}
-
-impl Default for BackgroundSettlementTracker {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl BackgroundSettlementTracker {
-    /// Constructs a tracker with zero in-flight tasks.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(TrackerInner {
-                in_flight: AtomicUsize::new(0),
-                drained: Notify::new(),
-            }),
-        }
-    }
-
-    /// Returns the current approximate number of in-flight settlement
-    /// tasks. Useful for `/healthz` style readiness probes.
-    #[must_use]
-    pub fn in_flight(&self) -> usize {
-        self.inner.in_flight.load(Ordering::SeqCst)
-    }
-
-    /// Increments the in-flight counter and returns a guard that
-    /// decrements it on drop. Internal: the paygate's
-    /// `handle_request_background` is the only intended caller.
-    fn start(&self) -> SettlementInFlightGuard {
-        let _previous = self.inner.in_flight.fetch_add(1, Ordering::SeqCst);
-        SettlementInFlightGuard {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-
-    /// Awaits the in-flight count to reach zero, bounded by `timeout`.
-    /// Returns `Ok(())` once drained, or `Err(remaining)` after the
-    /// deadline with the count of still-running tasks.
-    ///
-    /// # Errors
-    ///
-    /// Returns the count of in-flight tasks when the timeout elapses
-    /// before the drain completes. Callers may then choose to abort the
-    /// runtime, log, or extend the deadline.
-    pub async fn wait_for_drain(&self, timeout: Duration) -> Result<(), usize> {
-        if self.in_flight() == 0 {
-            return Ok(());
-        }
-        let deadline = tokio::time::Instant::now() + timeout;
-        loop {
-            let notified = self.inner.drained.notified();
-            tokio::pin!(notified);
-            tokio::select! {
-                () = &mut notified => {}
-                () = tokio::time::sleep_until(deadline) => {
-                    let remaining = self.in_flight();
-                    return if remaining == 0 { Ok(()) } else { Err(remaining) };
-                }
-            }
-            if self.in_flight() == 0 {
-                return Ok(());
-            }
-        }
-    }
-}
-
-/// Drop-guard returned by [`BackgroundSettlementTracker::start`].
-///
-/// On drop, decrements the in-flight counter and notifies any awaiter
-/// blocked in [`BackgroundSettlementTracker::wait_for_drain`]. The guard
-/// is `Send + Sync` so it can be carried across `await` points by the
-/// background settlement supervisor.
-#[derive(Debug)]
-pub(crate) struct SettlementInFlightGuard {
-    inner: Arc<TrackerInner>,
-}
-
-impl Drop for SettlementInFlightGuard {
-    fn drop(&mut self) {
-        let previous = self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
-        if previous == 1 {
-            // Last in-flight task drained — wake every waiting drainer.
-            self.inner.drained.notify_waiters();
-        }
-    }
-}
-
 /// Awaits the join handle of a background settlement task and surfaces the
 /// outcome via tracing.
 ///
@@ -1163,7 +1086,7 @@ fn skip_handler_response(
     response
         .headers_mut()
         .insert("Payment-Response", header_value);
-    super::cors::ensure_expose_headers(response.headers_mut());
+    ensure_expose_headers(response.headers_mut());
     Ok(response)
 }
 
@@ -1198,16 +1121,12 @@ fn decode_payment_payload<T: serde::de::DeserializeOwned>(header_bytes: &[u8]) -
     serde_json::from_slice(decoded.as_ref()).ok()
 }
 
-/// Matches the payment payload against accepted price tags and builds a
-/// [`wire::VerifyRequest`].
-/// Maps an internal [`VerificationError`] to the correct HTTP status.
+/// Maps a paygate verification failure to the HTTP status.
 ///
-/// This is where Fix-5 lives: a `Permit2AllowanceRequired` inside the
-/// `VerificationFailed(..)` string hints the buyer needs an on-chain
-/// approval first — HTTP 412 is the canonical "precondition failed"
-/// status per the x402 v2 spec.
-fn inferred_status(ve: &VerificationError) -> StatusCode {
-    if let VerificationError::VerificationFailed(message) = ve
+/// A `Permit2AllowanceRequired` inside `VerificationFailed` maps to 412;
+/// everything else is 402.
+fn inferred_status(err: &PaygateError) -> StatusCode {
+    if let PaygateError::VerificationFailed(message) = err
         && message.contains("permit2_allowance_required")
     {
         return StatusCode::PRECONDITION_FAILED;
@@ -1218,12 +1137,12 @@ fn inferred_status(ve: &VerificationError) -> StatusCode {
 fn match_requirements(
     payload: &PaymentPayload,
     accepts: &[wire::PriceTag],
-) -> Result<wire::PaymentRequirements, VerificationError> {
+) -> Result<wire::PaymentRequirements, PaygateError> {
     accepts
         .iter()
         .find(|pt| **pt == payload.accepted)
         .map(|pt| pt.requirements.clone())
-        .ok_or(VerificationError::NoPaymentMatching)
+        .ok_or(PaygateError::NoPaymentMatching)
 }
 
 fn build_settle_request(
@@ -1244,58 +1163,66 @@ fn build_settle_request(
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn empty_tracker_drains_immediately() {
-        let tracker = BackgroundSettlementTracker::new();
-        assert_eq!(tracker.in_flight(), 0);
-        // No tasks in flight — drain returns Ok instantly even with a
-        // zero deadline because the early-exit short-circuits the loop.
-        tracker.wait_for_drain(Duration::ZERO).await.unwrap();
+    #[test]
+    fn adds_header_when_absent() {
+        let mut headers = HeaderMap::new();
+        ensure_expose_headers(&mut headers);
+        assert_eq!(
+            headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap(),
+            X402_EXPOSED_HEADERS,
+        );
     }
 
-    #[tokio::test]
-    async fn drain_waits_for_guard_drop() {
-        let tracker = BackgroundSettlementTracker::new();
-        let guard = tracker.start();
-        assert_eq!(tracker.in_flight(), 1);
-
-        // Drop the guard from another task after a short delay; the main
-        // task should observe the notify and return Ok.
-        let tracker_clone = tracker.clone();
-        let drop_task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            drop(guard);
-            assert_eq!(tracker_clone.in_flight(), 0);
-        });
-
-        tracker
-            .wait_for_drain(Duration::from_secs(1))
-            .await
-            .expect("drain should complete after the guard drops");
-        drop_task.await.unwrap();
+    #[test]
+    fn merges_existing_header() {
+        let mut headers = HeaderMap::new();
+        let _ = headers.insert(
+            ACCESS_CONTROL_EXPOSE_HEADERS,
+            HeaderValue::from_static("X-Foo"),
+        );
+        ensure_expose_headers(&mut headers);
+        let value = headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap();
+        let value = value.to_str().unwrap();
+        assert!(value.contains("X-Foo"));
+        assert!(value.contains("Payment-Required"));
+        assert!(value.contains("Payment-Response"));
     }
 
-    #[tokio::test]
-    async fn drain_times_out_when_guards_outlive_deadline() {
-        let tracker = BackgroundSettlementTracker::new();
-        let _guard = tracker.start();
-
-        let result = tracker.wait_for_drain(Duration::from_millis(20)).await;
-        assert_eq!(result, Err(1), "deadline elapses with the guard alive");
+    #[test]
+    fn expose_headers_idempotent() {
+        let mut headers = HeaderMap::new();
+        ensure_expose_headers(&mut headers);
+        ensure_expose_headers(&mut headers);
+        let value = headers.get(ACCESS_CONTROL_EXPOSE_HEADERS).unwrap();
+        assert_eq!(value, X402_EXPOSED_HEADERS);
     }
 
-    #[tokio::test]
-    async fn nested_guards_decrement_in_order() {
-        let tracker = BackgroundSettlementTracker::new();
-        let g1 = tracker.start();
-        let g2 = tracker.start();
-        let g3 = tracker.start();
-        assert_eq!(tracker.in_flight(), 3);
-        drop(g2);
-        assert_eq!(tracker.in_flight(), 2);
-        drop(g1);
-        assert_eq!(tracker.in_flight(), 1);
-        drop(g3);
-        assert_eq!(tracker.in_flight(), 0);
+    #[test]
+    fn permit2_allowance_required_maps_to_412() {
+        assert_eq!(
+            reason_to_status(&ErrorReason::Permit2AllowanceRequired),
+            StatusCode::PRECONDITION_FAILED,
+        );
+    }
+
+    #[test]
+    fn other_reasons_map_to_402() {
+        for reason in [
+            ErrorReason::InvalidPayload,
+            ErrorReason::InvalidPaymentRequirements,
+            ErrorReason::InvalidExactEvmPayloadSignature,
+            ErrorReason::InsufficientFunds,
+            ErrorReason::DuplicateSettlement,
+            ErrorReason::InvalidExactSolanaPayloadMemoMismatch,
+            ErrorReason::InvalidTransactionState,
+            ErrorReason::UnexpectedSettleError,
+            ErrorReason::Custom("some_unknown_code".into()),
+        ] {
+            assert_eq!(
+                reason_to_status(&reason),
+                StatusCode::PAYMENT_REQUIRED,
+                "reason {reason:?} should map to 402"
+            );
+        }
     }
 }

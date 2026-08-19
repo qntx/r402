@@ -24,11 +24,12 @@ use tracing::instrument;
 use super::contract::IX402UptoPermit2Proxy;
 use super::contract::IX402UptoPermit2Proxy::IX402UptoPermit2ProxyErrors;
 use crate::chain::Eip155ChainReference;
+use crate::error::Eip155ExactError;
 use crate::exact::PERMIT2_ADDRESS;
 use crate::exact::VALIDATOR_ADDRESS;
+use crate::exact::facilitator::assert_time;
 use crate::exact::facilitator::contract::{IERC20, Validator6492};
 use crate::exact::facilitator::signature::StructuredSignature;
-use crate::exact::facilitator::{Eip155ExactError, assert_time};
 use crate::upto::types::{
     self, PermitWitnessTransferFrom as SolPermitWitnessTransferFrom,
     TokenPermissions as SolTokenPermissions, Witness as SolWitness,

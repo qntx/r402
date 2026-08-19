@@ -15,6 +15,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Removed
 
+- **`r402_http::server::{cors, status, layer}`** — CORS/status helpers live
+  on `server` / `paygate`; Tower adapter is `server::middleware`. HTTP
+  `VerificationError` is gone; variants sit on `PaygateError`.
+- **`r402_evm::exact::facilitator::Eip155ExactError`** — use
+  `r402_evm::Eip155ExactError`.
+- **`r402_mcp::ClientHooks`** — renamed to `McpClientHooks`.
 - **`r402_core` module paths** `error_reason`, `hooks`, `settlement_override`,
   and `scheme::sealed`. Types live at crate root and in `error`, `facilitator`,
   `payment`, and `scheme` respectively (`ErrorReason`, `HookedFacilitator`,
@@ -36,6 +42,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+- **Dependencies** — `http` 1.5, `sha3` 0.12, alloy stack 2.1 /
+  `alloy-primitives`/`alloy-sol-types` 1.6, `rmcp` 3.1.3,
+  `spl-token-2022-interface` 3.1. Solana `client` / `transaction` /
+  `message` / `account` stay on 3.x: 4.2 wants `solana-pubkey` 4.2 while
+  `solana-compute-budget-interface` 3.1 (latest) requires 4.3, and the 4.5
+  message crate pulls a second `wincode` major.
 - **`X402Middleware::try_new` / `TryFrom<&str>` / `TryFrom<String>`**
   now return `FacilitatorClientError` instead of
   `Box<dyn std::error::Error>`.

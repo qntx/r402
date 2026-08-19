@@ -15,25 +15,23 @@
 //! - **[`SettlementMode::Concurrent`]**: verify → (settle ∥ execute) → await settle.
 //! - **[`SettlementMode::Background`]**: verify → spawn settle (fire-and-forget) → execute → return.
 
-pub mod cors;
 pub mod facilitator;
 pub mod hooks;
-pub mod layer;
+pub mod middleware;
 pub mod paygate;
 pub mod pricing;
-pub mod status;
+pub mod tracker;
 pub mod upto;
 
-pub use cors::{X402_EXPOSED_HEADERS, ensure_expose_headers};
 pub use facilitator::{FacilitatorClient, FacilitatorClientError};
 pub use hooks::{DynPaygateHooks, NoopPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
-pub use layer::{SettlementMode, X402LayerBuilder, X402Middleware};
+pub use middleware::{SettlementMode, X402LayerBuilder, X402Middleware};
 pub use paygate::{
-    BackgroundSettlementTracker, Paygate, PaygateBuilder, PaygateError, ResourceTemplate,
-    VerificationError, VerifiedPayment, settlement_to_header,
+    Paygate, PaygateBuilder, PaygateError, ResourceTemplate, VerifiedPayment, X402_EXPOSED_HEADERS,
+    ensure_expose_headers, reason_to_status, settlement_to_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
-pub use status::reason_to_status;
+pub use tracker::BackgroundSettlementTracker;
 pub use upto::{
     SETTLEMENT_OVERRIDES_HEADER, SettlementOverrides, UptoActualAmount,
     marshal_settlement_overrides, resolve_response_settlement_amount, set_settlement_overrides,

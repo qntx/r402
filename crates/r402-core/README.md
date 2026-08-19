@@ -4,7 +4,8 @@ Core types, traits, and wire formats for the x402 payment protocol.
 
 This crate is blockchain-agnostic. It defines the shared data model used by
 client, server, and facilitator implementations across every chain. Chain
-specific behavior lives in sibling crates (`r402-evm`, `r402-svm`).
+specific behavior lives in sibling crates (`r402-evm`, `r402-svm`,
+`r402-tron`, `r402-casper`).
 
 ## Modules
 

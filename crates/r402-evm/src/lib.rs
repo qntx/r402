@@ -55,8 +55,14 @@ pub mod batch_settlement;
 pub mod chain;
 pub mod eip2612;
 pub mod erc20_approval;
+#[cfg(feature = "facilitator")]
+#[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
+pub mod error;
 pub mod exact;
 pub mod upto;
+
+#[cfg(feature = "facilitator")]
+pub use error::Eip155ExactError;
 
 mod networks;
 pub use auth_capture::Eip155AuthCapture;
