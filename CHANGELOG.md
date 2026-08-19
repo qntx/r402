@@ -26,6 +26,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   with `aliasPolicy` config (default `reject`) and `SettlementCache` keyed
   by the base64 transaction. Umbrella feature `hedera` is optional and is
   included in `full`.
+- **`r402-algorand`** — Algorand `exact` E2E: algod REST + canonical msgpack
+  client (optional 0-amount fee-payer txn + ASA transfer), server
+  `price_tag` (`USDC::algorand()` / `USDC::algorand_testnet()`, `feePayer`
+  enricher), in-process facilitator (simulate, broadcast, confirmation,
+  `SettlementCache` keyed by the payment group). Umbrella feature
+  `algorand` is optional and is included in `full`.
 
 ### Changed
 

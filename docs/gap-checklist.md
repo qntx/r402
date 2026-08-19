@@ -11,6 +11,8 @@ Status of official TS mechanism families versus r402 crates.
 | Aptos | `@x402/aptos` | — | Missing (after MSRV 1.95) |
 | Algorand | `@x402/avm` | — | Missing |
 | Hedera | `@x402/hedera` | `r402-hedera` | exact E2E shipped |
+| Algorand | `@x402/avm` | `r402-algorand` | exact E2E shipped |
+| Hedera | `@x402/hedera` | — | Missing |
 | Keeta | `@x402/keeta` | — | Missing |
 | Stellar | `@x402/stellar` | — | Missing (after MSRV 1.95) |
 | XRPL | `@x402/xrpl` | `r402-xrpl` | exact E2E shipped |

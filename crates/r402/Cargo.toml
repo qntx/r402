@@ -30,6 +30,7 @@ tron = ["dep:r402-tron"]
 near = ["dep:r402-near"]
 xrpl = ["dep:r402-xrpl"]
 hedera = ["dep:r402-hedera"]
+algorand = ["dep:r402-algorand"]
 http = ["dep:r402-http"]
 mcp = ["dep:r402-mcp"]
 
@@ -41,6 +42,7 @@ client = [
     "r402-near?/client",
     "r402-xrpl?/client",
     "r402-hedera?/client",
+    "r402-algorand?/client",
     "r402-http?/client",
     "r402-mcp?/client",
 ]
@@ -52,6 +54,7 @@ server = [
     "r402-near?/server",
     "r402-xrpl?/server",
     "r402-hedera?/server",
+    "r402-algorand?/server",
     "r402-http?/server",
     "r402-mcp?/server",
 ]
@@ -64,6 +67,7 @@ facilitator = [
     "r402-near?/facilitator",
     "r402-xrpl?/facilitator",
     "r402-hedera?/facilitator",
+    "r402-algorand?/facilitator",
 ]
 
 telemetry = [
@@ -75,6 +79,7 @@ telemetry = [
     "r402-near?/telemetry",
     "r402-xrpl?/telemetry",
     "r402-hedera?/telemetry",
+    "r402-algorand?/telemetry",
     "r402-http?/telemetry",
     "r402-mcp?/telemetry",
 ]
@@ -95,6 +100,7 @@ full = [
     "near",
     "xrpl",
     "hedera",
+    "algorand",
     "http",
     "mcp",
     "client",
@@ -114,6 +120,7 @@ r402-tron = { workspace = true, optional = true }
 r402-near = { workspace = true, optional = true }
 r402-xrpl = { workspace = true, optional = true }
 r402-hedera = { workspace = true, optional = true }
+r402-algorand = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }
 r402-mcp = { workspace = true, optional = true }
 

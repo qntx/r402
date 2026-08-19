@@ -26,6 +26,7 @@ r402-http = { version = "0.16.0", path = "crates/r402-http" }
 r402-mcp = { version = "0.16.0", path = "crates/r402-mcp" }
 r402-hedera = { version = "0.16.0", path = "crates/r402-hedera" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
+r402-algorand = { version = "0.16.0", path = "crates/r402-algorand" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
 r402-tron = { version = "0.16.0", path = "crates/r402-tron" }
 r402-xrpl = { version = "0.16.0", path = "crates/r402-xrpl" }

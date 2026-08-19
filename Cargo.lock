@@ -5302,6 +5302,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 name = "r402"
 version = "0.16.0"
 dependencies = [
+ "r402-algorand",
  "r402-casper",
  "r402-core",
  "r402-evm",
@@ -5312,6 +5313,26 @@ dependencies = [
  "r402-solana",
  "r402-tron",
  "r402-xrpl",
+]
+
+[[package]]
+name = "r402-algorand"
+version = "0.16.0"
+dependencies = [
+ "base64 0.23.1",
+ "compact_str",
+ "data-encoding",
+ "ed25519-dalek",
+ "r402-core",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-core",
+ "wiremock",
 ]
 
 [[package]]
