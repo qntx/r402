@@ -157,7 +157,7 @@ pub enum SolanaChainReferenceFormatError {
     InvalidReference(String),
 }
 
-/// Information about an SPL token deployment on a Solana network.
+/// Information about a token deployment on a Solana network.
 ///
 /// This type contains all the information needed to interact with a specific
 /// token on a specific Solana network, including the mint address, decimal
@@ -166,12 +166,11 @@ pub enum SolanaChainReferenceFormatError {
 pub struct SolanaTokenDeployment {
     /// The Solana network where this token is deployed.
     pub chain_reference: SolanaChainReference,
-    /// The SPL token mint address.
+    /// The mint address.
     pub address: Address,
     /// The number of decimal places for this token.
     pub decimals: u8,
-    /// Program that owns the mint. `$` amounts use this so Token-2022 mints
-    /// are not treated as legacy SPL Token.
+    /// Mint owner program (legacy SPL Token or Token-2022).
     pub token_program: Pubkey,
 }
 
