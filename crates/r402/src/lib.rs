@@ -4,6 +4,9 @@
 #[cfg(feature = "algorand")]
 #[cfg_attr(docsrs, doc(cfg(feature = "algorand")))]
 pub use r402_algorand as algorand;
+#[cfg(feature = "aptos")]
+#[cfg_attr(docsrs, doc(cfg(feature = "aptos")))]
+pub use r402_aptos as aptos;
 #[cfg(feature = "casper")]
 #[cfg_attr(docsrs, doc(cfg(feature = "casper")))]
 pub use r402_casper as casper;

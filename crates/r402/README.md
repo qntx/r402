@@ -18,6 +18,7 @@ individual crates when you need a minimal dependency graph.
 | `xrpl` | [`r402-xrpl`](https://docs.rs/r402-xrpl) | XRPL exact (XRP / RLUSD) |
 | `hedera` | [`r402-hedera`](https://docs.rs/r402-hedera) | Hedera exact (HBAR / HTS) |
 | `algorand` | [`r402-algorand`](https://docs.rs/r402-algorand) | Algorand exact (ASA / algod REST) |
+| `aptos` | [`r402-aptos`](https://docs.rs/r402-aptos) | Aptos exact (FA / aptos-sdk 0.6) |
 | `keeta` | [`r402-keeta`](https://docs.rs/r402-keeta) | Keeta exact (signed `SEND` block) |
 | `tvm` | [`r402-tvm`](https://docs.rs/r402-tvm) | TON exact (TEP-74 / W5R1) |
 | `stellar` | [`r402-stellar`](https://docs.rs/r402-stellar) | Stellar exact (SEP-41 auth entries) |
@@ -52,6 +53,7 @@ use r402::near;   // r402-near
 use r402::xrpl;   // r402-xrpl
 use r402::hedera; // r402-hedera
 use r402::algorand; // r402-algorand
+use r402::aptos;    // r402-aptos
 use r402::keeta;  // r402-keeta
 use r402::tvm;    // r402-tvm
 use r402::stellar; // r402-stellar
@@ -74,6 +76,8 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `tvm` | | Re-export `r402-tvm` as [`tvm`] |
 | `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `stellar` | | Re-export `r402-stellar` as [`stellar`] |
+| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
+| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |

@@ -51,6 +51,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   transaction as source / optional fee bump, simulates, and submits.
   Pubnet requires an operator RPC URL. Umbrella feature `stellar` is
   optional and is included in `full`.
+- **`r402-aptos`** — Aptos `exact` E2E: `aptos-sdk` 0.6.0 sponsored
+  `primary_fungible_store::transfer`, TS JSON-of-bytes payload encoding,
+  server `price_tag` (`USDC::aptos()` / `USDC::aptos_testnet()`, `feePayer`
+  enricher), in-process facilitator with gas caps `500_000` / `1000` and
+  `SettlementCache` keyed by the base64 payload. Umbrella feature `aptos`
+  is optional and is included in `full`.
 
 ### Changed
 

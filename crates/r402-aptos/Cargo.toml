@@ -1,0 +1,53 @@
+[package]
+name = "r402-aptos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Aptos chain support for the x402 payment protocol."
+readme = "README.md"
+keywords = ["x402", "payment", "aptos", "usdc", "fungible-asset"]
+categories = [
+    "api-bindings",
+    "cryptography::cryptocurrencies",
+    "web-programming",
+    "asynchronous",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
+client = ["dep:aptos-sdk", "dep:serde_json"]
+server = ["dep:serde_json"]
+facilitator = [
+    "dep:aptos-sdk",
+    "dep:serde_json",
+    "r402-core/cache",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+base64 = { workspace = true }
+compact_str = { workspace = true }
+r402-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+aptos-sdk = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+aptos-sdk = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

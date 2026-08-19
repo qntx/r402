@@ -31,6 +31,7 @@ near = ["dep:r402-near"]
 xrpl = ["dep:r402-xrpl"]
 hedera = ["dep:r402-hedera"]
 algorand = ["dep:r402-algorand"]
+aptos = ["dep:r402-aptos"]
 keeta = ["dep:r402-keeta"]
 tvm = ["dep:r402-tvm"]
 stellar = ["dep:r402-stellar"]
@@ -46,6 +47,7 @@ client = [
     "r402-xrpl?/client",
     "r402-hedera?/client",
     "r402-algorand?/client",
+    "r402-aptos?/client",
     "r402-keeta?/client",
     "r402-tvm?/client",
     "r402-stellar?/client",
@@ -61,6 +63,7 @@ server = [
     "r402-xrpl?/server",
     "r402-hedera?/server",
     "r402-algorand?/server",
+    "r402-aptos?/server",
     "r402-keeta?/server",
     "r402-tvm?/server",
     "r402-stellar?/server",
@@ -77,6 +80,7 @@ facilitator = [
     "r402-xrpl?/facilitator",
     "r402-hedera?/facilitator",
     "r402-algorand?/facilitator",
+    "r402-aptos?/facilitator",
     "r402-keeta?/facilitator",
     "r402-tvm?/facilitator",
     "r402-stellar?/facilitator",
@@ -92,6 +96,7 @@ telemetry = [
     "r402-xrpl?/telemetry",
     "r402-hedera?/telemetry",
     "r402-algorand?/telemetry",
+    "r402-aptos?/telemetry",
     "r402-keeta?/telemetry",
     "r402-tvm?/telemetry",
     "r402-stellar?/telemetry",
@@ -116,6 +121,7 @@ full = [
     "xrpl",
     "hedera",
     "algorand",
+    "aptos",
     "keeta",
     "tvm",
     "stellar",
@@ -139,6 +145,7 @@ r402-near = { workspace = true, optional = true }
 r402-xrpl = { workspace = true, optional = true }
 r402-hedera = { workspace = true, optional = true }
 r402-algorand = { workspace = true, optional = true }
+r402-aptos = { workspace = true, optional = true }
 r402-keeta = { workspace = true, optional = true }
 r402-tvm = { workspace = true, optional = true }
 r402-stellar = { workspace = true, optional = true }

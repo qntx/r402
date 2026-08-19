@@ -28,6 +28,7 @@ r402-hedera = { version = "0.16.0", path = "crates/r402-hedera" }
 r402-keeta = { version = "0.16.0", path = "crates/r402-keeta" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
 r402-algorand = { version = "0.16.0", path = "crates/r402-algorand" }
+r402-aptos = { version = "0.16.0", path = "crates/r402-aptos" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
 r402-stellar = { version = "0.16.0", path = "crates/r402-stellar" }
 r402-tron = { version = "0.16.0", path = "crates/r402-tron" }
@@ -163,6 +164,14 @@ stellar-xdr = { version = "27", default-features = false, features = [
 ] }
 stellar-strkey = "0.0.16"
 sha2 = "0.10"
+# Aptos (official aptos-labs/aptos-rust-sdk). rust-version 1.95.
+# default-features = false; crates enable ed25519 + SingleKey schemes.
+# Do not use git aptos-core.
+aptos-sdk = { version = "0.6.0", default-features = false, features = [
+    "ed25519",
+    "secp256k1",
+    "secp256r1",
+] }
 
 # Telemetry
 tracing = "0.1"
