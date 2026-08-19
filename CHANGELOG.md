@@ -47,7 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- **MSRV raised to 1.95.** Required by `stellar-rpc-client` 27 and `aptos-sdk` 0.6.0.
+- **MSRV raised to 1.95.** Required by `aptos-sdk` 0.6.0 (unlocks `stellar-rpc-client` 27).
 
 ## [0.16.0] — 2026-08-19
 
