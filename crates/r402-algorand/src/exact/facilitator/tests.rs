@@ -82,6 +82,10 @@ impl AlgodRpc for MockRpc {
     async fn pending_transaction(&self, _txid: &str) -> Result<PendingTransaction, AlgodError> {
         Ok(self.pending.clone())
     }
+
+    async fn last_round(&self) -> Result<u64, AlgodError> {
+        Ok(self.params.last_round)
+    }
 }
 
 fn b64(bytes: &[u8]) -> String {
@@ -96,7 +100,26 @@ fn signed_group(
     asset_id: u64,
     fee_payer_fee: u64,
 ) -> ExactAvmPayload {
-    let chain = AlgorandChainReference::TESTNET;
+    signed_group_on(
+        AlgorandChainReference::TESTNET,
+        client,
+        fee_payer,
+        pay_to,
+        amount,
+        asset_id,
+        fee_payer_fee,
+    )
+}
+
+fn signed_group_on(
+    chain: AlgorandChainReference,
+    client: &AlgorandSigner,
+    fee_payer: &AlgorandSigner,
+    pay_to: AlgorandAddress,
+    amount: u64,
+    asset_id: u64,
+    fee_payer_fee: u64,
+) -> ExactAvmPayload {
     let mut pay = Transaction::new(TxnType::Pay, fee_payer.address());
     pay.receiver = Some(fee_payer.address());
     pay.fee = fee_payer_fee;
@@ -385,6 +408,79 @@ async fn verify_rejects_asset_mismatch() {
 }
 
 #[tokio::test]
+async fn verify_rejects_wrong_genesis_hash() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_group_on(
+        AlgorandChainReference::MAINNET,
+        &client,
+        &fee_payer,
+        pay_to,
+        1_000_000,
+        USDC_TESTNET_ASA_ID,
+        2000,
+    );
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_network_mismatch");
+}
+
+#[tokio::test]
+async fn verify_rejects_aggregated_facilitator_fees() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let chain = AlgorandChainReference::TESTNET;
+    let mut pay_a = Transaction::new(TxnType::Pay, fee_payer.address());
+    pay_a.receiver = Some(fee_payer.address());
+    pay_a.fee = 8_000;
+    pay_a.first_valid = 1_000;
+    pay_a.last_valid = 2_000;
+    pay_a.genesis_id = chain.genesis_id().to_owned();
+    pay_a.genesis_hash = chain.genesis_hash();
+    let pay_b = pay_a.clone();
+    let mut axfer = Transaction::new(TxnType::Axfer, client.address());
+    axfer.asset_id = USDC_TESTNET_ASA_ID;
+    axfer.asset_amount = 1_000_000;
+    axfer.asset_receiver = Some(pay_to);
+    axfer.first_valid = 1_000;
+    axfer.last_valid = 2_000;
+    axfer.genesis_id = chain.genesis_id().to_owned();
+    axfer.genesis_hash = chain.genesis_hash();
+    let grouped = assign_group(vec![pay_a, pay_b, axfer]);
+    let payload = ExactAvmPayload {
+        payment_group: vec![
+            b64(&encode_signed(&SignedTransaction {
+                sig: None,
+                txn: grouped[0].clone(),
+            })),
+            b64(&encode_signed(&SignedTransaction {
+                sig: None,
+                txn: grouped[1].clone(),
+            })),
+            b64(&encode_signed(&client.sign(&grouped[2]))),
+        ],
+        payment_index: 2,
+    };
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_fee_too_high");
+}
+
+#[tokio::test]
 async fn verify_rejects_fee_too_high() {
     let client = seed(1);
     let fee_payer = seed(2);
@@ -578,6 +674,15 @@ async fn client_builds_sponsored_group() {
     .unwrap();
     assert!(axfer.has_signature());
     assert_eq!(axfer.txn.asset_amount, 1_000_000);
+    assert_eq!(
+        axfer.txn.genesis_hash,
+        crate::chain::types::ALGORAND_TESTNET_GENESIS_HASH
+    );
+    assert_ne!(
+        axfer.txn.genesis_hash.as_slice(),
+        AlgorandChainReference::TESTNET.as_str().as_bytes()
+    );
+    assert_eq!(pay.txn.genesis_hash, axfer.txn.genesis_hash);
 }
 
 #[test]

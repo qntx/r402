@@ -40,8 +40,12 @@ pub struct PendingTransaction {
     pub pool_error: String,
 }
 
+/// Consecutive `pending_transaction` failures before `wait_for_confirmation` aborts.
+#[cfg(feature = "facilitator")]
+const PENDING_ERROR_BUDGET: u32 = 3;
+
 /// Errors from algod REST reads and submits.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum AlgodError {
     /// HTTP transport or non-success status.
     #[error("algod error: {0}")]
@@ -49,6 +53,9 @@ pub enum AlgodError {
     /// Response JSON could not be parsed.
     #[error("algod parse error: {0}")]
     Parse(String),
+    /// Pending txn is not yet in the pool (`404`).
+    #[error("algod pending transaction not found")]
+    NotFound,
 }
 
 impl From<CodecError> for AlgodError {
@@ -79,6 +86,9 @@ pub trait AlgodRpc: Send + Sync {
         &self,
         txid: &str,
     ) -> impl Future<Output = Result<PendingTransaction, AlgodError>> + Send;
+
+    /// Latest committed round (`GET /v2/status`).
+    fn last_round(&self) -> impl Future<Output = Result<u64, AlgodError>> + Send;
 }
 
 /// HTTP client pointed at an algod endpoint.
@@ -149,6 +159,12 @@ struct ParamsResponse {
 struct SendResponse {
     #[serde(rename = "txId", alias = "txid")]
     tx_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StatusResponse {
+    #[serde(rename = "last-round")]
+    last_round: u64,
 }
 
 impl AlgodRpc for AlgodClient {
@@ -260,6 +276,9 @@ impl AlgodRpc for AlgodClient {
             .send()
             .await
             .map_err(|e| AlgodError::Http(e.to_string()))?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(AlgodError::NotFound);
+        }
         if !response.status().is_success() {
             return Err(AlgodError::Http(format!(
                 "pending status {}",
@@ -286,21 +305,47 @@ impl AlgodRpc for AlgodClient {
             pool_error,
         })
     }
+
+    async fn last_round(&self) -> Result<u64, AlgodError> {
+        let response = self
+            .http
+            .get(self.url("/v2/status"))
+            .headers(self.headers("application/json")?)
+            .send()
+            .await
+            .map_err(|e| AlgodError::Http(e.to_string()))?;
+        if !response.status().is_success() {
+            return Err(AlgodError::Http(format!(
+                "status status {}",
+                response.status()
+            )));
+        }
+        let body: StatusResponse = response
+            .json()
+            .await
+            .map_err(|e| AlgodError::Parse(e.to_string()))?;
+        Ok(body.last_round)
+    }
 }
 
-/// Polls pending until confirmation or `wait_rounds` × 3 seconds elapse.
+/// Polls pending until confirmation or `last-round` advances by `wait_rounds`.
+///
+/// `404` (not yet in the pool) is treated as still pending. Other pending
+/// RPC errors abort after [`PENDING_ERROR_BUDGET`] consecutive failures.
 ///
 /// # Errors
 ///
-/// Returns [`AlgodError`] when the pool rejects the txn or the wait expires.
+/// Returns [`AlgodError`] when the pool rejects the txn, pending RPC errors
+/// persist, or `wait_rounds` rounds elapse without confirmation.
 #[cfg(feature = "facilitator")]
 pub async fn wait_for_confirmation<R: AlgodRpc>(
     rpc: &R,
     txid: &str,
     wait_rounds: u32,
 ) -> Result<(), AlgodError> {
-    let timeout = Duration::from_secs(u64::from(wait_rounds).saturating_mul(3).max(3));
-    let deadline = tokio::time::Instant::now() + timeout;
+    let start = rpc.last_round().await?;
+    let limit = start.saturating_add(u64::from(wait_rounds.max(1)));
+    let mut consecutive_errors = 0_u32;
     loop {
         match rpc.pending_transaction(txid).await {
             Ok(pending) if !pending.pool_error.is_empty() => {
@@ -310,12 +355,21 @@ pub async fn wait_for_confirmation<R: AlgodRpc>(
                 )));
             }
             Ok(pending) if pending.confirmed_round.is_some() => return Ok(()),
-            Ok(_) | Err(_) => {}
+            Ok(_) | Err(AlgodError::NotFound) => {
+                consecutive_errors = 0;
+            }
+            Err(err) => {
+                consecutive_errors = consecutive_errors.saturating_add(1);
+                if consecutive_errors >= PENDING_ERROR_BUDGET {
+                    return Err(err);
+                }
+            }
         }
-        if tokio::time::Instant::now() >= deadline {
+        let current = rpc.last_round().await?;
+        if current >= limit {
             return Err(AlgodError::Http(format!("confirmation timeout for {txid}")));
         }
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(250)).await;
     }
 }
 
@@ -362,6 +416,10 @@ impl<T: AlgodRpc + Send + Sync> AlgodRpc for &T {
     ) -> impl Future<Output = Result<PendingTransaction, AlgodError>> + Send {
         (**self).pending_transaction(txid)
     }
+
+    fn last_round(&self) -> impl Future<Output = Result<u64, AlgodError>> + Send {
+        (**self).last_round()
+    }
 }
 
 impl<T: AlgodRpc + Send + Sync> AlgodRpc for std::sync::Arc<T> {
@@ -388,6 +446,10 @@ impl<T: AlgodRpc + Send + Sync> AlgodRpc for std::sync::Arc<T> {
         txid: &str,
     ) -> impl Future<Output = Result<PendingTransaction, AlgodError>> + Send {
         (**self).pending_transaction(txid)
+    }
+
+    fn last_round(&self) -> impl Future<Output = Result<u64, AlgodError>> + Send {
+        (**self).last_round()
     }
 }
 
@@ -434,5 +496,85 @@ mod tests {
             params.genesis_hash,
             crate::chain::types::ALGORAND_TESTNET_GENESIS_HASH
         );
+    }
+
+    #[cfg(feature = "facilitator")]
+    mod wait {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        use super::*;
+
+        struct WaitMock {
+            last: AtomicU64,
+            pending: Result<PendingTransaction, AlgodError>,
+            pending_calls: AtomicU64,
+        }
+
+        impl AlgodRpc for WaitMock {
+            async fn suggested_params(&self) -> Result<SuggestedParams, AlgodError> {
+                Err(AlgodError::Http("unused".to_owned()))
+            }
+
+            async fn simulate_group(
+                &self,
+                _signed_txns: &[Vec<u8>],
+            ) -> Result<SimulateResult, AlgodError> {
+                Err(AlgodError::Http("unused".to_owned()))
+            }
+
+            async fn send_group(&self, _signed_txns: &[Vec<u8>]) -> Result<String, AlgodError> {
+                Err(AlgodError::Http("unused".to_owned()))
+            }
+
+            async fn pending_transaction(
+                &self,
+                _txid: &str,
+            ) -> Result<PendingTransaction, AlgodError> {
+                let _ = self.pending_calls.fetch_add(1, Ordering::SeqCst);
+                self.pending.clone()
+            }
+
+            async fn last_round(&self) -> Result<u64, AlgodError> {
+                Ok(self.last.fetch_add(1, Ordering::SeqCst))
+            }
+        }
+
+        #[tokio::test]
+        async fn times_out_after_last_round_advances() {
+            let rpc = WaitMock {
+                last: AtomicU64::new(10),
+                pending: Ok(PendingTransaction {
+                    confirmed_round: None,
+                    pool_error: String::new(),
+                }),
+                pending_calls: AtomicU64::new(0),
+            };
+            let err = wait_for_confirmation(&rpc, "TX", 2).await.unwrap_err();
+            assert!(err.to_string().contains("confirmation timeout"), "{err}");
+        }
+
+        #[tokio::test]
+        async fn surfaces_persistent_pending_errors() {
+            let rpc = WaitMock {
+                last: AtomicU64::new(10),
+                pending: Err(AlgodError::Http("boom".to_owned())),
+                pending_calls: AtomicU64::new(0),
+            };
+            let err = wait_for_confirmation(&rpc, "TX", 20).await.unwrap_err();
+            assert!(err.to_string().contains("boom"), "{err}");
+            assert!(rpc.pending_calls.load(Ordering::SeqCst) >= u64::from(PENDING_ERROR_BUDGET));
+        }
+
+        #[tokio::test]
+        async fn treats_not_found_as_pending() {
+            let rpc = WaitMock {
+                last: AtomicU64::new(10),
+                pending: Err(AlgodError::NotFound),
+                pending_calls: AtomicU64::new(0),
+            };
+            let err = wait_for_confirmation(&rpc, "TX", 1).await.unwrap_err();
+            assert!(err.to_string().contains("confirmation timeout"), "{err}");
+            assert!(rpc.pending_calls.load(Ordering::SeqCst) >= 1);
+        }
     }
 }

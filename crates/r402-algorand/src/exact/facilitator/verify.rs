@@ -125,6 +125,16 @@ where
     }
 
     let decoded = decode_transaction_group(payment_group, facilitator_addresses)?;
+    let expected_gh = req_chain.genesis_hash();
+    for (i, stxn) in decoded.iter().enumerate() {
+        if stxn.txn.genesis_hash != expected_gh {
+            return Err(
+                invalid("invalid_exact_avm_network_mismatch").with_message(format!(
+                    "transaction {i} genesis hash does not match payment network"
+                )),
+            );
+        }
+    }
     let payment_idx = usize::try_from(payment_index).unwrap_or(usize::MAX);
     let payment = decoded
         .get(payment_idx)
@@ -262,10 +272,7 @@ fn verify_payment_transaction(
     Ok(())
 }
 
-fn verify_fee_payer_transaction(
-    txn: &Transaction,
-    group_size: usize,
-) -> Result<(), AlgorandInvalid> {
+fn verify_fee_payer_transaction(txn: &Transaction) -> Result<(), AlgorandInvalid> {
     if txn.txn_type != TxnType::Pay {
         return Err(
             invalid("invalid_exact_avm_invalid_fee_payer").with_message(format!(
@@ -292,15 +299,6 @@ fn verify_fee_payer_transaction(
         return Err(invalid("invalid_exact_avm_invalid_fee_payer")
             .with_message("rekeyTo not allowed on fee payer"));
     }
-    let max_fee = max_reasonable_group_fee(group_size);
-    if txn.fee > max_fee {
-        return Err(
-            invalid("invalid_exact_avm_fee_too_high").with_message(format!(
-                "Fee {} exceeds maximum {max_fee} ({group_size} txns × 5000 µAlgo)",
-                txn.fee
-            )),
-        );
-    }
     Ok(())
 }
 
@@ -315,10 +313,12 @@ where
     F: FnMut(&Transaction, &str) -> Result<Vec<u8>, AlgorandInvalid>,
 {
     let mut signed = Vec::with_capacity(decoded.len());
+    let mut facilitator_fees = 0_u64;
     for (i, stxn) in decoded.iter().enumerate() {
         let sender = stxn.txn.sender.to_string();
         if facilitator_addresses.iter().any(|a| a == &sender) {
-            verify_fee_payer_transaction(&stxn.txn, decoded.len())?;
+            verify_fee_payer_transaction(&stxn.txn)?;
+            facilitator_fees = facilitator_fees.saturating_add(stxn.txn.fee);
             signed.push(sign(&stxn.txn, &sender)?);
         } else {
             let encoded = payment_group
@@ -330,6 +330,15 @@ where
                 .map_err(|_| invalid("invalid_exact_avm_invalid_transaction"))?;
             signed.push(bytes);
         }
+    }
+    let max_fee = max_reasonable_group_fee(decoded.len());
+    if facilitator_fees > max_fee {
+        return Err(
+            invalid("invalid_exact_avm_fee_too_high").with_message(format!(
+                "Facilitator fees {facilitator_fees} exceed maximum {max_fee} ({} txns × 5000 µAlgo)",
+                decoded.len()
+            )),
+        );
     }
     Ok(signed)
 }

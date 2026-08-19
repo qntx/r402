@@ -58,23 +58,30 @@ pub type MicroAlgos = u64;
 /// [`Self::genesis_hash`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AlgorandChainReference {
-    /// First 32 ASCII characters of the url-safe genesis hash.
-    pub caip_ref: [u8; 32],
-    /// Full standard-base64 genesis hash used for the on-tx `gh` field.
-    pub genesis_hash_b64: &'static str,
+    caip_ref: &'static str,
+    genesis_hash: [u8; 32],
+    genesis_hash_b64: &'static str,
+    genesis_id: &'static str,
+    algod_url: &'static str,
 }
 
 impl AlgorandChainReference {
     /// Algorand mainnet.
     pub const MAINNET: Self = Self {
-        caip_ref: *b"wGHE2Pwdvd7S12BL5FaOP20EGYesN73k",
+        caip_ref: ALGORAND_MAINNET_CAIP_REF,
+        genesis_hash: ALGORAND_MAINNET_GENESIS_HASH,
         genesis_hash_b64: ALGORAND_MAINNET_GENESIS_HASH_B64,
+        genesis_id: ALGORAND_MAINNET_GENESIS_ID,
+        algod_url: ALGORAND_MAINNET_ALGOD_URL,
     };
 
     /// Algorand testnet.
     pub const TESTNET: Self = Self {
-        caip_ref: *b"SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe",
+        caip_ref: ALGORAND_TESTNET_CAIP_REF,
+        genesis_hash: ALGORAND_TESTNET_GENESIS_HASH,
         genesis_hash_b64: ALGORAND_TESTNET_GENESIS_HASH_B64,
+        genesis_id: ALGORAND_TESTNET_GENESIS_ID,
+        algod_url: ALGORAND_TESTNET_ALGOD_URL,
     };
 
     /// All chain references with built-in support.
@@ -82,43 +89,32 @@ impl AlgorandChainReference {
 
     /// Returns the CAIP-2 reference string (first 32 chars).
     #[must_use]
-    #[allow(
-        clippy::expect_used,
-        clippy::missing_panics_doc,
-        reason = "caip_ref is constructed from ASCII literals"
-    )]
-    pub fn as_str(&self) -> &str {
-        std::str::from_utf8(&self.caip_ref).expect("caip_ref is ASCII")
+    pub const fn as_str(&self) -> &'static str {
+        self.caip_ref
     }
 
     /// Returns the 32-byte genesis hash written into `gh`.
     #[must_use]
-    pub fn genesis_hash(self) -> [u8; 32] {
-        if self == Self::MAINNET {
-            ALGORAND_MAINNET_GENESIS_HASH
-        } else {
-            ALGORAND_TESTNET_GENESIS_HASH
-        }
+    pub const fn genesis_hash(self) -> [u8; 32] {
+        self.genesis_hash
+    }
+
+    /// Returns the full standard-base64 genesis hash.
+    #[must_use]
+    pub const fn genesis_hash_b64(self) -> &'static str {
+        self.genesis_hash_b64
     }
 
     /// Returns the genesis ID written into `gen`.
     #[must_use]
-    pub fn genesis_id(self) -> &'static str {
-        if self == Self::MAINNET {
-            ALGORAND_MAINNET_GENESIS_ID
-        } else {
-            ALGORAND_TESTNET_GENESIS_ID
-        }
+    pub const fn genesis_id(self) -> &'static str {
+        self.genesis_id
     }
 
     /// Returns the default algod endpoint for this network.
     #[must_use]
-    pub fn default_algod_url(self) -> &'static str {
-        if self == Self::MAINNET {
-            ALGORAND_MAINNET_ALGOD_URL
-        } else {
-            ALGORAND_TESTNET_ALGOD_URL
-        }
+    pub const fn default_algod_url(self) -> &'static str {
+        self.algod_url
     }
 }
 
@@ -295,9 +291,10 @@ pub enum AlgorandAddressFormatError {
 }
 
 fn address_checksum(public_key: &[u8; 32]) -> [u8; 4] {
-    let digest = Sha512_256::digest(public_key);
+    let digest: [u8; 32] = Sha512_256::digest(public_key).into();
+    let (_, tail) = digest.split_at(28);
     let mut checksum = [0u8; 4];
-    checksum.copy_from_slice(digest.get(28..32).unwrap_or(&[0; 4]));
+    checksum.copy_from_slice(tail);
     checksum
 }
 
@@ -320,14 +317,11 @@ fn decode_address(s: &str) -> Result<AlgorandAddress, AlgorandAddressFormatError
     if decoded.len() != 36 {
         return Err(AlgorandAddressFormatError::Invalid(s.to_owned()));
     }
+    let (pk, checksum) = decoded.split_at(32);
     let mut public_key = [0u8; 32];
-    let Some(pk) = decoded.get(..32) else {
-        return Err(AlgorandAddressFormatError::Invalid(s.to_owned()));
-    };
     public_key.copy_from_slice(pk);
     let expected = address_checksum(&public_key);
-    let got = decoded.get(32..36).unwrap_or(&[]);
-    if got != expected {
+    if checksum != expected {
         return Err(AlgorandAddressFormatError::Invalid(s.to_owned()));
     }
     Ok(AlgorandAddress(public_key))
@@ -386,6 +380,8 @@ impl AlgorandTokenDeployment {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
+    use base64::Engine as _;
+
     use super::*;
 
     #[test]
@@ -415,7 +411,7 @@ mod tests {
         let back = AlgorandChainReference::try_from(chain_id).unwrap();
         assert_eq!(back, AlgorandChainReference::TESTNET);
         assert_eq!(back.genesis_hash(), ALGORAND_TESTNET_GENESIS_HASH);
-        assert_eq!(back.genesis_hash_b64, ALGORAND_TESTNET_GENESIS_HASH_B64);
+        assert_eq!(back.genesis_hash_b64(), ALGORAND_TESTNET_GENESIS_HASH_B64);
         assert!(is_algorand_network(
             "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k"
         ));
@@ -438,12 +434,24 @@ mod tests {
     fn mainnet_gh_is_full_hash_not_caip_truncation() {
         assert_ne!(
             AlgorandChainReference::MAINNET.as_str(),
-            AlgorandChainReference::MAINNET.genesis_hash_b64
+            AlgorandChainReference::MAINNET.genesis_hash_b64()
         );
         assert!(
             AlgorandChainReference::MAINNET
-                .genesis_hash_b64
+                .genesis_hash_b64()
                 .ends_with('=')
         );
+    }
+
+    #[test]
+    fn genesis_hash_bytes_match_b64() {
+        for chain in AlgorandChainReference::ALL {
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(chain.genesis_hash_b64())
+                .unwrap();
+            let bytes: [u8; 32] = decoded.try_into().unwrap();
+            assert_eq!(bytes, chain.genesis_hash());
+            assert_ne!(chain.as_str().as_bytes(), chain.genesis_hash().as_slice());
+        }
     }
 }

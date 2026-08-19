@@ -117,4 +117,8 @@ impl AlgodRpc for AlgorandChainProvider {
     ) -> impl Future<Output = Result<PendingTransaction, AlgodError>> + Send {
         self.rpc.pending_transaction(txid)
     }
+
+    fn last_round(&self) -> impl Future<Output = Result<u64, AlgodError>> + Send {
+        self.rpc.last_round()
+    }
 }
