@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SettlementCache` (120s, keyed by the base64 delegate). Umbrella feature
   `near` is optional and is included in `full`.
 
+### Changed
+
+- **MSRV raised to 1.93.** Required by `near-jsonrpc-client` 0.22.
+
 ## [0.16.0] — 2026-08-19
 
 ### Security

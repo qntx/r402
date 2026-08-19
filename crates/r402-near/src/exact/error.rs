@@ -4,21 +4,7 @@ use compact_str::CompactString;
 use r402_core::error::ErrorReason;
 use r402_core::wire::VerifyResponse;
 
-/// Errors specific to NEAR exact scheme operations.
-#[derive(Debug, thiserror::Error)]
-pub enum NearExactError {
-    /// JSON-RPC or chain-state read failed.
-    #[error("near rpc: {0}")]
-    Rpc(String),
-    /// Borsh or base64 decoding failed.
-    #[error("decode error: {0}")]
-    Decode(String),
-    /// Client signing failed.
-    #[error("signing error: {0}")]
-    Signing(String),
-}
-
-/// A verify failure that maps 1:1 onto a TS `invalidReason` string.
+/// A verify failure carrying a wire `invalidReason` and optional payer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NearInvalid {
     /// Wire `invalidReason`.

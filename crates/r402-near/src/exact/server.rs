@@ -41,7 +41,6 @@ impl NearExact {
 mod tests {
     use super::*;
     use crate::USDC;
-    use crate::chain::NearChainReference;
 
     #[test]
     fn price_tag_omits_extra_and_enricher() {
@@ -55,6 +54,5 @@ mod tests {
             tag.requirements.asset,
             USDC::near_testnet().address.to_string()
         );
-        let _ = NearChainReference::TESTNET;
     }
 }

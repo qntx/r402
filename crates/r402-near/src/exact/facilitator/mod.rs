@@ -20,7 +20,6 @@ pub use verify::{decode_signed_delegate, default_max_sponsored_gas, verify_reque
 #[cfg(test)]
 mod tests;
 
-use crate::DEFAULT_MAX_SPONSORED_GAS;
 use crate::chain::NearChainProvider;
 use crate::exact::{ExactScheme, NearExact};
 
@@ -28,8 +27,10 @@ use crate::exact::{ExactScheme, NearExact};
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NearExactFacilitatorConfig {
-    /// Maximum sponsored gas in gas units. Defaults to
-    /// [`crate::DEFAULT_MAX_SPONSORED_GAS`].
+    /// Maximum sponsored gas in gas units.
+    ///
+    /// When omitted, [`NearExact`] [`SchemeBuilder`] uses
+    /// [`crate::chain::NearChainProvider::max_sponsored_gas`].
     #[serde(default)]
     pub max_sponsored_gas: Option<u64>,
 }
@@ -81,7 +82,7 @@ impl SchemeBuilder<NearChainProvider> for NearExact {
             .unwrap_or_default();
         let gas = parsed
             .max_sponsored_gas
-            .unwrap_or(DEFAULT_MAX_SPONSORED_GAS);
+            .unwrap_or_else(|| provider.max_sponsored_gas());
         Ok(Box::new(NearExactFacilitator::new(provider, gas)))
     }
 }

@@ -10,7 +10,7 @@ resolver = "3"
 # "ethereum") and so live in the individual `Cargo.toml` files.
 version = "0.16.0"
 edition = "2024"
-rust-version = "1.91"
+rust-version = "1.93"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/qntx/r402"
 homepage = "https://github.com/qntx/r402"

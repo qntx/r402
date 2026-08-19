@@ -1072,6 +1072,33 @@ async fn borsh_roundtrip_golden() {
     assert_eq!(decoded.delegate_action.actions.len(), 1);
 }
 
+#[test]
+fn decodes_and_verifies_ts_signed_delegate_golden() {
+    let fixture: Value = serde_json::from_str(include_str!("../fixtures/ts_signed_delegate.json"))
+        .expect("fixture json");
+    let b64 = fixture
+        .get("signedDelegateAction")
+        .and_then(Value::as_str)
+        .expect("signedDelegateAction");
+    let decoded = super::decode_signed_delegate(b64).expect("ts borsh decode");
+    assert!(
+        decoded.verify(),
+        "TS @near-js SignedDelegate signature must verify under near-primitives"
+    );
+    assert_eq!(decoded.delegate_action.sender_id.as_str(), "alice.testnet");
+    assert_eq!(decoded.delegate_action.receiver_id.as_str(), "usdc.testnet");
+    assert_eq!(decoded.delegate_action.nonce, 7);
+    assert_eq!(decoded.delegate_action.max_block_height, 9999);
+    assert_eq!(decoded.delegate_action.actions.len(), 1);
+    assert_eq!(
+        decoded.delegate_action.public_key.to_string(),
+        fixture
+            .get("publicKey")
+            .and_then(Value::as_str)
+            .expect("publicKey")
+    );
+}
+
 #[tokio::test]
 async fn settle_succeeds_when_inner_receipt_ok() {
     let rpc = MockRpc::default();
