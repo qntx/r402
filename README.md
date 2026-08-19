@@ -199,7 +199,7 @@ sequenceDiagram
 
 - **Chains** — EVM (EIP-155), Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar
 - **Schemes** — **`exact`** (all chains) + **`upto`** (usage-based, EVM)
-- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 auth (Casper)
+- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 (Casper); NEP-141 / NEP-366 (NEAR); TEP-74 / W5R1 (TON); XRP / RLUSD Payment (XRPL); HBAR / HTS (Hedera); ASA (Algorand); FA (Aptos); SEND (Keeta); SEP-41 (Stellar)
 - **Lifecycle hooks** — `FacilitatorHooks` (verify/settle) + `ClientHooks` (payment creation)
 - **Async model** — zero `async_trait` in core — RPITIT / `Pin<Box<dyn Future>>`
 - **Facilitator trait** — unified, dyn-compatible `Box<dyn Facilitator>` across schemes
