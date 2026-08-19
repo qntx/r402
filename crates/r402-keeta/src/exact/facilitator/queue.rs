@@ -36,7 +36,10 @@ struct Job {
 
 impl Drop for Job {
     fn drop(&mut self) {
-        lock(&self.pending).remove(&self.block.hash());
+        // Only unfinished jobs (never `complete_job`) still hold `reply`.
+        if self.reply.is_some() {
+            lock(&self.pending).remove(&self.block.hash());
+        }
     }
 }
 
@@ -231,10 +234,11 @@ impl Drop for DestroyOnDrop {
 }
 
 fn complete_job(mut job: Job, result: Result<String, String>) {
+    let Some(reply) = job.reply.take() else {
+        return;
+    };
     lock(&job.pending).remove(&job.block.hash());
-    if let Some(reply) = job.reply.take() {
-        drop(reply.send(result));
-    }
+    drop(reply.send(result));
 }
 
 async fn live_worker(mut rx: mpsc::Receiver<Job>, fee_payer: AccountRef, network: Network) {

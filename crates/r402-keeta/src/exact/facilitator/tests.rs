@@ -885,6 +885,67 @@ async fn dropped_enqueue_does_not_pin_hash_after_worker_finishes() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn completing_job_does_not_clear_retry_reservation() {
+    let actors = actors();
+    let encoded = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        AMOUNT,
+        None,
+        testnet(),
+    );
+    let decoded = super::decode_block(&encoded).unwrap();
+    let first_started = Arc::new(tokio::sync::Notify::new());
+    let first_release = Arc::new(tokio::sync::Notify::new());
+    let retry_started = Arc::new(tokio::sync::Notify::new());
+    let retry_release = Arc::new(tokio::sync::Notify::new());
+    let first_started_cb = Arc::clone(&first_started);
+    let first_release_cb = Arc::clone(&first_release);
+    let retry_started_cb = Arc::clone(&retry_started);
+    let retry_release_cb = Arc::clone(&retry_release);
+    let queue = Arc::new(SettlementQueue::mock(
+        vec!["fee-payer-1".to_owned(), "fee-payer-2".to_owned()],
+        move |addr, block| {
+            if addr == "fee-payer-1" {
+                hold_until(
+                    Arc::clone(&first_started_cb),
+                    Arc::clone(&first_release_cb),
+                    block,
+                )
+            } else {
+                hold_until(
+                    Arc::clone(&retry_started_cb),
+                    Arc::clone(&retry_release_cb),
+                    block,
+                )
+            }
+        },
+    ));
+    let queue_waiter = Arc::clone(&queue);
+    let first_block = decoded.clone();
+    let retry_block = decoded.clone();
+    let waiter = tokio::spawn(async move {
+        queue_waiter
+            .enqueue("fee-payer-1", first_block)
+            .await
+            .expect("first settle");
+        queue_waiter.enqueue("fee-payer-2", retry_block).await
+    });
+    first_started.notified().await;
+    first_release.notify_one();
+    retry_started.notified().await;
+    let third = queue.enqueue("fee-payer-1", decoded).await;
+    assert!(
+        matches!(third, Err(super::QueueError::Duplicate)),
+        "Job::Drop must not clear a retry that already reserved the hash: {third:?}"
+    );
+    retry_release.notify_one();
+    assert!(waiter.await.unwrap().is_ok());
+}
+
 #[tokio::test]
 async fn same_payer_jobs_do_not_overlap_submit() {
     let actors = actors();
