@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Security
+
+- **auth-capture**: off-chain verify rejects signatures whose length is not 65 bytes
+  (remaining fail-open after #67). `/verify` is the access gate; non-EOA blobs
+  were accepted with no recover. Official EIP-6492 envelopes now fail closed
+  (they were previously accepted without recover).
+
 ### Settle pipeline hardening (SettlementMode **unchanged**)
 
 - **Three settlement modes kept**: Sequential / Concurrent / Background

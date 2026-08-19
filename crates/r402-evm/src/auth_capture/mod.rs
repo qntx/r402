@@ -68,6 +68,8 @@ mod client_verify_tests {
     #[cfg(feature = "client")]
     use alloy_signer_local::PrivateKeySigner;
     #[cfg(feature = "client")]
+    use r402_core::error::VerificationError;
+    #[cfg(feature = "client")]
     use r402_core::scheme::AuthCaptureScheme;
     #[cfg(feature = "client")]
     use r402_core::wire::PaymentPayload;
@@ -123,11 +125,7 @@ mod client_verify_tests {
         assert_eq!(recovered, payer);
     }
 
-    /// A 64-byte signature must not pass off-chain verification. It clears the
-    /// `signature.len() < 64` guard but is not 65 bytes, so signer recovery is
-    /// skipped and the payload would otherwise verify with no key ever checked —
-    /// letting a caller claim any `from` for free. The sibling batch-settlement
-    /// scheme already rejects non-65-byte signatures for this reason.
+    /// 64-byte signatures are not recovered; reject them.
     #[cfg(feature = "client")]
     #[tokio::test]
     async fn eip3009_rejects_64_byte_signature() {
@@ -152,13 +150,11 @@ mod client_verify_tests {
             .await
             .expect("sign");
 
-        // Attacker replaces the real 65-byte signature with a 64-byte blob and
-        // claims a different `from`. The nonce is payer-agnostic, so it still
-        // validates; only the signer gate would catch the swapped payer — and on
-        // the unpatched code it is skipped, so verify returns the attacker's
-        // chosen address.
-        let AuthCapturePayload::Eip3009(mut p) = scheme_payload else {
-            panic!("expected eip3009 payload");
+        let mut p = match scheme_payload {
+            AuthCapturePayload::Eip3009(p) => p,
+            AuthCapturePayload::Permit2(_) => {
+                unreachable!("sign_auth_capture with default extra is Eip3009")
+            }
         };
         p.authorization.from = Address::repeat_byte(0xCC);
         p.signature = alloy_primitives::Bytes::from(vec![0u8; 64]);
@@ -176,8 +172,122 @@ mod client_verify_tests {
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
 
         assert!(
-            verify_offchain(&payment, &requirements, 8453).is_err(),
+            matches!(
+                verify_offchain(&payment, &requirements, 8453),
+                Err(VerificationError::InvalidSignature(_))
+            ),
             "a 64-byte signature must not verify off-chain",
+        );
+    }
+
+    /// Signatures longer than 65 bytes are not recovered; reject them.
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn eip3009_rejects_66_byte_signature() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_core::wire::UnixTimestamp::now().as_secs();
+        let extra = AuthCaptureExtra {
+            name: "USD Coin".into(),
+            version: "2".into(),
+            capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
+            capture_deadline: now + 3600,
+            refund_deadline: now + 86400,
+            fee_recipient: ChecksummedAddress(Address::repeat_byte(0x22)),
+            min_fee_bps: 0,
+            max_fee_bps: 1000,
+            auto_capture: Some(false),
+            asset_transfer_method: None,
+        };
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+
+        let mut p = match scheme_payload {
+            AuthCapturePayload::Eip3009(p) => p,
+            AuthCapturePayload::Permit2(_) => {
+                unreachable!("sign_auth_capture with default extra is Eip3009")
+            }
+        };
+        p.authorization.from = Address::repeat_byte(0xCC);
+        p.signature = alloy_primitives::Bytes::from(vec![0u8; 66]);
+        let forged = AuthCapturePayload::Eip3009(p);
+
+        let requirements = v2::PaymentRequirements::new(
+            AuthCaptureScheme,
+            "eip155:8453".parse().unwrap(),
+            TokenAmount::from(amount),
+            ChecksummedAddress(pay_to),
+            ChecksummedAddress(asset),
+            300,
+        )
+        .with_extra(extra);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
+
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453),
+                Err(VerificationError::InvalidSignature(_))
+            ),
+            "a 66-byte signature must not verify off-chain",
+        );
+    }
+
+    /// A valid EOA signature plus a trailing byte must not be truncated and recovered.
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn eip3009_rejects_trailing_byte_on_valid_signature() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_core::wire::UnixTimestamp::now().as_secs();
+        let extra = AuthCaptureExtra {
+            name: "USD Coin".into(),
+            version: "2".into(),
+            capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
+            capture_deadline: now + 3600,
+            refund_deadline: now + 86400,
+            fee_recipient: ChecksummedAddress(Address::repeat_byte(0x22)),
+            min_fee_bps: 0,
+            max_fee_bps: 1000,
+            auto_capture: Some(false),
+            asset_transfer_method: None,
+        };
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+
+        let mut p = match scheme_payload {
+            AuthCapturePayload::Eip3009(p) => p,
+            AuthCapturePayload::Permit2(_) => {
+                unreachable!("sign_auth_capture with default extra is Eip3009")
+            }
+        };
+        let mut longer = p.signature.to_vec();
+        longer.push(0);
+        p.signature = alloy_primitives::Bytes::from(longer);
+        let forged = AuthCapturePayload::Eip3009(p);
+
+        let requirements = v2::PaymentRequirements::new(
+            AuthCaptureScheme,
+            "eip155:8453".parse().unwrap(),
+            TokenAmount::from(amount),
+            ChecksummedAddress(pay_to),
+            ChecksummedAddress(asset),
+            300,
+        )
+        .with_extra(extra);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
+
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453),
+                Err(VerificationError::InvalidSignature(_))
+            ),
+            "a 65-byte signature with a trailing byte must not verify off-chain",
         );
     }
 }
