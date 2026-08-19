@@ -13,7 +13,7 @@ Status of official TS mechanism families versus r402 crates.
 | Hedera | `@x402/hedera` | — | Missing |
 | Keeta | `@x402/keeta` | — | Missing |
 | Stellar | `@x402/stellar` | — | Missing (after MSRV 1.95) |
-| XRPL | `@x402/xrpl` | — | Missing |
+| XRPL | `@x402/xrpl` | `r402-xrpl` | exact E2E shipped |
 | Concordium | `@x402/concordium` | — | Deferred (no SPDX-clean SDK) |
 | Tron | — | `r402-tron` | r402-only |
 | Casper | spec only | `r402-casper` | r402-only (remote facilitator) |

@@ -23,3 +23,6 @@ pub use r402_solana as solana;
 #[cfg(feature = "tron")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tron")))]
 pub use r402_tron as tron;
+#[cfg(feature = "xrpl")]
+#[cfg_attr(docsrs, doc(cfg(feature = "xrpl")))]
+pub use r402_xrpl as xrpl;

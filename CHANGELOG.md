@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `SettlementCache` (120s, keyed by the base64 delegate). Umbrella feature
   `near` is optional and is included in `full`.
 - **`r402-solana`**: `solana-testnet` (`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`); `SolanaTokenDeployment.token_program` (legacy SPL Token vs Token-2022); default mints for USDT, USDG, PYUSD, and CASH. Testnet USDC uses the Circle devnet mint.
+- **`r402-xrpl`** — XRPL `exact` E2E: payer-signed `Payment` blob, server
+  `price_tag` (`XRP::mainnet()` / `RLUSD::mainnet()` / `RLUSD::testnet()`,
+  `areFeesSponsored: false`), in-process facilitator with sequence/ticket
+  checks, simulation, `tesSUCCESS` settle, and `SettlementCache` keyed by
+  transaction hash (TTL floor 120s). `getSigners` is empty. Umbrella
+  feature `xrpl` is optional and is included in `full`.
 
 ### Changed
 

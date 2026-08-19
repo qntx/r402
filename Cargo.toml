@@ -27,6 +27,7 @@ r402-mcp = { version = "0.16.0", path = "crates/r402-mcp" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
 r402-tron = { version = "0.16.0", path = "crates/r402-tron" }
+r402-xrpl = { version = "0.16.0", path = "crates/r402-xrpl" }
 
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy
@@ -122,6 +123,12 @@ near-crypto = "0.37"
 near-primitives = "0.37"
 near-jsonrpc-primitives = "0.37"
 borsh = "1.3"
+
+# XRPL
+#
+# default-features = false; crates enable core + models, and std + json-rpc
+# on client/facilitator. Do not enable wallet or websocket.
+xrpl-rust = { version = "1.3.0", default-features = false }
 
 # Telemetry
 tracing = "0.1"

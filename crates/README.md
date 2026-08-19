@@ -9,6 +9,7 @@
 | **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
 | **[`r402-near`](r402-near/)** | [![crates.io][r402-near-crate]][r402-near-crate-url] [![docs.rs][r402-near-doc]][r402-near-doc-url] | NEAR — NEP-141 / NEP-366 exact transfers |
+| **[`r402-xrpl`](r402-xrpl/)** | [![crates.io][r402-xrpl-crate]][r402-xrpl-crate-url] [![docs.rs][r402-xrpl-doc]][r402-xrpl-doc-url] | XRPL — XRP / RLUSD exact transfers |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum payment gate, reqwest client, facilitator client |
 | **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport on official **`rmcp`** (Go/TS parity) |
 
@@ -23,6 +24,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` | In-process via TronGrid HTTP |
 | [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator |
 | [`r402-near`](r402-near/) | `near:mainnet`, `near:testnet` | `exact` | In-process via JSON-RPC (relayer-sponsored) |
+| [`r402-xrpl`](r402-xrpl/) | `xrpl:0`, `xrpl:1`, `xrpl:2` | `exact` | In-process via JSON-RPC (payer-signed blob) |
 
 ## Dependency graph
 
@@ -34,6 +36,7 @@ r402 (umbrella)
   ├── r402-tron          ── r402-core   exact (TronGrid)
   ├── r402-casper        ── r402-core   exact (preflight + remote facilitator)
   ├── r402-near          ── r402-core   exact (NEP-366 relayer)
+  ├── r402-xrpl          ── r402-core   exact (payer-signed Payment)
   ├── r402-http          ── r402-core   Axum Paygate + reqwest X402Client
   └── r402-mcp           ── r402-core   MCP transport (rmcp, V2)
 ```
@@ -52,6 +55,7 @@ Publish order (crates.io): `r402-core` → chain crates → `r402-http` / `r402-
 | `tron` | | Enable `r402-tron` |
 | `casper` | | Enable `r402-casper` |
 | `near` | | Enable `r402-near` |
+| `xrpl` | | Enable `r402-xrpl` |
 | `mcp` | | Enable `r402-mcp` |
 | `client` | | Propagate `client` to enabled crates |
 | `server` | | Propagate `server` to enabled crates |
@@ -79,6 +83,7 @@ r402 = { version = "0.16", features = [
 | `r402-tron` | Price tag generation | TIP-712 / EIP-3009 / Permit2 signing | On-chain verify & settle (TronGrid) | `tracing` spans |
 | `r402-casper` | Price tag generation | `SchemeClient` + EIP-712 digest signing | Remote facilitator client | `tracing` spans |
 | `r402-near` | Price tag generation | NEP-366 delegate signing | On-chain verify & settle (JSON-RPC) | `tracing` spans |
+| `r402-xrpl` | Price tag generation | Payer-signed `Payment` blob | On-chain verify & settle (JSON-RPC) | `tracing` spans |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
@@ -94,6 +99,8 @@ r402 = { version = "0.16", features = [
 [r402-casper-crate-url]: https://crates.io/crates/r402-casper
 [r402-near-crate]: https://img.shields.io/crates/v/r402-near.svg
 [r402-near-crate-url]: https://crates.io/crates/r402-near
+[r402-xrpl-crate]: https://img.shields.io/crates/v/r402-xrpl.svg
+[r402-xrpl-crate-url]: https://crates.io/crates/r402-xrpl
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
 [r402-mcp-crate]: https://img.shields.io/crates/v/r402-mcp.svg
@@ -112,6 +119,8 @@ r402 = { version = "0.16", features = [
 [r402-casper-doc-url]: https://docs.rs/r402-casper
 [r402-near-doc]: https://img.shields.io/docsrs/r402-near.svg
 [r402-near-doc-url]: https://docs.rs/r402-near
+[r402-xrpl-doc]: https://img.shields.io/docsrs/r402-xrpl.svg
+[r402-xrpl-doc-url]: https://docs.rs/r402-xrpl
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
 [r402-mcp-doc]: https://img.shields.io/docsrs/r402-mcp.svg
