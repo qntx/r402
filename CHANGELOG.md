@@ -13,6 +13,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   were accepted with no recover. Official EIP-6492 envelopes now fail closed
   (they were previously accepted without recover).
 
+### Removed
+
+- **`r402_svm::settlement_cache`** — compatibility re-export of
+  `r402_core::cache`. Import `SettlementCache` / `Duplicate` (and
+  `DEFAULT_SETTLEMENT_TTL` / `DEFAULT_SETTLEMENT_CAPACITY`) from
+  `r402_core::cache`.
+- **`r402_evm::exact::facilitator::VALIDATOR_ADDRESS`** — import
+  `r402_evm::exact::VALIDATOR_ADDRESS`.
+- **`X402Middleware::new`** — panicking constructor. Use
+  `X402Middleware::try_new`, which returns `FacilitatorClientError`
+  on an invalid facilitator URL.
+- **`r402_http::client` re-exports** of `r402_core` hook / `PaymentClient`
+  types. Implement `r402_core::ClientHooks` and construct
+  `r402_core::PaymentClient` from core.
+
+### Changed
+
+- **`X402Middleware::try_new` / `TryFrom<&str>` / `TryFrom<String>`**
+  now return `FacilitatorClientError` instead of
+  `Box<dyn std::error::Error>`.
+- **`Eip155ChainProvider::rpc_client`** returns `Result` when no HTTP(S)
+  endpoint remains after filtering, instead of panicking.
+
 ### Settle pipeline hardening (SettlementMode **unchanged**)
 
 - **Three settlement modes kept**: Sequential / Concurrent / Background

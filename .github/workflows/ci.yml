@@ -10,4 +10,4 @@ jobs:
   ci:
     uses: qntx/workflows/.github/workflows/ci-rust.yml@main
     with:
-      submodules: true
+      submodules: false

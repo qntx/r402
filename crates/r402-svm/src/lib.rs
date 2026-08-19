@@ -50,10 +50,6 @@ pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
 pub mod chain;
 pub mod exact;
 
-#[cfg(feature = "facilitator")]
-#[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
-pub mod settlement_cache;
-
 mod networks;
 pub use exact::SolanaExact;
 #[cfg(feature = "client")]

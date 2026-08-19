@@ -87,7 +87,8 @@ impl Eip155ChainProvider {
     ///
     /// # Errors
     ///
-    /// Returns an error if the wallet has no signers.
+    /// Returns an error if the wallet has no signers or no HTTP RPC
+    /// endpoint remains after filtering.
     pub fn new(
         chain: Eip155ChainReference,
         wallet: EthereumWallet,
@@ -105,7 +106,7 @@ impl Eip155ChainProvider {
         let signer_cursor = Arc::new(AtomicUsize::new(0));
 
         let chain_id: ChainId = chain.into();
-        let client = Self::rpc_client(&chain_id, rpc_endpoints);
+        let client = Self::rpc_client(&chain_id, rpc_endpoints)?;
 
         let nonce_manager = PendingNonceManager::default();
         let filler = JoinFill::new(
@@ -143,15 +144,13 @@ impl Eip155ChainProvider {
     /// Each entry in `endpoints` is a `(url, optional_rate_limit)` pair.
     /// Non-HTTP(S) URLs are silently skipped.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics if no valid HTTP transports remain after filtering.
-    #[must_use]
-    #[allow(
-        clippy::expect_used,
-        reason = "panics on empty endpoints is intentional"
-    )]
-    pub fn rpc_client(chain_id: &ChainId, endpoints: &[(Url, Option<u32>)]) -> RpcClient {
+    /// Returns an error if no HTTP(S) endpoint remains after filtering.
+    pub fn rpc_client(
+        chain_id: &ChainId,
+        endpoints: &[(Url, Option<u32>)],
+    ) -> Result<RpcClient, Box<dyn std::error::Error>> {
         #[cfg(not(feature = "telemetry"))]
         let _ = chain_id;
         let transports = endpoints
@@ -171,15 +170,12 @@ impl Eip155ChainProvider {
                 Some(service)
             })
             .collect::<Vec<_>>();
+        let count = NonZeroUsize::new(transports.len())
+            .ok_or("at least one HTTP RPC endpoint is required")?;
         let fallback = ServiceBuilder::new()
-            .layer(
-                FallbackLayer::default().with_active_transport_count(
-                    NonZeroUsize::new(transports.len())
-                        .expect("Non-zero amount of stateless transports"),
-                ),
-            )
+            .layer(FallbackLayer::default().with_active_transport_count(count))
             .service(transports);
-        RpcClient::new(fallback, false)
+        Ok(RpcClient::new(fallback, false))
     }
 
     /// Round-robin selection of next signer from wallet.
@@ -425,5 +421,45 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
                 Err(MetaTransactionSendError::PendingTransaction(e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test assertions on known-valid fixtures"
+)]
+mod tests {
+    use super::*;
+
+    fn chain_id() -> ChainId {
+        "eip155:8453".parse().expect("fixture chain id")
+    }
+
+    #[test]
+    fn rpc_client_rejects_empty_endpoints() {
+        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[]);
+        assert!(
+            err.is_err(),
+            "empty endpoint list must return Err, not panic"
+        );
+    }
+
+    #[test]
+    fn rpc_client_rejects_non_http_endpoints() {
+        let ws = Url::parse("ws://127.0.0.1:8545").expect("fixture ws url");
+        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[(ws, None)]);
+        assert!(
+            err.is_err(),
+            "non-HTTP endpoints must return Err after filtering"
+        );
+    }
+
+    #[test]
+    fn rpc_client_accepts_https_endpoint() {
+        let url = Url::parse("https://mainnet.base.org").expect("fixture rpc url");
+        Eip155ChainProvider::rpc_client(&chain_id(), &[(url, None)])
+            .expect("HTTPS endpoint must construct");
     }
 }

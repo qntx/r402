@@ -44,7 +44,7 @@ use axum::{Router, routing::get};
 use r402_evm::{Eip155Exact, USDC};
 use r402_http::server::X402Middleware;
 
-let x402 = X402Middleware::new("https://facilitator.example.com");
+let x402 = X402Middleware::try_new("https://facilitator.example.com")?;
 
 let app = Router::new().route(
     "/paid-content",
@@ -90,7 +90,7 @@ async fn meter(/* ... */) -> impl IntoResponse {
     response
 }
 
-let layer = X402Middleware::new("https://facilitator.example.com")
+let layer = X402Middleware::try_new("https://facilitator.example.com")?
     .with_price_tag(Eip155Upto::price_tag(
         address!("0xYourPayToAddress"),
         USDC::base().amount(1_000_000u64), // up to 1 USDC

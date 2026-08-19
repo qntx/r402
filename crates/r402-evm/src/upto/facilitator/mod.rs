@@ -33,13 +33,6 @@ use crate::chain::Eip155MetaTransactionProvider;
 use crate::exact::facilitator::Eip155ExactError;
 use crate::upto::{Eip155Upto, UptoScheme, types};
 
-/// Default clock skew tolerance (seconds) for time-window checks.
-///
-/// Aliases [`crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS`] (6 s) so the
-/// upto and exact facilitators share a single source of truth aligned with
-/// Go's `Permit2DeadlineBuffer`.
-const DEFAULT_CLOCK_SKEW_TOLERANCE: u64 = crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
-
 /// Facilitator for the EIP-155 upto scheme (Permit2 only).
 ///
 /// Verify runs the off-chain invariants (amount, spender, recipient, time)
@@ -72,7 +65,7 @@ impl<P> Eip155UptoFacilitator<P> {
     pub const fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
         Self {
             provider,
-            clock_skew_tolerance: DEFAULT_CLOCK_SKEW_TOLERANCE,
+            clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
         }
     }
