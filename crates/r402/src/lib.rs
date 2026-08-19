@@ -17,6 +17,9 @@ pub use r402_hedera as hedera;
 #[cfg(feature = "http")]
 #[cfg_attr(docsrs, doc(cfg(feature = "http")))]
 pub use r402_http as http;
+#[cfg(feature = "keeta")]
+#[cfg_attr(docsrs, doc(cfg(feature = "keeta")))]
+pub use r402_keeta as keeta;
 #[cfg(feature = "mcp")]
 #[cfg_attr(docsrs, doc(cfg(feature = "mcp")))]
 pub use r402_mcp as mcp;

@@ -32,6 +32,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   enricher), in-process facilitator (simulate, broadcast, confirmation,
   `SettlementCache` keyed by the payment group). Umbrella feature
   `algorand` is optional and is included in `full`.
+- **`r402-keeta`** — Keeta `exact` E2E: `UserClient::init_builder` /
+  `send` / `send_external` / `build` client, server `price_tag`
+  (`USDC::keeta()` / `USDC::keeta_testnet()`, `enricher: None`),
+  `Block::try_from` verify, per-fee-payer `mpsc` settle with
+  `TransmitOptions::with_fee_signer`. Umbrella feature `keeta` is optional
+  and is included in `full`.
 
 ### Changed
 

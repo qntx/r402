@@ -25,6 +25,7 @@ r402-evm = { version = "0.16.0", path = "crates/r402-evm" }
 r402-http = { version = "0.16.0", path = "crates/r402-http" }
 r402-mcp = { version = "0.16.0", path = "crates/r402-mcp" }
 r402-hedera = { version = "0.16.0", path = "crates/r402-hedera" }
+r402-keeta = { version = "0.16.0", path = "crates/r402-keeta" }
 r402-near = { version = "0.16.0", path = "crates/r402-near" }
 r402-algorand = { version = "0.16.0", path = "crates/r402-algorand" }
 r402-solana = { version = "0.16.0", path = "crates/r402-solana" }
@@ -133,6 +134,14 @@ borsh = "1.3"
 xrpl-rust = { version = "1.3.0", default-features = false }
 # Hedera (Hiero Rust SDK). No rust-version advertised; 0.43.x is Apache-2.0.
 hedera = "0.43"
+# Keeta
+#
+# keetanetwork-client 0.5.1 `std` enables http + tokio + reqwest/rustls.
+# Do not pin keetanetwork-ledger 0.2.1 (depends on block ^0.3.1).
+keetanetwork-client = { version = "0.5.1", default-features = false, features = ["std"] }
+keetanetwork-block = { version = "0.4.1", features = ["std", "rasn"] }
+keetanetwork-account = { version = "0.4.0", features = ["std", "rasn"] }
+keetanetwork-crypto = { version = "0.3", features = ["std"] }
 
 # Telemetry
 tracing = "0.1"

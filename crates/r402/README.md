@@ -18,6 +18,7 @@ individual crates when you need a minimal dependency graph.
 | `xrpl` | [`r402-xrpl`](https://docs.rs/r402-xrpl) | XRPL exact (XRP / RLUSD) |
 | `hedera` | [`r402-hedera`](https://docs.rs/r402-hedera) | Hedera exact (HBAR / HTS) |
 | `algorand` | [`r402-algorand`](https://docs.rs/r402-algorand) | Algorand exact (ASA / algod REST) |
+| `keeta` | [`r402-keeta`](https://docs.rs/r402-keeta) | Keeta exact (signed `SEND` block) |
 | `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
@@ -33,7 +34,7 @@ r402 = { version = "0.16", features = ["evm", "http", "client", "server", "facil
 
 # Multi-chain
 r402 = { version = "0.16", features = [
-  "evm", "solana", "tron", "casper",
+  "evm", "solana", "tron", "casper", "near", "keeta",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -48,6 +49,7 @@ use r402::near;   // r402-near
 use r402::xrpl;   // r402-xrpl
 use r402::hedera; // r402-hedera
 use r402::algorand; // r402-algorand
+use r402::keeta;  // r402-keeta
 use r402::http;   // r402-http
 use r402::mcp;    // r402-mcp (needs feature "mcp")
 ```
