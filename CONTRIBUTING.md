@@ -24,7 +24,7 @@ cargo build --workspace --all-features
 cargo test --workspace --all-features
 ```
 
-The MSRV is **Rust 1.93** (`workspace.package.rust-version` in `Cargo.toml`).
+The MSRV is **Rust 1.95** (`workspace.package.rust-version` in `Cargo.toml`).
 CI builds on stable; match that locally with `rustup`.
 
 `--all-features` (and `r402-hedera` `client`/`facilitator`/`full`) needs

@@ -47,7 +47,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- **MSRV raised to 1.93.** Required by `near-jsonrpc-client` 0.22.
+- **MSRV raised to 1.95.** Required by `stellar-rpc-client` 27 and `aptos-sdk` 0.6.0.
 
 ## [0.16.0] — 2026-08-19
 
