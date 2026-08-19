@@ -10,12 +10,11 @@
     reason = "test assertions with known JSON structure"
 )]
 
-use r402_core::cache::SettlementCache;
 use r402_core::error::ErrorReason;
 use r402_core::wire::{SettleResponse, VerifyResponse};
 use serde_json::{Value, json};
 
-use super::{settle_request, verify_request_json};
+use super::{XrplSettlementCache, settle_request, verify_request_json};
 use crate::DEFAULT_MAX_FEE_DROPS;
 use crate::chain::codec::{invoice_id_to_field, sign_transaction};
 use crate::chain::rpc::{
@@ -262,15 +261,65 @@ async fn verify_rejects_destination_mismatch() {
 
 #[tokio::test]
 async fn verify_rejects_partial_payment_and_paths() {
-    let blob = sign_payment(json!({ "Flags": crate::TF_PARTIAL_PAYMENT }));
     let reqs = base_requirements();
     let rpc = MockRpc::default();
+    let flags_blob = sign_payment(json!({ "Flags": crate::TF_PARTIAL_PAYMENT }));
     assert!(
         reason(
-            &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await
+            &verify_request_json(
+                &rpc,
+                DEFAULT_MAX_FEE_DROPS,
+                &request(&flags_blob, &reqs, &reqs)
+            )
+            .await
         )
         .contains("partial_payment")
     );
+    let paths_blob = sign_payment(json!({ "Paths": [[{"account": PAY_TO}]] }));
+    assert!(
+        reason(
+            &verify_request_json(
+                &rpc,
+                DEFAULT_MAX_FEE_DROPS,
+                &request(&paths_blob, &reqs, &reqs)
+            )
+            .await
+        )
+        .contains("paths_not_allowed")
+    );
+}
+
+#[tokio::test]
+async fn verify_rejects_delegate_memos_delivermin_signers() {
+    let reqs = base_requirements();
+    let rpc = MockRpc::default();
+    let cases = [
+        (json!({ "Delegate": PAY_TO }), "delegate_not_allowed"),
+        (
+            json!({ "Memos": [{ "Memo": { "MemoData": "DEAD" } }] }),
+            "memos_not_allowed",
+        ),
+        (json!({ "DeliverMin": "1" }), "delivermin_not_allowed"),
+        (
+            json!({
+                "Signers": [{
+                    "Signer": {
+                        "Account": PAY_TO,
+                        "SigningPubKey": "ED00",
+                        "TxnSignature": "00"
+                    }
+                }]
+            }),
+            "multisig_not_supported",
+        ),
+    ];
+    for (overrides, needle) in cases {
+        let blob = sign_payment(overrides);
+        let got = reason(
+            &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await,
+        );
+        assert!(got.contains(needle), "expected {needle} in {got}");
+    }
 }
 
 #[tokio::test]
@@ -448,7 +497,7 @@ async fn settle_success_and_duplicate() {
     let blob = sign_payment(json!({}));
     let reqs = base_requirements();
     let rpc = MockRpc::default();
-    let cache = SettlementCache::new();
+    let cache = XrplSettlementCache::new();
     let req = request(&blob, &reqs, &reqs);
     let first = settle_request(
         &rpc,
@@ -522,6 +571,31 @@ async fn verify_rejects_missing_last_ledger() {
     assert!(
         result.contains("lastledgersequence_missing") || result.contains("payload"),
         "{result}"
+    );
+}
+
+#[tokio::test]
+async fn verify_rejects_iou_missing_amount() {
+    let blob = sign_payment(json!({ "Amount": Value::Null }));
+    let reqs = json!({
+        "scheme": "exact",
+        "network": "xrpl:1",
+        "asset": "USD",
+        "payTo": PAY_TO,
+        "amount": "10.5",
+        "maxTimeoutSeconds": 60,
+        "extra": {
+            "areFeesSponsored": false,
+            "invoiceId": INVOICE,
+            "issuer": ISSUER
+        }
+    });
+    let rpc = MockRpc::default();
+    assert!(
+        reason(
+            &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await
+        )
+        .contains("iou_amount")
     );
 }
 

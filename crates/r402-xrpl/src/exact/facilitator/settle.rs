@@ -1,7 +1,11 @@
 //! Facilitator settlement for the XRPL exact scheme.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
+use r402_core::cache::Duplicate;
 use r402_core::error::ErrorReason;
 use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
@@ -11,10 +15,64 @@ use crate::SETTLEMENT_TTL_MS;
 use crate::chain::codec::{decode_signed_tx_blob, signed_tx_hash};
 use crate::chain::rpc::{XrplRpc, XrplRpcError, XrplTxResult};
 
+/// Per-entry settlement dedup keyed by transaction hash.
+///
+/// TTL is the payment's landable window (`maxTimeoutSeconds`) plus the 120s
+/// floor, matching the scheme's `LastLedgerSequence` policy. A global-TTL
+/// cache would evict while the blob is still landable.
+#[derive(Clone, Debug)]
+pub struct XrplSettlementCache {
+    entries: Arc<Mutex<HashMap<String, Instant>>>,
+}
+
+impl Default for XrplSettlementCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl XrplSettlementCache {
+    /// Creates an empty cache.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Reserves `key` for `ttl`. Returns [`Duplicate::Yes`] when already present.
+    #[must_use = "callers MUST honour the Duplicate outcome to enforce idempotency"]
+    pub fn reserve(&self, key: impl Into<String>, ttl: Duration) -> Duplicate {
+        let now = Instant::now();
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entries.retain(|_, expires_at| *expires_at > now);
+        let key = key.into();
+        if entries.contains_key(&key) {
+            return Duplicate::Yes;
+        }
+        entries.insert(key, now + ttl);
+        Duplicate::No
+    }
+}
+
+/// Landable-window TTL: `maxTimeoutSeconds` plus the 120s floor.
+#[must_use]
+pub fn settlement_ttl(max_timeout_seconds: u64) -> Duration {
+    let landable_ms = max_timeout_seconds.saturating_mul(1000);
+    Duration::from_millis(
+        landable_ms
+            .saturating_add(SETTLEMENT_TTL_MS)
+            .max(SETTLEMENT_TTL_MS),
+    )
+}
+
 /// Settles a verified XRPL payment by submitting the signed blob.
 pub async fn settle_request<R, F, Fut>(
     rpc: &R,
-    cache: &SettlementCache,
+    cache: &XrplSettlementCache,
     max_fee_drops: u64,
     request: &Value,
     submit: F,
@@ -78,11 +136,7 @@ where
         .and_then(|r| r.get("maxTimeoutSeconds"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let _ttl_ms = max_timeout
-        .saturating_mul(1000)
-        .saturating_add(SETTLEMENT_TTL_MS);
-
-    if cache.reserve(&hash) == Duplicate::Yes {
+    if cache.reserve(&hash, settlement_ttl(max_timeout)) == Duplicate::Yes {
         return settle_failure(ErrorReason::DuplicateSettlement, &network, payer);
     }
 
@@ -128,5 +182,23 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+    }
+}
+
+#[cfg(test)]
+mod ttl_tests {
+    use super::*;
+
+    #[test]
+    fn ttl_covers_timeout_and_floors_at_120s() {
+        assert_eq!(settlement_ttl(0), Duration::from_millis(SETTLEMENT_TTL_MS));
+        assert_eq!(
+            settlement_ttl(60),
+            Duration::from_millis(60_000 + SETTLEMENT_TTL_MS)
+        );
+        assert_eq!(
+            settlement_ttl(300),
+            Duration::from_millis(300_000 + SETTLEMENT_TTL_MS)
+        );
     }
 }

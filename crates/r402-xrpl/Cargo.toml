@@ -24,8 +24,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
 client = [
-    "xrpl-rust/std",
-    "xrpl-rust/json-rpc",
     "dep:hex",
     "dep:reqwest",
     "dep:serde_json",
@@ -35,8 +33,6 @@ client = [
 ]
 server = ["dep:serde_json"]
 facilitator = [
-    "xrpl-rust/std",
-    "xrpl-rust/json-rpc",
     "dep:hex",
     "dep:reqwest",
     "dep:serde_json",
@@ -52,7 +48,8 @@ compact_str = { workspace = true }
 r402-core = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
-# `std` + `json-rpc` are feature-gated: wallet and websocket stay off.
+# core + models only. Transport is workspace reqwest; do not enable wallet,
+# websocket, std, or json-rpc (std pulls tungstenite/reqwest 0.12).
 xrpl-rust = { workspace = true, default-features = false, features = ["core", "models"] }
 
 hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
@@ -70,7 +67,7 @@ serde_json = { workspace = true }
 sha2 = { version = "0.10", default-features = false, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
 wiremock = { workspace = true }
-xrpl-rust = { workspace = true, default-features = false, features = ["std", "core", "models", "json-rpc"] }
+xrpl-rust = { workspace = true, default-features = false, features = ["core", "models"] }
 
 [lints]
 workspace = true

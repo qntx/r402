@@ -5,23 +5,20 @@ mod verify;
 
 use std::collections::HashMap;
 use std::future::Future;
-use std::time::Duration;
 
 use compact_str::CompactString;
-use r402_core::cache::{DEFAULT_SETTLEMENT_CAPACITY, SettlementCache};
 use r402_core::chain::ChainProvider;
 use r402_core::error::FacilitatorError;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::scheme::{SchemeBuilder, SchemeId};
 use r402_core::wire;
 use serde::Deserialize;
-pub use settle::settle_request;
+pub use settle::{XrplSettlementCache, settle_request, settlement_ttl};
 pub use verify::{default_max_fee_drops, verify_request_json};
 
 #[cfg(test)]
 mod tests;
 
-use crate::SETTLEMENT_TTL_MS;
 use crate::chain::XrplChainProvider;
 use crate::exact::{ExactScheme, XrplExact};
 
@@ -41,27 +38,21 @@ pub struct XrplExactFacilitatorConfig {
 pub struct XrplExactFacilitator<P> {
     provider: P,
     max_fee_drops: u64,
-    settlement_cache: SettlementCache,
+    settlement_cache: XrplSettlementCache,
 }
 
 impl<P> XrplExactFacilitator<P> {
-    /// Creates a facilitator with a settlement cache covering the landable window floor.
+    /// Creates a facilitator with a per-entry landable-window settlement cache.
     pub fn new(provider: P, max_fee_drops: u64) -> Self {
-        Self::with_settlement_cache(
-            provider,
-            max_fee_drops,
-            SettlementCache::with_params(
-                Duration::from_millis(SETTLEMENT_TTL_MS),
-                DEFAULT_SETTLEMENT_CAPACITY,
-            ),
-        )
+        Self::with_settlement_cache(provider, max_fee_drops, XrplSettlementCache::new())
     }
 
-    /// Creates a facilitator with a shared [`SettlementCache`].
+    /// Creates a facilitator with a shared [`XrplSettlementCache`].
+    #[must_use]
     pub const fn with_settlement_cache(
         provider: P,
         max_fee_drops: u64,
-        settlement_cache: SettlementCache,
+        settlement_cache: XrplSettlementCache,
     ) -> Self {
         Self {
             provider,

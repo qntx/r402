@@ -12,7 +12,7 @@ use xrpl::core::keypairs::{derive_classic_address, derive_keypair};
 use crate::chain::codec::{
     invoice_id_to_field, max_last_ledger_sequence, sign_transaction, signed_tx_hash,
 };
-use crate::chain::rpc::{XrplRpc, extract_created_ticket_sequences};
+use crate::chain::rpc::{XrplRpc, extract_created_ticket_sequences, submit_and_wait};
 use crate::chain::types::{
     XrplChainReference, is_decimal_string, is_integer_string, is_xrpl_network,
     parse_xrpl_network_id,
@@ -318,26 +318,9 @@ pub async fn create_tickets<R: XrplRpc>(
     let blob = sign_transaction(&mut tx, &signer.private_key, &signer.public_key)
         .map_err(|e| ClientError::Signing(e.to_string()))?;
     let hash = signed_tx_hash(&blob).map_err(|e| ClientError::Signing(e.to_string()))?;
-    let submitted = rpc
-        .submit(&blob)
+    let settled = submit_and_wait(rpc, &blob, &hash, last_ledger)
         .await
         .map_err(|e| ClientError::Signing(e.to_string()))?;
-    let mut outcome = rpc
-        .tx(&hash)
-        .await
-        .map_err(|e| ClientError::Signing(e.to_string()))?;
-    if outcome.as_ref().is_none_or(|found| !found.validated) {
-        // One extra read covers nodes that index `tx` after submit returns.
-        outcome = rpc
-            .tx(&submitted.hash)
-            .await
-            .map_err(|e| ClientError::Signing(e.to_string()))?;
-    }
-    let Some(settled) = outcome else {
-        return Err(ClientError::Signing(
-            "TicketCreate returned no transaction".to_owned(),
-        ));
-    };
     if !settled.validated || settled.result_code != "tesSUCCESS" {
         return Err(ClientError::Signing(format!(
             "TicketCreate failed: {}",
@@ -475,9 +458,20 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::unused_async,
+    reason = "test assertions"
+)]
 mod tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
     use super::*;
+    use crate::chain::rpc::{
+        XrplAccountAuthorization, XrplRpcError, XrplSimulationResult, XrplSubmitResult,
+        XrplTxResult,
+    };
 
     #[test]
     fn from_seed_derives_classic_address() {
@@ -490,5 +484,83 @@ mod tests {
                 || signer.public_key().starts_with("02")
                 || signer.public_key().starts_with("03")
         );
+    }
+
+    struct TicketRpc {
+        lookups: AtomicU32,
+    }
+
+    impl XrplRpc for TicketRpc {
+        async fn current_ledger_index(&self) -> Result<u32, XrplRpcError> {
+            Ok(990)
+        }
+
+        async fn account_authorization(
+            &self,
+            _account: &str,
+        ) -> Result<XrplAccountAuthorization, XrplRpcError> {
+            Ok(XrplAccountAuthorization {
+                regular_key: None,
+                is_master_key_disabled: false,
+                sequence: 1,
+            })
+        }
+
+        async fn ticket_sequences(&self, _account: &str) -> Result<Vec<u32>, XrplRpcError> {
+            Ok(Vec::new())
+        }
+
+        async fn fee_drops(&self) -> Result<u64, XrplRpcError> {
+            Ok(12)
+        }
+
+        async fn simulate(
+            &self,
+            _unsigned_tx: &Value,
+        ) -> Result<XrplSimulationResult, XrplRpcError> {
+            Ok(XrplSimulationResult {
+                engine_result: "tesSUCCESS".to_owned(),
+                engine_result_message: None,
+            })
+        }
+
+        async fn submit(&self, _signed_tx_blob: &str) -> Result<XrplSubmitResult, XrplRpcError> {
+            Ok(XrplSubmitResult {
+                hash: "AB".repeat(32),
+                engine_result: "tesSUCCESS".to_owned(),
+            })
+        }
+
+        async fn tx(&self, hash: &str) -> Result<Option<XrplTxResult>, XrplRpcError> {
+            let n = self.lookups.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                return Ok(None);
+            }
+            Ok(Some(XrplTxResult {
+                hash: hash.to_owned(),
+                validated: true,
+                result_code: "tesSUCCESS".to_owned(),
+                meta: Some(json!({
+                    "TransactionResult": "tesSUCCESS",
+                    "AffectedNodes": [{
+                        "CreatedNode": {
+                            "LedgerEntryType": "Ticket",
+                            "NewFields": { "TicketSequence": 8 }
+                        }
+                    }]
+                })),
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn create_tickets_waits_for_validated_result() {
+        let signer = XrplSigner::from_seed("sEdTM1uX8pu2do5XvTnutH6HsouMaM2").unwrap();
+        let rpc = TicketRpc {
+            lookups: AtomicU32::new(0),
+        };
+        let tickets = create_tickets(&signer, &rpc, 1, 60).await.unwrap();
+        assert_eq!(tickets, vec![8]);
+        assert!(rpc.lookups.load(Ordering::SeqCst) >= 2);
     }
 }

@@ -176,13 +176,8 @@ impl XrplJsonRpc {
             .json()
             .await
             .map_err(|e| XrplRpcError::Parse(e.to_string()))?;
-        if let Some(error) = value.get("error") {
-            let message = value
-                .get("error_message")
-                .and_then(Value::as_str)
-                .or_else(|| error.as_str())
-                .unwrap_or("xrpl rpc error");
-            return Err(XrplRpcError::Rpc(message.to_owned()));
+        if let Some(message) = json_rpc_error_message(&value) {
+            return Err(XrplRpcError::Rpc(message));
         }
         value
             .get("result")
@@ -202,30 +197,85 @@ impl XrplJsonRpc {
         hash: &str,
         last_ledger: u32,
     ) -> Result<XrplTxResult, XrplRpcError> {
-        let submitted = self.submit(signed_tx_blob).await?;
-        if is_hard_fail(&submitted.engine_result) {
-            return Ok(XrplTxResult {
-                hash: submitted.hash,
-                validated: false,
-                result_code: submitted.engine_result,
-                meta: None,
-            });
-        }
-        loop {
-            if let Some(tx) = self.tx(hash).await?
-                && tx.validated
-            {
-                return Ok(tx);
-            }
-            let current = self.current_ledger_index().await?;
-            if current > last_ledger {
-                return Err(XrplRpcError::Rpc(format!(
-                    "transaction {hash} expired after LastLedgerSequence {last_ledger}"
-                )));
-            }
-            tokio::time::sleep(SUBMIT_POLL_INTERVAL).await;
-        }
+        poll_until_validated(self, signed_tx_blob, hash, last_ledger).await
     }
+}
+
+/// Submits a signed blob and polls `tx` until validated or `LastLedgerSequence` passes.
+///
+/// # Errors
+///
+/// Returns [`XrplRpcError`] on transport failure or when the transaction expires.
+pub async fn submit_and_wait<R: XrplRpc>(
+    rpc: &R,
+    signed_tx_blob: &str,
+    hash: &str,
+    last_ledger: u32,
+) -> Result<XrplTxResult, XrplRpcError> {
+    poll_until_validated(rpc, signed_tx_blob, hash, last_ledger).await
+}
+
+async fn poll_until_validated<R: XrplRpc>(
+    rpc: &R,
+    signed_tx_blob: &str,
+    hash: &str,
+    last_ledger: u32,
+) -> Result<XrplTxResult, XrplRpcError> {
+    let submitted = rpc.submit(signed_tx_blob).await?;
+    if is_hard_fail(&submitted.engine_result) {
+        return Ok(XrplTxResult {
+            hash: submitted.hash,
+            validated: false,
+            result_code: submitted.engine_result,
+            meta: None,
+        });
+    }
+    loop {
+        if let Some(tx) = rpc.tx(hash).await?
+            && tx.validated
+        {
+            return Ok(tx);
+        }
+        let current = rpc.current_ledger_index().await?;
+        if current > last_ledger {
+            return Err(XrplRpcError::Rpc(format!(
+                "transaction {hash} expired after LastLedgerSequence {last_ledger}"
+            )));
+        }
+        tokio::time::sleep(SUBMIT_POLL_INTERVAL).await;
+    }
+}
+
+fn json_rpc_error_message(envelope: &Value) -> Option<String> {
+    if let Some(err) = envelope.get("error")
+        && !err.is_null()
+    {
+        return Some(
+            envelope
+                .get("error_message")
+                .and_then(Value::as_str)
+                .or_else(|| err.as_str())
+                .unwrap_or("xrpl rpc error")
+                .to_owned(),
+        );
+    }
+    let result = envelope.get("result")?;
+    let nested = result.get("error");
+    let nested_status = result.get("status").and_then(Value::as_str);
+    if nested_status == Some("error") || nested.is_some_and(|e| !e.is_null()) {
+        return Some(
+            nested
+                .and_then(Value::as_str)
+                .or_else(|| result.get("error_message").and_then(Value::as_str))
+                .unwrap_or("xrpl rpc error")
+                .to_owned(),
+        );
+    }
+    None
+}
+
+fn is_txn_missing(message: &str) -> bool {
+    message.contains("txnNotFound") || message.contains("actNotFound")
 }
 
 fn ticket_sequence_from_object(object: &Value) -> Option<u32> {
@@ -421,11 +471,7 @@ impl XrplRpc for XrplJsonRpc {
     async fn tx(&self, hash: &str) -> Result<Option<XrplTxResult>, XrplRpcError> {
         match self.call("tx", json!({ "transaction": hash })).await {
             Ok(result) => Ok(Some(parse_tx_result(hash, &result))),
-            Err(XrplRpcError::Rpc(message))
-                if message.contains("txnNotFound") || message.contains("actNotFound") =>
-            {
-                Ok(None)
-            }
+            Err(XrplRpcError::Rpc(message)) if is_txn_missing(&message) => Ok(None),
             Err(err) => Err(err),
         }
     }
@@ -610,6 +656,39 @@ mod tests {
             .unwrap();
         assert_eq!(auth.sequence, 7);
         assert!(!auth.is_master_key_disabled);
+    }
+
+    struct TxNotFoundRespond;
+
+    impl Respond for TxNotFoundRespond {
+        fn respond(&self, request: &Request) -> ResponseTemplate {
+            let body: Value = serde_json::from_slice(&request.body).unwrap_or_else(|_| json!({}));
+            let rpc_method = body.get("method").and_then(Value::as_str).unwrap_or("");
+            match rpc_method {
+                "tx" => ResponseTemplate::new(200).set_body_json(json!({
+                    "result": {
+                        "error": "txnNotFound",
+                        "status": "error",
+                        "error_message": "Transaction not found."
+                    }
+                })),
+                _ => ResponseTemplate::new(200).set_body_json(json!({
+                    "result": { "error": format!("unexpected {rpc_method}") },
+                    "status": "success"
+                })),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn tx_maps_nested_txn_not_found_to_none() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(TxNotFoundRespond)
+            .mount(&server)
+            .await;
+        let rpc = XrplJsonRpc::connect(server.uri());
+        assert!(rpc.tx("AB".repeat(32).as_str()).await.unwrap().is_none());
     }
 
     #[test]

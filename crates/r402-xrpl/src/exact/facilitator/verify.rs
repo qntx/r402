@@ -268,16 +268,17 @@ fn verify_network_binding(tx: &Value, network: &str) -> Result<(), XrplInvalid> 
     Ok(())
 }
 
-fn destination_amount(tx: &Value) -> Result<&Value, XrplInvalid> {
+fn destination_amount(tx: &Value, is_xrp: bool) -> Result<&Value, XrplInvalid> {
     match (tx.get("Amount"), tx.get("DeliverMax")) {
         (Some(_), Some(_)) => Err(invalid("invalid_exact_xrpl_facilitator_error")),
-        (None, None) => Err(invalid("invalid_exact_xrpl_payload_amount_xrp")),
+        (None, None) if is_xrp => Err(invalid("invalid_exact_xrpl_payload_amount_xrp")),
+        (None, None) => Err(invalid("invalid_exact_xrpl_payload_iou_amount")),
         (Some(amount), None) | (None, Some(amount)) => Ok(amount),
     }
 }
 
 fn verify_xrp_amount(tx: &Value, requirements: &Value) -> Result<(), XrplInvalid> {
-    let dest = destination_amount(tx)?;
+    let dest = destination_amount(tx, true)?;
     let dest_str = dest.as_str().unwrap_or("");
     if !is_integer_string(dest_str) {
         return Err(invalid("invalid_exact_xrpl_payload_amount_xrp"));
@@ -297,7 +298,7 @@ fn verify_xrp_amount(tx: &Value, requirements: &Value) -> Result<(), XrplInvalid
 }
 
 fn verify_iou_amount(tx: &Value, requirements: &Value) -> Result<(), XrplInvalid> {
-    let dest = destination_amount(tx)?;
+    let dest = destination_amount(tx, false)?;
     let dest_obj = dest
         .as_object()
         .ok_or_else(|| invalid("invalid_exact_xrpl_payload_iou_amount"))?;
