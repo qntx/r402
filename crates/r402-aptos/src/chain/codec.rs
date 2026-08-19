@@ -277,18 +277,22 @@ fn deserialize_account_authenticator(
     if let Ok(auth) = aptos_bcs::from_bytes::<AccountAuthenticator>(bytes) {
         return Ok(auth);
     }
-    // TS SingleKey/MultiKey emit on-chain bytes (no extra Vec length). The
-    // SDK Deserialize for those variants is an internal length-prefixed
-    // layout, so fall back to SDK key/signature parsers on the raw tail.
+    // TS SingleKey/MultiKey emit on-chain bytes. SDK `Deserialize` for those
+    // variants is an internal length-prefixed layout, so parse the on-chain
+    // layout with SDK `from_bcs_bytes` / `from_bytes` on exact slices.
     let tag = bytes
         .first()
         .copied()
         .ok_or_else(|| AptosCodecError::Bcs("empty account authenticator".to_owned()))?;
     match tag {
         2 => {
-            let rest = bytes.get(1..).unwrap_or(&[]);
+            let rest = bytes.get(1..).ok_or_else(|| {
+                AptosCodecError::Bcs("truncated SingleKey authenticator".to_owned())
+            })?;
             let (pk, pk_len) = take_any_public_key(rest)?;
-            let sig_bytes = rest.get(pk_len..).unwrap_or(&[]);
+            let sig_bytes = rest
+                .get(pk_len..)
+                .ok_or_else(|| AptosCodecError::Bcs("truncated SingleKey signature".to_owned()))?;
             let sig = AnySignature::from_bcs_bytes(sig_bytes)
                 .map_err(|e| AptosCodecError::from_sdk(&e))?;
             Ok(AccountAuthenticator::single_key(
@@ -297,9 +301,13 @@ fn deserialize_account_authenticator(
             ))
         }
         3 => {
-            let rest = bytes.get(1..).unwrap_or(&[]);
+            let rest = bytes.get(1..).ok_or_else(|| {
+                AptosCodecError::Bcs("truncated MultiKey authenticator".to_owned())
+            })?;
             let (pk, pk_len) = take_multi_key_public(rest)?;
-            let sig_bytes = rest.get(pk_len..).unwrap_or(&[]);
+            let sig_bytes = rest
+                .get(pk_len..)
+                .ok_or_else(|| AptosCodecError::Bcs("truncated MultiKey signature".to_owned()))?;
             let sig = MultiKeySignature::from_bytes(sig_bytes)
                 .map_err(|e| AptosCodecError::from_sdk(&e))?;
             Ok(AccountAuthenticator::multi_key(
@@ -313,32 +321,73 @@ fn deserialize_account_authenticator(
     }
 }
 
+/// `AnyPublicKey` on-chain: `variant || ULEB128(len) || bytes`.
 fn take_any_public_key(bytes: &[u8]) -> Result<(AnyPublicKey, usize), AptosCodecError> {
-    for end in 2..=bytes.len() {
-        let prefix = bytes
-            .get(..end)
-            .ok_or_else(|| AptosCodecError::Bcs("truncated AnyPublicKey".to_owned()))?;
-        if let Ok(pk) = AnyPublicKey::from_bcs_bytes(prefix) {
-            return Ok((pk, end));
-        }
-    }
-    Err(AptosCodecError::Bcs(
-        "could not parse AnyPublicKey from authenticator".to_owned(),
-    ))
+    let len = any_public_key_declared_len(bytes)?;
+    let prefix = bytes
+        .get(..len)
+        .ok_or_else(|| AptosCodecError::Bcs("truncated AnyPublicKey".to_owned()))?;
+    let pk = AnyPublicKey::from_bcs_bytes(prefix).map_err(|e| AptosCodecError::from_sdk(&e))?;
+    Ok((pk, len))
 }
 
+fn any_public_key_declared_len(bytes: &[u8]) -> Result<usize, AptosCodecError> {
+    let rest = bytes
+        .get(1..)
+        .ok_or_else(|| AptosCodecError::Bcs("truncated AnyPublicKey".to_owned()))?;
+    let (payload_len, prefix_len) = uleb128_len(rest)?;
+    1usize
+        .checked_add(prefix_len)
+        .and_then(|n| n.checked_add(payload_len))
+        .ok_or_else(|| AptosCodecError::Bcs("AnyPublicKey length overflow".to_owned()))
+}
+
+/// `MultiKeyPublicKey` on-chain: `num_keys || AnyPublicKey* || threshold`.
 fn take_multi_key_public(bytes: &[u8]) -> Result<(MultiKeyPublicKey, usize), AptosCodecError> {
-    for end in 2..=bytes.len() {
-        let prefix = bytes
-            .get(..end)
-            .ok_or_else(|| AptosCodecError::Bcs("truncated MultiKeyPublicKey".to_owned()))?;
-        if let Ok(pk) = MultiKeyPublicKey::from_bytes(prefix) {
-            return Ok((pk, end));
-        }
+    let num_keys = usize::from(
+        *bytes
+            .first()
+            .ok_or_else(|| AptosCodecError::Bcs("truncated MultiKeyPublicKey".to_owned()))?,
+    );
+    if num_keys == 0 || num_keys > 32 {
+        return Err(AptosCodecError::Bcs(format!(
+            "invalid MultiKeyPublicKey key count {num_keys}"
+        )));
     }
-    Err(AptosCodecError::Bcs(
-        "could not parse MultiKeyPublicKey from authenticator".to_owned(),
-    ))
+    let mut offset = 1usize;
+    for _ in 0..num_keys {
+        let used =
+            any_public_key_declared_len(bytes.get(offset..).ok_or_else(|| {
+                AptosCodecError::Bcs("truncated MultiKeyPublicKey key".to_owned())
+            })?)?;
+        offset = offset
+            .checked_add(used)
+            .ok_or_else(|| AptosCodecError::Bcs("MultiKeyPublicKey offset overflow".to_owned()))?;
+    }
+    offset = offset
+        .checked_add(1)
+        .ok_or_else(|| AptosCodecError::Bcs("truncated MultiKeyPublicKey threshold".to_owned()))?;
+    let prefix = bytes
+        .get(..offset)
+        .ok_or_else(|| AptosCodecError::Bcs("truncated MultiKeyPublicKey".to_owned()))?;
+    let pk = MultiKeyPublicKey::from_bytes(prefix).map_err(|e| AptosCodecError::from_sdk(&e))?;
+    Ok((pk, offset))
+}
+
+fn uleb128_len(bytes: &[u8]) -> Result<(usize, usize), AptosCodecError> {
+    let mut value = 0usize;
+    let mut shift = 0;
+    for (i, &byte) in bytes.iter().enumerate() {
+        if i >= 5 {
+            return Err(AptosCodecError::Bcs("ULEB128 too long".to_owned()));
+        }
+        value |= usize::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok((value, i + 1));
+        }
+        shift += 7;
+    }
+    Err(AptosCodecError::Bcs("truncated ULEB128".to_owned()))
 }
 
 #[cfg(test)]
@@ -418,5 +467,101 @@ mod tests {
             .sender_authenticator
             .verify(&tx.signing_message().unwrap())
             .unwrap();
+    }
+
+    fn ts_fixture(name: &str) -> (String, serde_json::Value) {
+        let root: serde_json::Value = serde_json::from_str(include_str!(
+            "../exact/fixtures/ts_encode_aptos_payload.json"
+        ))
+        .unwrap();
+        let entry = root.get(name).unwrap();
+        (
+            entry
+                .get("encoded")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+                .to_owned(),
+            entry.clone(),
+        )
+    }
+
+    fn assert_ts_payment(name: &str, expected_variant: fn(&AccountAuthenticator) -> bool) {
+        let (encoded, meta) = ts_fixture(name);
+        let payment = DecodedAptosPayment::from_base64(&encoded).unwrap();
+        assert!(
+            expected_variant(&payment.sender_authenticator),
+            "{name} authenticator variant"
+        );
+        assert_eq!(
+            payment.sender_long(),
+            meta.get("sender")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+        );
+        assert_eq!(
+            payment
+                .transaction
+                .fee_payer_address
+                .unwrap()
+                .to_long_string(),
+            meta.get("feePayer")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+        );
+        let entry = payment.entry_function().unwrap();
+        assert!(is_supported_transfer(entry));
+        let asset: AccountAddress = aptos_bcs::from_bytes(entry.args.first().unwrap()).unwrap();
+        assert_eq!(
+            asset.to_long_string(),
+            meta.get("asset")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+        );
+        let pay_to: AccountAddress = aptos_bcs::from_bytes(entry.args.get(1).unwrap()).unwrap();
+        assert_eq!(
+            pay_to.to_long_string(),
+            meta.get("payTo")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+        );
+        let amount: u64 = aptos_bcs::from_bytes(entry.args.get(2).unwrap()).unwrap();
+        assert_eq!(
+            amount.to_string(),
+            meta.get("amount")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+        );
+        payment
+            .sender_authenticator
+            .verify(&payment.transaction.signing_message().unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn decodes_ts_encode_aptos_payload_ed25519() {
+        assert_ts_payment("ed25519", |a| {
+            matches!(a, AccountAuthenticator::Ed25519 { .. })
+        });
+    }
+
+    #[test]
+    fn decodes_ts_encode_aptos_payload_single_key_ed25519() {
+        assert_ts_payment("singleKeyEd25519", |a| {
+            matches!(a, AccountAuthenticator::SingleKey { .. })
+        });
+    }
+
+    #[test]
+    fn decodes_ts_encode_aptos_payload_single_key_secp256k1() {
+        assert_ts_payment("singleKeySecp256k1", |a| {
+            matches!(a, AccountAuthenticator::SingleKey { .. })
+        });
+    }
+
+    #[test]
+    fn decodes_ts_encode_aptos_payload_multi_key() {
+        assert_ts_payment("multiKey", |a| {
+            matches!(a, AccountAuthenticator::MultiKey { .. })
+        });
     }
 }

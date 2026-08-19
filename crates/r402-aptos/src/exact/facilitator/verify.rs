@@ -124,39 +124,46 @@ async fn verify_inner<P: AptosFacilitatorOps>(
         .with_payer(sender.clone())
     })?;
 
-    if matches!(
-        decoded.sender_authenticator,
-        AccountAuthenticator::Ed25519 { .. }
-    ) {
-        match decoded.sender_authenticator.derived_address() {
-            Ok(derived) if derived == raw.sender => {}
-            _ => {
-                return Err(
-                    invalid("invalid_exact_aptos_payload_sender_authenticator_mismatch")
-                        .with_payer(sender),
-                );
+    match &decoded.sender_authenticator {
+        AccountAuthenticator::Ed25519 { .. } => {
+            match decoded.sender_authenticator.derived_address() {
+                Ok(derived) if derived == raw.sender => {}
+                _ => {
+                    return Err(invalid(
+                        "invalid_exact_aptos_payload_sender_authenticator_mismatch",
+                    )
+                    .with_payer(sender));
+                }
+            }
+            if decoded
+                .sender_authenticator
+                .verify(&signing_message)
+                .is_err()
+            {
+                return Err(invalid(
+                    "invalid_exact_aptos_payload_sender_authenticator_invalid_signature",
+                )
+                .with_payer(sender));
             }
         }
-    }
-
-    if matches!(
-        decoded.sender_authenticator,
-        AccountAuthenticator::NoAccountAuthenticator
-    ) {
-        return Err(
-            invalid("invalid_exact_aptos_payload_unsupported_authenticator").with_payer(sender),
-        );
-    }
-
-    if decoded
-        .sender_authenticator
-        .verify(&signing_message)
-        .is_err()
-    {
-        return Err(
-            invalid("invalid_exact_aptos_payload_sender_authenticator_invalid_signature")
-                .with_payer(sender),
-        );
+        AccountAuthenticator::SingleKey { .. } | AccountAuthenticator::MultiKey { .. } => {
+            if decoded
+                .sender_authenticator
+                .verify(&signing_message)
+                .is_err()
+            {
+                return Err(invalid(
+                    "invalid_exact_aptos_payload_sender_authenticator_invalid_signature",
+                )
+                .with_payer(sender));
+            }
+        }
+        AccountAuthenticator::MultiEd25519 { .. }
+        | AccountAuthenticator::NoAccountAuthenticator => {
+            return Err(
+                invalid("invalid_exact_aptos_payload_unsupported_authenticator").with_payer(sender),
+            );
+        }
     }
 
     if is_sponsored {

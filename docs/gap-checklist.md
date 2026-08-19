@@ -9,6 +9,7 @@ Status of official TS mechanism families versus r402 crates.
 | NEAR | `@x402/near` | `r402-near` | exact E2E shipped |
 | TVM (TON) | `@x402/tvm` | `r402-tvm` | exact E2E shipped |
 | Aptos | `@x402/aptos` | — | Missing (after MSRV 1.95) |
+| Aptos | `@x402/aptos` | `r402-aptos` | exact E2E shipped |
 | Algorand | `@x402/avm` | `r402-algorand` | exact E2E shipped |
 | Hedera | `@x402/hedera` | `r402-hedera` | exact E2E shipped |
 | Keeta | `@x402/keeta` | `r402-keeta` | exact E2E shipped |

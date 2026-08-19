@@ -14,7 +14,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use aptos_sdk::account::Ed25519Account;
+use aptos_sdk::account::{Ed25519Account, MultiEd25519Account};
+use aptos_sdk::crypto::Ed25519PrivateKey;
+use aptos_sdk::transaction::EntryFunction;
 use aptos_sdk::transaction::InputEntryFunctionData;
 use aptos_sdk::transaction::authenticator::{AccountAuthenticator, Ed25519Signature};
 use aptos_sdk::transaction::builder::TransactionBuilder;
@@ -143,7 +145,28 @@ fn signed_sample(opts: SampleOpts) -> SignedSample {
     let pay_to = AccountAddress::from_hex(opts.pay_to.unwrap_or(PAY_TO)).unwrap();
     let asset = AccountAddress::from_hex(opts.asset.unwrap_or(USDC_TESTNET_FA)).unwrap();
     let amount: u64 = opts.amount.unwrap_or(AMOUNT).parse().unwrap();
-    let payload = InputEntryFunctionData::transfer_fungible_asset(asset, pay_to, amount).unwrap();
+    let payload = match opts.payload {
+        SamplePayload::DefaultTransfer => {
+            InputEntryFunctionData::transfer_fungible_asset(asset, pay_to, amount).unwrap()
+        }
+        SamplePayload::AptTransfer => EntryFunction::apt_transfer(pay_to, amount).unwrap().into(),
+        SamplePayload::MissingTypeArg => {
+            InputEntryFunctionData::new("0x1::primary_fungible_store::transfer")
+                .arg(asset)
+                .arg(pay_to)
+                .arg(amount)
+                .build()
+                .unwrap()
+        }
+        SamplePayload::MissingAmountArg => {
+            InputEntryFunctionData::new("0x1::primary_fungible_store::transfer")
+                .type_arg("0x1::fungible_asset::Metadata")
+                .arg(asset)
+                .arg(pay_to)
+                .build()
+                .unwrap()
+        }
+    };
     let raw = TransactionBuilder::new()
         .sender(sender.address())
         .sequence_number(0)
@@ -189,6 +212,7 @@ struct SampleOpts {
     asset: Option<&'static str>,
     pay_to: Option<&'static str>,
     zero_signature: bool,
+    payload: SamplePayload,
 }
 
 impl Default for SampleOpts {
@@ -203,8 +227,17 @@ impl Default for SampleOpts {
             asset: None,
             pay_to: None,
             zero_signature: false,
+            payload: SamplePayload::DefaultTransfer,
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum SamplePayload {
+    DefaultTransfer,
+    AptTransfer,
+    MissingTypeArg,
+    MissingAmountArg,
 }
 
 fn requirements(fee_payer: Option<&str>) -> Value {
@@ -512,4 +545,155 @@ async fn encode_fixture_is_json_of_bytes() {
     let decoded = crate::chain::codec::decode_aptos_payload(&sample.encoded).unwrap();
     assert!(!decoded.transaction.is_empty());
     assert!(!decoded.sender_authenticator.is_empty());
+}
+
+#[tokio::test]
+async fn rejects_wrong_function() {
+    let sample = signed_sample(SampleOpts {
+        payload: SamplePayload::AptTransfer,
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_wrong_function"
+    );
+}
+
+#[tokio::test]
+async fn rejects_wrong_type_args() {
+    let sample = signed_sample(SampleOpts {
+        payload: SamplePayload::MissingTypeArg,
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_wrong_type_args"
+    );
+}
+
+#[tokio::test]
+async fn rejects_wrong_args() {
+    let sample = signed_sample(SampleOpts {
+        payload: SamplePayload::MissingAmountArg,
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(reason(&result), "invalid_exact_aptos_payload_wrong_args");
+}
+
+#[tokio::test]
+async fn rejects_asset_mismatch() {
+    let other_asset = "0x00000000000000000000000000000000000000000000000000000000000000aa";
+    let sample = signed_sample(SampleOpts {
+        asset: Some(other_asset),
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_asset_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn rejects_amount_mismatch() {
+    let sample = signed_sample(SampleOpts {
+        amount: Some("999"),
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_amount_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn rejects_recipient_mismatch() {
+    let other = "0x00000000000000000000000000000000000000000000000000000000000000bb";
+    let sample = signed_sample(SampleOpts {
+        pay_to: Some(other),
+        ..SampleOpts::default()
+    });
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![sample.fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&sample.fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_recipient_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn rejects_fee_payer_mismatch() {
+    let sample = signed_sample(SampleOpts::default());
+    let other = Ed25519Account::generate();
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![
+        sample.fee_payer.address().to_long_string(),
+        other.address().to_long_string(),
+    ];
+    let reqs = requirements(Some(&other.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_fee_payer_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn rejects_multied25519_authenticator() {
+    let keys = vec![Ed25519PrivateKey::generate(), Ed25519PrivateKey::generate()];
+    let account = MultiEd25519Account::new(keys, 1).unwrap();
+    let fee_payer = Ed25519Account::generate();
+    let pay_to = AccountAddress::from_hex(PAY_TO).unwrap();
+    let asset = AccountAddress::from_hex(USDC_TESTNET_FA).unwrap();
+    let payload = InputEntryFunctionData::transfer_fungible_asset(asset, pay_to, 1000).unwrap();
+    let raw = TransactionBuilder::new()
+        .sender(account.address())
+        .sequence_number(0)
+        .payload(payload)
+        .max_gas_amount(DEFAULT_CLIENT_MAX_GAS)
+        .gas_unit_price(100)
+        .expiration_timestamp_secs(future_expiration())
+        .chain_id(AptosSdkChainId::testnet())
+        .build()
+        .unwrap();
+    let transaction = SimpleTransaction {
+        raw_transaction: raw,
+        fee_payer_address: Some(fee_payer.address()),
+    };
+    let message = transaction.signing_message().unwrap();
+    let signature = account.sign(&message).unwrap();
+    let authenticator = AccountAuthenticator::MultiEd25519 {
+        public_key: account.public_key().to_bytes(),
+        signature: signature.to_bytes(),
+    };
+    let encoded = encode_aptos_payload(&transaction, &authenticator).unwrap();
+    let mut provider = MockProvider::default();
+    provider.fee_payers = vec![fee_payer.address().to_long_string()];
+    let reqs = requirements(Some(&fee_payer.address().to_long_string()));
+    let result = verify(&provider, &request(&reqs, &encoded)).await;
+    assert_eq!(
+        reason(&result),
+        "invalid_exact_aptos_payload_unsupported_authenticator"
+    );
 }
