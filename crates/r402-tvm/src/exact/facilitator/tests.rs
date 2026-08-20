@@ -7,6 +7,7 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::unused_async,
+    unknown_lints,
     clippy::unused_async_trait_impl,
     reason = "test assertions"
 )]

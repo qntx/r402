@@ -10,6 +10,7 @@
     clippy::excessive_nesting,
     clippy::let_underscore_must_use,
     clippy::unused_async,
+    unknown_lints,
     clippy::unused_async_trait_impl,
     reason = "test assertions with known JSON structure"
 )]
