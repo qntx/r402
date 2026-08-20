@@ -1,0 +1,11 @@
+{
+  "source": "@near-js/crypto KeyPairSigner + @near-js/transactions encodeSignedDelegate (packages 2.5.1)",
+  "senderId": "alice.testnet",
+  "receiverId": "usdc.testnet",
+  "ftReceiver": "merchant.testnet",
+  "amount": "1000000",
+  "nonce": 7,
+  "maxBlockHeight": 9999,
+  "publicKey": "ed25519:HD87eUsw4231jyMEjagc92CLu6dNcqbLPvp6WnFitf3p",
+  "signedDelegateAction": "DQAAAGFsaWNlLnRlc3RuZXQMAAAAdXNkYy50ZXN0bmV0AQAAAAILAAAAZnRfdHJhbnNmZXI1AAAAeyJyZWNlaXZlcl9pZCI6Im1lcmNoYW50LnRlc3RuZXQiLCJhbW91bnQiOiIxMDAwMDAwIn0A4FfrSBsAAAEAAAAAAAAAAAAAAAAAAAAHAAAAAAAAAA8nAAAAAAAAAPDWAUkxBLaRGT3v/UN3EKnTtco+f8gGIxIBRG7erlkDAIh+r5YpwPClVGt0/nxuN1xHdxFE3McsLeS+BeLk1xa36UMlbabCjrls+QV0auE0RNCrVMK3fvAsbCYnwssfzgE="
+}

@@ -1,0 +1,12 @@
+{
+  "scheme": "exact",
+  "network": "xrpl:1",
+  "asset": "XRP",
+  "payTo": "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+  "amount": "1000000",
+  "maxTimeoutSeconds": 60,
+  "extra": {
+    "areFeesSponsored": false,
+    "invoiceId": "INV-2026-XRPL-001"
+  }
+}

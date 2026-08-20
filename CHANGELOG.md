@@ -6,6 +6,62 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- **`r402-near`** — NEAR `exact` E2E: NEP-366 `SignedDelegate` client, server
+  `price_tag` (`USDC::near()` / `USDC::near_testnet()`, `enricher: None`),
+  in-process facilitator with the official TS `invalidReason` table and
+  `SettlementCache` (120s, keyed by the base64 delegate). Umbrella feature
+  `near` is optional and is included in `full`.
+- **`r402-solana`**: `solana-testnet` (`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`); `SolanaTokenDeployment.token_program` (legacy SPL Token vs Token-2022); default mints for USDT, USDG, PYUSD, and CASH. Testnet USDC uses the Circle devnet mint.
+- **`r402-xrpl`** — XRPL `exact` E2E: payer-signed `Payment` blob, server
+  `price_tag` (`XRP::mainnet()` / `RLUSD::mainnet()` / `RLUSD::testnet()`,
+  `areFeesSponsored: false`), in-process facilitator with sequence/ticket
+  checks, simulation, `tesSUCCESS` settle, and `SettlementCache` keyed by
+  transaction hash (TTL floor 120s). `getSigners` is empty. Umbrella
+  feature `xrpl` is optional and is included in `full`.
+- **`r402-hedera`** — Hedera `exact` E2E: payer-signed `TransferTransaction`
+  (HBAR `0.0.0` / HTS USDC), server `price_tag` (`USDC::hedera()` /
+  `USDC::hedera_testnet()`, `feePayer` enricher), in-process facilitator
+  with `aliasPolicy` config (default `reject`) and `SettlementCache` keyed
+  by the base64 transaction. Umbrella feature `hedera` is optional and is
+  included in `full`.
+- **`r402-algorand`** — Algorand `exact` E2E: algod REST + canonical msgpack
+  client (optional 0-amount fee-payer txn + ASA transfer), server
+  `price_tag` (`USDC::algorand()` / `USDC::algorand_testnet()`, `feePayer`
+  enricher), in-process facilitator (simulate, broadcast, confirmation,
+  `SettlementCache` keyed by the payment group). Umbrella feature
+  `algorand` is optional and is included in `full`.
+- **`r402-keeta`** — Keeta `exact` E2E: `UserClient::init_builder` /
+  `send` / `send_external` / `build` client, server `price_tag`
+  (`USDC::keeta()` / `USDC::keeta_testnet()`, `enricher: None`),
+  `Block::try_from` verify, per-fee-payer `mpsc` settle with
+  `TransmitOptions::with_fee_signer`. Umbrella feature `keeta` is optional
+  and is included in `full`.
+- **`r402-tvm`** — TON `exact` E2E: W5R1 client settlement BoC, server
+  `price_tag` (`USDT::tvm()` / `USDT::tvm_testnet()`, `areFeesSponsored: true`),
+  Highload V3 facilitator batcher (1s / 100 / max 185) and `SettlementCache`
+  reserve-only (120s, keyed by settlement BoC hash). Umbrella feature `tvm`
+  is optional and is included in `full`. CAIP-2 `tvm:-239` / `tvm:-3`
+  round-trip through `ChainId`.
+- **`r402-stellar`** — Stellar `exact` E2E: client signs Soroban auth
+  entries only (`stellar-rpc-client` 27 / `stellar-xdr` 27), server
+  `price_tag` (`USDC::stellar()` / `USDC::stellar_testnet()`,
+  `areFeesSponsored: true` only), in-process facilitator rebuilds the
+  transaction as source / optional fee bump, simulates, and submits.
+  Pubnet requires an operator RPC URL. Umbrella feature `stellar` is
+  optional and is included in `full`.
+- **`r402-aptos`** — Aptos `exact` E2E: `aptos-sdk` 0.6.0 sponsored
+  `primary_fungible_store::transfer`, TS JSON-of-bytes payload encoding,
+  server `price_tag` (`USDC::aptos()` / `USDC::aptos_testnet()`, `feePayer`
+  enricher), in-process facilitator with gas caps `500_000` / `1000` and
+  `SettlementCache` keyed by the base64 payload. Umbrella feature `aptos`
+  is optional and is included in `full`.
+
+### Changed
+
+- **MSRV raised to 1.95.** Required by `aptos-sdk` 0.6.0 (unlocks `stellar-rpc-client` 27).
+
 ## [0.16.0] — 2026-08-19
 
 ### Security

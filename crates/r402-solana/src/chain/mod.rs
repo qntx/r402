@@ -7,7 +7,7 @@
 //!
 //! - [`SolanaChainReference`] - A 32-character genesis hash identifying a Solana network
 //! - [`SolanaChainProvider`] - Provider for interacting with Solana chains
-//! - [`SolanaTokenDeployment`] - Token deployment information including mint address and decimals
+//! - [`SolanaTokenDeployment`] - Token deployment information including mint, decimals, and token program
 //! - [`Address`] - A Solana public key (base58-encoded)
 //!
 //! # Solana Networks
@@ -15,6 +15,7 @@
 //! Solana networks are identified by the first 32 characters of their genesis block hash:
 //! - Mainnet: `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
 //! - Devnet: `EtWTRABZaYq6iMfeYKouRu166VU2xqa1`
+//! - Testnet: `4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`
 
 /// Core Solana chain types (addresses, references, token deployments).
 pub mod types;

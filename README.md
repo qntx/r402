@@ -21,7 +21,15 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, and Casper**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and XRPL**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Hedera**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Algorand**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Keeta**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and TON**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, and Stellar**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Keeta, and Stellar**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, and Keeta**.
+r402 is a production-grade, multi-chain implementation of x402 with dual-path ERC-3009 / Permit2 transfers, the `exact` and `upto` (usage-based) schemes, composable lifecycle hooks, and built-in deployments across **EVM, Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, and Stellar**.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
@@ -189,9 +197,9 @@ sequenceDiagram
 
 ## Design
 
-- **Four built-in chains** — EVM (EIP-155), Solana, Tron, Casper
+- **Chains** — EVM (EIP-155), Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar
 - **Schemes** — **`exact`** (all chains) + **`upto`** (usage-based, EVM)
-- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 auth (Casper)
+- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 (Casper); NEP-141 / NEP-366 (NEAR); TEP-74 / W5R1 (TON); XRP / RLUSD Payment (XRPL); HBAR / HTS (Hedera); ASA (Algorand); FA (Aptos); SEND (Keeta); SEP-41 (Stellar)
 - **Lifecycle hooks** — `FacilitatorHooks` (verify/settle) + `ClientHooks` (payment creation)
 - **Async model** — zero `async_trait` in core — RPITIT / `Pin<Box<dyn Future>>`
 - **Facilitator trait** — unified, dyn-compatible `Box<dyn Facilitator>` across schemes
