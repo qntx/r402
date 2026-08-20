@@ -98,23 +98,17 @@ pub struct ExactTvmPayload {
 
 /// Wire format type aliases for the TON exact scheme.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactScheme, ExactTvmPayload, TvmExtra};
     use crate::chain::{TvmAddress, TvmTokenAmount};
 
-    /// Type alias for verify requests using the exact TON payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and TON-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactTvmPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactTvmPayload>;
 
     /// Type alias for payment requirements with TON-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, TvmTokenAmount, TvmAddress, TvmExtra>;
+        wire::PaymentRequirements<ExactScheme, TvmTokenAmount, TvmAddress, TvmExtra>;
 }
 
 #[cfg(test)]

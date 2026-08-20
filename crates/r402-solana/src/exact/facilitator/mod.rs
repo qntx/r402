@@ -51,7 +51,7 @@ impl<P> SolanaExactFacilitator<P> {
 
     /// Creates a facilitator with a shared [`SettlementCache`].
     ///
-    /// Sharing the cache across multiple facilitator instances (e.g. v1 + v2)
+    /// Sharing the cache across multiple facilitator instances
     /// guarantees a transaction submitted through one path cannot be replayed
     /// through another.
     pub const fn with_settlement_cache(

@@ -4,6 +4,18 @@
 //! TEP-74 `jetton_transfer`. The facilitator verifies that payload against
 //! `PaymentRequirements` and relays it through a Highload V3 wallet.
 
+#![allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    clippy::missing_errors_doc,
+    clippy::missing_const_for_fn,
+    clippy::redundant_closure,
+    clippy::option_if_let_else,
+    clippy::map_unwrap_or,
+    clippy::or_fun_call,
+    reason = "exact client/facilitator follow the TS checklist"
+)]
+
 use r402_core::scheme::SchemeId;
 
 #[cfg(feature = "server")]

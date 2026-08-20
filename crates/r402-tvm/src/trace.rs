@@ -1,5 +1,12 @@
 //! Toncenter-shaped trace helpers used by client fee estimates and settle.
 
+#![allow(
+    clippy::format_collect,
+    clippy::missing_errors_doc,
+    clippy::cast_possible_truncation,
+    reason = "trace hex helpers match Toncenter JSON"
+)]
+
 use serde_json::Value;
 use tonlib_core::cell::Cell;
 

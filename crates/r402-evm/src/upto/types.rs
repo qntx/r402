@@ -196,19 +196,19 @@ sol!(
 
 /// Wire format type aliases for the EIP-155 upto scheme.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{UptoPermit2Payload, UptoScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request for the upto EVM scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Typed settle request (same structure as [`VerifyRequest`]).
     pub type SettleRequest = VerifyRequest;
 
     /// Payment payload with embedded requirements and upto Permit2 data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, UptoPermit2Payload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, UptoPermit2Payload>;
 
     use super::UptoPaymentRequirementsExtra;
 
@@ -217,7 +217,7 @@ pub mod v2 {
     /// `extra` carries the facilitator address (required for client
     /// signing) plus optional token EIP-712 domain parameters used by the
     /// `settleWithPermit` gas-sponsoring extension.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
+    pub type PaymentRequirements = wire::PaymentRequirements<
         UptoScheme,
         TokenAmount,
         ChecksummedAddress,

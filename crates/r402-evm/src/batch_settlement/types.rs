@@ -252,19 +252,19 @@ impl BatchSettlementPayload {
 
 /// Wire aliases.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{BatchSettlementExtra, BatchSettlementPayload, BatchSettlementScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
     /// Typed settle request.
     pub type SettleRequest = VerifyRequest;
     /// Payment payload.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, BatchSettlementPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, BatchSettlementPayload>;
     /// Payment requirements.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
+    pub type PaymentRequirements = wire::PaymentRequirements<
         BatchSettlementScheme,
         TokenAmount,
         ChecksummedAddress,

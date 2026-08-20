@@ -8,28 +8,8 @@
 )]
 #![allow(
     clippy::doc_markdown,
-    clippy::excessive_nesting,
-    clippy::cognitive_complexity,
-    clippy::too_many_lines,
-    clippy::missing_const_for_fn,
-    clippy::or_fun_call,
-    clippy::option_if_let_else,
-    clippy::redundant_closure,
-    clippy::needless_question_mark,
-    clippy::manual_let_else,
-    clippy::type_complexity,
-    clippy::collapsible_if,
-    clippy::needless_continue,
-    clippy::significant_drop_tightening,
-    clippy::format_collect,
-    clippy::missing_errors_doc,
-    clippy::cast_sign_loss,
-    clippy::cast_possible_truncation,
-    clippy::map_unwrap_or,
-    clippy::redundant_closure_for_method_calls,
-    reason = "TON terms are not intra-doc links; verify/REST follow a sequential checklist"
+    reason = "TON terms (W5R1, TEP-74, Highload, BoC, jetton) are not intra-doc links"
 )]
-// Names are not crate features; listed so a leaked C++ binding cannot compile.
 #![allow(
     unexpected_cfgs,
     reason = "compile_error guard for forbidden tonlib-sys / tonlib-client"

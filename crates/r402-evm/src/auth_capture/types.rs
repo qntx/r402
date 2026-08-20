@@ -218,19 +218,19 @@ pub struct PaymentInfo {
 
 /// Wire aliases for typed verify/settle.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{AuthCaptureExtra, AuthCapturePayload, AuthCaptureScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
     /// Typed settle request.
     pub type SettleRequest = VerifyRequest;
     /// Payment payload.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, AuthCapturePayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, AuthCapturePayload>;
     /// Payment requirements.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
+    pub type PaymentRequirements = wire::PaymentRequirements<
         AuthCaptureScheme,
         TokenAmount,
         ChecksummedAddress,

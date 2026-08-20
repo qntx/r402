@@ -45,27 +45,17 @@ pub struct ExactStellarPayload {
 /// Uses CAIP-2 chain IDs (`stellar:pubnet`, `stellar:testnet`) for chain
 /// identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactScheme, ExactStellarPayload, StellarExtra};
     use crate::chain::{StellarAddress, StellarTokenAmount};
 
-    /// Type alias for verify requests using the exact Stellar payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and Stellar-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactStellarPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactStellarPayload>;
 
     /// Type alias for payment requirements with Stellar-specific types.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
-        ExactScheme,
-        StellarTokenAmount,
-        StellarAddress,
-        StellarExtra,
-    >;
+    pub type PaymentRequirements =
+        wire::PaymentRequirements<ExactScheme, StellarTokenAmount, StellarAddress, StellarExtra>;
 }
 
 #[cfg(test)]

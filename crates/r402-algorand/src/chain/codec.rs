@@ -3,6 +3,7 @@
 //! Map keys are sorted lexicographically and default values are omitted, matching
 //! go-algorand's canonical codec. Addresses, hashes, and signatures are msgpack
 //! `bin`; integers use the shortest unsigned encoding.
+//! Canonical go-algorand encoding is the product; no `algokit_transact` in the dep set.
 
 use std::collections::BTreeMap;
 

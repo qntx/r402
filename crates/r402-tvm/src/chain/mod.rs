@@ -5,6 +5,14 @@
 //! - [`TvmTokenDeployment`] — jetton minter metadata
 //! - [`TvmChainProvider`] — Highload V3 signer + REST (feature `facilitator`)
 
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::missing_errors_doc,
+    clippy::needless_question_mark,
+    reason = "TON address and Highload packing"
+)]
+
 /// Core TON chain types (addresses, references, token deployments).
 pub mod types;
 pub use types::*;

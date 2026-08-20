@@ -5,7 +5,6 @@ use compact_str::CompactString;
 use r402_core::wire::VerifyResponse;
 use serde_json::Value;
 
-use crate::MAX_TRANSACTION_GROUP_SIZE;
 use crate::chain::codec::{SignedTransaction, Transaction, TxnType, decode_signed};
 use crate::chain::rpc::AlgodRpc;
 use crate::chain::signer::verify_txn_signature;
@@ -105,11 +104,11 @@ where
         .and_then(Value::as_u64)
         .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
 
-    if payment_group.len() > MAX_TRANSACTION_GROUP_SIZE {
+    let group_n = payment_group.len();
+    if group_n != 1 && group_n != 2 {
         return Err(
             invalid("invalid_exact_avm_group_size_exceeded").with_message(format!(
-                "Transaction group has {} transactions, maximum is {MAX_TRANSACTION_GROUP_SIZE}",
-                payment_group.len()
+                "exact Algorand group must be payment only, or payment + unsigned facilitator fee pay (got {group_n})"
             )),
         );
     }
@@ -152,6 +151,19 @@ where
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
     verify_payment_transaction(payment, requirements, encoded_payment)?;
+
+    if group_n == 2 {
+        let extra_idx = 1 - payment_idx;
+        let extra = decoded
+            .get(extra_idx)
+            .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
+        if extra.has_signature() {
+            return Err(invalid("invalid_exact_avm_payload").with_message(
+                "only an unsigned facilitator 0-amount self-pay may accompany the payment",
+            ));
+        }
+        verify_fee_payer_transaction(&extra.txn)?;
+    }
 
     let prepared =
         prepare_signed_group_with(&decoded, payment_group, facilitator_addresses, &mut sign)?;
@@ -268,6 +280,26 @@ fn verify_payment_transaction(
     if !verify_txn_signature(&stxn.txn, &sig) {
         return Err(invalid("invalid_exact_avm_invalid_signature")
             .with_message("Payment transaction signature does not match sender"));
+    }
+    if stxn.txn.asset_close_to.is_some() {
+        return Err(
+            invalid("invalid_exact_avm_payload").with_message("aclose not allowed on payment")
+        );
+    }
+    if stxn.txn.asset_sender.is_some() {
+        return Err(
+            invalid("invalid_exact_avm_payload").with_message("asnd not allowed on payment")
+        );
+    }
+    if stxn.txn.rekey_to.is_some() {
+        return Err(
+            invalid("invalid_exact_avm_payload").with_message("rekey not allowed on payment")
+        );
+    }
+    if stxn.txn.close_remainder_to.is_some() {
+        return Err(
+            invalid("invalid_exact_avm_payload").with_message("close not allowed on payment")
+        );
     }
     Ok(())
 }

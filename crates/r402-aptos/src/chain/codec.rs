@@ -3,7 +3,7 @@
 //! Wire: base64(UTF-8 JSON `{ transaction: [u8], senderAuthenticator: [u8] }`).
 //! Inner `transaction` is BCS of TS `SimpleTransaction` (raw txn + optional
 //! fee-payer address). Inner `senderAuthenticator` is BCS
-//! [`AccountAuthenticator`]. Construction/sign/verify use `aptos-sdk` 0.6.
+//! `AccountAuthenticator`. Construction/sign/verify use `aptos-sdk` 0.6.
 
 use aptos_sdk::account::Account;
 use aptos_sdk::crypto::{AnyPublicKey, AnySignature, MultiKeyPublicKey, MultiKeySignature};
@@ -277,9 +277,7 @@ fn deserialize_account_authenticator(
     if let Ok(auth) = aptos_bcs::from_bytes::<AccountAuthenticator>(bytes) {
         return Ok(auth);
     }
-    // TS SingleKey/MultiKey emit on-chain bytes. SDK `Deserialize` for those
-    // variants is an internal length-prefixed layout, so parse the on-chain
-    // layout with SDK `from_bcs_bytes` / `from_bytes` on exact slices.
+    // On-chain SingleKey/MultiKey bytes differ from SDK Deserialize; this parser is the product.
     let tag = bytes
         .first()
         .copied()

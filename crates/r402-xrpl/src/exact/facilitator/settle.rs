@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use compact_str::CompactString;
-use r402_core::cache::Duplicate;
+use r402_core::cache::{DEFAULT_SETTLEMENT_CAPACITY, Duplicate};
 use r402_core::error::ErrorReason;
 use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
@@ -40,9 +40,17 @@ impl XrplSettlementCache {
         }
     }
 
-    /// Reserves `key` for `ttl`. Returns [`Duplicate::Yes`] when already present.
+    /// Reserves `key` for `ttl`.
+    ///
+    /// Returns [`Duplicate::Yes`] when already present. Returns `None` when
+    /// the cache is at [`DEFAULT_SETTLEMENT_CAPACITY`] and the key is new
+    /// (fail-closed; does not evict landable hashes).
     #[must_use = "callers MUST honour the Duplicate outcome to enforce idempotency"]
-    pub fn reserve(&self, key: impl Into<String>, ttl: Duration) -> Duplicate {
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "mutex must stay held through insert"
+    )]
+    pub fn reserve(&self, key: impl Into<String>, ttl: Duration) -> Option<Duplicate> {
         let now = Instant::now();
         let mut entries = self
             .entries
@@ -51,10 +59,13 @@ impl XrplSettlementCache {
         entries.retain(|_, expires_at| *expires_at > now);
         let key = key.into();
         if entries.contains_key(&key) {
-            return Duplicate::Yes;
+            return Some(Duplicate::Yes);
+        }
+        if entries.len() >= usize::try_from(DEFAULT_SETTLEMENT_CAPACITY).unwrap_or(10_000) {
+            return None;
         }
         entries.insert(key, now + ttl);
-        Duplicate::No
+        Some(Duplicate::No)
     }
 }
 
@@ -136,8 +147,18 @@ where
         .and_then(|r| r.get("maxTimeoutSeconds"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    if cache.reserve(&hash, settlement_ttl(max_timeout)) == Duplicate::Yes {
-        return settle_failure(ErrorReason::DuplicateSettlement, &network, payer);
+    match cache.reserve(&hash, settlement_ttl(max_timeout)) {
+        Some(Duplicate::Yes) => {
+            return settle_failure(ErrorReason::DuplicateSettlement, &network, payer);
+        }
+        None => {
+            return settle_failure(
+                ErrorReason::from_wire("invalid_exact_xrpl_facilitator_error"),
+                &network,
+                payer,
+            );
+        }
+        Some(Duplicate::No) => {}
     }
 
     match submit(signed_blob.to_owned(), last_ledger).await {

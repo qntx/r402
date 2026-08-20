@@ -267,7 +267,7 @@ fn is_valid_pay_to_format(pay_to: &str, alias_policy: AliasPolicy) -> bool {
         return false;
     }
     if alias_policy == AliasPolicy::Allow {
-        return true;
+        return pay_to.parse::<crate::chain::HederaAddress>().is_ok();
     }
     is_entity_id(pay_to)
 }

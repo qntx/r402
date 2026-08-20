@@ -78,7 +78,6 @@ async fn verify_inner<P: AptosFacilitatorOps>(
         .get("extra")
         .and_then(|e| e.get("feePayer"))
         .and_then(Value::as_str);
-    let is_sponsored = fee_payer.is_some();
     let managed = provider.fee_payer_addresses();
 
     if let Some(fee_payer) = fee_payer {
@@ -166,6 +165,11 @@ async fn verify_inner<P: AptosFacilitatorOps>(
         }
     }
 
+    if decoded.transaction.fee_payer_address.is_some() && fee_payer.is_none() {
+        return Err(invalid("invalid_exact_aptos_payload_fee_payer_mismatch").with_payer(sender));
+    }
+
+    let is_sponsored = fee_payer.is_some();
     if is_sponsored {
         if raw.max_gas_amount > MAX_GAS_AMOUNT {
             return Err(AptosInvalid::from_owned(format!(
@@ -204,6 +208,13 @@ async fn verify_inner<P: AptosFacilitatorOps>(
 
     let now = now_secs();
     if raw.expiration_timestamp_secs < now.saturating_add(EXPIRATION_BUFFER_SECONDS) {
+        return Err(invalid("invalid_exact_aptos_payload_transaction_expired").with_payer(sender));
+    }
+    let max_timeout = requirements
+        .get("maxTimeoutSeconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if raw.expiration_timestamp_secs > now.saturating_add(max_timeout) {
         return Err(invalid("invalid_exact_aptos_payload_transaction_expired").with_payer(sender));
     }
 

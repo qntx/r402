@@ -27,23 +27,17 @@ pub struct ExactNearPayload {
 /// Uses CAIP-2 chain IDs (`near:mainnet`, `near:testnet`) for chain
 /// identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactNearPayload, ExactScheme, NearExtra};
     use crate::chain::{NearAddress, NearTokenAmount};
 
-    /// Type alias for verify requests using the exact NEAR payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and NEAR-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactNearPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactNearPayload>;
 
     /// Type alias for payment requirements with NEAR-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, NearTokenAmount, NearAddress, NearExtra>;
+        wire::PaymentRequirements<ExactScheme, NearTokenAmount, NearAddress, NearExtra>;
 }
 
 #[cfg(test)]

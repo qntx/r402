@@ -24,8 +24,8 @@ use crate::wire::{
 
 /// Builds facilitator instances from a chain provider.
 ///
-/// Each chain crate ships a blueprint per scheme (e.g.
-/// `ExactEvmBlueprint`, `UptoEvmBlueprint`) that knows how to construct a
+/// Each chain crate ships a scheme marker (e.g. `Eip155Exact`, `SolanaExact`)
+/// that implements [`SchemeBuilder`] and constructs a
 /// `Box<dyn DynFacilitator>` given a chain provider reference and optional
 /// JSON configuration.
 pub trait SchemeBuilder<P> {

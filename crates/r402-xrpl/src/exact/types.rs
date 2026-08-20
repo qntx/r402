@@ -73,23 +73,17 @@ pub struct ExactXrplPayload {
 
 /// Wire format type aliases for the XRPL exact scheme.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactScheme, ExactXrplPayload, XrplExtra};
     use crate::chain::{XrplAddress, XrplTokenAmount};
 
-    /// Type alias for verify requests using the exact XRPL payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and XRPL-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactXrplPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactXrplPayload>;
 
     /// Type alias for payment requirements with XRPL-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, XrplTokenAmount, XrplAddress, XrplExtra>;
+        wire::PaymentRequirements<ExactScheme, XrplTokenAmount, XrplAddress, XrplExtra>;
 }
 
 #[cfg(test)]

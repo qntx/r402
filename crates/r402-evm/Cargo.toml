@@ -24,9 +24,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
 
-exact = []
-upto = []
-
 client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
 client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
 server = []
@@ -48,7 +45,7 @@ facilitator = [
     "dep:url",
     "r402-core/cache",
 ]
-full = ["telemetry", "exact", "upto", "client", "client-provider", "server", "facilitator"]
+full = ["telemetry", "client", "client-provider", "server", "facilitator"]
 
 [dependencies]
 alloy-primitives = { workspace = true }

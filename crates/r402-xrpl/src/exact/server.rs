@@ -39,17 +39,14 @@ impl XrplExact {
         .with_optional_extra(serde_json::to_value(extra).ok());
         wire::PriceTag {
             requirements,
-            enricher: Some(Arc::new(xrpl_fee_enricher_v2)),
+            enricher: Some(Arc::new(xrpl_fee_enricher)),
         }
     }
 }
 
 /// Enricher: force `areFeesSponsored: false` and copy `assetTransferMethod`
 /// from the matching `/supported` kind when the tag does not already set it.
-pub fn xrpl_fee_enricher_v2(
-    price_tag: &mut wire::PriceTag,
-    capabilities: &wire::SupportedResponse,
-) {
+pub fn xrpl_fee_enricher(price_tag: &mut wire::PriceTag, capabilities: &wire::SupportedResponse) {
     let supported_extra = capabilities.kinds.iter().find(|kind| {
         wire::V2 == kind.x402_version
             && kind.scheme.as_str() == ExactScheme.as_ref()
@@ -116,7 +113,7 @@ mod tests {
                 }),
             ),
         ]);
-        xrpl_fee_enricher_v2(&mut tag, &capabilities);
+        xrpl_fee_enricher(&mut tag, &capabilities);
         let extra = tag.requirements.extra.unwrap();
         assert_eq!(extra["areFeesSponsored"], false);
         assert_eq!(extra["assetTransferMethod"], "ticketSequence");

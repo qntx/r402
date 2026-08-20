@@ -238,27 +238,23 @@ sol!(
 /// Uses CAIP-2 chain IDs (e.g. `tron:0x2b6653dc`) for chain identification
 /// and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactPayload, ExactScheme, PaymentRequirementsExtra};
     use crate::chain::{Address, TronTokenAmount};
 
     /// Type alias for verify requests using the exact Tron payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;
 
     /// Type alias for payment payloads with embedded requirements and Tron-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactPayload>;
 
     /// Type alias for payment requirements with Tron-specific types.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
-        ExactScheme,
-        TronTokenAmount,
-        Address,
-        PaymentRequirementsExtra,
-    >;
+    pub type PaymentRequirements =
+        wire::PaymentRequirements<ExactScheme, TronTokenAmount, Address, PaymentRequirementsExtra>;
 }
 
 #[cfg(test)]

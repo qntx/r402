@@ -33,13 +33,13 @@ impl AlgorandExact {
         );
         wire::PriceTag {
             requirements,
-            enricher: Some(Arc::new(algorand_fee_payer_enricher_v2)),
+            enricher: Some(Arc::new(algorand_fee_payer_enricher)),
         }
     }
 }
 
 /// Copies `feePayer` from `/supported` onto the price tag extra.
-pub fn algorand_fee_payer_enricher_v2(
+pub fn algorand_fee_payer_enricher(
     price_tag: &mut wire::PriceTag,
     capabilities: &wire::SupportedResponse,
 ) {

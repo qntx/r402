@@ -32,13 +32,13 @@ impl AptosExact {
         );
         wire::PriceTag {
             requirements,
-            enricher: Some(Arc::new(aptos_fee_payer_enricher_v2)),
+            enricher: Some(Arc::new(aptos_fee_payer_enricher)),
         }
     }
 }
 
 /// Copies `feePayer` from `/supported` onto the price tag extra.
-pub fn aptos_fee_payer_enricher_v2(
+pub fn aptos_fee_payer_enricher(
     price_tag: &mut wire::PriceTag,
     capabilities: &wire::SupportedResponse,
 ) {

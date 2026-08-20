@@ -26,19 +26,20 @@ individual crates when you need a minimal dependency graph.
 | `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
 
 Forwarding features: `client`, `server`, `facilitator`, `telemetry`, `cache`,
-`ext-bazaar`, `ext-payment-id`, `all-extensions`, `full`.
+`ext-bazaar`, `ext-payment-id`, `ext-eip2612`, `ext-erc20-approval`,
+`all-extensions`, `full`.
 
 ## Quick Start
 
 ```toml
 [dependencies]
 # Minimal EVM HTTP server/client
-r402 = { version = "0.16", features = ["evm", "http", "client", "server", "facilitator"] }
+r402 = { version = "0.17", features = ["evm", "http", "client", "server", "facilitator"] }
 
 # Multi-chain
-r402 = { version = "0.16", features = [
-  "evm", "solana", "tron", "casper", "near", "tvm", "xrpl",
-  "hedera", "algorand", "aptos", "keeta", "stellar",
+r402 = { version = "0.17", features = [
+  "evm", "solana", "tron", "casper", "near", "xrpl",
+  "hedera", "algorand", "aptos", "keeta", "tvm", "stellar",
   "http", "client", "server", "facilitator",
 ] }
 ```
@@ -73,12 +74,10 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `xrpl` | | Re-export `r402-xrpl` as [`xrpl`] |
 | `hedera` | | Re-export `r402-hedera` as [`hedera`] |
 | `algorand` | | Re-export `r402-algorand` as [`algorand`] |
+| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
+| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `tvm` | | Re-export `r402-tvm` as [`tvm`] |
-| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
-| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `stellar` | | Re-export `r402-stellar` as [`stellar`] |
-| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
-| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
 | `http` | yes | Re-export `r402-http` as [`http`] |
 | `mcp` | | Re-export `r402-mcp` as [`mcp`] |
 | `client` | | Forward `client` to enabled chain + http crates |
@@ -88,6 +87,8 @@ use r402::mcp;    // r402-mcp (needs feature "mcp")
 | `cache` | | `r402-core` settlement cache |
 | `ext-bazaar` | | Bazaar extension |
 | `ext-payment-id` | | Payment-identifier extension |
+| `ext-eip2612` | | EIP-2612 gas-sponsoring extra |
+| `ext-erc20-approval` | | ERC-20 approval gas-sponsoring extra |
 | `all-extensions` | | All built-in extensions |
 | `full` | | Every feature above |
 

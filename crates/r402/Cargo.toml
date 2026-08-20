@@ -25,8 +25,8 @@ default = ["evm", "http"]
 
 evm = ["dep:r402-evm"]
 solana = ["dep:r402-solana"]
-casper = ["dep:r402-casper"]
 tron = ["dep:r402-tron"]
+casper = ["dep:r402-casper"]
 near = ["dep:r402-near"]
 xrpl = ["dep:r402-xrpl"]
 hedera = ["dep:r402-hedera"]
@@ -115,8 +115,8 @@ all-extensions = ["r402-core/all-extensions"]
 full = [
     "evm",
     "solana",
-    "casper",
     "tron",
+    "casper",
     "near",
     "xrpl",
     "hedera",

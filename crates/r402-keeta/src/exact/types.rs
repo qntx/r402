@@ -31,23 +31,17 @@ pub struct ExactKeetaPayload {
 /// Uses CAIP-2 chain IDs (`keeta:21378`, `keeta:1413829460`) for chain
 /// identification and embeds requirements directly in the payload.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactKeetaPayload, ExactScheme, KeetaExtra};
     use crate::chain::{KeetaAddress, KeetaTokenAmount};
 
-    /// Type alias for verify requests using the exact Keeta payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and Keeta-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactKeetaPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactKeetaPayload>;
 
     /// Type alias for payment requirements with Keeta-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, KeetaTokenAmount, KeetaAddress, KeetaExtra>;
+        wire::PaymentRequirements<ExactScheme, KeetaTokenAmount, KeetaAddress, KeetaExtra>;
 }
 
 #[cfg(test)]

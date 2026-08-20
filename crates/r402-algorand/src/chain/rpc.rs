@@ -331,7 +331,7 @@ impl AlgodRpc for AlgodClient {
 /// Polls pending until confirmation or `last-round` advances by `wait_rounds`.
 ///
 /// `404` (not yet in the pool) is treated as still pending. Other pending
-/// RPC errors abort after [`PENDING_ERROR_BUDGET`] consecutive failures.
+/// RPC errors abort after `PENDING_ERROR_BUDGET` consecutive failures.
 ///
 /// # Errors
 ///

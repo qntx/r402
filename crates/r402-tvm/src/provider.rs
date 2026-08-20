@@ -1,5 +1,29 @@
 //! Toncenter / TonAPI REST clients.
 
+#![allow(
+    clippy::excessive_nesting,
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    clippy::missing_const_for_fn,
+    clippy::or_fun_call,
+    clippy::option_if_let_else,
+    clippy::redundant_closure,
+    clippy::needless_question_mark,
+    clippy::manual_let_else,
+    clippy::type_complexity,
+    clippy::collapsible_if,
+    clippy::needless_continue,
+    clippy::significant_drop_tightening,
+    clippy::format_collect,
+    clippy::missing_errors_doc,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::map_unwrap_or,
+    clippy::redundant_closure_for_method_calls,
+    clippy::let_underscore_must_use,
+    reason = "TON REST sequential JSON mapping"
+)]
+
 use std::time::Duration;
 
 use base64::Engine;

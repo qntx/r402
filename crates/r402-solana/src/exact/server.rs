@@ -32,13 +32,13 @@ impl SolanaExact {
         );
         wire::PriceTag {
             requirements,
-            enricher: Some(Arc::new(solana_fee_payer_enricher_v2)),
+            enricher: Some(Arc::new(solana_fee_payer_enricher)),
         }
     }
 }
 
 /// Enricher function for V2 Solana price tags - adds `fee_payer` to extra field
-pub fn solana_fee_payer_enricher_v2(
+pub fn solana_fee_payer_enricher(
     price_tag: &mut wire::PriceTag,
     capabilities: &wire::SupportedResponse,
 ) {

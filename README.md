@@ -21,7 +21,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 is a multi-chain x402 SDK (`exact` / `upto`) with client signing, server gating, and facilitator settlement. Deployments: **EVM, Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar**.
+r402 is a multi-chain x402 SDK (`exact` / `upto`) with client signing, server gating, and facilitator settlement. Deployments: **EVM, Solana, Tron, Casper, NEAR, XRPL, Hedera, Algorand, Aptos, Keeta, TON, Stellar**.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
@@ -31,7 +31,7 @@ r402 is a multi-chain x402 SDK (`exact` / `upto`) with client signing, server ga
 
 ```toml
 [dependencies]
-r402 = { version = "0.16", features = ["evm", "http", "client", "server"] }
+r402 = { version = "0.17", features = ["evm", "http", "client", "server"] }
 ```
 
 Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.
