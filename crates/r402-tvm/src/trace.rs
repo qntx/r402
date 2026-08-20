@@ -1,10 +1,10 @@
 //! Toncenter-shaped trace helpers used by client fee estimates and settle.
 
 use serde_json::Value;
+use tonlib_core::cell::Cell;
 
 use crate::chain::TvmAddress;
 use crate::codecs::common::cell_hash_base64;
-use tonlib_core::cell::Cell;
 
 /// Errors from trace parsing / verification.
 #[derive(Debug, thiserror::Error)]

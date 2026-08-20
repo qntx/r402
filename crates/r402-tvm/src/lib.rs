@@ -1,4 +1,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unused_async_trait_impl,
+        reason = "in-crate mock impls of AFIT traits have no .await"
+    )
+)]
 #![allow(
     clippy::doc_markdown,
     clippy::excessive_nesting,

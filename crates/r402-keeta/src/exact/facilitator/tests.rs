@@ -9,6 +9,8 @@
     clippy::needless_pass_by_value,
     clippy::excessive_nesting,
     clippy::let_underscore_must_use,
+    clippy::unused_async,
+    clippy::unused_async_trait_impl,
     reason = "test assertions with known JSON structure"
 )]
 

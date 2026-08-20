@@ -1,9 +1,8 @@
 //! Facilitator-side Keeta chain provider: fee-payer keys + read client.
 
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-
 use std::str::FromStr;
+use std::sync::Arc;
 
 use keetanetwork_account::{
     Account, Accountable, GenericAccount, KeyED25519, KeyPairType, Keyable,

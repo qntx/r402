@@ -1,5 +1,9 @@
 //! Facilitator verification for the TON exact scheme.
 
+use compact_str::CompactString;
+use r402_core::wire::VerifyResponse;
+use serde_json::Value;
+
 use crate::chain::rpc::TvmRpc;
 use crate::chain::{TvmAddress, TvmRelayRequest};
 use crate::codecs::common::cell_hash_hex;
@@ -30,9 +34,6 @@ use crate::{
     DEFAULT_JETTON_WALLET_MESSAGE_AMOUNT, DEFAULT_MAX_TIMEOUT_SECONDS,
     DEFAULT_TVM_OUTER_GAS_BUFFER, MIN_FACILITATOR_TON_BALANCE, W5R1_CODE_HASH,
 };
-use compact_str::CompactString;
-use r402_core::wire::VerifyResponse;
-use serde_json::Value;
 
 /// Successful verify plus the relay request used for settle.
 #[derive(Debug, Clone)]

@@ -6,6 +6,7 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::unused_async,
+    clippy::unused_async_trait_impl,
     clippy::field_reassign_with_default,
     clippy::needless_pass_by_value,
     reason = "test assertions with known JSON structure"

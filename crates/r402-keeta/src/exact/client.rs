@@ -287,7 +287,7 @@ mod tests {
             return None;
         }
         let mut seed = [0u8; 32];
-        for (i, chunk) in s.as_bytes().chunks_exact(2).enumerate() {
+        for (i, chunk) in s.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let hi = from_hex(chunk[0])?;
             let lo = from_hex(chunk[1])?;
             seed[i] = (hi << 4) | lo;

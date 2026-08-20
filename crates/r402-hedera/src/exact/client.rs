@@ -226,8 +226,9 @@ where
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
-    use super::*;
     use hedera::PrivateKey;
+
+    use super::*;
 
     #[test]
     fn signs_token_transfer() {
