@@ -501,7 +501,7 @@ fn parse_private_key_bytes(private_key: &str) -> Result<Vec<u8>, TvmRpcError> {
     }
     if value.len().is_multiple_of(2) && value.bytes().all(|b| b.is_ascii_hexdigit()) {
         let mut out = vec![0u8; value.len() / 2];
-        for (i, chunk) in value.as_bytes().chunks_exact(2).enumerate() {
+        for (i, chunk) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let byte = u8::from_str_radix(
                 std::str::from_utf8(chunk).map_err(|e| TvmRpcError::Parse(e.to_string()))?,
                 16,

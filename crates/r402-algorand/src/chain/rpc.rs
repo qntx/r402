@@ -456,10 +456,11 @@ impl<T: AlgodRpc + Send + Sync> AlgodRpc for std::sync::Arc<T> {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
-    use super::*;
     use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::*;
 
     #[test]
     fn failure_message_kebab_and_camel() {

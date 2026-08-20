@@ -1,8 +1,7 @@
 //! Type definitions for the TON `"exact"` payment scheme.
 
-use serde::{Deserialize, Serialize};
-
 pub use r402_core::scheme::ExactScheme;
+use serde::{Deserialize, Serialize};
 
 use crate::chain::TvmAddress;
 use crate::codecs::common::{BocError, decode_base64_boc, make_zero_bit_cell};

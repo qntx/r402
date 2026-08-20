@@ -5,6 +5,7 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::unused_async,
+    clippy::unused_async_trait_impl,
     clippy::indexing_slicing,
     clippy::needless_pass_by_value,
     reason = "test assertions with known JSON structure"
@@ -616,10 +617,11 @@ async fn verify_rejects_iou_issuer_missing() {
 
 #[tokio::test]
 async fn supported_signers_are_empty() {
-    use crate::chain::{XrplChainProvider, XrplChainReference};
-    use crate::exact::facilitator::XrplExactFacilitator;
     use r402_core::chain::ChainProvider;
     use r402_core::facilitator::Facilitator;
+
+    use crate::chain::{XrplChainProvider, XrplChainReference};
+    use crate::exact::facilitator::XrplExactFacilitator;
 
     let provider = XrplChainProvider::new(
         XrplChainReference::TESTNET,

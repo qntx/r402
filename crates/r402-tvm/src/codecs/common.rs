@@ -126,7 +126,7 @@ pub(crate) fn decode_boc_text(value: &str) -> Result<Vec<u8>, BocError> {
     }
     if normalized.len().is_multiple_of(2) && normalized.bytes().all(|b| b.is_ascii_hexdigit()) {
         let mut out = vec![0u8; normalized.len() / 2];
-        for (i, chunk) in normalized.as_bytes().chunks_exact(2).enumerate() {
+        for (i, chunk) in normalized.as_bytes().as_chunks::<2>().0.iter().enumerate() {
             let hi = chunk
                 .first()
                 .copied()

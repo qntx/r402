@@ -1,4 +1,11 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unused_async_trait_impl,
+        reason = "in-crate mock impls of AFIT traits have no .await"
+    )
+)]
 
 //! Stellar chain support for the x402 payment protocol.
 //!

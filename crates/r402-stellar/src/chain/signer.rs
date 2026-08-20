@@ -5,9 +5,9 @@ use std::str::FromStr;
 
 use ed25519_dalek::{Signer, SigningKey};
 use stellar_strkey::ed25519::{PrivateKey, PublicKey};
+use stellar_xdr::{SorobanAuthorizationEntry, TransactionEnvelope};
 
 use super::xdr::{StellarXdrError, sign_auth_entries_for_address, sign_transaction_envelope};
-use stellar_xdr::{SorobanAuthorizationEntry, TransactionEnvelope};
 
 /// Local Ed25519 signer wrapping a Stellar secret seed (`S…`).
 #[derive(Clone)]

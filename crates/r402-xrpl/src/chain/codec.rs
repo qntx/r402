@@ -190,7 +190,7 @@ fn normalize_decimal(value: &str) -> Result<NormalizedDecimal, XrplCodecError> {
             "invalid decimal string: {value}"
         )));
     }
-    let (raw_whole, raw_fraction) = value.split_once('.').map_or((value, ""), |parts| parts);
+    let (raw_whole, raw_fraction) = value.split_once('.').unwrap_or((value, ""));
     let whole = raw_whole.trim_start_matches('0');
     let whole = if whole.is_empty() { "0" } else { whole };
     let fraction = raw_fraction.trim_end_matches('0');
