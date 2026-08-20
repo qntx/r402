@@ -32,8 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Fixed
 
-- `.github/workflows/publish.yml` now publishes the eight chain-parity crates
-  before `r402-http` / `r402-mcp` / umbrella `r402`.
+- CI and publish workflows install `protobuf-compiler` (`hedera-proto` build)
+  and publish the eight chain-parity crates before `r402-http` / `r402-mcp` /
+  umbrella `r402`.
 
 ### Added
 
