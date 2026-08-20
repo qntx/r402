@@ -3,6 +3,7 @@ name: Publish to crates.io
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ jobs:
   publish:
     name: Build, Test & Publish
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
         with:
@@ -47,8 +48,70 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
+          set -euo pipefail
+
+          # crates.io caps new crate names (~6 / 10 min). Version bumps of
+          # existing crates are separate. Treat "already on registry" as
+          # success so a rerun can finish a partial publish. Sleep on 429
+          # until the timestamp in the error body, then retry.
+          publish_pkg() {
+            local pkg="$1"
+            local attempt=0
+            local max_attempts=12
+            local log status wait_s retry_line when target now
+
+            while [ "$attempt" -lt "$max_attempts" ]; do
+              attempt=$((attempt + 1))
+              log="$(mktemp)"
+              echo "::group::Publishing ${pkg} (attempt ${attempt})"
+              set +e
+              cargo publish -p "$pkg" --locked >"$log" 2>&1
+              status=$?
+              set -e
+              cat "$log"
+              echo "::endgroup::"
+
+              if [ "$status" -eq 0 ]; then
+                rm -f "$log"
+                return 0
+              fi
+
+              if grep -Eqi 'already exists on crates\.io|already been uploaded|already uploaded' "$log"; then
+                echo "${pkg} already on crates.io; skipping"
+                rm -f "$log"
+                return 0
+              fi
+
+              if grep -Fq 'Too Many Requests' "$log"; then
+                wait_s=120
+                retry_line="$(grep -oE 'try again after [^[:space:]].*GMT' "$log" | head -n1 || true)"
+                if [ -n "$retry_line" ]; then
+                  when="${retry_line#try again after }"
+                  target="$(date -u -d "$when" +%s)"
+                  now="$(date -u +%s)"
+                  wait_s=$((target - now + 15))
+                fi
+                if [ "$wait_s" -lt 60 ]; then
+                  wait_s=60
+                fi
+                if [ "$wait_s" -gt 900 ]; then
+                  wait_s=900
+                fi
+                rm -f "$log"
+                echo "crates.io 429 for ${pkg}; sleeping ${wait_s}s"
+                sleep "$wait_s"
+                continue
+              fi
+
+              rm -f "$log"
+              echo "::error::cargo publish failed for ${pkg}"
+              return 1
+            done
+
+            echo "::error::exhausted retries for ${pkg}"
+            return 1
+          }
+
           for pkg in r402-core r402-evm r402-solana r402-tron r402-casper r402-near r402-xrpl r402-hedera r402-algorand r402-aptos r402-keeta r402-tvm r402-stellar r402-http r402-mcp r402; do
-            echo "::group::Publishing $pkg"
-            cargo publish -p "$pkg" --locked
-            echo "::endgroup::"
+            publish_pkg "$pkg"
           done

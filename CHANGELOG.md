@@ -10,6 +10,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+## [0.17.1] — 2026-08-20
+
+### Fixed
+
+- crates.io publish is idempotent: skip a crate version already on the
+  registry, retry HTTP 429 until the `try again after` timestamp. Completes
+  the 0.17 set that 0.17.0 did not finish under the new-crate rate limit
+  (`r402-tvm`, `r402-stellar`, `r402-http`, `r402-mcp`, umbrella `r402`).
+  First versions of `r402-tvm` and `r402-stellar` are 0.17.1. Do not yank
+  0.17.0.
+
 ## [0.17.0] — 2026-08-20
 
 ### Security
@@ -562,6 +573,7 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.17.1]: https://github.com/qntx/r402/releases/tag/v0.17.1
 [0.17.0]: https://github.com/qntx/r402/releases/tag/v0.17.0
 [0.16.0]: https://github.com/qntx/r402/releases/tag/v0.16.0
 [0.15.0]: https://github.com/qntx/r402/releases/tag/v0.15.0
