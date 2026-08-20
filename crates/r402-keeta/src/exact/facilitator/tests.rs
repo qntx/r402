@@ -10,6 +10,7 @@
     clippy::excessive_nesting,
     clippy::let_underscore_must_use,
     clippy::unused_async,
+    unknown_lints,
     clippy::unused_async_trait_impl,
     reason = "test assertions with known JSON structure"
 )]
@@ -23,6 +24,8 @@ use keetanetwork_account::{
 use keetanetwork_block::{
     AccountRef, Amount, Block, BlockBuilder, BlockHash, Hashable, Send, SetRep,
 };
+use r402_core::cache::SettlementCache;
+use r402_core::error::ErrorReason;
 use r402_core::wire::{SettleResponse, VerifyResponse};
 use serde_json::{Value, json};
 
@@ -773,7 +776,14 @@ async fn settle_success() {
         Box::pin(async move { Ok(signed.hash().to_string()) })
     });
     let req = request(&actors, &block, json!({}));
-    let first = settle_request(&MockPreflight::default(), &[], &queue, &req).await;
+    let first = settle_request(
+        &MockPreflight::default(),
+        &[],
+        &SettlementCache::new(),
+        &queue,
+        &req,
+    )
+    .await;
     match first {
         SettleResponse::Success {
             transaction, payer, ..
@@ -808,9 +818,9 @@ async fn settle_duplicate_in_flight() {
     ));
     let queue_first = Arc::clone(&queue);
     let first_block = decoded.clone();
-    let first = tokio::spawn(async move { queue_first.enqueue("fee-payer", first_block).await });
+    let first = tokio::spawn(async move { queue_first.enqueue(first_block).await });
     started.notified().await;
-    let second = queue.enqueue("fee-payer", decoded).await;
+    let second = queue.enqueue(decoded).await;
     assert!(matches!(second, Err(super::QueueError::Duplicate)));
     release.notify_one();
     assert!(first.await.unwrap().is_ok());
@@ -863,16 +873,16 @@ async fn dropped_enqueue_does_not_pin_hash_after_worker_finishes() {
     ));
     let queue_first = Arc::clone(&queue);
     let first_block = decoded.clone();
-    let first = tokio::spawn(async move { queue_first.enqueue("fee-payer", first_block).await });
+    let first = tokio::spawn(async move { queue_first.enqueue(first_block).await });
     started.notified().await;
     first.abort();
-    let in_flight = queue.enqueue("fee-payer", decoded.clone()).await;
+    let in_flight = queue.enqueue(decoded.clone()).await;
     assert!(matches!(in_flight, Err(super::QueueError::Duplicate)));
     let _ = release_tx.send(());
     let _ = done_rx.await;
     let retried = tokio::time::timeout(Duration::from_secs(1), async {
         loop {
-            match queue.enqueue("fee-payer", decoded.clone()).await {
+            match queue.enqueue(decoded.clone()).await {
                 Ok(hash) => return Ok(hash),
                 Err(super::QueueError::Duplicate) => tokio::task::yield_now().await,
                 Err(err) => return Err(err),
@@ -931,15 +941,15 @@ async fn completing_job_does_not_clear_retry_reservation() {
     let retry_block = decoded.clone();
     let waiter = tokio::spawn(async move {
         queue_waiter
-            .enqueue("fee-payer-1", first_block)
+            .enqueue(first_block)
             .await
             .expect("first settle");
-        queue_waiter.enqueue("fee-payer-2", retry_block).await
+        queue_waiter.enqueue(retry_block).await
     });
     first_started.notified().await;
     first_release.notify_one();
     retry_started.notified().await;
-    let third = queue.enqueue("fee-payer-1", decoded).await;
+    let third = queue.enqueue(decoded).await;
     assert!(
         matches!(third, Err(super::QueueError::Duplicate)),
         "Job::Drop must not clear a retry that already reserved the hash: {third:?}"
@@ -981,7 +991,7 @@ async fn same_payer_jobs_do_not_overlap_submit() {
     let second_started_cb = Arc::clone(&second_started);
     let second_release_cb = Arc::clone(&second_release);
     let queue = Arc::new(SettlementQueue::mock(
-        vec!["fee-payer".to_owned()],
+        vec!["fee-payer-1".to_owned(), "fee-payer-2".to_owned()],
         move |_addr, block| {
             if block.hash() == first_hash {
                 hold_until(
@@ -999,10 +1009,10 @@ async fn same_payer_jobs_do_not_overlap_submit() {
         },
     ));
     let queue_a = Arc::clone(&queue);
-    let job_a = tokio::spawn(async move { queue_a.enqueue("fee-payer", first_block).await });
+    let job_a = tokio::spawn(async move { queue_a.enqueue(first_block).await });
     first_started.notified().await;
     let queue_b = Arc::clone(&queue);
-    let job_b = tokio::spawn(async move { queue_b.enqueue("fee-payer", second_block).await });
+    let job_b = tokio::spawn(async move { queue_b.enqueue(second_block).await });
     let second_started_early =
         tokio::time::timeout(Duration::from_millis(50), second_started.notified()).await;
     assert!(
@@ -1029,8 +1039,8 @@ async fn different_payers_submit_in_parallel() {
         testnet(),
     );
     let second_encoded = signed_send(
-        &actors.payer,
-        &actors.payer,
+        &actors.other,
+        &actors.other,
         &actors.token,
         &actors.pay_to,
         "200",
@@ -1066,9 +1076,9 @@ async fn different_payers_submit_in_parallel() {
         },
     ));
     let queue_a = Arc::clone(&queue);
-    let job_a = tokio::spawn(async move { queue_a.enqueue("fee-payer-1", first_block).await });
+    let job_a = tokio::spawn(async move { queue_a.enqueue(first_block).await });
     let queue_b = Arc::clone(&queue);
-    let job_b = tokio::spawn(async move { queue_b.enqueue("fee-payer-2", second_block).await });
+    let job_b = tokio::spawn(async move { queue_b.enqueue(second_block).await });
     tokio::time::timeout(Duration::from_secs(1), async {
         first_started.notified().await;
         second_started.notified().await;
@@ -1079,6 +1089,34 @@ async fn different_payers_submit_in_parallel() {
     second_release.notify_one();
     assert!(job_a.await.unwrap().is_ok());
     assert!(job_b.await.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn settle_replay_after_success_is_duplicate_settlement() {
+    let actors = actors();
+    let block = signed_send(
+        &actors.payer,
+        &actors.payer,
+        &actors.token,
+        &actors.pay_to,
+        AMOUNT,
+        None,
+        testnet(),
+    );
+    let queue = SettlementQueue::mock(vec!["fee-payer".to_owned()], |_addr, signed| {
+        Box::pin(async move { Ok(signed.hash().to_string()) })
+    });
+    let cache = SettlementCache::new();
+    let req = request(&actors, &block, json!({}));
+    let first = settle_request(&MockPreflight::default(), &[], &cache, &queue, &req).await;
+    assert!(matches!(first, SettleResponse::Success { .. }), "{first:?}");
+    let second = settle_request(&MockPreflight::default(), &[], &cache, &queue, &req).await;
+    match second {
+        SettleResponse::Failure { reason, .. } => {
+            assert_eq!(reason, ErrorReason::DuplicateSettlement);
+        }
+        other => panic!("expected DuplicateSettlement, got {other:?}"),
+    }
 }
 
 fn hold_until(

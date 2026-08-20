@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use compact_str::CompactString;
 pub use queue::{QueueError, SettlementQueue};
+use r402_core::cache::SettlementCache;
 use r402_core::chain::ChainProvider;
 use r402_core::error::FacilitatorError;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
@@ -28,15 +29,27 @@ use crate::exact::{ExactScheme, KeetaExact};
 pub struct KeetaExactFacilitator<P> {
     provider: P,
     queue: Arc<SettlementQueue>,
+    settlement_cache: SettlementCache,
 }
 
 impl<P> KeetaExactFacilitator<P> {
-    /// Creates a facilitator with a live per-fee-payer settlement queue.
+    /// Creates a facilitator with a live per-account settlement queue.
     #[must_use]
     pub fn new(provider: P, queue: SettlementQueue) -> Self {
+        Self::with_settlement_cache(provider, queue, SettlementCache::new())
+    }
+
+    /// Creates a facilitator with a shared [`SettlementCache`].
+    #[must_use]
+    pub fn with_settlement_cache(
+        provider: P,
+        queue: SettlementQueue,
+        settlement_cache: SettlementCache,
+    ) -> Self {
         Self {
             provider,
             queue: Arc::new(queue),
+            settlement_cache,
         }
     }
 }
@@ -99,7 +112,14 @@ impl Facilitator for KeetaExactFacilitator<KeetaChainProvider> {
     ) -> Result<wire::SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let fee_payer_ids = self.provider.fee_payer_ids();
-        Ok(settle_request(&self.provider, &fee_payer_ids, &self.queue, &json).await)
+        Ok(settle_request(
+            &self.provider,
+            &fee_payer_ids,
+            &self.settlement_cache,
+            &self.queue,
+            &json,
+        )
+        .await)
     }
 
     fn supported(

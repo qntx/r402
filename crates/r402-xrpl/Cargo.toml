@@ -26,6 +26,7 @@ telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
 client = [
     "dep:hex",
     "dep:reqwest",
+    "dep:rust_decimal",
     "dep:serde_json",
     "dep:sha2",
     "dep:tokio",
@@ -35,6 +36,7 @@ server = ["dep:serde_json"]
 facilitator = [
     "dep:hex",
     "dep:reqwest",
+    "dep:rust_decimal",
     "dep:serde_json",
     "dep:sha2",
     "dep:tokio",
@@ -52,8 +54,9 @@ thiserror = { workspace = true }
 # websocket, std, or json-rpc (std pulls tungstenite/reqwest 0.12).
 xrpl-rust = { workspace = true, default-features = false, features = ["core", "models"] }
 
-hex = { version = "0.4", default-features = false, features = ["alloc"], optional = true }
+hex = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
+rust_decimal = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 sha2 = { version = "0.10", default-features = false, features = ["std"], optional = true }
 tokio = { workspace = true, optional = true, features = ["time"] }
@@ -62,7 +65,7 @@ tracing-core = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
-hex = { version = "0.4", default-features = false, features = ["alloc"] }
+hex = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { version = "0.10", default-features = false, features = ["std"] }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

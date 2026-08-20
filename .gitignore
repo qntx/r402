@@ -23,4 +23,5 @@ target
 vendor/
 audit/
 plan/
-docs/
+docs/*
+!docs/gap-checklist.md

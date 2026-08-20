@@ -32,26 +32,20 @@ pub struct ExactAvmPayload {
 /// Wire format type aliases for the Algorand exact scheme.
 ///
 /// `payTo` is a 58-char address and `asset` is a decimal ASA id, so both
-/// wire as [`CompactString`].
+/// wire as `compact_str::CompactString`.
 pub mod v2 {
     use compact_str::CompactString;
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
     use r402_core::wire::U64String;
 
     use super::{AlgorandExtra, ExactAvmPayload, ExactScheme};
 
-    /// Type alias for verify requests using the exact Algorand payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and AVM data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactAvmPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactAvmPayload>;
 
     /// Type alias for payment requirements with Algorand-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, U64String, CompactString, AlgorandExtra>;
+        wire::PaymentRequirements<ExactScheme, U64String, CompactString, AlgorandExtra>;
 }
 
 #[cfg(test)]

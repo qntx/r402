@@ -155,58 +155,24 @@ pub fn max_last_ledger_sequence(current_ledger: u32, max_timeout_seconds: u64) -
 ///
 /// # Errors
 ///
-/// Returns [`XrplCodecError::Codec`] when either string is not a decimal.
+/// Returns [`XrplCodecError::Codec`] when either string is not a decimal
+/// or cannot be parsed exactly (`rust_decimal::Decimal::from_str_exact`).
 pub fn compare_decimal_strings(left: &str, right: &str) -> Result<Ordering, XrplCodecError> {
-    let left = normalize_decimal(left)?;
-    let right = normalize_decimal(right)?;
-    if left.whole.len() != right.whole.len() {
-        return Ok(if left.whole.len() > right.whole.len() {
-            Ordering::Greater
-        } else {
-            Ordering::Less
-        });
-    }
-    match left.whole.cmp(&right.whole) {
-        Ordering::Equal => {
-            let width = left.fraction.len().max(right.fraction.len());
-            let left_frac = pad_fraction(&left.fraction, width);
-            let right_frac = pad_fraction(&right.fraction, width);
-            Ok(left_frac.cmp(&right_frac))
-        }
-        other => Ok(other),
-    }
-}
-
-struct NormalizedDecimal {
-    /// Whole digits with leading zeros stripped.
-    whole: String,
-    /// Fractional digits with trailing zeros stripped.
-    fraction: String,
-}
-
-fn normalize_decimal(value: &str) -> Result<NormalizedDecimal, XrplCodecError> {
-    if !is_decimal_string(value) {
+    if !is_decimal_string(left) {
         return Err(XrplCodecError::Codec(format!(
-            "invalid decimal string: {value}"
+            "invalid decimal string: {left}"
         )));
     }
-    let (raw_whole, raw_fraction) = value.split_once('.').unwrap_or((value, ""));
-    let whole = raw_whole.trim_start_matches('0');
-    let whole = if whole.is_empty() { "0" } else { whole };
-    let fraction = raw_fraction.trim_end_matches('0');
-    Ok(NormalizedDecimal {
-        whole: whole.to_owned(),
-        fraction: fraction.to_owned(),
-    })
-}
-
-fn pad_fraction(fraction: &str, width: usize) -> String {
-    let mut out = String::with_capacity(width);
-    out.push_str(fraction);
-    while out.len() < width {
-        out.push('0');
+    if !is_decimal_string(right) {
+        return Err(XrplCodecError::Codec(format!(
+            "invalid decimal string: {right}"
+        )));
     }
-    out
+    let left = rust_decimal::Decimal::from_str_exact(left)
+        .map_err(|e| XrplCodecError::Codec(format!("invalid decimal string: {e}")))?;
+    let right = rust_decimal::Decimal::from_str_exact(right)
+        .map_err(|e| XrplCodecError::Codec(format!("invalid decimal string: {e}")))?;
+    Ok(left.cmp(&right))
 }
 
 #[cfg(test)]
@@ -243,6 +209,11 @@ mod tests {
             compare_decimal_strings("100", "99").unwrap(),
             Ordering::Greater
         );
+        assert_eq!(
+            compare_decimal_strings("1.234567890123456", "1.234567890123456").unwrap(),
+            Ordering::Equal
+        );
+        assert!(compare_decimal_strings("1e-5", "0.00001").is_err());
     }
 
     #[test]

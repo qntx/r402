@@ -24,23 +24,17 @@ pub struct ExactAptosPayload {
 
 /// Wire format type aliases for the Aptos exact scheme.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{AptosExtra, ExactAptosPayload, ExactScheme};
     use crate::chain::{AptosAddress, AptosTokenAmount};
 
-    /// Type alias for verify requests using the exact Aptos payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and Aptos data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactAptosPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactAptosPayload>;
 
     /// Type alias for payment requirements with Aptos-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, AptosTokenAmount, AptosAddress, AptosExtra>;
+        wire::PaymentRequirements<ExactScheme, AptosTokenAmount, AptosAddress, AptosExtra>;
 }
 
 #[cfg(test)]

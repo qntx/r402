@@ -24,14 +24,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 telemetry = ["dep:tracing", "r402-core/telemetry"]
 
-exact = []
-
 client = ["dep:serde_json", "dep:rand", "dep:sha3"]
 server = ["dep:serde_json"]
 facilitator = ["dep:serde_json", "dep:url"]
 # Default HTTP transport for `CasperExactFacilitator` (pulls `reqwest`).
 http-client = ["facilitator", "dep:reqwest"]
-full = ["telemetry", "exact", "client", "server", "facilitator", "http-client"]
+full = ["telemetry", "client", "server", "facilitator", "http-client"]
 
 [dependencies]
 blake2 = { workspace = true }

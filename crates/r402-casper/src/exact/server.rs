@@ -48,7 +48,7 @@ impl CasperExact {
 
         wire::PriceTag {
             requirements,
-            enricher: Some(Arc::new(casper_fee_payer_enricher_v2)),
+            enricher: Some(Arc::new(casper_fee_payer_enricher)),
         }
     }
 }
@@ -56,7 +56,7 @@ impl CasperExact {
 /// Enricher for Casper price tags — copies the facilitator's advertised
 /// `feePayer` into `requirements.extra` while preserving the EIP-712 domain
 /// fields the seller already set.
-pub fn casper_fee_payer_enricher_v2(
+pub fn casper_fee_payer_enricher(
     price_tag: &mut wire::PriceTag,
     capabilities: &wire::SupportedResponse,
 ) {
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn enricher_merges_fee_payer_without_dropping_domain() {
         let mut tag = CasperExact::price_tag(payee(), WCSPR::casper_test().amount(1));
-        casper_fee_payer_enricher_v2(&mut tag, &capabilities(PAYEE));
+        casper_fee_payer_enricher(&mut tag, &capabilities(PAYEE));
         let extra = tag.requirements.extra.as_ref().unwrap();
         assert_eq!(extra["feePayer"], PAYEE);
         assert_eq!(extra["name"], "Wrapped CSPR");
@@ -161,7 +161,7 @@ mod tests {
             wire::SupportedPaymentKind::new(2, "exact", "casper:casper")
                 .with_extra(serde_json::json!({ "feePayer": PAYEE })),
         );
-        casper_fee_payer_enricher_v2(&mut tag, &supported);
+        casper_fee_payer_enricher(&mut tag, &supported);
         assert!(
             tag.requirements
                 .extra
@@ -186,7 +186,7 @@ mod tests {
             ),
             enricher: None,
         };
-        casper_fee_payer_enricher_v2(&mut tag, &capabilities(PAYEE));
+        casper_fee_payer_enricher(&mut tag, &capabilities(PAYEE));
         assert_eq!(tag.requirements.extra.as_ref().unwrap()["feePayer"], PAYEE);
     }
 }

@@ -125,36 +125,11 @@ pub(crate) fn decode_boc_text(value: &str) -> Result<Vec<u8>, BocError> {
         return Err(BocError::Invalid("BOC value is empty".to_owned()));
     }
     if normalized.len().is_multiple_of(2) && normalized.bytes().all(|b| b.is_ascii_hexdigit()) {
-        let mut out = vec![0u8; normalized.len() / 2];
-        for (i, chunk) in normalized.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-            let hi = chunk
-                .first()
-                .copied()
-                .and_then(hex_digit)
-                .ok_or_else(|| BocError::Invalid("invalid hex".to_owned()))?;
-            let lo = chunk
-                .get(1)
-                .copied()
-                .and_then(hex_digit)
-                .ok_or_else(|| BocError::Invalid("invalid hex".to_owned()))?;
-            if let Some(slot) = out.get_mut(i) {
-                *slot = (hi << 4) | lo;
-            }
-        }
-        return Ok(out);
+        return hex::decode(normalized).map_err(|e| BocError::Invalid(e.to_string()));
     }
     base64::engine::general_purpose::STANDARD
         .decode(normalized)
         .map_err(|e| BocError::Invalid(e.to_string()))
-}
-
-const fn hex_digit(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
 }
 
 /// Loads W5R1 or Highload V3 code from a hex BoC constant.

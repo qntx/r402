@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+### Changed
+
+## [0.17.0] — 2026-08-20
+
+### Security
+
+- **TVM**: Highload batcher no longer `abort()`s an in-flight flush. Size vs idle
+  wait uses a per-network worker (`Weak<Inner>`, fixed deadline, notify does not
+  flush). Callers cannot observe `batcher dropped` after `SettlementCache::reserve`.
+- **Keeta**: settle serializes per payer account (not fee-payer). Adds reserve-only
+  `SettlementCache` keyed by block hash. Same-account concurrent settles cannot
+  fork the DAG.
+- **Algorand**: payment `axfer` rejects `aclose` / `asnd` / `rekey` / `close`.
+  Exact groups are payment-only or payment + unsigned facilitator 0-amount self-pay.
+- **Aptos**: gas caps apply when the transaction is sponsored; missing
+  `extra.feePayer` on a sponsored txn is rejected. Expiration is bounded by
+  `maxTimeoutSeconds`.
+- **Hedera**: `AliasPolicy::Allow` still requires a well-formed alias
+  (`HederaAddress` / entity id / `AccountId`), not an arbitrary string.
+- **XRPL**: settlement cache is capacity-bounded (fail-closed at 10_000). IOU
+  amounts compare with `Decimal::from_str_exact`.
+
+### Fixed
+
+- CI and publish workflows install `protobuf-compiler` (`hedera-proto` build)
+  and publish the eight chain-parity crates before `r402-http` / `r402-mcp` /
+  umbrella `r402`.
+
+### Added
+
 - **`r402-near`** — NEAR `exact` E2E: NEP-366 `SignedDelegate` client, server
   `price_tag` (`USDC::near()` / `USDC::near_testnet()`, `enricher: None`),
   in-process facilitator with the official TS `invalidReason` table and
@@ -61,6 +91,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 
 - **MSRV raised to 1.95.** Required by `aptos-sdk` 0.6.0 (unlocks `stellar-rpc-client` 27).
+- Catalog order is `evm, solana, tron, casper, near, xrpl, hedera, algorand, aptos, keeta, tvm, stellar`.
+- NEAR / TVM / Stellar settlement cache stays the 120s spec floor; replay after TTL
+  is closed by on-chain nonce / seqno / `validUntil`. XRPL keeps landable-window TTL.
+
+### Removed
+
+- Public `*_enricher_v2` names. Use `solana_fee_payer_enricher`,
+  `hedera_fee_payer_enricher`, `algorand_fee_payer_enricher`,
+  `aptos_fee_payer_enricher`, `xrpl_fee_enricher`, `casper_fee_payer_enricher`.
+- Empty cargo features `exact` / `upto` on `r402-evm`, `exact` on `r402-solana`
+  and `r402-casper`.
+- Unused `v2::{VerifyRequest, SettleRequest}` aliases on the new chain crates.
+- `use r402_core::wire as proto_v2` import alias.
 
 ## [0.16.0] — 2026-08-19
 
@@ -519,6 +562,7 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.17.0]: https://github.com/qntx/r402/releases/tag/v0.17.0
 [0.16.0]: https://github.com/qntx/r402/releases/tag/v0.16.0
 [0.15.0]: https://github.com/qntx/r402/releases/tag/v0.15.0
 [0.14.0-beta.1]: https://github.com/qntx/r402/releases/tag/v0.14.0-beta.1

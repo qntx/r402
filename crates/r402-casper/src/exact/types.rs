@@ -183,7 +183,7 @@ mod unix_seconds {
 /// identification and embeds the accepted requirements directly in the
 /// payload, per x402 v2.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{
         CasperPaymentRequirementsExtra, ExactCasperPayload, ExactScheme, Motes,
@@ -192,14 +192,14 @@ pub mod v2 {
     use crate::chain::Address;
 
     /// Type alias for verify requests using the exact Casper payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Type alias for settle requests (same structure as verify requests).
     pub type SettleRequest = VerifyRequest;
 
     /// Type alias for payment payloads with embedded requirements and
     /// Casper-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactCasperPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactCasperPayload>;
 
     /// Type alias for payment requirements with Casper-specific types.
     ///
@@ -207,7 +207,7 @@ pub mod v2 {
     /// tagged addressable key; both are represented as strings on the wire,
     /// so the shared `TAddress` parameter stays the wire-level string and the
     /// scheme parses each field into its own type.
-    pub type PaymentRequirements = proto_v2::PaymentRequirements<
+    pub type PaymentRequirements = wire::PaymentRequirements<
         ExactScheme,
         Motes,
         compact_str::CompactString,

@@ -488,36 +488,10 @@ fn parse_mirror_key(mirror_key: &MirrorAccountKey) -> Result<AccountKey, String>
 
 fn decode_hex(s: &str) -> Result<Vec<u8>, String> {
     let s = s.strip_prefix("0x").unwrap_or(s);
-    if !s.len().is_multiple_of(2) {
-        return Err("invalid hex key".to_owned());
-    }
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(s.len() / 2);
-    let mut i = 0;
-    while i < bytes.len() {
-        let hi = bytes
-            .get(i)
-            .copied()
-            .ok_or_else(|| "invalid hex key".to_owned())?;
-        let lo = bytes
-            .get(i.saturating_add(1))
-            .copied()
-            .ok_or_else(|| "invalid hex key".to_owned())?;
-        out.push((nibble(hi)? << 4) | nibble(lo)?);
-        i = i.saturating_add(2);
-    }
-    Ok(out)
+    hex::decode(s).map_err(|_| "invalid hex key".to_owned())
 }
 
-fn nibble(c: u8) -> Result<u8, String> {
-    match c {
-        b'0'..=b'9' => Ok(c - b'0'),
-        b'a'..=b'f' => Ok(c - b'a' + 10),
-        b'A'..=b'F' => Ok(c - b'A' + 10),
-        _ => Err("invalid hex key".to_owned()),
-    }
-}
-
+// `hedera::protobuf::FromProtobuf` is `pub(crate)`; `Key` has no public decode.
 fn parse_proto_key(bytes: &[u8]) -> Result<AccountKey, String> {
     let mut rest = bytes;
     let mut found = None;

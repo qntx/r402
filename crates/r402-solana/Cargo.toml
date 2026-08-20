@@ -24,8 +24,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
 
-exact = ["r402-core/cache"]
-
 client = [
     "dep:bincode",
     "dep:serde_json",
@@ -58,7 +56,7 @@ facilitator = [
     "dep:tokio",
     "r402-core/cache",
 ]
-full = ["telemetry", "exact", "client", "server", "facilitator"]
+full = ["telemetry", "client", "server", "facilitator"]
 
 [dependencies]
 base64 = { workspace = true }

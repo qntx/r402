@@ -6,6 +6,7 @@
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::unused_async,
+    unknown_lints,
     clippy::unused_async_trait_impl,
     reason = "test assertions with known JSON structure"
 )]
@@ -149,6 +150,58 @@ fn signed_group_on(
     ExactAvmPayload {
         payment_group: vec![b64(&unsigned_pay), b64(&signed_axfer)],
         payment_index: 1,
+    }
+}
+
+fn signed_group_mut_axfer(
+    client: &AlgorandSigner,
+    fee_payer: &AlgorandSigner,
+    pay_to: AlgorandAddress,
+    mutate: impl FnOnce(&mut Transaction),
+) -> ExactAvmPayload {
+    let mut pay = Transaction::new(TxnType::Pay, fee_payer.address());
+    pay.receiver = Some(fee_payer.address());
+    pay.fee = 2000;
+    pay.first_valid = 1_000;
+    pay.last_valid = 2_000;
+    pay.genesis_id = AlgorandChainReference::TESTNET.genesis_id().to_owned();
+    pay.genesis_hash = AlgorandChainReference::TESTNET.genesis_hash();
+
+    let mut axfer = Transaction::new(TxnType::Axfer, client.address());
+    axfer.asset_id = USDC_TESTNET_ASA_ID;
+    axfer.asset_amount = 1_000_000;
+    axfer.asset_receiver = Some(pay_to);
+    axfer.first_valid = 1_000;
+    axfer.last_valid = 2_000;
+    axfer.genesis_id = AlgorandChainReference::TESTNET.genesis_id().to_owned();
+    axfer.genesis_hash = AlgorandChainReference::TESTNET.genesis_hash();
+    mutate(&mut axfer);
+
+    let grouped = assign_group(vec![pay, axfer]);
+    let unsigned_pay = encode_signed(&SignedTransaction {
+        sig: None,
+        txn: grouped[0].clone(),
+    });
+    let signed_axfer = encode_signed(&client.sign(&grouped[1]));
+    ExactAvmPayload {
+        payment_group: vec![b64(&unsigned_pay), b64(&signed_axfer)],
+        payment_index: 1,
+    }
+}
+
+fn signed_payment_only(client: &AlgorandSigner, pay_to: AlgorandAddress) -> ExactAvmPayload {
+    let mut axfer = Transaction::new(TxnType::Axfer, client.address());
+    axfer.asset_id = USDC_TESTNET_ASA_ID;
+    axfer.asset_amount = 1_000_000;
+    axfer.asset_receiver = Some(pay_to);
+    axfer.first_valid = 1_000;
+    axfer.last_valid = 2_000;
+    axfer.genesis_id = AlgorandChainReference::TESTNET.genesis_id().to_owned();
+    axfer.genesis_hash = AlgorandChainReference::TESTNET.genesis_hash();
+    let signed_axfer = encode_signed(&client.sign(&axfer));
+    ExactAvmPayload {
+        payment_group: vec![b64(&signed_axfer)],
+        payment_index: 0,
     }
 }
 
@@ -478,7 +531,7 @@ async fn verify_rejects_aggregated_facilitator_fees() {
     );
     let addrs = vec![fee_payer.address().to_string()];
     let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
-    assert_eq!(reason(&resp), "invalid_exact_avm_fee_too_high");
+    assert_eq!(reason(&resp), "invalid_exact_avm_group_size_exceeded");
 }
 
 #[tokio::test]
@@ -693,4 +746,150 @@ fn encode_size_used_for_fee() {
     assert!(size > 0);
     assert_eq!(crate::chain::codec::txn_fee(0, 1000, size), 1000);
     assert_eq!(crate::chain::codec::txn_fee(10, 1000, 50), 1000);
+}
+
+#[tokio::test]
+async fn verify_rejects_payment_aclose() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_group_mut_axfer(&client, &fee_payer, pay_to, |axfer| {
+        axfer.asset_close_to = Some(AlgorandAddress::from_public_key([9u8; 32]));
+    });
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+}
+
+#[tokio::test]
+async fn verify_rejects_payment_asnd() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_group_mut_axfer(&client, &fee_payer, pay_to, |axfer| {
+        axfer.asset_sender = Some(AlgorandAddress::from_public_key([9u8; 32]));
+    });
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+}
+
+#[tokio::test]
+async fn verify_rejects_payment_rekey() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_group_mut_axfer(&client, &fee_payer, pay_to, |axfer| {
+        axfer.rekey_to = Some(AlgorandAddress::from_public_key([9u8; 32]));
+    });
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+}
+
+#[tokio::test]
+async fn verify_rejects_payment_close_remainder() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_group_mut_axfer(&client, &fee_payer, pay_to, |axfer| {
+        axfer.close_remainder_to = Some(AlgorandAddress::from_public_key([9u8; 32]));
+    });
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+}
+
+#[tokio::test]
+async fn verify_rejects_extra_signed_axfer() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let mut axfer_a = Transaction::new(TxnType::Axfer, client.address());
+    axfer_a.asset_id = USDC_TESTNET_ASA_ID;
+    axfer_a.asset_amount = 1_000_000;
+    axfer_a.asset_receiver = Some(pay_to);
+    axfer_a.first_valid = 1_000;
+    axfer_a.last_valid = 2_000;
+    axfer_a.genesis_id = AlgorandChainReference::TESTNET.genesis_id().to_owned();
+    axfer_a.genesis_hash = AlgorandChainReference::TESTNET.genesis_hash();
+    let mut axfer_b = axfer_a.clone();
+    axfer_b.asset_amount = 1;
+    let grouped = assign_group(vec![axfer_a, axfer_b]);
+    let payload = ExactAvmPayload {
+        payment_group: vec![
+            b64(&encode_signed(&client.sign(&grouped[0]))),
+            b64(&encode_signed(&client.sign(&grouped[1]))),
+        ],
+        payment_index: 0,
+    };
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+}
+
+#[tokio::test]
+async fn verify_rejects_group_len_3() {
+    let group: Vec<String> = (0..3).map(|_| "AA==".to_owned()).collect();
+    let req = request_json(
+        &ExactAvmPayload {
+            payment_group: group,
+            payment_index: 0,
+        },
+        &AlgorandAddress::ZERO,
+        "1",
+        "1",
+    );
+    let resp = verify_request_json(&MockRpc::default(), &[], &req, |_, _| {
+        Err(invalid("invalid_exact_avm_invalid_fee_payer"))
+    })
+    .await;
+    assert_eq!(reason(&resp), "invalid_exact_avm_group_size_exceeded");
+}
+
+#[tokio::test]
+async fn verify_accepts_payment_only() {
+    let client = seed(1);
+    let fee_payer = seed(2);
+    let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+    let payload = signed_payment_only(&client, pay_to);
+    let req = request_json(
+        &payload,
+        &pay_to,
+        "1000000",
+        &USDC_TESTNET_ASA_ID.to_string(),
+    );
+    let addrs = vec![fee_payer.address().to_string()];
+    let resp = verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+    assert_eq!(reason(&resp), "valid");
 }

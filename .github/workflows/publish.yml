@@ -4,11 +4,51 @@ on:
   push:
     tags: ["v*.*.*"]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   publish:
-    uses: qntx/workflows/.github/workflows/publish-crates.yml@main
-    with:
-      # Publish order: leaf crates first, umbrella `r402` last.
-      packages: "r402-core r402-evm r402-solana r402-tron r402-casper r402-http r402-mcp r402"
-    secrets:
-      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    name: Build, Test & Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --verbose --all-features
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for pkg in r402-core r402-evm r402-solana r402-tron r402-casper r402-near r402-xrpl r402-hedera r402-algorand r402-aptos r402-keeta r402-tvm r402-stellar r402-http r402-mcp r402; do
+            echo "::group::Publishing $pkg"
+            cargo publish -p "$pkg" --locked
+            echo "::endgroup::"
+          done

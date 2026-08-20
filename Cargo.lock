@@ -6042,7 +6042,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "r402"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "r402-algorand",
  "r402-aptos",
@@ -6063,7 +6063,7 @@ dependencies = [
 
 [[package]]
 name = "r402-algorand"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
@@ -6073,7 +6073,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "sha2 0.11.0",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -6083,7 +6083,7 @@ dependencies = [
 
 [[package]]
 name = "r402-aptos"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "aptos-sdk",
  "base64 0.23.1",
@@ -6099,7 +6099,7 @@ dependencies = [
 
 [[package]]
 name = "r402-casper"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "blake2",
  "compact_str",
@@ -6117,7 +6117,7 @@ dependencies = [
 
 [[package]]
 name = "r402-core"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
@@ -6136,7 +6136,7 @@ dependencies = [
 
 [[package]]
 name = "r402-evm"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "alloy-contract",
  "alloy-network",
@@ -6166,11 +6166,12 @@ dependencies = [
 
 [[package]]
 name = "r402-hedera"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
  "hedera",
+ "hex",
  "r402-core",
  "reqwest 0.13.4",
  "serde",
@@ -6184,7 +6185,7 @@ dependencies = [
 
 [[package]]
 name = "r402-http"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "async-trait",
  "axum-core 0.5.6",
@@ -6206,7 +6207,7 @@ dependencies = [
 
 [[package]]
 name = "r402-keeta"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
@@ -6225,7 +6226,7 @@ dependencies = [
 
 [[package]]
 name = "r402-mcp"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "r402-core",
  "rmcp",
@@ -6238,7 +6239,7 @@ dependencies = [
 
 [[package]]
 name = "r402-near"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "borsh",
@@ -6259,7 +6260,7 @@ dependencies = [
 
 [[package]]
 name = "r402-solana"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "bincode",
@@ -6288,7 +6289,7 @@ dependencies = [
 
 [[package]]
 name = "r402-stellar"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "compact_str",
  "ed25519-dalek",
@@ -6309,7 +6310,7 @@ dependencies = [
 
 [[package]]
 name = "r402-tron"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "alloy-primitives",
  "alloy-signer",
@@ -6332,11 +6333,12 @@ dependencies = [
 
 [[package]]
 name = "r402-tvm"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.23.1",
  "compact_str",
  "ed25519-dalek",
+ "hex",
  "num-bigint 0.4.8",
  "num-traits",
  "r402-core",
@@ -6355,12 +6357,13 @@ dependencies = [
 
 [[package]]
 name = "r402-xrpl"
-version = "0.16.0"
+version = "0.17.0"
 dependencies = [
  "compact_str",
  "hex",
  "r402-core",
  "reqwest 0.13.4",
+ "rust_decimal",
  "serde",
  "serde_json",
  "sha2 0.10.9",

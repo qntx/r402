@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use keetanetwork_block::{AccountRef, Block, BlockHash, Hashable};
 use keetanetwork_client::{Network, TransmitOptions, UserClient};
+#[cfg(test)]
 use r402_core::facilitator::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -58,11 +59,13 @@ impl Drop for EnqueueGuard {
     }
 }
 
+#[cfg(test)]
 type SubmitFn =
     Arc<dyn Fn(String, Block) -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
 enum Backend {
     Live(Network),
+    #[cfg(test)]
     Mock(SubmitFn),
 }
 
@@ -70,6 +73,7 @@ enum Backend {
 pub struct SettlementQueue {
     senders: Mutex<HashMap<String, mpsc::Sender<Job>>>,
     pending: Arc<Mutex<HashSet<BlockHash>>>,
+    account_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     fee_payers: Vec<(String, Option<AccountRef>)>,
     next: AtomicUsize,
     backend: Backend,
@@ -103,6 +107,7 @@ impl SettlementQueue {
     }
 
     /// Creates a queue that invokes `submit` instead of the network.
+    #[cfg(test)]
     #[must_use]
     pub fn mock<F>(fee_payer_addrs: Vec<String>, submit: F) -> Self
     where
@@ -119,6 +124,7 @@ impl SettlementQueue {
         Self {
             senders: Mutex::new(HashMap::new()),
             pending: Arc::new(Mutex::new(HashSet::new())),
+            account_locks: Mutex::new(HashMap::new()),
             fee_payers,
             next: AtomicUsize::new(0),
             backend,
@@ -136,16 +142,19 @@ impl SettlementQueue {
         self.fee_payers.get(idx).map(|(addr, _)| addr.clone())
     }
 
-    /// Enqueues `block` for sequential transmit on `fee_payer`.
+    /// Enqueues `block` for sequential transmit on one fee payer.
+    ///
+    /// Same payer account never overlaps submit. Fee-payer selection happens
+    /// inside the per-account lock.
     ///
     /// # Errors
     ///
     /// Returns [`QueueError::Duplicate`] when the block hash is already
-    /// in-flight, [`QueueError::UnknownFeePayer`] when `fee_payer` is not
-    /// managed by this queue, or [`QueueError::Transmit`] when the node
-    /// rejects the staple.
-    pub async fn enqueue(&self, fee_payer: &str, block: Block) -> Result<String, QueueError> {
+    /// in-flight, [`QueueError::UnknownFeePayer`] when no fee payer is
+    /// configured, or [`QueueError::Transmit`] when the node rejects the staple.
+    pub async fn enqueue(&self, block: Block) -> Result<String, QueueError> {
         let hash = block.hash();
+        let account = block.data().account().to_string();
         {
             let mut pending = lock(&self.pending);
             if pending.contains(&hash) {
@@ -160,7 +169,18 @@ impl SettlementQueue {
             transferred: false,
         };
 
-        let sender = self.worker(fee_payer)?;
+        let account_mu = {
+            let mut map = lock(&self.account_locks);
+            Arc::clone(
+                map.entry(account)
+                    .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(()))),
+            )
+        };
+        let _account_guard = account_mu.lock().await;
+        let Some(fee_payer) = self.pick_fee_payer() else {
+            return Err(QueueError::UnknownFeePayer("none".to_owned()));
+        };
+        let sender = self.worker(&fee_payer)?;
 
         let (reply_tx, reply_rx) = oneshot::channel();
         let job = Job {
@@ -202,6 +222,7 @@ impl SettlementQueue {
                     live_worker(rx, account, network).await;
                 })
             }
+            #[cfg(test)]
             Backend::Mock(submit) => {
                 let submit = Arc::clone(submit);
                 tokio::spawn(async move {
@@ -264,6 +285,7 @@ async fn live_worker(mut rx: mpsc::Receiver<Job>, fee_payer: AccountRef, network
     }
 }
 
+#[cfg(test)]
 async fn mock_worker(mut rx: mpsc::Receiver<Job>, addr: String, submit: SubmitFn) {
     while let Some(job) = rx.recv().await {
         let result = submit(addr.clone(), job.block.clone()).await;

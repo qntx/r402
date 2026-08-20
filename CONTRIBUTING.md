@@ -82,7 +82,7 @@ characters and use the imperative mood:
 
 ```text
 feat(http): add /supported retry on 429
-fix(svm): require extra.feePayer to match facilitator signers
+fix(solana): require extra.feePayer to match facilitator signers
 docs(security): publish private disclosure procedure
 ```
 

@@ -4,8 +4,7 @@ Core types, traits, and wire formats for the x402 payment protocol.
 
 This crate is blockchain-agnostic. It defines the shared data model used by
 client, server, and facilitator implementations across every chain. Chain
-specific behavior lives in sibling crates (`r402-evm`, `r402-solana`,
-`r402-tron`, `r402-casper`).
+specific behavior lives in sibling crates — see [`crates/README.md`](../README.md).
 
 ## Modules
 
@@ -27,6 +26,9 @@ specific behavior lives in sibling crates (`r402-evm`, `r402-solana`,
 | `cache`          |         | Enable `moka`-backed TTL caches            |
 | `ext-bazaar`     |         | Enable the bazaar resource discovery ext.  |
 | `ext-payment-id` |         | Enable the payment-identifier idempotency. |
+| `ext-eip2612`    |         | Enable EIP-2612 gas-sponsoring extra.      |
+| `ext-erc20-approval` |     | Enable ERC-20 approval gas-sponsoring extra. |
+| `metrics`        |         | Enable the `metrics` facade counters.      |
 | `all-extensions` |         | Enable every built-in extension            |
 | `full`           |         | Enable every feature                       |
 

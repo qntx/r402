@@ -38,6 +38,7 @@ full = ["telemetry", "client", "server", "facilitator"]
 [dependencies]
 base64 = { workspace = true }
 compact_str = { workspace = true }
+hex = { workspace = true }
 num-bigint = "0.4"
 num-traits = "0.2"
 r402-core = { workspace = true }

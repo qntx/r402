@@ -1,5 +1,14 @@
 //! Facilitator verification for the TON exact scheme.
 
+#![allow(
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    clippy::excessive_nesting,
+    clippy::missing_errors_doc,
+    clippy::missing_const_for_fn,
+    reason = "sequential TS verify checklist"
+)]
+
 use compact_str::CompactString;
 use r402_core::wire::VerifyResponse;
 use serde_json::Value;

@@ -457,7 +457,7 @@ pub struct XrplTokenDeployment {
     pub chain_reference: XrplChainReference,
     /// Native XRP or an issued currency.
     pub asset: XrplAsset,
-    /// Decimal places used by [`XrplTokenDeployment::parse`] for this asset.
+    /// Decimal places used when parsing human amounts for this asset.
     pub decimals: u8,
 }
 

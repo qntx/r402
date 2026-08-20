@@ -23,23 +23,17 @@ pub struct ExactHederaPayload {
 
 /// Wire format type aliases for the Hedera exact scheme.
 pub mod v2 {
-    use r402_core::wire as proto_v2;
+    use r402_core::wire;
 
     use super::{ExactHederaPayload, ExactScheme, HederaExtra};
     use crate::chain::{HederaAddress, HederaTokenAmount};
 
-    /// Type alias for verify requests using the exact Hedera payment scheme.
-    pub type VerifyRequest = proto_v2::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
-
-    /// Type alias for settle requests (same structure as verify requests).
-    pub type SettleRequest = VerifyRequest;
-
     /// Type alias for payment payloads with embedded requirements and Hedera-specific data.
-    pub type PaymentPayload = proto_v2::PaymentPayload<PaymentRequirements, ExactHederaPayload>;
+    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, ExactHederaPayload>;
 
     /// Type alias for payment requirements with Hedera-specific types.
     pub type PaymentRequirements =
-        proto_v2::PaymentRequirements<ExactScheme, HederaTokenAmount, HederaAddress, HederaExtra>;
+        wire::PaymentRequirements<ExactScheme, HederaTokenAmount, HederaAddress, HederaExtra>;
 }
 
 #[cfg(test)]

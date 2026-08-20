@@ -1,6 +1,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![doc = include_str!("../README.md")]
 
+// rustfmt reorder_imports owns this file; catalog order lives in Cargo.toml `full` and READMEs.
+
 #[cfg(feature = "algorand")]
 #[cfg_attr(docsrs, doc(cfg(feature = "algorand")))]
 pub use r402_algorand as algorand;

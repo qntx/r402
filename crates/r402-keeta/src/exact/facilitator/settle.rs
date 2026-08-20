@@ -1,6 +1,8 @@
 //! Facilitator settlement for the Keeta exact scheme.
 
 use compact_str::CompactString;
+use keetanetwork_block::Hashable;
+use r402_core::cache::{Duplicate, SettlementCache};
 use r402_core::error::ErrorReason;
 use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
@@ -9,10 +11,11 @@ use super::queue::{QueueError, SettlementQueue};
 use super::verify::{decode_block, verify_request_json};
 use crate::chain::provider::KeetaPreflight;
 
-/// Settles a verified Keeta payment through the per-fee-payer queue.
+/// Settles a verified Keeta payment through the per-account queue.
 pub async fn settle_request<P: KeetaPreflight>(
     preflight: &P,
     fee_payer_ids: &[String],
+    cache: &SettlementCache,
     queue: &SettlementQueue,
     request: &Value,
 ) -> SettleResponse {
@@ -39,15 +42,6 @@ pub async fn settle_request<P: KeetaPreflight>(
         }
     };
 
-    let Some(fee_payer) = queue.pick_fee_payer() else {
-        return settle_failure(
-            ErrorReason::from_wire("transaction_failed"),
-            Some("no fee payer addresses available".into()),
-            &network,
-            payer,
-        );
-    };
-
     let Some(block_b64) = request
         .get("paymentPayload")
         .and_then(|p| p.get("payload"))
@@ -71,7 +65,11 @@ pub async fn settle_request<P: KeetaPreflight>(
         );
     };
 
-    match queue.enqueue(&fee_payer, block).await {
+    if cache.reserve(block.hash().to_string()) == Duplicate::Yes {
+        return settle_failure(ErrorReason::DuplicateSettlement, None, &network, payer);
+    }
+
+    match queue.enqueue(block).await {
         Ok(transaction) => SettleResponse::Success {
             payer: payer.unwrap_or_default(),
             transaction: transaction.into(),

@@ -1,5 +1,18 @@
 //! Facilitator-side TON chain provider: Highload V3 wallet + REST.
 
+#![allow(
+    clippy::excessive_nesting,
+    clippy::cognitive_complexity,
+    clippy::too_many_lines,
+    clippy::significant_drop_tightening,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::missing_errors_doc,
+    clippy::or_fun_call,
+    clippy::map_unwrap_or,
+    reason = "Highload query_id / relay packing is a sequential checklist"
+)]
+
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};

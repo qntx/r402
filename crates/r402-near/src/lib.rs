@@ -2,6 +2,7 @@
 #![cfg_attr(
     test,
     allow(
+        unknown_lints,
         clippy::unused_async_trait_impl,
         reason = "in-crate mock impls of AFIT traits have no .await"
     )
