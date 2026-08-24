@@ -150,7 +150,7 @@ keetanetwork-crypto = { version = "0.3", features = ["std"] }
 #
 # Cell/BoC only. Never depend on tonlib-client or tonlib-sys.
 tonlib-core = { version = "0.26", default-features = false }
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 
 # Stellar
 #
