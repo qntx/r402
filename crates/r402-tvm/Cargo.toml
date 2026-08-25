@@ -39,7 +39,7 @@ full = ["telemetry", "client", "server", "facilitator"]
 base64 = { workspace = true }
 compact_str = { workspace = true }
 hex = { workspace = true }
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 r402-core = { workspace = true }
 serde = { workspace = true }

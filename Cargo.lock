@@ -5149,6 +5149,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-bigint"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e7820bc0a80a0238e650327316f929ba18d5be054b647490a3a6a339f3e7c0"
+dependencies = [
+ "num-integer",
+ "num-traits",
+]
+
+[[package]]
 name = "num-complex"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6409,7 +6419,7 @@ dependencies = [
  "compact_str",
  "ed25519-dalek 3.0.0",
  "hex",
- "num-bigint 0.4.8",
+ "num-bigint 0.5.1",
  "num-traits",
  "r402-core",
  "rand 0.10.2",
