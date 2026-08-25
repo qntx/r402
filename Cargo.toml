@@ -163,7 +163,7 @@ stellar-xdr = { version = "27", default-features = false, features = [
     "serde",
     "base64",
 ] }
-stellar-strkey = "0.0.16"
+stellar-strkey = "0.0.18"
 sha2 = "0.10"
 # Aptos (official aptos-labs/aptos-rust-sdk). rust-version 1.95.
 # default-features = false; crates enable ed25519 + SingleKey schemes.
