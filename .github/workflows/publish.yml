@@ -5,9 +5,14 @@ on:
     tags: ["v*.*.*"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   publish:
-    uses: qntx/workflows/.github/workflows/publish-crates.yml@main
+    uses: qntx/workflows/.github/workflows/publish-crates.yml@v2.0.0
+    permissions:
+      contents: read
     with:
       packages: "r402-core r402-evm r402-solana r402-tron r402-casper r402-near r402-xrpl r402-hedera r402-algorand r402-aptos r402-keeta r402-tvm r402-stellar r402-http r402-mcp r402"
       apt-packages: protobuf-compiler
