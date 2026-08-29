@@ -35,12 +35,14 @@ ext-bazaar = []
 ext-payment-id = ["cache"]
 ext-eip2612 = []
 ext-erc20-approval = []
+ext-agent-identity = []
 
 all-extensions = [
     "ext-bazaar",
     "ext-payment-id",
     "ext-eip2612",
     "ext-erc20-approval",
+    "ext-agent-identity",
 ]
 
 full = ["telemetry", "cache", "metrics", "all-extensions"]

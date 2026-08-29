@@ -28,6 +28,7 @@ specific behavior lives in sibling crates — see [`crates/README.md`](../README
 | `ext-payment-id` |         | Enable the payment-identifier idempotency. |
 | `ext-eip2612`    |         | Enable EIP-2612 gas-sponsoring extra.      |
 | `ext-erc20-approval` |     | Enable ERC-20 approval gas-sponsoring extra. |
+| `ext-agent-identity` |     | Enable the ERC-8004 agent-identity ext.    |
 | `metrics`        |         | Enable the `metrics` facade counters.      |
 | `all-extensions` |         | Enable every built-in extension            |
 | `full`           |         | Enable every feature                       |
