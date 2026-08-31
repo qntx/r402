@@ -111,7 +111,7 @@ solana-message = "3"
 solana-pubkey = "4"
 solana-signature = "3"
 solana-signer = "3"
-solana-transaction = "3"
+solana-transaction = "4"
 spl-token = { version = "9", features = ["no-entrypoint"] }
 # Interface-only sub-crate of `spl-token-2022`. We exclusively need its
 # program ID, `Mint::unpack`, and `transfer_checked` instruction builder,
