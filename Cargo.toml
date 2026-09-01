@@ -64,7 +64,7 @@ rmcp = { version = "3.1", default-features = false }
 # Utility
 base64 = "0.23"
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
-blake2 = "0.10"
+blake2 = "0.11"
 sha3 = "0.12"
 # Solana's entire ecosystem still ships bincode 1 (legacy serde wire
 # format). Upgrading to bincode 3 here would split the workspace across
