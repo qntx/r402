@@ -17,6 +17,8 @@ homepage = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
+r402-protocol = { path = "crates/r402-protocol" }
+
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy
 # `NonceManager`, `reqwest_middleware::Middleware`) that pre-date AFIT.
