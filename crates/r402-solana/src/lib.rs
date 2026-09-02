@@ -20,6 +20,7 @@
 //!
 //! - [`chain`] - Core Solana chain types, providers, and configuration
 //! - [`exact`] - Solana "exact" payment scheme
+//! - [`upto`] - Solana "upto" payment-channel escrow scheme
 //!
 //! # Feature Flags
 //!
@@ -35,6 +36,8 @@
 use base64 as _;
 #[cfg(not(feature = "facilitator"))]
 use futures_util as _;
+#[cfg(test)]
+use tokio as _;
 
 /// Recommended hard cap for `max_compute_unit_price` (micro-lamports).
 ///
@@ -49,9 +52,17 @@ pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
 
 pub mod chain;
 pub mod exact;
+pub mod upto;
 
 mod networks;
 pub use exact::SolanaExact;
 #[cfg(feature = "client")]
 pub use exact::client::SolanaExactClient;
 pub use networks::*;
+pub use upto::SolanaUpto;
+#[cfg(feature = "client")]
+pub use upto::SolanaUptoClient;
+#[cfg(feature = "facilitator")]
+pub use upto::SolanaUptoFacilitator;
+#[cfg(feature = "server")]
+pub use upto::UptoSvmScheme;

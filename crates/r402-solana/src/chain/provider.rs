@@ -253,6 +253,15 @@ pub trait SolanaChainProviderLike: Sync {
         tx: &VersionedTransaction,
         commitment_config: CommitmentConfig,
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send;
+
+    /// Underlying RPC client for scheme-specific reads (channel accounts, slots).
+    fn rpc_client(&self) -> Arc<RpcClient>;
+
+    /// Broadcasts a signed transaction without waiting for confirmation.
+    fn send(
+        &self,
+        tx: &VersionedTransaction,
+    ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send;
 }
 
 impl SolanaChainProviderLike for SolanaChainProvider {
@@ -398,6 +407,17 @@ impl SolanaChainProviderLike for SolanaChainProvider {
             }
         }
     }
+
+    fn rpc_client(&self) -> Arc<RpcClient> {
+        Self::rpc_client(self)
+    }
+
+    fn send(
+        &self,
+        tx: &VersionedTransaction,
+    ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
+        Self::send(self, tx)
+    }
 }
 
 impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
@@ -445,5 +465,16 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         commitment_config: CommitmentConfig,
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
         (**self).send_and_confirm(tx, commitment_config)
+    }
+
+    fn rpc_client(&self) -> Arc<RpcClient> {
+        (**self).rpc_client()
+    }
+
+    fn send(
+        &self,
+        tx: &VersionedTransaction,
+    ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
+        (**self).send(tx)
     }
 }

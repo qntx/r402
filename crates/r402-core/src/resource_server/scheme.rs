@@ -9,6 +9,7 @@ use super::hooks::{
     SettleContext, SettleResultContext, VerifiedPaymentCanceledContext, WirePaymentPayload,
 };
 use super::payment_flow::PaymentFlowConfig;
+use crate::error::FacilitatorError;
 use crate::facilitator::BoxFuture;
 use crate::wire::{PaymentRequired, PaymentRequirements, ResourceInfo, SupportedResponse};
 
@@ -28,6 +29,26 @@ pub struct SchemePaymentRequiredContext<'a> {
     pub payment_required_response: &'a PaymentRequired,
     /// Facilitator `GET /supported` snapshot.
     pub supported: &'a SupportedResponse,
+}
+
+impl<'a> SchemePaymentRequiredContext<'a> {
+    /// Constructs a 402 enrich context.
+    #[must_use]
+    pub const fn new(
+        requirements: &'a [PaymentRequirements],
+        resource: &'a ResourceInfo,
+        payment_required_response: &'a PaymentRequired,
+        supported: &'a SupportedResponse,
+    ) -> Self {
+        Self {
+            requirements,
+            payment_payload: None,
+            resource,
+            error: None,
+            payment_required_response,
+            supported,
+        }
+    }
 }
 
 /// Scheme/network adapter registered on [`super::ResourceServer`].
@@ -57,11 +78,16 @@ pub trait SchemeNetworkServer: Send + Sync {
     }
 
     /// Optional additive settle-payload enrichment.
+    ///
+    /// `Ok(None)` leaves the client payload unchanged. `Ok(Some(map))` is
+    /// merged additively (SVM `upto` attaches `voucherSignature` on
+    /// after-handler / cancel). `Err` fails the settle.
     fn enrich_settlement_payload<'a>(
         &'a self,
         _ctx: &'a SettleContext,
-    ) -> impl Future<Output = Option<Map<String, Value>>> + Send + 'a {
-        async { None }
+    ) -> impl Future<Output = Result<Option<Map<String, Value>>, FacilitatorError>> + Send + 'a
+    {
+        async { Ok(None) }
     }
 
     /// Optional additive settle-response enrichment.
@@ -107,7 +133,7 @@ pub trait DynSchemeNetworkServer: Send + Sync {
     fn enrich_settlement_payload<'a>(
         &'a self,
         ctx: &'a SettleContext,
-    ) -> BoxFuture<'a, Option<Map<String, Value>>>;
+    ) -> BoxFuture<'a, Result<Option<Map<String, Value>>, FacilitatorError>>;
 
     /// See [`SchemeNetworkServer::enrich_settlement_response`].
     fn enrich_settlement_response<'a>(
@@ -149,7 +175,7 @@ impl<T: SchemeNetworkServer + ?Sized> DynSchemeNetworkServer for T {
     fn enrich_settlement_payload<'a>(
         &'a self,
         ctx: &'a SettleContext,
-    ) -> BoxFuture<'a, Option<Map<String, Value>>> {
+    ) -> BoxFuture<'a, Result<Option<Map<String, Value>>, FacilitatorError>> {
         Box::pin(<Self as SchemeNetworkServer>::enrich_settlement_payload(
             self, ctx,
         ))

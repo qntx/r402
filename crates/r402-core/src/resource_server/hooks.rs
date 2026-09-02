@@ -167,6 +167,17 @@ impl Debug for PaymentHookContext {
     }
 }
 
+impl PaymentHookContext {
+    /// Constructs a payment hook context.
+    #[must_use]
+    pub const fn new(payload: WirePaymentPayload, requirements: PaymentRequirements) -> Self {
+        Self {
+            payload,
+            requirements,
+        }
+    }
+}
+
 /// Context for after-verify hooks (includes facilitator result).
 #[derive(Clone)]
 #[non_exhaustive]
@@ -208,6 +219,18 @@ impl Debug for SettleContext {
             .field("phase", &self.phase)
             .field("payment", &self.payment)
             .finish_non_exhaustive()
+    }
+}
+
+impl SettleContext {
+    /// Constructs a settle context with empty declared extensions.
+    #[must_use]
+    pub fn new(payment: PaymentHookContext, phase: SettlePhase) -> Self {
+        Self {
+            payment,
+            declared_extensions: Extensions::new(),
+            phase,
+        }
     }
 }
 
@@ -253,6 +276,24 @@ impl Debug for VerifiedPaymentCanceledContext {
             .field("response_status", &self.response_status)
             .field("settled_phases", &self.settled_phases)
             .finish_non_exhaustive()
+    }
+}
+
+impl VerifiedPaymentCanceledContext {
+    /// Constructs a cancel context.
+    #[must_use]
+    pub const fn new(
+        payment: PaymentHookContext,
+        reason: CancelReason,
+        settled_phases: Vec<SettlePhase>,
+    ) -> Self {
+        Self {
+            payment,
+            reason,
+            error: None,
+            response_status: None,
+            settled_phases,
+        }
     }
 }
 

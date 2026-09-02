@@ -442,9 +442,12 @@ impl ResourceServer {
         phase: SettlePhase,
     ) -> Result<SettleResponse, FacilitatorError> {
         let effective = apply_settlement_overrides(requirements, overrides)?;
+        let payload = self
+            .apply_scheme_settlement_payload_enrich(payload, &effective, phase)
+            .await?;
         let settle_ctx = SettleContext {
             payment: PaymentHookContext {
-                payload: payload.clone(),
+                payload,
                 requirements: effective,
             },
             declared_extensions: Extensions::new(),
@@ -680,6 +683,43 @@ impl ResourceServer {
             }
             _ => first,
         }
+    }
+
+    /// Official pre-settle payload enrich (SVM `upto` voucher on claim/cancel).
+    async fn apply_scheme_settlement_payload_enrich(
+        &self,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+        phase: SettlePhase,
+    ) -> Result<WirePaymentPayload, FacilitatorError> {
+        let Some(scheme) =
+            self.registered_scheme(requirements.scheme.as_str(), &requirements.network)
+        else {
+            return Ok(payload.clone());
+        };
+        let ctx = SettleContext {
+            payment: PaymentHookContext {
+                payload: payload.clone(),
+                requirements: requirements.clone(),
+            },
+            declared_extensions: Extensions::new(),
+            phase,
+        };
+        let Some(enrichment) = scheme.enrich_settlement_payload(&ctx).await? else {
+            return Ok(payload.clone());
+        };
+        let mut enriched = payload.clone();
+        let Value::Object(payload_map) = &mut enriched.payload else {
+            return Err(FacilitatorError::Verification(
+                VerificationError::InvalidFormat("settlement payload is not a JSON object".into()),
+            ));
+        };
+        assert_additive_payload_enrichment(payload_map, &enrichment, scheme.scheme())
+            .map_err(FacilitatorError::internal)?;
+        for (key, value) in enrichment {
+            payload_map.insert(key, value);
+        }
+        Ok(enriched)
     }
 
     async fn recover_settle(
@@ -1048,7 +1088,7 @@ mod tests {
 
     use super::*;
     use crate::chain::ChainIdPattern;
-    use crate::wire::{Extensions, ResourceInfo, SupportedResponse};
+    use crate::wire::{Extensions, ResourceInfo, SettleRequest, SupportedResponse, VerifyRequest};
 
     struct MockFacilitator {
         verifies: AtomicUsize,
@@ -1406,6 +1446,110 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, FacilitatorError::Onchain(_)));
         assert_eq!(*failure.lock().unwrap(), vec![SettlePhase::Cancel]);
+    }
+
+    struct VoucherEnrichScheme {
+        flows: HashMap<String, PaymentFlowConfig>,
+    }
+
+    impl SchemeNetworkServer for VoucherEnrichScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+
+        fn enrich_settlement_payload<'a>(
+            &'a self,
+            ctx: &'a SettleContext,
+        ) -> impl Future<
+            Output = Result<Option<serde_json::Map<String, Value>>, FacilitatorError>,
+        > + Send
+        + 'a {
+            let enrichment = match ctx.phase {
+                SettlePhase::BeforeHandler => None,
+                SettlePhase::AfterHandler | SettlePhase::Cancel => {
+                    let mut map = serde_json::Map::new();
+                    map.insert("voucherSignature".into(), Value::String("sig".into()));
+                    Some(map)
+                }
+            };
+            std::future::ready(Ok(enrichment))
+        }
+    }
+
+    struct CaptureSettlePayload {
+        payloads: Mutex<Vec<Value>>,
+    }
+
+    impl Facilitator for CaptureSettlePayload {
+        fn verify(
+            &self,
+            _: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("0x")))
+        }
+
+        fn settle(
+            &self,
+            request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            let json = request.into_json();
+            self.payloads
+                .lock()
+                .unwrap()
+                .push(json["paymentPayload"]["payload"].clone());
+            std::future::ready(Ok(success_settle("0x1")))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
+
+    #[tokio::test]
+    async fn settle_payment_merges_scheme_payload_enrichment_after_handler() {
+        let mut flows = HashMap::new();
+        flows.insert(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+            PaymentFlowConfig::authorization_and_upfront(),
+        );
+        let fac = Arc::new(CaptureSettlePayload {
+            payloads: Mutex::new(Vec::new()),
+        });
+        let rs = ResourceServer::new(Arc::clone(&fac))
+            .with_scheme(eip155_wildcard(), VoucherEnrichScheme { flows });
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+
+        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+            .await
+            .unwrap();
+        rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
+        rs.settle_payment(&payload, &req, None, SettlePhase::Cancel)
+            .await
+            .unwrap();
+
+        let captured = fac.payloads.lock().unwrap().clone();
+        assert_eq!(captured[0], serde_json::json!({"k": 1}));
+        assert_eq!(
+            captured[1],
+            serde_json::json!({"k": 1, "voucherSignature": "sig"})
+        );
+        assert_eq!(
+            captured[2],
+            serde_json::json!({"k": 1, "voucherSignature": "sig"})
+        );
     }
 
     fn pending_failure(transaction: &str) -> SettleResponse {
