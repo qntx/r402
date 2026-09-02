@@ -1,0 +1,20 @@
+{
+  "sequential": {
+    "order": ["verify", "handler", "settle"],
+    "payment_response": true,
+    "upto_actual": "apply",
+    "handler_4xx": "cancel_settle"
+  },
+  "concurrent": {
+    "order": ["verify", "settle_parallel_handler", "join_settle"],
+    "payment_response": true,
+    "upto_actual": "reject_402_settlement_aborted",
+    "handler_4xx": "detach_settle"
+  },
+  "background": {
+    "order": ["verify", "spawn_settle", "handler"],
+    "payment_response": false,
+    "upto_actual": "strip_do_not_fail",
+    "handler_4xx": "detach_settle"
+  }
+}

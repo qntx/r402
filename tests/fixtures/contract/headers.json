@@ -1,0 +1,22 @@
+{
+  "payment_signature": "Payment-Signature",
+  "payment_required": "Payment-Required",
+  "payment_response": "Payment-Response",
+  "sign_in_with_x": "SIGN-IN-WITH-X",
+  "extension_responses": "EXTENSION-RESPONSES",
+  "expose_headers": "Payment-Required, Payment-Response",
+  "status": {
+    "unpaid": 402,
+    "malformed_payment": 402,
+    "permit2_allowance": 412,
+    "facilitator_transport": 502,
+    "missing_scheme": 500,
+    "incompatible_mode": 500,
+    "ok": 200
+  },
+  "cache_control": {
+    "payment_required": "no-store",
+    "settle_failure": "no-store",
+    "ok_with_receipt": "private"
+  }
+}
