@@ -3,13 +3,15 @@
 //! This module provides static network metadata and default USD-pegged token
 //! deployments for Solana mainnet, devnet, and testnet.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 use solana_pubkey::pubkey;
 
 use crate::chain::{
-    SolanaChainReference, SolanaTokenDeployment, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+    Address, SolanaChainReference, SolanaTokenDeployment, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
 
 /// Well-known Solana networks with their names and CAIP-2 identifiers.
@@ -220,6 +222,35 @@ pub fn cash_solana_deployment(
     chain: &SolanaChainReference,
 ) -> Option<&'static SolanaTokenDeployment> {
     deployment_on(&CASH_DEPLOYMENTS, chain)
+}
+
+fn default_solana_mints() -> impl Iterator<Item = (&'static SolanaTokenDeployment, &'static str)> {
+    USDC_DEPLOYMENTS
+        .iter()
+        .map(|d| (d, "USDC"))
+        .chain(USDT_DEPLOYMENTS.iter().map(|d| (d, "USDT")))
+        .chain(USDG_DEPLOYMENTS.iter().map(|d| (d, "USDG")))
+        .chain(PYUSD_DEPLOYMENTS.iter().map(|d| (d, "PYUSD")))
+        .chain(CASH_DEPLOYMENTS.iter().map(|d| (d, "CASH")))
+}
+
+/// Reverse lookup by mint and CAIP-2 network across default Solana USD assets.
+#[must_use]
+pub fn find_default_solana_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "solana" {
+        return None;
+    }
+    let chain = SolanaChainReference::from_str(network.reference()).ok()?;
+    let mint: Address = asset.parse().ok()?;
+    default_solana_mints()
+        .find(|(deployment, _)| deployment.chain_reference == chain && deployment.address == mint)
+        .map(|(deployment, symbol)| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                symbol,
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Solana chains.
@@ -549,5 +580,20 @@ mod tests {
             .expect("testnet reference");
         assert_eq!(parsed, SolanaChainReference::SOLANA_TESTNET);
         assert_eq!(parsed.to_string(), "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z");
+    }
+
+    #[test]
+    fn find_default_solana_asset_covers_usdc_and_other_mints() {
+        let mainnet: ChainId = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp".parse().unwrap();
+        let usdc =
+            find_default_solana_asset("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", &mainnet)
+                .unwrap();
+        assert_eq!(usdc.symbol, "USDC");
+        assert_eq!(usdc.decimals, 6);
+        let pyusd =
+            find_default_solana_asset("2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo", &mainnet)
+                .unwrap();
+        assert_eq!(pyusd.symbol, "PYUSD");
+        assert!(find_default_solana_asset("11111111111111111111111111111111", &mainnet).is_none());
     }
 }

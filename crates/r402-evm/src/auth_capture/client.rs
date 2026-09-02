@@ -6,8 +6,11 @@ use std::sync::Arc;
 
 use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_sol_types::{SolStruct, eip712_domain, sol};
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
+use r402_core::scheme::{
+    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
+};
 use r402_core::wire::{Base64Bytes, PaymentRequired, UnixTimestamp};
 use rand::RngExt;
 use rand::rng;
@@ -121,6 +124,7 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155AuthCaptureClient<S>
                 amount: req.amount.clone(),
                 scheme: "auth-capture".into(),
                 pay_to: req.pay_to.clone(),
+                requirements: req.clone(),
                 signer: Box::new(AuthCaptureCandidateSigner {
                     signer: Arc::clone(&self.signer),
                     chain_id,
@@ -133,6 +137,10 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155AuthCaptureClient<S>
             });
         }
         out
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_evm_asset_info(asset, network)
     }
 }
 

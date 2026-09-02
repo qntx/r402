@@ -1,8 +1,10 @@
 //! Well-known Keeta network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{KeetaAddress, KeetaChainReference, KeetaTokenDeployment};
@@ -59,6 +61,25 @@ pub fn usdc_keeta_deployments() -> &'static [KeetaTokenDeployment] {
 #[must_use]
 pub fn usdc_keeta_deployment(chain: KeetaChainReference) -> Option<&'static KeetaTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by token account and CAIP-2 network.
+#[must_use]
+pub fn find_default_keeta_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "keeta" {
+        return None;
+    }
+    let chain = KeetaChainReference::from_str(network.reference()).ok()?;
+    let address: KeetaAddress = asset.parse().ok()?;
+    usdc_keeta_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Keeta chains.
@@ -130,5 +151,12 @@ mod tests {
             USDC::keeta_testnet().address.as_str(),
             "keeta_apna75yhhvnv4ei7ape55hndk4yepno7a7i2mhtiwahiygixjcnmvswxhnmnk"
         );
+        let network: ChainId = "keeta:21378".parse().unwrap();
+        let info = find_default_keeta_asset(
+            "keeta_amnkge74xitii5dsobstldatv3irmyimujfjotftx7plaaaseam4bntb7wnna",
+            &network,
+        )
+        .unwrap();
+        assert_eq!(info.symbol, "USDC");
     }
 }

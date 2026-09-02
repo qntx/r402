@@ -1,8 +1,10 @@
 //! Well-known Aptos network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{
@@ -58,6 +60,25 @@ pub fn usdc_aptos_deployments() -> &'static [AptosTokenDeployment] {
 #[must_use]
 pub fn usdc_aptos_deployment(chain: AptosChainReference) -> Option<&'static AptosTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by FA metadata address and CAIP-2 network.
+#[must_use]
+pub fn find_default_aptos_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "aptos" {
+        return None;
+    }
+    let chain = AptosChainReference::from_str(network.reference()).ok()?;
+    let address: AptosAddress = asset.parse().ok()?;
+    usdc_aptos_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.as_str(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Aptos chains.
@@ -122,5 +143,9 @@ mod tests {
         assert_eq!(USDC::aptos_testnet().address.as_str(), USDC_TESTNET_FA);
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(APTOS_NETWORKS.len(), 2);
+        let network: ChainId = "aptos:1".parse().unwrap();
+        let info = find_default_aptos_asset(USDC_MAINNET_FA, &network).unwrap();
+        assert_eq!(info.symbol, "USDC");
+        assert_eq!(info.decimals, u32::from(DEFAULT_TOKEN_DECIMALS));
     }
 }

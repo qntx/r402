@@ -3,9 +3,11 @@
 //! This module provides static network metadata and USDC SEP-41 token
 //! deployment information for Stellar pubnet and testnet.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{StellarAddress, StellarChainReference, StellarTokenDeployment};
@@ -70,6 +72,25 @@ pub fn usdc_stellar_deployment(
     chain: StellarChainReference,
 ) -> Option<&'static StellarTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by SEP-41 contract address and CAIP-2 network.
+#[must_use]
+pub fn find_default_stellar_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "stellar" {
+        return None;
+    }
+    let chain = StellarChainReference::from_str(network.reference()).ok()?;
+    let address: StellarAddress = asset.parse().ok()?;
+    usdc_stellar_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Stellar chains.
@@ -139,5 +160,8 @@ mod tests {
         assert!(USDC::stellar().address.is_contract());
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(STELLAR_NETWORKS.len(), 2);
+        let network: ChainId = "stellar:pubnet".parse().unwrap();
+        let info = find_default_stellar_asset(USDC_PUBNET_ADDRESS, &network).unwrap();
+        assert_eq!(info.symbol, "USDC");
     }
 }

@@ -34,7 +34,8 @@ pub use hooks::{
 pub use payment_flow::{
     PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
     PaymentFlowScheme, ResolvedPaymentFlow, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettlePhase,
-    apply_payment_flow_wire_extra, resolve_payment_flow, resolve_payment_flow_phases,
+    apply_payment_flow_wire_extra, extra_payment_flow, is_authorization_payment_flow,
+    is_recognized_payment_flow, resolve_payment_flow, resolve_payment_flow_phases,
 };
 pub use scheme::{DynSchemeNetworkServer, SchemeNetworkServer, SchemePaymentRequiredContext};
 use serde::Serialize;

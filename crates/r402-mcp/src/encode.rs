@@ -374,11 +374,11 @@ mod tests {
             );
         }
 
-        #[test]
-        fn jsonrpc_32042_namespaced_x402_is_payment_required() {
+        #[tokio::test]
+        async fn jsonrpc_32042_namespaced_x402_is_payment_required() {
             let data = json!({
                 "challenges": [{"method": "tempo"}],
-                "x402": sample_required(),
+                "x402": sample_required("Payment required").await,
             });
             let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
                 code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
@@ -397,9 +397,9 @@ mod tests {
             );
         }
 
-        #[test]
-        fn jsonrpc_402_direct_data_is_payment_required() {
-            let data = serde_json::to_value(sample_required()).unwrap();
+        #[tokio::test]
+        async fn jsonrpc_402_direct_data_is_payment_required() {
+            let data = serde_json::to_value(sample_required("Payment required").await).unwrap();
             let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
                 code: ErrorCode(MCP_PAYMENT_REQUIRED_CODE),
                 message: "Payment Required".into(),
@@ -411,11 +411,11 @@ mod tests {
             );
         }
 
-        #[test]
-        fn jsonrpc_402_does_not_read_namespaced_x402() {
+        #[tokio::test]
+        async fn jsonrpc_402_does_not_read_namespaced_x402() {
             let data = json!({
                 "challenges": [{"method": "tempo"}],
-                "x402": sample_required(),
+                "x402": sample_required("Payment required").await,
             });
             let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
                 code: ErrorCode(MCP_PAYMENT_REQUIRED_CODE),

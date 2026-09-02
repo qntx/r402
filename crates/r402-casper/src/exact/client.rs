@@ -7,8 +7,11 @@
 use std::future::Future;
 use std::sync::Arc;
 
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
+use r402_core::scheme::{
+    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
+};
 use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
 use rand::RngExt;
 use rand::rng;
@@ -261,6 +264,7 @@ where
                     amount: requirements.amount.to_string().into(),
                     scheme: self.scheme().into(),
                     pay_to: requirements.pay_to.clone(),
+                    requirements: v.clone(),
                     signer: Box::new(V2PayloadSigner {
                         resource_info: Some(payment_required.resource.clone()),
                         signer: self.signer.clone(),
@@ -269,6 +273,10 @@ where
                 })
             })
             .collect()
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_casper_asset(asset, network)
     }
 }
 

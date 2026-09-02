@@ -43,6 +43,7 @@ pub use resource_server::{
     apply_payment_flow_wire_extra, assert_accepts_additive_extra_after_scheme_enrich,
     assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
     assert_additive_settlement_extra, assert_settle_response_core_unchanged,
+    extra_payment_flow, is_authorization_payment_flow, is_recognized_payment_flow,
     is_vacant_string_field, merge_additive_settlement_extra, resolve_payment_flow,
     resolve_payment_flow_phases, snapshot_payment_requirements_list, snapshot_settle_response_core,
 };
@@ -60,8 +61,9 @@ pub mod metrics;
 // trip `unused_crate_dependencies` because no unit test references it.
 // The empty re-import silences that lint without affecting binary size.
 pub use client::{
-    ClientHooks, CreatedPayment, DynClientHooks, PaymentClient, PaymentCreationContext,
-    PaymentResponseContext, PaymentResponseResult,
+    AllowedAssets, ClientHooks, CreatedPayment, DynClientHooks, MaxAmountPerPayment, PaymentClient,
+    PaymentCreationContext, PaymentResponseContext, PaymentResponseResult, SpendControlAsset,
+    SpendControls,
 };
 pub use error::{
     AsPaymentProblem, ClientError, ErrorReason, FacilitatorError, PaymentProblem, SettlementError,

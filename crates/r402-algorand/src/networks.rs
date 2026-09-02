@@ -1,8 +1,10 @@
 //! Well-known Algorand network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{AlgorandChainReference, AlgorandTokenDeployment};
@@ -55,6 +57,25 @@ pub fn usdc_algorand_deployment(
     chain: AlgorandChainReference,
 ) -> Option<&'static AlgorandTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by ASA id and CAIP-2 network.
+#[must_use]
+pub fn find_default_algorand_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "algorand" {
+        return None;
+    }
+    let chain = AlgorandChainReference::from_str(network.reference()).ok()?;
+    let asset_id: u64 = asset.parse().ok()?;
+    usdc_algorand_deployment(chain)
+        .filter(|deployment| deployment.asset_id == asset_id)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.asset_id.to_string(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Algorand chains.
@@ -119,5 +140,9 @@ mod tests {
         assert_eq!(USDC::algorand_testnet().asset_id, USDC_TESTNET_ASA_ID);
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(ALGORAND_NETWORKS.len(), 2);
+        let network: ChainId = "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k".parse().unwrap();
+        let info = find_default_algorand_asset(&USDC_MAINNET_ASA_ID.to_string(), &network).unwrap();
+        assert_eq!(info.symbol, "USDC");
+        assert_eq!(info.asset, USDC_MAINNET_ASA_ID.to_string());
     }
 }

@@ -20,8 +20,11 @@ use std::sync::Arc;
 
 use alloy_primitives::U256;
 pub use eip2612::{Eip2612SigningParams, sign_eip2612_permit};
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
+use r402_core::scheme::{
+    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
+};
 use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
 pub use signing::{Permit2UptoSigningParams, sign_permit2_upto_authorization};
 
@@ -179,6 +182,7 @@ where
                     amount: requirements.amount.0.to_string().into(),
                     scheme: self.scheme().into(),
                     pay_to: requirements.pay_to.to_string().into(),
+                    requirements: v.clone(),
                     signer: Box::new(UptoPayloadSigner {
                         resource_info: Some(payment_required.resource.clone()),
                         signer: self.signer.clone(),
@@ -191,6 +195,10 @@ where
                 Some(candidate)
             })
             .collect::<Vec<_>>()
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_evm_asset_info(asset, network)
     }
 }
 

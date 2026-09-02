@@ -8,9 +8,11 @@
 //! Contract addresses are sourced from the `x402-chain-tron` reference
 //! implementation: <https://github.com/x402-rs/x402-rs/tree/main/crates/chains/x402-chain-tron>.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::chain::{Address, TronChainReference, TronTokenDeployment};
 
@@ -135,6 +137,25 @@ pub fn usdt_tron_deployment(chain: TronChainReference) -> Option<&'static TronTo
     USDT_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
 }
 
+/// Reverse lookup by TRC-20 address and CAIP-2 network.
+#[must_use]
+pub fn find_default_tron_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "tron" {
+        return None;
+    }
+    let chain = TronChainReference::from_str(network.reference()).ok()?;
+    let address: Address = asset.parse().ok()?;
+    usdt_tron_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                "USDT",
+            )
+        })
+}
+
 /// Ergonomic accessors for USDT token deployments on well-known Tron chains.
 ///
 /// Provides named methods for each supported chain, returning a static
@@ -196,6 +217,10 @@ mod tests {
         assert_eq!(USDT::mainnet().decimals, 6);
         assert_eq!(USDT::nile().decimals, 6);
         assert_eq!(USDT::all().len(), 2);
+        let network: ChainId = "tron:0x2b6653dc".parse().unwrap();
+        let info = find_default_tron_asset(&USDT::mainnet().address.to_string(), &network).unwrap();
+        assert_eq!(info.symbol, "USDT");
+        assert_eq!(info.decimals, 6);
     }
 
     #[test]

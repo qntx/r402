@@ -1,9 +1,10 @@
 //! Client-side payment signing for the Algorand `"exact"` scheme.
 
 use base64::Engine;
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
 use r402_core::scheme::SchemeId;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
 use r402_core::wire::ResourceInfo;
@@ -165,6 +166,7 @@ where
                     amount: requirements.amount.to_string().into(),
                     scheme: self.scheme().into(),
                     pay_to: requirements.pay_to.clone(),
+                    requirements: v.clone(),
                     signer: Box::new(V2PayloadSigner {
                         signer: self.signer.clone(),
                         rpc: self.rpc.clone(),
@@ -174,6 +176,10 @@ where
                 })
             })
             .collect()
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_algorand_asset(asset, network)
     }
 }
 

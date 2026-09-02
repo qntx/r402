@@ -5,8 +5,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy_primitives::{Address, B256, U256};
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed};
+use r402_core::scheme::{
+    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
+};
 use r402_core::wire::{Base64Bytes, PaymentRequired};
 
 use super::channel::{build_channel_config, compute_channel_id};
@@ -111,6 +114,7 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155BatchSettlementClien
                 amount: req.amount.clone(),
                 scheme: "batch-settlement".into(),
                 pay_to: req.pay_to.clone(),
+                requirements: req.clone(),
                 signer: Box::new(BatchVoucherSigner {
                     signer: Arc::clone(&self.signer),
                     charged: Arc::clone(&self.charged),
@@ -124,6 +128,10 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155BatchSettlementClien
             });
         }
         out
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_evm_asset_info(asset, network)
     }
 }
 
