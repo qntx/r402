@@ -172,7 +172,8 @@ fn arb_error_reason() -> impl Strategy<Value = ErrorReason> {
 }
 
 fn arb_extra() -> impl Strategy<Value = Option<serde_json::Value>> {
-    // Null is excluded: `skip_serializing_if = Option::is_none` drops Some(Null).
+    // JSON `null` decodes as `None` for `Option<Value>`, so `Some(Null)` does
+    // not round-trip.
     let value = prop_oneof![
         any::<bool>().prop_map(serde_json::Value::Bool),
         any::<i64>().prop_map(serde_json::Value::from),

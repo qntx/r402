@@ -386,10 +386,8 @@ pub enum ErrorReason {
     ///
     /// Non-terminal: the transaction may still confirm. A
     /// [`crate::wire::SettleResponse::Failure`] with this reason MUST carry a
-    /// non-empty `transaction` (spec §9). A [`crate::facilitator::Facilitator::settle`]
-    /// impl MUST NOT emit this code unless it writes that hash into a
-    /// [`crate::PendingSettlementStore`] on the first attempt and reads it on
-    /// the retry to reconcile instead of broadcasting again.
+    /// non-empty `transaction` (spec §9). Emit only via
+    /// [`crate::PendingSettlementStore`].
     SettlementPending,
 
     // Cross-chain reserved codes (SDK consensus).

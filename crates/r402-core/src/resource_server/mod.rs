@@ -214,6 +214,9 @@ impl ResourceServer {
     /// Official `SettlePayment`: optional amount overrides → before hooks →
     /// facilitator → after hooks.
     ///
+    /// Facilitator settle is attempted twice only when the first `Ok` result is
+    /// `settlement_pending` with a non-empty `transaction`; no sleep.
+    ///
     /// `overrides` applies partial settlement (upto): atomic / percent / dollar
     /// amounts are resolved against `requirements.amount` before hooks see the
     /// payment context (matches Go `SettlePaymentWithExtensions`).
@@ -356,13 +359,14 @@ impl ResourceServer {
         }
     }
 
-    /// Calls facilitator settle once, then retries identically iff the outcome
-    /// is [`crate::error::ErrorReason::SettlementPending`] with a non-empty
-    /// transaction hash.
+    /// Calls facilitator settle once, then retries identically iff the first
+    /// result is `Ok(SettleResponse::Failure)` with
+    /// [`crate::error::ErrorReason::SettlementPending`] and a non-empty
+    /// transaction hash. `Err` is never retried.
     ///
-    /// No sleep or backoff: the mechanism owns any bounded receipt wait.
-    /// Capped at one retry. The facilitator MUST have written that hash into
-    /// a [`crate::PendingSettlementStore`] before emitting the code.
+    /// No sleep or backoff. Capped at one retry. Emit pending only as that
+    /// `Ok(Failure)` after writing the hash into a
+    /// [`crate::PendingSettlementStore`].
     async fn settle_with_pending_retry(
         &self,
         request: SettleRequest,
@@ -881,6 +885,18 @@ mod tests {
         let req = payload.accepted.clone();
         let result = rs.settle_payment(&payload, &req, None).await.unwrap();
         assert!(!result.is_success());
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_retry_on_facilitator_error() {
+        let mock =
+            QueueFacilitator::new(vec![Err(FacilitatorError::Onchain("rpc timeout".into()))]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.settle_payment(&payload, &req, None).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Onchain(_)));
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
     }
 

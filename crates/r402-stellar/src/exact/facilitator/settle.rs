@@ -106,7 +106,7 @@ where
                     reason: ErrorReason::from_wire("settle_exact_stellar_transaction_failed"),
                     message: None,
                     payer: Some(payer),
-                    transaction: Default::default(),
+                    transaction: confirm.tx_hash.unwrap_or_default().into(),
                     network: network.into(),
                     extensions: Extensions::new(),
                     extra: None,
@@ -130,7 +130,10 @@ where
                 reason,
                 message: Some(message.into()),
                 payer: Some(payer),
-                transaction: Default::default(),
+                transaction: err
+                    .transaction_hash()
+                    .map(CompactString::from)
+                    .unwrap_or_default(),
                 network: network.into(),
                 extensions: Extensions::new(),
                 extra: None,

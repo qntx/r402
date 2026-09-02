@@ -122,7 +122,7 @@ where
         return SettleResponse::Failure {
             reason: ErrorReason::from_wire("invalid_exact_avm_confirmation_failed"),
             message: Some(format!("Transaction submitted but confirmation failed: {err}").into()),
-            transaction: Default::default(),
+            transaction: payment_txid.into(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),

@@ -179,7 +179,7 @@ where
         Ok(outcome) => SettleResponse::Failure {
             reason: ErrorReason::from_wire(&format!("transaction_failed: {}", outcome.result_code)),
             message: None,
-            transaction: Default::default(),
+            transaction: outcome.hash.into(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),

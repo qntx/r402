@@ -504,10 +504,8 @@ impl SettleResponse {
 
     /// Builds a `Failure` response from a [`FacilitatorError`].
     ///
-    /// `transaction` is `""` unless the error carries a broadcast hash.
-    /// [`ErrorReason::SettlementPending`] with an empty hash is a programming
-    /// error: the caller must persist that hash in a
-    /// [`crate::PendingSettlementStore`] before emitting the code.
+    /// The caller supplies `transaction` (`""` when no broadcast hash is known).
+    /// [`ErrorReason::SettlementPending`] with an empty hash is a programming error.
     #[must_use]
     pub fn from_facilitator_error(
         error: &FacilitatorError,
