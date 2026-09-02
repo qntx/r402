@@ -23,7 +23,9 @@ pub mod pricing;
 pub mod tracker;
 pub mod upto;
 
-pub use facilitator::{FacilitatorClient, FacilitatorClientError};
+pub use facilitator::{
+    FacilitatorAuthHeaders, FacilitatorClient, FacilitatorClientError, compute_retry_delay,
+};
 pub use hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
 pub use middleware::{SettlementMode, X402Layer, X402Middleware};
 pub use paygate::{

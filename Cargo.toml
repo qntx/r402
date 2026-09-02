@@ -52,6 +52,7 @@ tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
 # Web
 axum-core = "0.5"
 http = "1.5"
+httpdate = "1"
 reqwest = { version = "0.13", features = ["json"] }
 reqwest-middleware = "0.5"
 tower = "0.5"
