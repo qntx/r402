@@ -354,9 +354,9 @@ mod tests {
         use super::*;
         use crate::error::mcp_call_error_from_rmcp;
 
-        #[test]
-        fn jsonrpc_32042_direct_data_is_payment_required() {
-            let data = serde_json::to_value(sample_required()).unwrap();
+        #[tokio::test]
+        async fn jsonrpc_32042_direct_data_is_payment_required() {
+            let data = serde_json::to_value(sample_required("Payment required").await).unwrap();
             let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
                 code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
                 message: "Payment Required".into(),
