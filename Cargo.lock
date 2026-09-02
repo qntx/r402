@@ -6286,6 +6286,7 @@ dependencies = [
  "axum-core 0.5.6",
  "compact_str",
  "http 1.5.0",
+ "httpdate",
  "metrics",
  "r402-core",
  "reqwest 0.13.4",

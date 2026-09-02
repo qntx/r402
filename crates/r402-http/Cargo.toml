@@ -33,6 +33,7 @@ client = [
 server = [
     "dep:axum-core",
     "dep:http",
+    "dep:httpdate",
     "dep:r402-core",
     "dep:reqwest",
     "dep:serde",
@@ -59,6 +60,7 @@ thiserror = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 axum-core = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
+httpdate = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }

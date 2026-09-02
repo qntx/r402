@@ -147,10 +147,9 @@ impl X402Middleware<Arc<FacilitatorClient>> {
         self.facilitator.base_url()
     }
 
-    /// Sets the TTL for caching the facilitator's supported response.
+    /// Enables TTL caching of the facilitator's `/supported` response.
     ///
-    /// Default is 10 minutes. Use [`FacilitatorClient::without_supported_cache()`]
-    /// to disable caching entirely.
+    /// Caching is off by default.
     #[must_use]
     pub fn with_supported_cache_ttl(&self, ttl: Duration) -> Self {
         let inner = Arc::unwrap_or_clone(Arc::clone(&self.facilitator));
