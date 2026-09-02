@@ -250,33 +250,33 @@ impl FacilitatorError {
     {
         Self::Internal(err.into())
     }
+
+    /// 402 payment problem. `None` for [`Self::Transport`] (HTTP 502, not 402).
+    #[must_use]
+    pub fn as_payment_problem(&self) -> Option<PaymentProblem> {
+        match self {
+            Self::Verification(e) => Some(e.as_payment_problem()),
+            Self::Settlement(e) => Some(e.as_payment_problem()),
+            Self::Aborted { reason, message } => Some(PaymentProblem::new(
+                ErrorReason::from_wire(reason),
+                format!("{reason}: {message}"),
+            )),
+            Self::Onchain(message) => Some(PaymentProblem::new(
+                ErrorReason::InvalidTransactionState,
+                message.clone(),
+            )),
+            Self::Transport { .. } => None,
+            Self::Internal(e) => Some(PaymentProblem::new(
+                ErrorReason::UnexpectedVerifyError,
+                e.to_string(),
+            )),
+        }
+    }
 }
 
 impl From<FacilitatorTransportKind> for FacilitatorError {
     fn from(kind: FacilitatorTransportKind) -> Self {
         Self::Transport { kind }
-    }
-}
-
-impl AsPaymentProblem for FacilitatorError {
-    fn as_payment_problem(&self) -> PaymentProblem {
-        match self {
-            Self::Verification(e) => e.as_payment_problem(),
-            Self::Settlement(e) => e.as_payment_problem(),
-            Self::Aborted { reason, message } => PaymentProblem::new(
-                ErrorReason::from_wire(reason),
-                format!("{reason}: {message}"),
-            ),
-            Self::Onchain(message) => {
-                PaymentProblem::new(ErrorReason::InvalidTransactionState, message.clone())
-            }
-            Self::Transport { kind } => {
-                PaymentProblem::new(ErrorReason::UnexpectedVerifyError, kind.to_string())
-            }
-            Self::Internal(e) => {
-                PaymentProblem::new(ErrorReason::UnexpectedVerifyError, e.to_string())
-            }
-        }
     }
 }
 
@@ -319,8 +319,10 @@ mod tests {
         let err = FacilitatorError::transport(FacilitatorTransportKind::Timeout);
         assert!(err.is_transport());
         assert!(!matches!(err, FacilitatorError::Verification(_)));
-        let problem = err.as_payment_problem();
-        assert_eq!(problem.reason(), ErrorReason::UnexpectedVerifyError);
+        assert!(
+            err.as_payment_problem().is_none(),
+            "transport is HTTP 502, not a 402 payment problem"
+        );
     }
 
     #[test]

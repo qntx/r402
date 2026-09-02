@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use super::verify::{TypedVerifyRequest, VerifyRequest};
 use super::{Base64Bytes, Extensions};
-use crate::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
+use crate::error::{ErrorReason, FacilitatorError, VerificationError};
 use crate::scheme::SchemeSlug;
 
 /// Wire-level settle request. Same JSON as [`VerifyRequest`], distinct type.
@@ -192,20 +192,22 @@ impl SettleResponse {
     /// Builds a `Failure` response from a [`FacilitatorError`].
     ///
     /// The caller supplies `transaction` (`""` when no broadcast hash is known).
+    /// Returns `None` for [`FacilitatorError::Transport`]: that is HTTP 502,
+    /// not a 402 body.
     #[must_use]
     pub fn from_facilitator_error(
         error: &FacilitatorError,
         network: impl Into<CompactString>,
         transaction: impl Into<CompactString>,
-    ) -> Self {
-        let problem = error.as_payment_problem();
+    ) -> Option<Self> {
+        let problem = error.as_payment_problem()?;
         let reason = problem.reason();
         let transaction = transaction.into();
         debug_assert!(
             reason != ErrorReason::SettlementPending || !transaction.is_empty(),
             "settlement_pending requires a non-empty transaction hash"
         );
-        Self::Failure {
+        Some(Self::Failure {
             reason,
             message: Some(CompactString::from(problem.details())),
             payer: None,
@@ -214,7 +216,7 @@ impl SettleResponse {
             extensions: Extensions::new(),
             extension_responses: Extensions::new(),
             extra: None,
-        }
+        })
     }
 
     /// `success: false`, `errorReason == settlement_pending`, and a non-empty hash.
@@ -338,6 +340,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::error::FacilitatorTransportKind;
     use crate::payment::ExtensionEntry;
 
     fn v2_json(network: &str, scheme: &str) -> serde_json::Value {
@@ -559,7 +562,8 @@ mod tests {
     #[test]
     fn from_facilitator_error_carries_transaction() {
         let err = FacilitatorError::Onchain("rpc timeout".into());
-        let response = SettleResponse::from_facilitator_error(&err, "eip155:8453", "0xpending");
+        let response =
+            SettleResponse::from_facilitator_error(&err, "eip155:8453", "0xpending").unwrap();
         match response {
             SettleResponse::Failure {
                 transaction,
@@ -573,6 +577,12 @@ mod tests {
             }
             SettleResponse::Success { .. } => panic!("expected failure"),
         }
+    }
+
+    #[test]
+    fn from_facilitator_error_refuses_transport() {
+        let err = FacilitatorError::transport(FacilitatorTransportKind::Timeout);
+        assert!(SettleResponse::from_facilitator_error(&err, "eip155:8453", "").is_none());
     }
 
     #[test]

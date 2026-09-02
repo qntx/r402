@@ -4,7 +4,7 @@ use compact_str::CompactString;
 use serde::{Deserialize, Serialize};
 
 use super::{Extensions, Version};
-use crate::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
+use crate::error::{ErrorReason, FacilitatorError, VerificationError};
 use crate::scheme::SchemeSlug;
 
 /// Protocol-versioned verify request parameterized by payload and requirements.
@@ -193,17 +193,20 @@ impl VerifyResponse {
     }
 
     /// Converts a [`FacilitatorError`] into an `Invalid` response.
+    ///
+    /// Returns `None` for [`FacilitatorError::Transport`]: that is HTTP 502,
+    /// not a 402 body.
     #[must_use]
-    pub fn from_facilitator_error(error: &FacilitatorError) -> Self {
-        let problem = error.as_payment_problem();
-        Self::Invalid {
+    pub fn from_facilitator_error(error: &FacilitatorError) -> Option<Self> {
+        let problem = error.as_payment_problem()?;
+        Some(Self::Invalid {
             reason: problem.reason(),
             message: Some(CompactString::from(problem.details())),
             payer: None,
             extensions: Extensions::new(),
             extension_responses: Extensions::new(),
             extra: None,
-        }
+        })
     }
 }
 
@@ -292,6 +295,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::error::FacilitatorTransportKind;
     use crate::payment::ExtensionEntry;
 
     fn v2_json(network: &str, scheme: &str) -> serde_json::Value {
@@ -383,6 +387,12 @@ mod tests {
         assert!(encoded.get("extensionResponses").is_none());
         assert!(encoded.get("extensions").is_none());
         assert!(!response.extension_responses().is_empty());
+    }
+
+    #[test]
+    fn from_facilitator_error_refuses_transport() {
+        let err = FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody);
+        assert!(VerifyResponse::from_facilitator_error(&err).is_none());
     }
 
     #[test]
