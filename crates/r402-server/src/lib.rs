@@ -45,6 +45,6 @@ pub use scheme::{DynSchemeNetworkServer, SchemeNetworkServer, SchemePaymentRequi
 pub use settle::CompletedSettlement;
 pub use settlement::{
     AfterHandler, BackgroundSettlementTracker, IncompatibleSettlementMode, ScheduledSettlement,
-    SettlementMode, SettlementSchedule, finish, run, schedule,
+    SequentialFinish, SettlementMode, SettlementSchedule, finish, run, schedule,
 };
 pub use verify::VerifyPaymentOutcome;

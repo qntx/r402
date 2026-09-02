@@ -8,9 +8,8 @@ mod tracker;
 use std::fmt::{self, Display, Formatter};
 use std::future::Future;
 
-use compact_str::CompactString;
 use r402_protocol::error::FacilitatorError;
-use r402_protocol::payment::{Extensions, SettleResponse};
+use r402_protocol::payment::SettleResponse;
 pub use tracker::BackgroundSettlementTracker;
 
 use crate::payment_flow::{PaymentFlowName, PaymentFlowPhases};
@@ -54,7 +53,7 @@ pub enum AfterHandler {
     JoinSettle,
     /// Background: settle already spawned; do not await.
     SpawnSettle,
-    /// Sequential upfront: no after-handler settle; echo the before-handler receipt.
+    /// Sequential upfront: no after-handler settle.
     EchoReceipt,
 }
 
@@ -109,6 +108,23 @@ impl SettlementSchedule {
         self.tracker = Some(tracker);
         self
     }
+}
+
+/// Outcome of [`finish`] (Sequential).
+///
+/// [`Self::Echo`] exists so a caller cannot treat a missing after-handler
+/// settle as a new [`SettleResponse`] to attach.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Settled is the sequential success path; Echo is a zero-sized marker"
+)]
+#[must_use]
+pub enum SequentialFinish {
+    /// After-handler settle completed (authorization / escrow). Attach this receipt.
+    Settled(SettleResponse),
+    /// No after-handler settle (upfront). Attach the before-handler receipt.
+    Echo,
 }
 
 /// Outcome of [`run`] (Concurrent / Background).
@@ -197,8 +213,7 @@ fn flow_name(phases: PaymentFlowPhases) -> PaymentFlowName {
 /// Sequential after-handler settle. Does not take a handler.
 ///
 /// [`AfterHandler::WaitThenSettle`] awaits `settle`. [`AfterHandler::EchoReceipt`]
-/// requires `settle` to be `None` and returns an empty success (the caller
-/// echoes the before-handler receipt).
+/// requires `settle` to be `None` and returns [`SequentialFinish::Echo`].
 ///
 /// # Errors
 ///
@@ -208,7 +223,7 @@ fn flow_name(phases: PaymentFlowPhases) -> PaymentFlowName {
 pub async fn finish<S>(
     schedule: SettlementSchedule,
     settle: Option<S>,
-) -> Result<SettleResponse, FacilitatorError>
+) -> Result<SequentialFinish, FacilitatorError>
 where
     S: Future<Output = Result<SettleResponse, FacilitatorError>> + Send,
 {
@@ -217,7 +232,7 @@ where
             let fut = settle.ok_or_else(|| {
                 FacilitatorError::internal("WaitThenSettle requires an after-handler settle")
             })?;
-            fut.await
+            Ok(SequentialFinish::Settled(fut.await?))
         }
         AfterHandler::EchoReceipt => {
             if settle.is_some() {
@@ -225,23 +240,11 @@ where
                     "EchoReceipt does not take an after-handler settle",
                 ));
             }
-            Ok(echo_receipt())
+            Ok(SequentialFinish::Echo)
         }
         AfterHandler::JoinSettle | AfterHandler::SpawnSettle => {
             Err(FacilitatorError::internal("finish is sequential-only"))
         }
-    }
-}
-
-fn echo_receipt() -> SettleResponse {
-    SettleResponse::Success {
-        payer: CompactString::default(),
-        transaction: CompactString::default(),
-        network: CompactString::default(),
-        amount: None,
-        extensions: Extensions::new(),
-        extension_responses: Extensions::new(),
-        extra: None,
     }
 }
 

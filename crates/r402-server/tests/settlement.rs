@@ -15,13 +15,23 @@
 
 //! Sequential `finish`; Concurrent/Background `run`. Compatibility in `settlement.rs`.
 
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
+use r402_facilitator::Facilitator;
 use r402_protocol::error::FacilitatorError;
-use r402_protocol::payment::{Extensions, SettleResponse};
+use r402_protocol::network::ChainIdPattern;
+use r402_protocol::payment::{
+    Extensions, PaymentRequirements, SettleRequest, SettleResponse, SupportedResponse,
+    VerifyRequest, VerifyResponse,
+};
 use r402_server::{
-    AfterHandler, BackgroundSettlementTracker, PaymentFlowName, ScheduledSettlement,
-    SettlementMode, finish, run, schedule,
+    AfterHandler, BackgroundSettlementTracker, PaymentFlowConfig, PaymentFlowName, ResourceServer,
+    SDK_DEFAULT_ASSET_TRANSFER_METHOD, ScheduledSettlement, SchemeNetworkServer, SequentialFinish,
+    SettlePhase, SettlementMode, WirePaymentPayload, finish, run, schedule,
 };
 
 fn success(tx: &str) -> SettleResponse {
@@ -46,6 +56,74 @@ fn upfront() -> r402_server::PaymentFlowPhases {
 
 fn escrow() -> r402_server::PaymentFlowPhases {
     PaymentFlowName::Escrow.phases()
+}
+
+struct CountingFacilitator {
+    settles: AtomicUsize,
+}
+
+impl Facilitator for CountingFacilitator {
+    fn verify(
+        &self,
+        _request: VerifyRequest,
+    ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+        std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
+    }
+
+    fn settle(
+        &self,
+        _request: SettleRequest,
+    ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+        self.settles.fetch_add(1, Ordering::SeqCst);
+        std::future::ready(Ok(success("0xtx")))
+    }
+
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+        std::future::ready(Ok(SupportedResponse::default()))
+    }
+}
+
+struct FlowScheme {
+    flows: HashMap<String, PaymentFlowConfig>,
+}
+
+impl FlowScheme {
+    fn new(flow: PaymentFlowName) -> Self {
+        let mut flows = HashMap::new();
+        flows.insert(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+            PaymentFlowConfig::new(vec![flow], flow),
+        );
+        Self { flows }
+    }
+}
+
+impl SchemeNetworkServer for FlowScheme {
+    fn scheme(&self) -> &'static str {
+        "exact"
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        SDK_DEFAULT_ASSET_TRANSFER_METHOD
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        &self.flows
+    }
+}
+
+fn sample_payload() -> WirePaymentPayload {
+    let req = PaymentRequirements::new(
+        "exact".into(),
+        "eip155:1".parse().unwrap(),
+        "1".into(),
+        "0xa".into(),
+        "0xb".into(),
+        60,
+    );
+    WirePaymentPayload::new(req, serde_json::json!({"k": 1}))
 }
 
 #[test]
@@ -106,7 +184,8 @@ async fn finish_wait_then_settle_awaits_receipt() {
         .unwrap();
     assert!(matches!(
         got,
-        SettleResponse::Success { ref transaction, .. } if transaction == "0xseq"
+        SequentialFinish::Settled(SettleResponse::Success { ref transaction, .. })
+            if transaction == "0xseq"
     ));
 }
 
@@ -131,7 +210,78 @@ async fn finish_echo_receipt_takes_none() {
     )
     .await
     .unwrap();
-    assert!(got.is_success());
+    assert_eq!(got, SequentialFinish::Echo);
+}
+
+#[tokio::test]
+async fn sequential_upfront_settles_once_then_echo() {
+    let mock = Arc::new(CountingFacilitator {
+        settles: AtomicUsize::new(0),
+    });
+    let rs = ResourceServer::new(Arc::clone(&mock)).with_scheme(
+        ChainIdPattern::wildcard("eip155"),
+        FlowScheme::new(PaymentFlowName::Upfront),
+    );
+    let payload = sample_payload();
+    let req = payload.accepted.clone();
+    assert!(
+        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+            .await
+            .unwrap()
+            .is_success()
+    );
+    let schedule = schedule(upfront(), SettlementMode::Sequential).unwrap();
+    let got = finish(
+        schedule,
+        None::<std::future::Ready<Result<SettleResponse, FacilitatorError>>>,
+    )
+    .await
+    .unwrap();
+    assert_eq!(got, SequentialFinish::Echo);
+    assert_eq!(
+        mock.settles.load(Ordering::SeqCst),
+        1,
+        "upfront settle-before only; EchoReceipt must not settle again"
+    );
+}
+
+#[tokio::test]
+async fn sequential_escrow_settles_before_and_after() {
+    let mock = Arc::new(CountingFacilitator {
+        settles: AtomicUsize::new(0),
+    });
+    let rs = ResourceServer::new(Arc::clone(&mock)).with_scheme(
+        ChainIdPattern::wildcard("eip155"),
+        FlowScheme::new(PaymentFlowName::Escrow),
+    );
+    let payload = sample_payload();
+    let req = payload.accepted.clone();
+    assert!(
+        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+            .await
+            .unwrap()
+            .is_success()
+    );
+    let schedule = schedule(escrow(), SettlementMode::Sequential).unwrap();
+    let rs_after = rs.clone();
+    let payload_after = payload.clone();
+    let req_after = req.clone();
+    let got = finish(
+        schedule,
+        Some(async move {
+            rs_after
+                .settle_payment(&payload_after, &req_after, None, SettlePhase::AfterHandler)
+                .await
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(got, SequentialFinish::Settled(_)));
+    assert_eq!(
+        mock.settles.load(Ordering::SeqCst),
+        2,
+        "escrow settle-before plus finish WaitThenSettle"
+    );
 }
 
 #[tokio::test]
