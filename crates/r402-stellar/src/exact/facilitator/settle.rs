@@ -143,7 +143,7 @@ where
             reason: ErrorReason::from_wire("unexpected_settle_error"),
             message: Some(err.to_string().into()),
             payer: Some(payer),
-            transaction: Default::default(),
+            transaction: CompactString::default(),
             network: network.into(),
             extensions: Extensions::new(),
             extra: None,
@@ -159,7 +159,7 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
-        transaction: Default::default(),
+        transaction: CompactString::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),

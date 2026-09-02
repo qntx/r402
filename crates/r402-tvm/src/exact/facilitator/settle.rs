@@ -96,7 +96,7 @@ fn settle_failure(
     payer: Option<CompactString>,
 ) -> SettleResponse {
     SettleResponse::Failure {
-        transaction: Default::default(),
+        transaction: CompactString::default(),
         reason,
         message,
         payer,

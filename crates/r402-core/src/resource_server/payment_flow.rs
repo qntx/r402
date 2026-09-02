@@ -189,6 +189,24 @@ impl PaymentFlowConfig {
     pub const fn new(supported: Vec<PaymentFlowName>, default: PaymentFlowName) -> Self {
         Self { supported, default }
     }
+
+    /// Official exact-scheme row: authorization + upfront, default authorization.
+    #[must_use]
+    pub fn authorization_and_upfront() -> Self {
+        Self::new(
+            vec![PaymentFlowName::Authorization, PaymentFlowName::Upfront],
+            PaymentFlowName::Authorization,
+        )
+    }
+
+    /// Official upto / batch-settlement row: authorization only.
+    #[must_use]
+    pub fn authorization_only() -> Self {
+        Self::new(
+            vec![PaymentFlowName::Authorization],
+            PaymentFlowName::Authorization,
+        )
+    }
 }
 
 /// Scheme fields required to resolve ATM + payment flow.

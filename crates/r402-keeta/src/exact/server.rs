@@ -1,16 +1,44 @@
 //! Server-side price tag generation for the Keeta exact scheme.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
+use r402_core::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
 
 use crate::chain::{KeetaAddress, KeetaTokenDeployment};
 use crate::exact::{ExactScheme, KeetaExact};
 
+fn keeta_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        HashMap::from([(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.to_owned(),
+            PaymentFlowConfig::authorization_and_upfront(),
+        )])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for KeetaExact {
+    fn scheme(&self) -> &'static str {
+        ExactScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        SDK_DEFAULT_ASSET_TRANSFER_METHOD
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        keeta_exact_payment_flows()
+    }
+}
+
 impl KeetaExact {
     /// Creates a price tag for a Keeta token payment.
     ///
-    /// The enricher is `None`: fee payers are facilitator-local and are not
-    /// surfaced on `PaymentRequirements.extra`.
+    /// Fee payers are facilitator-local and are not surfaced on
+    /// `PaymentRequirements.extra`.
     #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
@@ -29,10 +57,7 @@ impl KeetaExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag {
-            requirements,
-            enricher: None,
-        }
+        wire::PriceTag::new(requirements)
     }
 }
 
@@ -43,7 +68,7 @@ mod tests {
     use crate::USDC;
 
     #[test]
-    fn price_tag_omits_extra_and_enricher() {
+    fn price_tag_omits_extra() {
         use keetanetwork_account::{
             Account, Accountable, GenericAccount, KeyED25519, KeyPairType, Keyable,
         };
@@ -60,10 +85,20 @@ mod tests {
         assert_eq!(tag.requirements.scheme, "exact");
         assert_eq!(tag.requirements.network.to_string(), "keeta:1413829460");
         assert!(tag.requirements.extra.is_none());
-        assert!(tag.enricher.is_none());
         assert_eq!(
             tag.requirements.asset,
             USDC::keeta_testnet().address.to_string()
+        );
+    }
+
+    #[test]
+    fn payment_flows_use_default_authorization_and_upfront() {
+        let scheme = KeetaExact;
+        assert_eq!(
+            scheme
+                .payment_flows()
+                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
+            Some(&PaymentFlowConfig::authorization_and_upfront())
         );
     }
 }

@@ -2,19 +2,17 @@
 //!
 //! A 402 challenge is [`PaymentRequired`]: resource metadata plus the
 //! [`PaymentRequirements`] the seller will accept. The buyer answers with a
-//! [`PaymentPayload`]. [`PriceTag`] is the seller-side builder that produces
-//! requirements, optionally enriching them from a facilitator `/supported`
-//! snapshot.
+//! [`PaymentPayload`]. [`PriceTag`] is the seller-side container for those
+//! requirements; scheme `extra` enrichment runs on
+//! [`crate::SchemeNetworkServer::enrich_payment_required_response`].
 
-use std::fmt::{self, Debug, Formatter};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use compact_str::CompactString;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use super::{Extensions, SupportedResponse, V2, Version2};
+use super::{Extensions, V2, Version2};
 use crate::chain::ChainId;
 
 /// Human-readable metadata describing the paid resource.
@@ -678,50 +676,23 @@ impl<TAccepted, TPayload> PaymentPayload<TAccepted, TPayload> {
     }
 }
 
-/// Type alias for enrichment callbacks.
+/// Seller-side payment-requirements container.
 ///
-/// An enricher receives mutable access to a [`PriceTag`] plus the
-/// facilitator's [`SupportedResponse`] so it can fill in scheme-specific
-/// `extra` fields (e.g. Solana fee payer, Permit2 nonce parameters).
-pub type Enricher = Arc<dyn Fn(&mut PriceTag, &SupportedResponse) + Send + Sync>;
-
-/// Mutable payment-requirements container with a lazy enrichment callback.
-///
-/// Sellers construct a `PriceTag` once from a price + chain + asset, then
-/// the HTTP paygate calls [`Self::enrich`] with the facilitator's
-/// capabilities to materialize chain-specific fields.
-#[derive(Clone)]
+/// Constructed from a price + chain + asset. Scheme-specific `extra`
+/// (fee payer, facilitator address, …) is filled by
+/// [`crate::SchemeNetworkServer::enrich_payment_required_response`] during
+/// 402 construction — not on this type.
+#[derive(Debug, Clone)]
 pub struct PriceTag {
-    /// The requirements being built.
+    /// The requirements being advertised.
     pub requirements: PaymentRequirements,
-    /// Optional enricher invoked by [`Self::enrich`].
-    #[doc(hidden)]
-    pub enricher: Option<Enricher>,
 }
 
 impl PriceTag {
-    /// Constructs a price tag around existing requirements (no enricher).
+    /// Constructs a price tag around existing requirements.
     #[must_use]
     pub const fn new(requirements: PaymentRequirements) -> Self {
-        Self {
-            requirements,
-            enricher: None,
-        }
-    }
-
-    /// Sets an enricher that runs on [`Self::enrich`].
-    #[must_use]
-    pub fn with_enricher(mut self, enricher: Enricher) -> Self {
-        self.enricher = Some(enricher);
-        self
-    }
-
-    /// Invokes the configured enricher, if any, with the facilitator's
-    /// capability snapshot.
-    pub fn enrich(&mut self, capabilities: &SupportedResponse) {
-        if let Some(enricher) = self.enricher.clone() {
-            enricher(self, capabilities);
-        }
+        Self { requirements }
     }
 
     /// Overrides the `maxTimeoutSeconds` field.
@@ -729,14 +700,5 @@ impl PriceTag {
     pub const fn with_timeout(mut self, seconds: u64) -> Self {
         self.requirements.max_timeout_seconds = seconds;
         self
-    }
-}
-
-impl Debug for PriceTag {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PriceTag")
-            .field("requirements", &self.requirements)
-            .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))
-            .finish()
     }
 }

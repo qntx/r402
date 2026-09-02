@@ -166,9 +166,8 @@ pub fn is_payment_required_rpc(err: &McpCallError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use std::future::Future;
+    use std::sync::Arc;
 
     use r402_core::FacilitatorError;
     use r402_core::facilitator::Facilitator;

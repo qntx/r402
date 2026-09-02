@@ -537,8 +537,9 @@ impl Paygate {
 impl Paygate {
     /// Builds the single 402 body used by unpaid responses and paid matching.
     ///
-    /// Runs `PriceTag::enrich` against `/supported`, then
-    /// [`ResourceServer::create_payment_required_response`].
+    /// Fetches `/supported` then runs
+    /// [`ResourceServer::create_payment_required_response`] (scheme enrich is
+    /// the only extra channel).
     ///
     /// # Errors
     ///
@@ -548,11 +549,6 @@ impl Paygate {
         let supported = Facilitator::supported(&facilitator)
             .await
             .unwrap_or_default();
-        let mut tags: Vec<_> = self.accepts.iter().cloned().collect();
-        for pt in &mut tags {
-            pt.enrich(&supported);
-        }
-        self.accepts = tags.into();
         let reqs: Vec<_> = self
             .accepts
             .iter()
@@ -1215,7 +1211,14 @@ fn build_settle_request(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::future::Future;
+
+    use r402_core::chain::ChainIdPattern;
+    use r402_core::resource_server::{
+        PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
+        SchemePaymentRequiredContext,
+    };
 
     use super::*;
 
@@ -1318,23 +1321,48 @@ mod tests {
         }
     }
 
-    fn fee_payer_enricher(tag: &mut wire::PriceTag, capabilities: &wire::SupportedResponse) {
-        let Some(fee_payer) = capabilities.kinds.iter().find_map(|kind| {
-            kind.extra
-                .as_ref()
-                .and_then(|extra| extra.get("feePayer"))
-                .cloned()
-        }) else {
-            return;
-        };
-        let mut extra = tag
-            .requirements
-            .extra
-            .take()
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
-        extra.insert("feePayer".into(), fee_payer);
-        tag.requirements.extra = Some(serde_json::Value::Object(extra));
+    struct FeePayerScheme {
+        flows: HashMap<String, PaymentFlowConfig>,
+    }
+
+    impl SchemeNetworkServer for FeePayerScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+
+        fn enrich_payment_required_response<'a>(
+            &'a self,
+            ctx: &'a SchemePaymentRequiredContext<'a>,
+        ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+            let fee_payer = ctx.supported.kinds.iter().find_map(|kind| {
+                kind.extra
+                    .as_ref()
+                    .and_then(|extra| extra.get("feePayer"))
+                    .cloned()
+            });
+            let mut accepts = ctx.requirements.to_vec();
+            let Some(fee_payer) = fee_payer else {
+                return std::future::ready(None);
+            };
+            for req in &mut accepts {
+                let mut extra = req
+                    .extra
+                    .take()
+                    .and_then(|value| value.as_object().cloned())
+                    .unwrap_or_default();
+                extra.insert("feePayer".into(), fee_payer.clone());
+                req.extra = Some(serde_json::Value::Object(extra));
+            }
+            std::future::ready(Some(accepts))
+        }
     }
 
     fn solana_requirements() -> wire::PaymentRequirements {
@@ -1366,10 +1394,17 @@ mod tests {
                 "feePayer": "FeePayer1111111111111111111111111111111111111",
             })),
         ]);
-        let tag =
-            wire::PriceTag::new(solana_requirements()).with_enricher(Arc::new(fee_payer_enricher));
-        let mut gate = Paygate::builder(MockFacilitator { supported })
-            .accept(tag)
+        let mut flows = HashMap::new();
+        flows.insert(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+            PaymentFlowConfig::authorization_and_upfront(),
+        );
+        let mut server = ResourceServer::new(Arc::new(MockFacilitator {
+            supported: supported.clone(),
+        }));
+        server.register_scheme(ChainIdPattern::wildcard("solana"), FeePayerScheme { flows });
+        let mut gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(solana_requirements()))
             .resource(wire::ResourceInfo::new("https://example.com/paid"))
             .build();
         gate.build_payment_required().await.unwrap();

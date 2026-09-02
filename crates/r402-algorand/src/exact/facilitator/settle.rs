@@ -152,7 +152,7 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
-        transaction: Default::default(),
+        transaction: CompactString::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),

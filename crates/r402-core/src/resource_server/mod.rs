@@ -246,10 +246,6 @@ impl ResourceServer {
     ///
     /// [`FacilitatorError::Internal`] when hook policy or payment-flow wire
     /// extra application fails (fail-closed).
-    #[allow(
-        clippy::unused_async,
-        reason = "official createPaymentRequiredResponse is async"
-    )]
     pub async fn create_payment_required_response(
         &self,
         accepts: Vec<PaymentRequirements>,
@@ -259,8 +255,8 @@ impl ResourceServer {
             resource,
             error,
             extensions,
-            supported: _,
-            payment_payload: _,
+            supported,
+            payment_payload,
         } = ctx;
         let mut response = PaymentRequired::new(resource)
             .with_accepts(accepts)
@@ -268,9 +264,59 @@ impl ResourceServer {
         if let Some(error) = error {
             response = response.with_error(error);
         }
+        self.apply_scheme_payment_required_enrich(
+            &mut response,
+            &supported,
+            payment_payload.as_ref(),
+        )
+        .await?;
         advertise_registered_extensions(&self.extensions, &mut response)?;
         apply_payment_flow_extras(&mut response.accepts)?;
         Ok(response)
+    }
+
+    /// Official per-accept scheme enrich, then additive-extra hook policy.
+    async fn apply_scheme_payment_required_enrich(
+        &self,
+        response: &mut PaymentRequired,
+        supported: &SupportedResponse,
+        payment_payload: Option<&WirePaymentPayload>,
+    ) -> Result<(), FacilitatorError> {
+        let targets: Vec<(CompactString, ChainId)> = response
+            .accepts
+            .iter()
+            .map(|accept| (accept.scheme.clone(), accept.network.clone()))
+            .collect();
+        let mut baseline = snapshot_payment_requirements_list(&response.accepts);
+        for (scheme_name, network) in targets {
+            let Some(scheme) = self.registered_scheme(scheme_name.as_str(), &network) else {
+                continue;
+            };
+            let network_label = network.to_string();
+            let enriched = {
+                let ctx = SchemePaymentRequiredContext {
+                    requirements: &response.accepts,
+                    payment_payload,
+                    resource: &response.resource,
+                    error: response.error.as_deref(),
+                    payment_required_response: response,
+                    supported,
+                };
+                scheme.enrich_payment_required_response(&ctx).await
+            };
+            if let Some(accepts) = enriched {
+                response.accepts = accepts;
+            }
+            assert_accepts_additive_extra_after_scheme_enrich(
+                &baseline,
+                &response.accepts,
+                scheme_name.as_str(),
+                network_label.as_str(),
+            )
+            .map_err(FacilitatorError::internal)?;
+            baseline = snapshot_payment_requirements_list(&response.accepts);
+        }
+        Ok(())
     }
 
     /// Official `FindMatchingRequirements`.
@@ -881,7 +927,7 @@ mod tests {
 
     use super::*;
     use crate::chain::ChainIdPattern;
-    use crate::wire::{Extensions, SupportedResponse};
+    use crate::wire::{Extensions, ResourceInfo, SupportedResponse};
 
     struct MockFacilitator {
         verifies: AtomicUsize,
@@ -1723,6 +1769,87 @@ mod tests {
         assert!(
             rs.find_matching_requirements(&available, &payload)
                 .is_some()
+        );
+    }
+
+    struct FeePayerEnrichScheme {
+        flows: HashMap<String, PaymentFlowConfig>,
+    }
+
+    impl SchemeNetworkServer for FeePayerEnrichScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+
+        fn enrich_payment_required_response<'a>(
+            &'a self,
+            ctx: &'a SchemePaymentRequiredContext<'a>,
+        ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
+            let fee_payer = ctx.supported.kinds.iter().find_map(|kind| {
+                kind.extra
+                    .as_ref()
+                    .and_then(|extra| extra.get("feePayer"))
+                    .cloned()
+            });
+            let mut accepts = ctx.requirements.to_vec();
+            let Some(fee_payer) = fee_payer else {
+                return std::future::ready(None);
+            };
+            for req in &mut accepts {
+                let mut extra = req
+                    .extra
+                    .take()
+                    .and_then(|value| value.as_object().cloned())
+                    .unwrap_or_default();
+                extra.insert("feePayer".into(), fee_payer.clone());
+                req.extra = Some(Value::Object(extra));
+            }
+            std::future::ready(Some(accepts))
+        }
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_runs_scheme_enrich() {
+        let supported = SupportedResponse::new().with_kinds(vec![
+            crate::wire::SupportedPaymentKind::new(2, "exact", "eip155:1")
+                .with_extra(serde_json::json!({ "feePayer": "0xfee" })),
+        ]);
+        let mut flows = HashMap::new();
+        flows.insert(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+            PaymentFlowConfig::authorization_and_upfront(),
+        );
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), FeePayerEnrichScheme { flows });
+        let req = sample_payload().accepted;
+        let built = rs
+            .create_payment_required_response(
+                vec![req],
+                PaymentRequiredBuildContext {
+                    resource: ResourceInfo::new("https://example.com/paid"),
+                    error: None,
+                    extensions: Extensions::new(),
+                    supported,
+                    payment_payload: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            built
+                .accepts
+                .first()
+                .and_then(|accept| accept.extra.as_ref())
+                .and_then(|extra| extra.get("feePayer")),
+            Some(&Value::String("0xfee".into()))
         );
     }
 

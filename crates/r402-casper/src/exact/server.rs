@@ -3,10 +3,16 @@
 //! A resource server uses this to turn a wCSPR amount into the
 //! `accepts[]` entry advertised in a `402 Payment Required` response.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::LazyLock;
 
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
+use r402_core::{
+    PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
+    SchemePaymentRequiredContext,
+};
 
 use crate::chain::{Address, CasperTokenDeployment};
 use crate::exact::{CasperExact, CasperPaymentRequirementsExtra, ExactScheme};
@@ -18,6 +24,41 @@ use crate::motes::Motes;
 /// for a buyer to sign and for the facilitator to land the settlement
 /// transaction, and matches the value used by the other chain crates.
 pub const DEFAULT_MAX_TIMEOUT_SECONDS: u64 = 300;
+
+fn casper_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        HashMap::from([(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.to_owned(),
+            PaymentFlowConfig::authorization_only(),
+        )])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for CasperExact {
+    fn scheme(&self) -> &'static str {
+        ExactScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        SDK_DEFAULT_ASSET_TRANSFER_METHOD
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        casper_exact_payment_flows()
+    }
+
+    fn enrich_payment_required_response<'a>(
+        &'a self,
+        ctx: &'a SchemePaymentRequiredContext<'a>,
+    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+        let mut accepts = ctx.requirements.to_vec();
+        let changed = accepts.iter_mut().fold(false, |acc, req| {
+            acc | apply_casper_fee_payer(req, ctx.supported)
+        });
+        std::future::ready(changed.then_some(accepts))
+    }
+}
 
 impl CasperExact {
     /// Creates a price tag for a Casper CEP-18 token payment.
@@ -46,21 +87,20 @@ impl CasperExact {
         )
         .with_optional_extra(serde_json::to_value(extra).ok());
 
-        wire::PriceTag {
-            requirements,
-            enricher: Some(Arc::new(casper_fee_payer_enricher)),
-        }
+        wire::PriceTag::new(requirements)
     }
 }
 
-/// Enricher for Casper price tags — copies the facilitator's advertised
-/// `feePayer` into `requirements.extra` while preserving the EIP-712 domain
-/// fields the seller already set.
-pub fn casper_fee_payer_enricher(
-    price_tag: &mut wire::PriceTag,
+/// Copies the facilitator's advertised `feePayer` into `requirements.extra`
+/// while preserving the EIP-712 domain fields the seller already set.
+fn apply_casper_fee_payer(
+    req: &mut wire::PaymentRequirements,
     capabilities: &wire::SupportedResponse,
-) {
-    let network = price_tag.requirements.network.to_string();
+) -> bool {
+    if req.scheme.as_str() != ExactScheme::VALUE {
+        return false;
+    }
+    let network = req.network.to_string();
     let Some(fee_payer) = capabilities
         .kinds
         .iter()
@@ -73,17 +113,21 @@ pub fn casper_fee_payer_enricher(
         .and_then(|extra| extra.get("feePayer"))
         .cloned()
     else {
-        return;
+        return false;
     };
 
-    match price_tag.requirements.extra.as_mut() {
+    match req.extra.as_mut() {
         Some(serde_json::Value::Object(existing)) => {
+            if existing.get("feePayer") == Some(&fee_payer) {
+                return false;
+            }
             let _ = existing.insert("feePayer".to_owned(), fee_payer);
         }
         _ => {
-            price_tag.requirements.extra = Some(serde_json::json!({ "feePayer": fee_payer }));
+            req.extra = Some(serde_json::json!({ "feePayer": fee_payer }));
         }
     }
+    true
 }
 
 #[cfg(test)]
@@ -145,23 +189,26 @@ mod tests {
     }
 
     #[test]
-    fn enricher_merges_fee_payer_without_dropping_domain() {
+    fn enrich_merges_fee_payer_without_dropping_domain() {
         let mut tag = CasperExact::price_tag(payee(), WCSPR::casper_test().amount(1));
-        casper_fee_payer_enricher(&mut tag, &capabilities(PAYEE));
+        assert!(apply_casper_fee_payer(
+            &mut tag.requirements,
+            &capabilities(PAYEE)
+        ));
         let extra = tag.requirements.extra.as_ref().unwrap();
         assert_eq!(extra["feePayer"], PAYEE);
         assert_eq!(extra["name"], "Wrapped CSPR");
     }
 
     #[test]
-    fn enricher_ignores_other_networks() {
+    fn enrich_ignores_other_networks() {
         let mut tag = CasperExact::price_tag(payee(), WCSPR::casper_test().amount(1));
         let mut supported = wire::SupportedResponse::default();
         supported.kinds.push(
             wire::SupportedPaymentKind::new(2, "exact", "casper:casper")
                 .with_extra(serde_json::json!({ "feePayer": PAYEE })),
         );
-        casper_fee_payer_enricher(&mut tag, &supported);
+        assert!(!apply_casper_fee_payer(&mut tag.requirements, &supported));
         assert!(
             tag.requirements
                 .extra
@@ -174,19 +221,27 @@ mod tests {
     }
 
     #[test]
-    fn enricher_populates_extra_when_absent() {
-        let mut tag = wire::PriceTag {
-            requirements: wire::PaymentRequirements::new(
-                CompactString::from("exact"),
-                CasperChainReference::CASPER_TEST.into(),
-                CompactString::from("1"),
-                CompactString::from(PAYEE),
-                CompactString::from(WCSPR::casper_test().address.to_string()),
-                DEFAULT_MAX_TIMEOUT_SECONDS,
-            ),
-            enricher: None,
-        };
-        casper_fee_payer_enricher(&mut tag, &capabilities(PAYEE));
-        assert_eq!(tag.requirements.extra.as_ref().unwrap()["feePayer"], PAYEE);
+    fn enrich_populates_extra_when_absent() {
+        let mut req = wire::PaymentRequirements::new(
+            CompactString::from("exact"),
+            CasperChainReference::CASPER_TEST.into(),
+            CompactString::from("1"),
+            CompactString::from(PAYEE),
+            CompactString::from(WCSPR::casper_test().address.to_string()),
+            DEFAULT_MAX_TIMEOUT_SECONDS,
+        );
+        assert!(apply_casper_fee_payer(&mut req, &capabilities(PAYEE)));
+        assert_eq!(req.extra.as_ref().unwrap()["feePayer"], PAYEE);
+    }
+
+    #[test]
+    fn payment_flows_are_authorization_only() {
+        let scheme = CasperExact;
+        assert_eq!(
+            scheme
+                .payment_flows()
+                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
+            Some(&PaymentFlowConfig::authorization_only())
+        );
     }
 }

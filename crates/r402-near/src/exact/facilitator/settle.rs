@@ -97,7 +97,7 @@ where
             NearReceiptStatus::Failure { error } => SettleResponse::Failure {
                 reason: ErrorReason::from_wire("settlement_failed"),
                 message: Some(error.into()),
-                transaction: Default::default(),
+                transaction: CompactString::default(),
                 payer,
                 network: network.into(),
                 extensions: Extensions::new(),
@@ -107,7 +107,7 @@ where
         Err(err) => SettleResponse::Failure {
             reason: ErrorReason::from_wire("settlement_failed"),
             message: Some(err.to_string().into()),
-            transaction: Default::default(),
+            transaction: CompactString::default(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
@@ -124,7 +124,7 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
-        transaction: Default::default(),
+        transaction: CompactString::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),

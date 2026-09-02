@@ -1,14 +1,43 @@
 //! Server price tags for EVM `batch-settlement`.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use alloy_primitives::U256;
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::scheme::BatchSettlementScheme;
 use r402_core::wire;
+use r402_core::{PaymentFlowConfig, SchemeNetworkServer};
 
 use super::Eip155BatchSettlement;
 use super::types::BatchSettlementExtra;
 use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
+
+fn eip155_batch_settlement_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        let row = PaymentFlowConfig::authorization_only();
+        HashMap::from([
+            ("eip3009".to_owned(), row.clone()),
+            ("permit2".to_owned(), row),
+        ])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for Eip155BatchSettlement {
+    fn scheme(&self) -> &'static str {
+        BatchSettlementScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        "eip3009"
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        eip155_batch_settlement_payment_flows()
+    }
+}
 
 impl Eip155BatchSettlement {
     /// Builds a price tag advertising batch-settlement terms.
@@ -32,10 +61,7 @@ impl Eip155BatchSettlement {
             3600,
         )
         .with_extra(serde_json::to_value(extra).unwrap_or_else(|_| serde_json::json!({})));
-        wire::PriceTag {
-            requirements,
-            enricher: None,
-        }
+        wire::PriceTag::new(requirements)
     }
 
     /// Convenience constructor from deployment EIP-712 metadata.

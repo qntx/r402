@@ -3,12 +3,41 @@
 //! This module provides functionality for servers to create price tags
 //! that clients can use to generate payment authorizations.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use alloy_primitives::U256;
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
+use r402_core::{PaymentFlowConfig, SchemeNetworkServer};
 
 use crate::chain::{Address, TronTokenDeployment};
 use crate::exact::{AssetTransferMethod, ExactScheme, PaymentRequirementsExtra, TronExact};
+
+fn tron_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        let row = PaymentFlowConfig::authorization_and_upfront();
+        HashMap::from([
+            ("eip3009".to_owned(), row.clone()),
+            ("permit2".to_owned(), row),
+        ])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for TronExact {
+    fn scheme(&self) -> &'static str {
+        ExactScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        "eip3009"
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        tron_exact_payment_flows()
+    }
+}
 
 impl TronExact {
     /// Creates a price tag for a TRC-20 token payment.
@@ -42,10 +71,7 @@ impl TronExact {
             300, // same authorization window as EVM / Solana exact price tags
         )
         .with_optional_extra(extra.and_then(|e| serde_json::to_value(e).ok()));
-        wire::PriceTag {
-            requirements,
-            enricher: None,
-        }
+        wire::PriceTag::new(requirements)
     }
 }
 
