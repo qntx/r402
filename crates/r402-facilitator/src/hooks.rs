@@ -366,7 +366,11 @@ impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
 #[cfg(test)]
 #[allow(
     clippy::excessive_nesting,
-    reason = "mock facilitator impls nest async fn bodies inside impl-in-fn"
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "mock facilitator impls nest async fn bodies; tests panic on assertion failure"
 )]
 mod tests {
     use std::future::Future;

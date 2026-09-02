@@ -2,24 +2,11 @@
 //! the x402 payment protocol.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(
-    test,
-    allow(
-        clippy::indexing_slicing,
-        clippy::panic,
-        clippy::unwrap_used,
-        clippy::expect_used,
-        reason = "unit tests panic on assertion failure"
-    )
-)]
 
 mod cache;
 mod facilitator;
 mod hooks;
 mod pending;
-
-#[cfg(test)]
-use wiremock as _;
 
 #[cfg(feature = "http-client")]
 pub mod http;

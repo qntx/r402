@@ -1424,7 +1424,6 @@ dependencies = [
  "moka",
  "r402-protocol",
  "reqwest",
- "serde",
  "serde_json",
  "thiserror",
  "tokio",

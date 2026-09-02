@@ -145,6 +145,8 @@ impl Default for SettlementCache {
 
 #[cfg(test)]
 mod tests {
+    use wiremock as _;
+
     use super::*;
 
     fn cache() -> TtlSet {

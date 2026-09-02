@@ -84,6 +84,25 @@ fn try_from_str_stores_normalized_base_url() {
 }
 
 #[test]
+fn try_new_keeps_facilitator_path_prefix() {
+    let client = FacilitatorClient::try_new("https://x402.org/facilitator".parse().unwrap())
+        .expect("valid URL");
+    assert_eq!(client.base_url().as_str(), "https://x402.org/facilitator/");
+    assert_eq!(
+        client.verify_url().as_str(),
+        "https://x402.org/facilitator/verify"
+    );
+    assert_eq!(
+        client.settle_url().as_str(),
+        "https://x402.org/facilitator/settle"
+    );
+    assert_eq!(
+        client.supported_url().as_str(),
+        "https://x402.org/facilitator/supported"
+    );
+}
+
+#[test]
 fn try_from_str_rejects_invalid_url() {
     let err = FacilitatorClient::try_from("not a url");
     match err {
@@ -321,6 +340,27 @@ async fn supported_does_not_retry_5xx() {
 }
 
 #[tokio::test]
+async fn supported_gives_up_after_three_429s() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/supported"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .insert_header("Retry-After", "0")
+                .set_body_string("rate limited"),
+        )
+        .expect(3)
+        .mount(&mock_server)
+        .await;
+
+    let err = test_client(&mock_server.uri())
+        .supported()
+        .await
+        .unwrap_err();
+    assert_transport(&err, FacilitatorTransportKind::HttpStatus { status: 429 });
+}
+
+#[tokio::test]
 async fn verify_2xx_malformed_body_is_transport() {
     let mock_server = MockServer::start().await;
     Mock::given(method("POST"))
@@ -390,6 +430,22 @@ async fn verify_4xx_with_is_valid_json_is_not_transport() {
 }
 
 #[tokio::test]
+async fn verify_4xx_valid_json_is_transport() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/verify"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(VerifyResponse::valid("0xpayer")))
+        .mount(&mock_server)
+        .await;
+
+    let err = test_client(&mock_server.uri())
+        .verify(&dummy_verify())
+        .await
+        .unwrap_err();
+    assert_transport(&err, FacilitatorTransportKind::HttpStatus { status: 400 });
+}
+
+#[tokio::test]
 async fn settle_4xx_with_success_json_is_not_transport() {
     let mock_server = MockServer::start().await;
     let body = SettleResponse::Failure {
@@ -413,6 +469,71 @@ async fn settle_4xx_with_success_json_is_not_transport() {
         .await
         .expect("well-formed success JSON on 4xx is a settle outcome, not Transport");
     assert!(!response.is_success());
+}
+
+#[tokio::test]
+async fn settle_4xx_success_json_is_transport() {
+    let mock_server = MockServer::start().await;
+    let body = SettleResponse::Success {
+        payer: "0xabc".into(),
+        transaction: "0xabc".into(),
+        network: "eip155:8453".into(),
+        amount: None,
+        extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
+        extra: None,
+    };
+    Mock::given(method("POST"))
+        .and(path("/settle"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(&body))
+        .mount(&mock_server)
+        .await;
+
+    let err = test_client(&mock_server.uri())
+        .settle(&dummy_settle())
+        .await
+        .unwrap_err();
+    assert_transport(&err, FacilitatorTransportKind::HttpStatus { status: 400 });
+}
+
+#[tokio::test]
+async fn settle_2xx_missing_transaction_is_malformed() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/settle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "payer": "0xabc",
+            "network": "eip155:8453"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let err = test_client(&mock_server.uri())
+        .settle(&dummy_settle())
+        .await
+        .unwrap_err();
+    assert_transport(&err, FacilitatorTransportKind::MalformedSuccessBody);
+}
+
+#[tokio::test]
+async fn auth_failure_is_transport_not_payment_problem() {
+    let client = FacilitatorClient::try_from("https://facilitator.example.com")
+        .unwrap()
+        .with_auth(|| async { Err(FacilitatorClientError::Auth("nope".into())) });
+    let err = client.verify(&dummy_verify()).await.unwrap_err();
+    assert_transport(&err, FacilitatorTransportKind::Io);
+}
+
+#[tokio::test]
+async fn connect_failure_is_transport_not_payment_problem() {
+    let client = FacilitatorClient::try_new("http://127.0.0.1:1/".parse().unwrap()).unwrap();
+    let err = client.verify(&dummy_verify()).await.unwrap_err();
+    assert!(err.is_transport(), "expected Transport, got {err:?}");
+    assert!(
+        err.as_payment_problem().is_none(),
+        "connect failure must not map to a 402 payment problem"
+    );
 }
 
 #[tokio::test]

@@ -25,7 +25,6 @@ http-client = [
     "dep:http",
     "dep:httpdate",
     "dep:reqwest",
-    "dep:serde",
     "dep:serde_json",
     "dep:thiserror",
     "dep:tokio",
@@ -43,7 +42,6 @@ http = { workspace = true, optional = true }
 httpdate = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync", "time"], optional = true }

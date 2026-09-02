@@ -7,74 +7,16 @@ use std::time::Duration;
 use http::{HeaderMap, StatusCode};
 use r402_protocol::error::{FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::payment::{
-    Base64Bytes, Extensions, SettleRequest, SettleResponse, SupportedResponse, VerifyRequest,
-    VerifyResponse,
+    SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use reqwest::Client;
-use serde::de::DeserializeOwned;
-use tokio::sync::RwLock;
 use url::Url;
 
 use super::auth::{CreateAuthHeadersCallback, FacilitatorAuthHeaders};
-use super::retry::{GET_SUPPORTED_RETRIES, supported_retry_delay};
+use super::cache::SupportedCache;
+use super::extension::{attach_settle, attach_verify};
+use super::retry::supported_retry_delay;
 use crate::Facilitator;
-
-/// TTL cache for [`SupportedResponse`].
-#[derive(Clone, Debug)]
-struct SupportedCacheState {
-    response: SupportedResponse,
-    expires_at: std::time::Instant,
-}
-
-/// An encapsulated TTL cache for the `/supported` endpoint response.
-///
-/// Clones share the same cache state via `Arc`.
-#[derive(Debug, Clone)]
-pub struct SupportedCache {
-    ttl: Duration,
-    state: Arc<RwLock<Option<SupportedCacheState>>>,
-}
-
-impl SupportedCache {
-    /// Creates a new cache with the given TTL.
-    #[must_use]
-    pub fn new(ttl: Duration) -> Self {
-        Self {
-            ttl,
-            state: Arc::new(RwLock::new(None)),
-        }
-    }
-
-    /// Returns the cached response if valid, None otherwise.
-    #[allow(
-        clippy::significant_drop_tightening,
-        reason = "read guard scope matches data access"
-    )]
-    pub async fn get(&self) -> Option<SupportedResponse> {
-        let guard = self.state.read().await;
-        let cache = guard.as_ref()?;
-        if std::time::Instant::now() < cache.expires_at {
-            Some(cache.response.clone())
-        } else {
-            None
-        }
-    }
-
-    /// Stores a response in the cache with the configured TTL.
-    pub async fn set(&self, response: SupportedResponse) {
-        let mut guard = self.state.write().await;
-        *guard = Some(SupportedCacheState {
-            response,
-            expires_at: std::time::Instant::now() + self.ttl,
-        });
-    }
-
-    /// Clears the cache.
-    pub async fn clear(&self) {
-        let mut guard = self.state.write().await;
-        *guard = None;
-    }
-}
 
 /// A client for communicating with a remote x402 facilitator.
 #[derive(Clone, Debug)]
@@ -189,7 +131,8 @@ impl FacilitatorClient {
     /// # Errors
     ///
     /// Returns [`FacilitatorClientError`] if URL construction fails.
-    pub fn try_new(base_url: Url) -> Result<Self, FacilitatorClientError> {
+    pub fn try_new(mut base_url: Url) -> Result<Self, FacilitatorClientError> {
+        ensure_trailing_slash(&mut base_url);
         let mut builder = Client::builder().timeout(Self::DEFAULT_TIMEOUT);
         if is_loopback(&base_url) {
             // HTTP_PROXY must not capture loopback mock servers or local facilitators.
@@ -275,9 +218,9 @@ impl FacilitatorClient {
 
     /// Sends a `POST /verify` request to the facilitator.
     ///
-    /// Non-2xx bodies that deserialize as [`VerifyResponse`] are returned as
-    /// `Ok` (402 at the resource server). Timeout, non-2xx without that JSON,
-    /// and malformed 2xx bodies are [`FacilitatorError::Transport`] (502).
+    /// 2xx or non-2xx `Invalid` JSON is `Ok`. Non-2xx `Valid` JSON, timeout,
+    /// connect/DNS/TLS/body failures, and malformed 2xx bodies are
+    /// [`FacilitatorError::Transport`] (502).
     ///
     /// # Errors
     ///
@@ -293,14 +236,13 @@ impl FacilitatorClient {
                 &headers,
             )
             .await?;
-        parse_operation_body(&raw, attach_verify)
+        parse_verify_body(&raw)
     }
 
     /// Sends a `POST /settle` request to the facilitator.
     ///
-    /// Non-2xx bodies that deserialize as [`SettleResponse`] are returned as
-    /// `Ok`. Transport failures follow the same three-state mapping as
-    /// [`Self::verify`].
+    /// 2xx `Success` requires a non-empty `transaction`. Non-2xx `Failure` is
+    /// `Ok`. Non-2xx `Success` is Transport.
     ///
     /// # Errors
     ///
@@ -316,7 +258,7 @@ impl FacilitatorClient {
                 &headers,
             )
             .await?;
-        parse_operation_body(&raw, attach_settle)
+        parse_settle_body(&raw)
     }
 
     /// Sends a `GET /supported` request to the facilitator.
@@ -352,34 +294,33 @@ impl FacilitatorClient {
     /// not a well-formed [`SupportedResponse`].
     pub async fn supported_inner(&self) -> Result<SupportedResponse, FacilitatorError> {
         let headers = self.auth_headers("supported").await?;
-        for attempt in 0..GET_SUPPORTED_RETRIES {
-            let raw = self
+        let mut raw = self
+            .send(self.client.get(self.supported_url.clone()), &headers)
+            .await?;
+        let mut attempt = 0;
+        while let Some(delay) =
+            supported_retry_delay(raw.status, raw.retry_after.as_deref(), attempt)
+        {
+            #[cfg(feature = "telemetry")]
+            tracing::warn!(
+                attempt,
+                delay_ms = delay.as_millis(),
+                status = raw.status.as_u16(),
+                "x402.facilitator_client.supported_retry",
+            );
+            tokio::time::sleep(delay).await;
+            attempt += 1;
+            raw = self
                 .send(self.client.get(self.supported_url.clone()), &headers)
                 .await?;
-            if let Some(delay) =
-                supported_retry_delay(raw.status, raw.retry_after.as_deref(), attempt)
-            {
-                #[cfg(feature = "telemetry")]
-                tracing::warn!(
-                    attempt,
-                    delay_ms = delay.as_millis(),
-                    status = raw.status.as_u16(),
-                    "x402.facilitator_client.supported_retry",
-                );
-                tokio::time::sleep(delay).await;
-                continue;
-            }
-            return parse_supported_body(&raw);
         }
-        Err(FacilitatorError::transport(
-            FacilitatorTransportKind::HttpStatus { status: 429 },
-        ))
+        parse_supported_body(&raw)
     }
 
     async fn auth_headers(&self, path: &'static str) -> Result<HeaderMap, FacilitatorError> {
         self.create_auth_headers(path)
             .await
-            .map_err(FacilitatorError::internal)
+            .map_err(|_| FacilitatorError::transport(FacilitatorTransportKind::Io))
     }
 
     async fn send(
@@ -393,7 +334,7 @@ impl FacilitatorClient {
         if let Some(timeout) = self.timeout {
             req = req.timeout(timeout);
         }
-        let http_response = req.send().await.map_err(map_reqwest)?;
+        let http_response = req.send().await.map_err(|e| map_reqwest(&e))?;
         let retry_after = http_response
             .headers()
             .get(http::header::RETRY_AFTER)
@@ -401,7 +342,11 @@ impl FacilitatorClient {
             .map(ToOwned::to_owned);
         let status = http_response.status();
         let response_headers = http_response.headers().clone();
-        let body = http_response.bytes().await.map_err(map_reqwest)?.to_vec();
+        let body = http_response
+            .bytes()
+            .await
+            .map_err(|e| map_reqwest(&e))?
+            .to_vec();
         Ok(RawHttpResponse {
             status,
             body,
@@ -409,6 +354,18 @@ impl FacilitatorClient {
             retry_after,
         })
     }
+}
+
+/// `Url::join("./verify")` replaces the last path segment unless the base ends
+/// with `/` (`https://x402.org/facilitator` would become `/verify`).
+fn ensure_trailing_slash(url: &mut Url) {
+    let path = url.path();
+    if path.ends_with('/') {
+        return;
+    }
+    let mut with_slash = path.to_owned();
+    with_slash.push('/');
+    url.set_path(&with_slash);
 }
 
 fn is_loopback(url: &Url) -> bool {
@@ -428,29 +385,64 @@ fn join_endpoint(base: &Url, path: &str) -> Result<Url, FacilitatorClientError> 
         })
 }
 
-fn map_reqwest(err: reqwest::Error) -> FacilitatorError {
+fn map_reqwest(err: &reqwest::Error) -> FacilitatorError {
     if err.is_timeout() {
         FacilitatorError::transport(FacilitatorTransportKind::Timeout)
     } else {
-        FacilitatorError::internal(err)
+        FacilitatorError::transport(FacilitatorTransportKind::Io)
     }
 }
 
-fn parse_operation_body<T, F>(raw: &RawHttpResponse, attach: F) -> Result<T, FacilitatorError>
-where
-    T: DeserializeOwned,
-    F: FnOnce(T, &HeaderMap) -> T,
-{
-    match serde_json::from_slice::<T>(&raw.body) {
-        Ok(parsed) => Ok(attach(parsed, &raw.headers)),
-        Err(_) if raw.status.is_success() => Err(FacilitatorError::transport(
-            FacilitatorTransportKind::MalformedSuccessBody,
-        )),
-        Err(_) => Err(FacilitatorError::transport(
-            FacilitatorTransportKind::HttpStatus {
-                status: raw.status.as_u16(),
-            },
-        )),
+const fn status_transport(status: StatusCode) -> FacilitatorError {
+    FacilitatorError::transport(FacilitatorTransportKind::HttpStatus {
+        status: status.as_u16(),
+    })
+}
+
+fn parse_verify_body(raw: &RawHttpResponse) -> Result<VerifyResponse, FacilitatorError> {
+    let parsed = match serde_json::from_slice::<VerifyResponse>(&raw.body) {
+        Ok(parsed) => parsed,
+        Err(_) if raw.status.is_success() => {
+            return Err(FacilitatorError::transport(
+                FacilitatorTransportKind::MalformedSuccessBody,
+            ));
+        }
+        Err(_) => return Err(status_transport(raw.status)),
+    };
+    if raw.status.is_success() || !parsed.is_valid() {
+        return Ok(attach_verify(parsed, &raw.headers));
+    }
+    Err(status_transport(raw.status))
+}
+
+fn parse_settle_body(raw: &RawHttpResponse) -> Result<SettleResponse, FacilitatorError> {
+    let parsed = match serde_json::from_slice::<SettleResponse>(&raw.body) {
+        Ok(parsed) => parsed,
+        Err(_) if raw.status.is_success() => {
+            return Err(FacilitatorError::transport(
+                FacilitatorTransportKind::MalformedSuccessBody,
+            ));
+        }
+        Err(_) => return Err(status_transport(raw.status)),
+    };
+    if raw.status.is_success() {
+        if settle_success_missing_transaction(&parsed) {
+            return Err(FacilitatorError::transport(
+                FacilitatorTransportKind::MalformedSuccessBody,
+            ));
+        }
+        return Ok(attach_settle(parsed, &raw.headers));
+    }
+    if parsed.is_success() {
+        return Err(status_transport(raw.status));
+    }
+    Ok(attach_settle(parsed, &raw.headers))
+}
+
+fn settle_success_missing_transaction(response: &SettleResponse) -> bool {
+    match response {
+        SettleResponse::Success { transaction, .. } => transaction.is_empty(),
+        _ => false,
     }
 }
 
@@ -460,86 +452,8 @@ fn parse_supported_body(raw: &RawHttpResponse) -> Result<SupportedResponse, Faci
             FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody)
         })
     } else {
-        Err(FacilitatorError::transport(
-            FacilitatorTransportKind::HttpStatus {
-                status: raw.status.as_u16(),
-            },
-        ))
+        Err(status_transport(raw.status))
     }
-}
-
-fn attach_verify(mut response: VerifyResponse, headers: &HeaderMap) -> VerifyResponse {
-    let side = parse_extension_responses(headers);
-    log_extension_responses(&side);
-    response.set_extension_responses(side);
-    response
-}
-
-fn attach_settle(mut response: SettleResponse, headers: &HeaderMap) -> SettleResponse {
-    let side = parse_extension_responses(headers);
-    log_extension_responses(&side);
-    response.set_extension_responses(side);
-    response
-}
-
-fn parse_extension_responses(headers: &HeaderMap) -> Extensions {
-    let Some(value) = headers.get("extension-responses") else {
-        return Extensions::new();
-    };
-    let Ok(raw) = value.to_str() else {
-        return Extensions::new();
-    };
-    decode_extension_responses(raw).unwrap_or_default()
-}
-
-/// Decode failure is ignored: missing, bad base64, non-object JSON, or
-/// deserialize error all yield an empty map.
-fn decode_extension_responses(header: &str) -> Option<Extensions> {
-    let bytes = Base64Bytes(header.as_bytes().to_vec());
-    let decoded = bytes.decode().ok()?;
-    let value: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
-    if !value.is_object() {
-        return None;
-    }
-    serde_json::from_value(value).ok()
-}
-
-fn log_extension_responses(responses: &Extensions) {
-    #[cfg(feature = "telemetry")]
-    {
-        if responses.is_empty() {
-            return;
-        }
-        let sanitized: serde_json::Map<String, serde_json::Value> = responses
-            .iter()
-            .map(|(key, entry)| {
-                (
-                    key.to_string(),
-                    serde_json::Value::Object(allowlisted(entry)),
-                )
-            })
-            .collect();
-        tracing::info!(
-            extension_responses = %serde_json::Value::Object(sanitized),
-            "x402.facilitator_client.extension_responses"
-        );
-    }
-    #[cfg(not(feature = "telemetry"))]
-    let _ = responses;
-}
-
-#[cfg(feature = "telemetry")]
-fn allowlisted(
-    entry: &r402_protocol::payment::ExtensionEntry,
-) -> serde_json::Map<String, serde_json::Value> {
-    use r402_protocol::payment::EXTENSION_RESPONSE_LOG_FIELDS;
-    let Some(obj) = entry.to_value().as_object().cloned() else {
-        return serde_json::Map::new();
-    };
-    EXTENSION_RESPONSE_LOG_FIELDS
-        .iter()
-        .filter_map(|field| obj.get(*field).cloned().map(|v| ((*field).to_owned(), v)))
-        .collect()
 }
 
 impl Facilitator for FacilitatorClient {
@@ -576,9 +490,7 @@ impl TryFrom<&str> for FacilitatorClient {
     type Error = FacilitatorClientError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let mut normalized = value.trim_end_matches('/').to_owned();
-        normalized.push('/');
-        let url = Url::parse(&normalized).map_err(|e| FacilitatorClientError::UrlParse {
+        let url = Url::parse(value).map_err(|e| FacilitatorClientError::UrlParse {
             context: "Failed to parse base url",
             source: e,
         })?;

@@ -171,6 +171,8 @@ impl AsPaymentProblem for SettlementError {
 /// `HttpStatus` is a non-2xx response whose body is not well-formed
 /// verify/settle JSON. `MalformedSuccessBody` is 2xx whose JSON is not a
 /// [`crate::payment::VerifyResponse`] / [`crate::payment::SettleResponse`].
+/// `Io` is connect/DNS/TLS/body-read (or auth-header resolution) before a
+/// complete mapped HTTP response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum FacilitatorTransportKind {
@@ -186,6 +188,9 @@ pub enum FacilitatorTransportKind {
     /// 2xx body is not a `VerifyResponse` / `SettleResponse`.
     #[error("facilitator returned a malformed success body")]
     MalformedSuccessBody,
+    /// Connect, DNS, TLS, body-read, or auth-header resolution failed.
+    #[error("facilitator I/O failure")]
+    Io,
 }
 
 /// Top-level facilitator failure.
@@ -336,5 +341,15 @@ mod tests {
             } => assert_eq!(status, 503, "status must round-trip"),
             other => panic!("expected transport, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn io_kind_is_transport_not_payment_problem() {
+        let err = FacilitatorError::transport(FacilitatorTransportKind::Io);
+        assert!(err.is_transport());
+        assert!(
+            err.as_payment_problem().is_none(),
+            "I/O transport is HTTP 502, not a 402 payment problem"
+        );
     }
 }
