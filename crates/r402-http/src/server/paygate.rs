@@ -25,9 +25,11 @@ use http::header::ACCESS_CONTROL_EXPOSE_HEADERS;
 use http::{HeaderMap, HeaderValue, StatusCode};
 use r402_core::error::ErrorReason;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::resource_server::{CancelReason, ResourceServer, ResourceServerHooks, SettlePhase};
+use r402_core::resource_server::{
+    CancelReason, PaymentRequiredBuildContext, ResourceServer, ResourceServerHooks, SettlePhase,
+};
 use r402_core::wire;
-use r402_core::wire::Base64Bytes;
+use r402_core::wire::{Base64Bytes, Extensions, PaymentRequired};
 use serde_json::json;
 use tower::Service;
 #[cfg(feature = "telemetry")]
@@ -106,6 +108,9 @@ pub enum PaygateError {
     /// Renders as a 402 with no `Payment-Response` header.
     #[error("settlement aborted: {0}")]
     SettlementAborted(String),
+    /// 402 body construction failed (hook policy / payment-flow extra).
+    #[error("payment-required construction failed: {0}")]
+    PaymentRequiredBuild(String),
 }
 
 #[allow(
@@ -302,6 +307,7 @@ impl PaygateBuilder {
             resource: self
                 .resource
                 .unwrap_or_else(|| wire::ResourceInfo::new("").with_mime_type("application/json")),
+            payment_required: None,
             hooks: self.hooks,
             settlement_tracker: self.settlement_tracker,
         }
@@ -326,6 +332,8 @@ pub struct Paygate {
     pub(crate) server: ResourceServer,
     pub(crate) accepts: Arc<[wire::PriceTag]>,
     pub(crate) resource: wire::ResourceInfo,
+    /// Shared 402 body for unpaid responses and paid matching.
+    pub(crate) payment_required: Option<PaymentRequired>,
     pub(crate) hooks: Option<Arc<dyn DynPaygateHooks>>,
     /// Optional tracker for background settlement tasks.
     ///
@@ -420,6 +428,12 @@ impl Paygate {
         &self.resource
     }
 
+    /// 402 body produced by [`Self::build_payment_required`], if built.
+    #[must_use]
+    pub const fn payment_required(&self) -> Option<&PaymentRequired> {
+        self.payment_required.as_ref()
+    }
+
     /// Returns the attached paygate hooks, if any.
     ///
     /// The middleware layer uses this accessor to dispatch
@@ -450,18 +464,14 @@ impl Paygate {
             | PaygateError::InvalidPaymentHeader
             | PaygateError::NoPaymentMatching
             | PaygateError::VerificationFailed(_) => {
-                let (status, payment_required) = {
-                    let status = inferred_status(&err);
-                    let payment_required = wire::PaymentRequired::new(self.resource.clone())
-                        .with_error(err.to_string())
-                        .with_accepts(
-                            self.accepts
-                                .iter()
-                                .map(|pt| pt.requirements.clone())
-                                .collect(),
-                        );
-                    (status, payment_required)
+                let Some(mut payment_required) = self.payment_required.clone() else {
+                    return json_status_response(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        &json!({ "error": "payment-required response has not been built" }),
+                    );
                 };
+                let status = inferred_status(&err);
+                payment_required.error = Some(err.to_string().into());
                 let body_bytes =
                     serde_json::to_vec(&payment_required).expect("serialization failed");
                 let header_value =
@@ -499,6 +509,10 @@ impl Paygate {
                 ensure_expose_headers(response.headers_mut());
                 response
             }
+            PaygateError::PaymentRequiredBuild(ref detail) => json_status_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &json!({ "error": detail }),
+            ),
             PaygateError::SettlementAborted(ref detail) => {
                 #[cfg(feature = "telemetry")]
                 tracing::error!(details = %detail, "Settlement aborted");
@@ -521,22 +535,45 @@ impl Paygate {
 }
 
 impl Paygate {
-    /// Enriches price tags with facilitator capabilities (e.g., fee payer address).
-    pub async fn enrich_accepts(&mut self) {
+    /// Builds the single 402 body used by unpaid responses and paid matching.
+    ///
+    /// Runs `PriceTag::enrich` against `/supported`, then
+    /// [`ResourceServer::create_payment_required_response`].
+    ///
+    /// # Errors
+    ///
+    /// [`PaygateError::PaymentRequiredBuild`] when the pipeline fails closed.
+    pub async fn build_payment_required(&mut self) -> Result<(), PaygateError> {
         let facilitator = self.facilitator();
-        let capabilities = Facilitator::supported(&facilitator)
+        let supported = Facilitator::supported(&facilitator)
             .await
             .unwrap_or_default();
-        let accepts: Vec<_> = self
+        let mut tags: Vec<_> = self.accepts.iter().cloned().collect();
+        for pt in &mut tags {
+            pt.enrich(&supported);
+        }
+        self.accepts = tags.into();
+        let reqs: Vec<_> = self
             .accepts
             .iter()
-            .cloned()
-            .map(|mut pt| {
-                pt.enrich(&capabilities);
-                pt
-            })
+            .map(|pt| pt.requirements.clone())
             .collect();
-        self.accepts = accepts.into();
+        let built = self
+            .server
+            .create_payment_required_response(
+                reqs,
+                PaymentRequiredBuildContext {
+                    resource: self.resource.clone(),
+                    error: None,
+                    extensions: Extensions::new(),
+                    supported,
+                    payment_payload: None,
+                },
+            )
+            .await
+            .map_err(|err| PaygateError::PaymentRequiredBuild(err.to_string()))?;
+        self.payment_required = Some(built);
+        Ok(())
     }
 
     /// Verifies the payment from request headers without executing the inner
@@ -559,7 +596,16 @@ impl Paygate {
         let payload: PaymentPayload =
             decode_payment_payload(header_bytes).ok_or(PaygateError::InvalidPaymentHeader)?;
 
-        let requirements = match_requirements(&payload, &self.accepts)?;
+        let payment_required = self.payment_required.as_ref().ok_or_else(|| {
+            PaygateError::PaymentRequiredBuild(
+                "payment-required response has not been built".into(),
+            )
+        })?;
+        let requirements = self
+            .server
+            .find_matching_requirements(&payment_required.accepts, &payload)
+            .cloned()
+            .ok_or(PaygateError::NoPaymentMatching)?;
         let outcome = self
             .server
             .verify_payment(&payload, &requirements)
@@ -1130,6 +1176,20 @@ fn decode_payment_payload<T: serde::de::DeserializeOwned>(header_bytes: &[u8]) -
 ///
 /// A `Permit2AllowanceRequired` inside `VerificationFailed` maps to 412;
 /// everything else is 402.
+#[allow(
+    clippy::expect_used,
+    reason = "infallible HTTP construction; panic indicates a bug"
+)]
+fn json_status_response(status: StatusCode, body: &serde_json::Value) -> Response {
+    let mut response = Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .expect("failed to construct response");
+    ensure_expose_headers(response.headers_mut());
+    response
+}
+
 fn inferred_status(err: &PaygateError) -> StatusCode {
     if let PaygateError::VerificationFailed(message) = err
         && message.contains("permit2_allowance_required")
@@ -1137,17 +1197,6 @@ fn inferred_status(err: &PaygateError) -> StatusCode {
         return StatusCode::PRECONDITION_FAILED;
     }
     StatusCode::PAYMENT_REQUIRED
-}
-
-fn match_requirements(
-    payload: &PaymentPayload,
-    accepts: &[wire::PriceTag],
-) -> Result<wire::PaymentRequirements, PaygateError> {
-    accepts
-        .iter()
-        .find(|pt| **pt == payload.accepted)
-        .map(|pt| pt.requirements.clone())
-        .ok_or(PaygateError::NoPaymentMatching)
 }
 
 fn build_settle_request(
@@ -1166,6 +1215,8 @@ fn build_settle_request(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
 
     #[test]
@@ -1229,5 +1280,129 @@ mod tests {
                 "reason {reason:?} should map to 402"
             );
         }
+    }
+
+    struct MockFacilitator {
+        supported: wire::SupportedResponse,
+    }
+
+    impl Facilitator for MockFacilitator {
+        fn verify(
+            &self,
+            _request: wire::VerifyRequest,
+        ) -> impl Future<Output = Result<wire::VerifyResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: wire::SettleRequest,
+        ) -> impl Future<Output = Result<wire::SettleResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "solana:mainnet".into(),
+                amount: Some("1".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<wire::SupportedResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(self.supported.clone()))
+        }
+    }
+
+    fn fee_payer_enricher(tag: &mut wire::PriceTag, capabilities: &wire::SupportedResponse) {
+        let Some(fee_payer) = capabilities.kinds.iter().find_map(|kind| {
+            kind.extra
+                .as_ref()
+                .and_then(|extra| extra.get("feePayer"))
+                .cloned()
+        }) else {
+            return;
+        };
+        let mut extra = tag
+            .requirements
+            .extra
+            .take()
+            .and_then(|value| value.as_object().cloned())
+            .unwrap_or_default();
+        extra.insert("feePayer".into(), fee_payer);
+        tag.requirements.extra = Some(serde_json::Value::Object(extra));
+    }
+
+    fn solana_requirements() -> wire::PaymentRequirements {
+        wire::PaymentRequirements::new(
+            "exact".into(),
+            "solana:mainnet".parse().unwrap(),
+            "1000".into(),
+            "PayTo111111111111111111111111111111111111111".into(),
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(),
+            60,
+        )
+    }
+
+    fn payment_headers(accepted: &wire::PaymentRequirements) -> HeaderMap {
+        let payload = PaymentPayload::new(accepted.clone(), json!({"sig": "0x"}));
+        let json = serde_json::to_vec(&payload).unwrap();
+        let encoded = Base64Bytes::encode(json);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            PAYMENT_HEADER,
+            HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
+        );
+        headers
+    }
+
+    async fn gate_with_fee_payer_enrich() -> Paygate {
+        let supported = wire::SupportedResponse::new().with_kinds(vec![
+            wire::SupportedPaymentKind::new(2, "exact", "solana:mainnet").with_extra(json!({
+                "feePayer": "FeePayer1111111111111111111111111111111111111",
+            })),
+        ]);
+        let tag =
+            wire::PriceTag::new(solana_requirements()).with_enricher(Arc::new(fee_payer_enricher));
+        let mut gate = Paygate::builder(MockFacilitator { supported })
+            .accept(tag)
+            .resource(wire::ResourceInfo::new("https://example.com/paid"))
+            .build();
+        gate.build_payment_required().await.unwrap();
+        gate
+    }
+
+    #[tokio::test]
+    async fn omit_fee_payer_after_enrich_is_no_payment_matching() {
+        let gate = gate_with_fee_payer_enrich().await;
+        let pr = gate.payment_required().expect("built");
+        let extra = pr.accepts.first().and_then(|req| req.extra.as_ref());
+        assert_eq!(
+            extra
+                .and_then(|value| value.get("feePayer"))
+                .and_then(serde_json::Value::as_str),
+            Some("FeePayer1111111111111111111111111111111111111"),
+        );
+
+        let unpaid = gate.error_response(PaygateError::PaymentHeaderMissing);
+        assert_eq!(unpaid.status(), StatusCode::PAYMENT_REQUIRED);
+        assert!(unpaid.headers().get("Payment-Required").is_some());
+
+        let omitted = solana_requirements();
+        let err = gate
+            .verify_only(&payment_headers(&omitted))
+            .await
+            .expect_err("omitted feePayer must not match");
+        assert!(matches!(err, PaygateError::NoPaymentMatching), "{err:?}");
+
+        let mut echoed = omitted;
+        echoed.extra = pr.accepts.first().and_then(|req| req.extra.clone());
+        gate.verify_only(&payment_headers(&echoed))
+            .await
+            .expect("echoed extra matches the 402 accepts list");
     }
 }

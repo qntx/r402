@@ -13,7 +13,7 @@ use compact_str::CompactString;
 
 /// TTL applied by [`InMemoryPendingSettlementStore`]. Other store
 /// implementations choose their own expiry.
-pub const PENDING_SETTLEMENT_TTL: Duration = Duration::from_secs(300);
+pub const PENDING_SETTLEMENT_TTL: Duration = Duration::from_mins(5);
 
 /// Remembers a broadcast transaction hash keyed by a payload-derived id
 /// (EIP-3009/Permit2 signature, SVM message hash, ...).

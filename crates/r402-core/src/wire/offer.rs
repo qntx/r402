@@ -217,6 +217,52 @@ pub fn find_matching_requirements<'a>(
         .find(|req| req.matches_payload_accepted(accepted))
 }
 
+fn omit_fields(extra: Option<&serde_json::Value>, fields: &[&str]) -> Option<serde_json::Value> {
+    let extra = extra?;
+    if fields.is_empty() {
+        return Some(extra.clone());
+    }
+    let Some(obj) = extra.as_object() else {
+        return Some(extra.clone());
+    };
+    let mut copied = obj.clone();
+    for field in fields {
+        copied.remove(*field);
+    }
+    Some(serde_json::Value::Object(copied))
+}
+
+/// Go `objectContainsSubset`: objects may grow extra keys; primitives and
+/// arrays require exact equality. A missing actual key matches only when
+/// the required value is JSON `null`.
+fn extra_contains_subset(
+    required: Option<&serde_json::Value>,
+    actual: Option<&serde_json::Value>,
+) -> bool {
+    let Some(required) = required else {
+        return true;
+    };
+    let empty = serde_json::Value::Object(serde_json::Map::new());
+    object_contains_subset(required, actual.unwrap_or(&empty))
+}
+
+fn object_contains_subset(expected: &serde_json::Value, actual: &serde_json::Value) -> bool {
+    let Some(expected_map) = expected.as_object() else {
+        return expected == actual;
+    };
+    let Some(actual_map) = actual.as_object() else {
+        return false;
+    };
+    for (key, value) in expected_map {
+        match actual_map.get(key) {
+            None if value.is_null() => {}
+            Some(actual_value) if object_contains_subset(value, actual_value) => {}
+            None | Some(_) => return false,
+        }
+    }
+    true
+}
+
 impl<TScheme, TAmount, TAddress, TExtra> PaymentRequirements<TScheme, TAmount, TAddress, TExtra> {
     /// Constructs the requirements from the six required wire fields.
     /// Use [`Self::with_extra`] / [`Self::with_optional_extra`] to attach
@@ -258,19 +304,31 @@ impl<TScheme, TAmount, TAddress, TExtra> PaymentRequirements<TScheme, TAmount, T
 }
 
 impl PaymentRequirements {
-    /// Returns true when `accepted` matches this requirement under Go
-    /// `FindMatchingRequirements` rules (`server.go`):
-    /// `scheme`, `network`, `amount`, `asset`, `payTo` must be equal.
-    ///
-    /// `maxTimeoutSeconds` and `extra` are intentionally **not** compared
-    /// (same as the foundation Go / Casper preflight convention).
+    /// Official V2 match: core fields including `maxTimeoutSeconds`, plus
+    /// server-declared `extra` as a subset of `accepted.extra`.
     #[must_use]
     pub fn matches_payload_accepted(&self, accepted: &Self) -> bool {
+        self.matches_payload_accepted_with_dynamic(accepted, &[])
+    }
+
+    /// Same as [`Self::matches_payload_accepted`], omitting `dynamic_extra_fields`
+    /// from both extras before the subset check.
+    #[must_use]
+    pub fn matches_payload_accepted_with_dynamic(
+        &self,
+        accepted: &Self,
+        dynamic_extra_fields: &[&str],
+    ) -> bool {
         self.scheme == accepted.scheme
             && self.network == accepted.network
             && self.amount == accepted.amount
             && self.asset == accepted.asset
             && self.pay_to == accepted.pay_to
+            && self.max_timeout_seconds == accepted.max_timeout_seconds
+            && extra_contains_subset(
+                omit_fields(self.extra.as_ref(), dynamic_extra_fields).as_ref(),
+                omit_fields(accepted.extra.as_ref(), dynamic_extra_fields).as_ref(),
+            )
     }
 
     /// Attempts to convert the wire-level requirements (all-strings) into
@@ -327,9 +385,8 @@ mod payment_requirements_tests {
         assert!(serde_json::from_value::<PaymentRequirements>(json).is_err());
     }
 
-    /// Go `FindMatchingRequirements`: scheme/network/amount/asset/payTo only.
     #[test]
-    fn find_matching_requirements_go_semantics() {
+    fn find_matching_requirements_requires_max_timeout_and_extra_subset() {
         let a = PaymentRequirements::new(
             "exact".into(),
             "eip155:1".parse().unwrap(),
@@ -345,20 +402,51 @@ mod payment_requirements_tests {
             "0xrecipient2".into(),
             "USDC".into(),
             30,
-        );
+        )
+        .with_extra(serde_json::json!({"feePayer": "payer"}));
         let available = [a.clone(), b.clone()];
 
-        // Match b even if maxTimeout differs on the accepted side.
-        let mut accepted = b;
-        accepted.max_timeout_seconds = 999;
-        let matched = find_matching_requirements(&available, &accepted).unwrap();
-        assert_eq!(matched.network.to_string(), "eip155:8453");
-        assert_eq!(matched.max_timeout_seconds, 30); // original available entry
+        let mut timeout_mismatch = b.clone();
+        timeout_mismatch.max_timeout_seconds = 999;
+        assert!(find_matching_requirements(&available, &timeout_mismatch).is_none());
 
-        // No match when scheme differs.
+        let matched = find_matching_requirements(&available, &b).unwrap();
+        assert_eq!(matched.network.to_string(), "eip155:8453");
+        assert_eq!(matched.max_timeout_seconds, 30);
+
+        let mut missing_fee = b.clone();
+        missing_fee.extra = None;
+        assert!(find_matching_requirements(&available, &missing_fee).is_none());
+
+        let mut extra_superset = b;
+        extra_superset.extra = Some(serde_json::json!({"feePayer": "payer", "alias": "x"}));
+        assert!(find_matching_requirements(&available, &extra_superset).is_some());
+
         let mut miss = a;
         miss.scheme = "nonexistent".into();
         assert!(find_matching_requirements(&available, &miss).is_none());
+    }
+
+    #[test]
+    fn extra_subset_null_required_matches_missing_actual_key() {
+        let required = PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            60,
+        )
+        .with_extra(serde_json::json!({"k": null}));
+        let accepted = PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            60,
+        );
+        assert!(required.matches_payload_accepted(&accepted));
     }
 }
 
@@ -558,21 +646,5 @@ impl Debug for PriceTag {
             .field("requirements", &self.requirements)
             .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))
             .finish()
-    }
-}
-
-/// Matches a [`PriceTag`] against wire-level requirements on the five
-/// protocol-critical fields only (scheme / network / amount / asset / `pay_to`).
-///
-/// `max_timeout_seconds` and `extra` are deliberately ignored so enriched
-/// fields attached by the facilitator do not cause false negatives.
-impl PartialEq<PaymentRequirements> for PriceTag {
-    fn eq(&self, other: &PaymentRequirements) -> bool {
-        let this = &self.requirements;
-        this.scheme == other.scheme
-            && this.network == other.network
-            && this.amount == other.amount
-            && this.asset == other.asset
-            && this.pay_to == other.pay_to
     }
 }
