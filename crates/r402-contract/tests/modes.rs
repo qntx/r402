@@ -1,4 +1,4 @@
-//! Settlement-mode contract (timing axis, not paymentFlow).
+//! Settlement-mode contract.
 
 #[cfg(test)]
 mod tests {
