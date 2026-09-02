@@ -25,3 +25,8 @@ audit/
 plan/
 docs/*
 !docs/gap-checklist.md
+!docs/layout/
+!docs/layout/**
+!docs/chain-parity-design.md
+!docs/parity-closure-design.md
+!docs/structure-aesthetics-redesign.md

@@ -1,3 +1,5 @@
+> **Obsolete.** Not the construction contract. Implement from [`docs/layout/`](layout/README.md) (384 enumerable files, HTTP shape B, three SettlementModes KEEP, upto KEEP, `r402-contract` unpublished). SVM upto already ships at HEAD `fb0e1cd`.
+
 # Chain-parity gap checklist
 
 Status of official TS mechanism families versus r402 crates.
