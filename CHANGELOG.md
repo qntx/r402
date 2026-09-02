@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- `r402-core`: `agent-identity` extension (`ext-agent-identity` feature) —
+  binds an optional ERC-8004 agent id to a payment so verify/settle
+  responses surface per-agent attribution for treasuries and compliance
+  hooks (issue #87).
+
 ### Changed
 
 ## [0.17.1] — 2026-08-20

@@ -23,6 +23,8 @@
 //!
 //! - `ext-bazaar` — [`bazaar::BazaarExtension`] for resource discovery
 //! - `ext-payment-id` — [`payment_id::PaymentIdentifierExtension`]
+//! - `ext-agent-identity` — [`agent_identity::AgentIdentityExtension`]
+//!   (ERC-8004 agent attribution)
 //! - `ext-eip2612` — [`eip2612::Eip2612GasSponsoringExtension`]
 //!   (server advertise; EVM payload types in `r402-evm`)
 //! - `ext-erc20-approval` — [`erc20_approval::Erc20ApprovalGasSponsoringExtension`]
@@ -55,6 +57,10 @@ use compact_str::CompactString;
 use crate::wire::{
     ExtensionEntry, Extensions, PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse,
 };
+
+#[cfg(feature = "ext-agent-identity")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ext-agent-identity")))]
+pub mod agent_identity;
 
 #[cfg(feature = "ext-bazaar")]
 #[cfg_attr(docsrs, doc(cfg(feature = "ext-bazaar")))]
