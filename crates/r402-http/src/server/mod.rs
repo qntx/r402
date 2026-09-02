@@ -27,10 +27,10 @@ pub use facilitator::{
     FacilitatorAuthHeaders, FacilitatorClient, FacilitatorClientError, compute_retry_delay,
 };
 pub use hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
-pub use middleware::{SettlementMode, X402Layer, X402Middleware};
+pub use middleware::{X402Layer, X402Middleware};
 pub use paygate::{
-    Paygate, PaygateBuilder, PaygateError, ResourceTemplate, VerifiedPayment, X402_EXPOSED_HEADERS,
-    ensure_expose_headers, reason_to_status, settlement_to_header,
+    Paygate, PaygateBuilder, PaygateError, ResourceTemplate, SettlementMode, VerifiedPayment,
+    X402_EXPOSED_HEADERS, ensure_expose_headers, reason_to_status, settlement_to_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use tracker::BackgroundSettlementTracker;

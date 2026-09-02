@@ -15,13 +15,18 @@
 //! - **[`SettlementMode::Background`]**: verify → spawn settle → execute → return.
 //!   Fire-and-forget — ideal for streaming responses.
 //!
+//! Concurrent and Background are authorization-only. Any resolved accept with
+//! `upfront` or `escrow` under those modes is HTTP 500.
+//!
 //! ## Configuration Notes
 //!
+//! - **[`X402Middleware::with_scheme`]** registers a [`SchemeNetworkServer`] on the
+//!   layer-owned [`ResourceServer`]. Paid routes 500 `MissingScheme` until then.
 //! - **[`X402Middleware::with_price_tag`]** sets the assets and amounts accepted for payment (static pricing).
 //! - **[`X402Middleware::with_dynamic_price`]** sets a callback for dynamic pricing based on request context.
 //! - **[`X402Middleware::with_base_url`]** sets the base URL for computing full resource URLs.
 //!   If not set, defaults to `http://localhost/` (avoid in production).
-//! - **[`X402Layer::with_settlement_mode`]** selects sequential or concurrent settlement.
+//! - **[`X402Layer::with_settlement_mode`]** selects sequential, concurrent, or background settlement.
 //! - **[`X402Layer::with_description`]** is optional but helps the payer understand what is being paid for.
 //! - **[`X402Layer::with_mime_type`]** sets the MIME type of the protected resource (default: `application/json`).
 //! - **[`X402Layer::with_resource`]** explicitly sets the full URI of the protected resource.
@@ -32,12 +37,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use axum_core::extract::Request;
 use axum_core::response::Response;
 use http::{HeaderMap, Uri};
+use r402_core::chain::ChainIdPattern;
 use r402_core::facilitator::Facilitator;
+use r402_core::resource_server::{ResourceServer, SchemeNetworkServer};
 use r402_core::wire;
 use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
@@ -45,159 +51,55 @@ use url::Url;
 
 use super::facilitator::{FacilitatorClient, FacilitatorClientError};
 use super::hooks::{DynPaygateHooks, PaygateHooks, ProtectedRequestOutcome};
-use super::paygate::{Paygate, ResourceTemplate};
+use super::paygate::{Paygate, ResourceTemplate, SettlementMode};
 use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
-
-/// Controls when on-chain settlement executes relative to the inner service.
-///
-/// # Variants
-///
-/// - **Sequential** (default): verify → execute → settle.  Settlement only
-///   runs after the handler returns a successful response.  This is the
-///   safest option — no settlement occurs on handler errors.
-///
-/// - **Concurrent**: verify → (settle ∥ execute) → await settle.  Settlement
-///   is spawned immediately after verification and runs in parallel with the
-///   handler, reducing total request latency by one facilitator RTT.
-///   On handler error the settlement task is detached (fire-and-forget).
-///
-/// - **Background**: verify → spawn settle (fire-and-forget) → execute → return.
-///   Settlement runs entirely in the background — the response is returned to
-///   the client immediately after the handler completes, without waiting for
-///   settlement.  Ideal for **streaming** responses (e.g. SSE / LLM token
-///   streams) where the client should start receiving data as soon as possible.
-///   **Trade-off:** the `Payment-Response` header is not attached since settlement
-///   may still be in progress when the response is sent.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub enum SettlementMode {
-    /// Settlement runs **after** the handler completes.
-    #[default]
-    Sequential,
-    /// Settlement runs **concurrently** with the handler; response waits for settlement.
-    Concurrent,
-    /// Settlement is fire-and-forget; response is returned immediately.
-    Background,
-}
 
 /// The main X402 middleware instance for enforcing x402 payments on routes.
 ///
-/// Create a single instance per application and use it to build payment layers
-/// for protected routes.
-pub struct X402Middleware<F> {
-    facilitator: F,
+/// Owns a [`ResourceServer`] (facilitator + registered schemes). Create one
+/// instance per application and use it to build payment layers for protected
+/// routes. Paid routes return HTTP 500 `MissingScheme` until [`Self::with_scheme`].
+#[derive(Clone, Debug)]
+pub struct X402Middleware {
+    server: ResourceServer,
     base_url: Option<Url>,
 }
 
-impl<F: Clone> Clone for X402Middleware<F> {
-    fn clone(&self) -> Self {
-        Self {
-            facilitator: self.facilitator.clone(),
-            base_url: self.base_url.clone(),
-        }
-    }
-}
-
-impl<F: std::fmt::Debug> std::fmt::Debug for X402Middleware<F> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("X402Middleware")
-            .field("facilitator", &self.facilitator)
-            .field("base_url", &self.base_url)
-            .finish()
-    }
-}
-
-impl<F> X402Middleware<F> {
-    /// Creates a middleware instance from any facilitator implementation.
+impl X402Middleware {
+    /// Wraps `fac` in a new [`ResourceServer`] and calls [`Self::from_resource_server`].
     ///
-    /// Use this when you already have a configured facilitator (e.g. one
-    /// with custom timeouts, caching, or a non-default HTTP client).
+    /// Paid routes 500 `MissingScheme` until [`Self::with_scheme`].
     #[must_use]
-    pub const fn from_facilitator(facilitator: F) -> Self {
+    pub fn from_facilitator(fac: impl Facilitator + 'static) -> Self {
+        Self::from_resource_server(ResourceServer::new(Arc::new(fac)))
+    }
+
+    /// Creates middleware that owns an existing [`ResourceServer`] (schemes included).
+    #[must_use]
+    pub const fn from_resource_server(server: ResourceServer) -> Self {
         Self {
-            facilitator,
+            server,
             base_url: None,
         }
     }
 
-    /// Returns a reference to the underlying facilitator.
-    pub const fn facilitator(&self) -> &F {
-        &self.facilitator
-    }
-}
-
-impl X402Middleware<Arc<FacilitatorClient>> {
-    /// Creates a new middleware instance with a facilitator URL.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FacilitatorClientError`] if the URL cannot be parsed or the
-    /// derived `/verify`, `/settle`, and `/supported` endpoints cannot be
-    /// constructed.
-    pub fn try_new(url: &str) -> Result<Self, FacilitatorClientError> {
-        let facilitator = FacilitatorClient::try_from(url)?;
-        Ok(Self {
-            facilitator: Arc::new(facilitator),
-            base_url: None,
-        })
-    }
-
-    /// Returns the configured facilitator URL.
+    /// Registers a scheme/network adapter on the owned [`ResourceServer`].
     #[must_use]
-    pub fn facilitator_url(&self) -> &Url {
-        self.facilitator.base_url()
+    pub fn with_scheme(
+        mut self,
+        network: ChainIdPattern,
+        scheme: impl SchemeNetworkServer + 'static,
+    ) -> Self {
+        self.server.register_scheme(network, scheme);
+        self
     }
 
-    /// Enables TTL caching of the facilitator's `/supported` response.
-    ///
-    /// Caching is off by default.
+    /// Returns a reference to the owned resource server.
     #[must_use]
-    pub fn with_supported_cache_ttl(&self, ttl: Duration) -> Self {
-        let inner = Arc::unwrap_or_clone(Arc::clone(&self.facilitator));
-        let facilitator = Arc::new(inner.with_supported_cache_ttl(ttl));
-        Self {
-            facilitator,
-            base_url: self.base_url.clone(),
-        }
+    pub const fn resource_server(&self) -> &ResourceServer {
+        &self.server
     }
 
-    /// Sets a per-request timeout for all facilitator HTTP calls (verify, settle, supported).
-    ///
-    /// Without this, the underlying `reqwest::Client` uses no timeout by default,
-    /// which can cause requests to hang indefinitely if the facilitator is slow
-    /// or unreachable, eventually triggering OS-level TCP timeouts (typically 2–5 minutes).
-    ///
-    /// A reasonable production value is 30 seconds.
-    #[must_use]
-    pub fn with_facilitator_timeout(&self, timeout: Duration) -> Self {
-        let inner = Arc::unwrap_or_clone(Arc::clone(&self.facilitator));
-        let facilitator = Arc::new(inner.with_timeout(timeout));
-        Self {
-            facilitator,
-            base_url: self.base_url.clone(),
-        }
-    }
-}
-
-impl TryFrom<&str> for X402Middleware<Arc<FacilitatorClient>> {
-    type Error = FacilitatorClientError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::try_new(value)
-    }
-}
-
-impl TryFrom<String> for X402Middleware<Arc<FacilitatorClient>> {
-    type Error = FacilitatorClientError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::try_new(&value)
-    }
-}
-
-impl<F> X402Middleware<F>
-where
-    F: Clone,
-{
     /// Sets the base URL used to construct resource URLs dynamically.
     ///
     /// If [`X402Layer::with_resource`] is not called, this base URL is combined with
@@ -210,23 +112,15 @@ where
         this.base_url = Some(base_url);
         this
     }
-}
 
-impl<TFacilitator> X402Middleware<TFacilitator>
-where
-    TFacilitator: Clone,
-{
     /// Sets the price tag for the protected route.
     ///
     /// Creates a layer builder that can be further configured with additional
     /// price tags and resource information.
     #[must_use]
-    pub fn with_price_tag(
-        &self,
-        price_tag: wire::PriceTag,
-    ) -> X402Layer<StaticPriceTags, TFacilitator> {
+    pub fn with_price_tag(&self, price_tag: wire::PriceTag) -> X402Layer<StaticPriceTags> {
         X402Layer {
-            facilitator: self.facilitator.clone(),
+            server: self.server.clone(),
             price_source: StaticPriceTags::new(vec![price_tag]),
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
@@ -242,12 +136,9 @@ where
     /// when the list is empty — the middleware will pass requests through
     /// without payment enforcement.
     #[must_use]
-    pub fn with_price_tags(
-        &self,
-        price_tags: Vec<wire::PriceTag>,
-    ) -> X402Layer<StaticPriceTags, TFacilitator> {
+    pub fn with_price_tags(&self, price_tags: Vec<wire::PriceTag>) -> X402Layer<StaticPriceTags> {
         X402Layer {
-            facilitator: self.facilitator.clone(),
+            server: self.server.clone(),
             price_source: StaticPriceTags::new(price_tags),
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
@@ -261,22 +152,48 @@ where
     /// The `callback` receives request headers, URI, and base URL, and returns
     /// a vector of V2 price tags.
     #[must_use]
-    pub fn with_dynamic_price<F, Fut>(
-        &self,
-        callback: F,
-    ) -> X402Layer<DynamicPriceTags, TFacilitator>
+    pub fn with_dynamic_price<F, Fut>(&self, callback: F) -> X402Layer<DynamicPriceTags>
     where
         F: Fn(&HeaderMap, &Uri, Option<&Url>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Vec<wire::PriceTag>> + Send + 'static,
     {
         X402Layer {
-            facilitator: self.facilitator.clone(),
+            server: self.server.clone(),
             price_source: DynamicPriceTags::new(callback),
             base_url: self.base_url.clone().map(Arc::new),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
             hooks: None,
         }
+    }
+}
+
+impl X402Middleware {
+    /// Creates a new middleware instance with a facilitator URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FacilitatorClientError`] if the URL cannot be parsed or the
+    /// derived `/verify`, `/settle`, and `/supported` endpoints cannot be
+    /// constructed.
+    pub fn try_new(url: &str) -> Result<Self, FacilitatorClientError> {
+        Ok(Self::from_facilitator(FacilitatorClient::try_from(url)?))
+    }
+}
+
+impl TryFrom<&str> for X402Middleware {
+    type Error = FacilitatorClientError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::try_new(value)
+    }
+}
+
+impl TryFrom<String> for X402Middleware {
+    type Error = FacilitatorClientError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::try_new(&value)
     }
 }
 
@@ -289,8 +206,8 @@ where
     missing_debug_implementations,
     reason = "generic types may not impl Debug"
 )]
-pub struct X402Layer<TSource, TFacilitator> {
-    facilitator: TFacilitator,
+pub struct X402Layer<TSource> {
+    server: ResourceServer,
     base_url: Option<Arc<Url>>,
     price_source: TSource,
     resource: Arc<ResourceTemplate>,
@@ -298,7 +215,7 @@ pub struct X402Layer<TSource, TFacilitator> {
     hooks: Option<Arc<dyn DynPaygateHooks>>,
 }
 
-impl<TFacilitator> X402Layer<StaticPriceTags, TFacilitator> {
+impl X402Layer<StaticPriceTags> {
     /// Adds another payment option.
     ///
     /// Allows specifying multiple accepted payment methods (e.g., different networks).
@@ -315,7 +232,18 @@ impl<TFacilitator> X402Layer<StaticPriceTags, TFacilitator> {
     missing_debug_implementations,
     reason = "generic types may not impl Debug"
 )]
-impl<TSource, TFacilitator> X402Layer<TSource, TFacilitator> {
+impl<TSource> X402Layer<TSource> {
+    /// Registers a scheme/network adapter on the owned [`ResourceServer`].
+    #[must_use]
+    pub fn with_scheme(
+        mut self,
+        network: ChainIdPattern,
+        scheme: impl SchemeNetworkServer + 'static,
+    ) -> Self {
+        self.server.register_scheme(network, scheme);
+        self
+    }
+
     /// Sets a description of what the payment grants access to.
     ///
     /// This is included in 402 responses to inform clients what they're paying for.
@@ -360,10 +288,8 @@ impl<TSource, TFacilitator> X402Layer<TSource, TFacilitator> {
     /// - [`SettlementMode::Concurrent`]: verify → (settle ∥ execute) → await settle.
     /// - [`SettlementMode::Background`]: verify → spawn settle → execute → return.
     ///
-    /// Concurrent mode reduces total latency by overlapping settlement with
-    /// handler execution. Background mode is ideal for streaming responses
-    /// where the client should receive data immediately (settlement errors
-    /// are logged but do not propagate).
+    /// Concurrent and Background are authorization-only. Upfront or escrow on
+    /// any resolved accept yields HTTP 500.
     #[must_use]
     pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
         self.settlement_mode = mode;
@@ -378,8 +304,8 @@ impl<TSource, TFacilitator> X402Layer<TSource, TFacilitator> {
     ///
     /// For transport-agnostic verify/settle lifecycle (including
     /// `on_verified_payment_canceled`), register hooks on a
-    /// [`r402_core::ResourceServer`] and build the paygate with
-    /// [`super::paygate::Paygate::builder_from_server`], or use
+    /// [`r402_core::ResourceServer`] and pass it to
+    /// [`X402Middleware::from_resource_server`], or use
     /// [`super::paygate::PaygateBuilder::with_resource_hook`] on a manual
     /// [`Paygate`].
     #[must_use]
@@ -392,18 +318,17 @@ impl<TSource, TFacilitator> X402Layer<TSource, TFacilitator> {
     }
 }
 
-impl<S, TSource, TFacilitator> Layer<S> for X402Layer<TSource, TFacilitator>
+impl<S, TSource> Layer<S> for X402Layer<TSource>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
-    TFacilitator: Facilitator + Clone,
     TSource: PriceTagSource,
 {
-    type Service = X402MiddlewareService<TSource, TFacilitator>;
+    type Service = X402MiddlewareService<TSource>;
 
     fn layer(&self, inner: S) -> Self::Service {
         X402MiddlewareService {
-            facilitator: self.facilitator.clone(),
+            server: self.server.clone(),
             base_url: self.base_url.clone(),
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
@@ -423,9 +348,9 @@ where
     missing_debug_implementations,
     reason = "BoxCloneSyncService does not impl Debug"
 )]
-pub struct X402MiddlewareService<TSource, TFacilitator> {
-    /// Payment facilitator (local or remote)
-    facilitator: TFacilitator,
+pub struct X402MiddlewareService<TSource> {
+    /// Resource server (facilitator + schemes) copied from the layer.
+    server: ResourceServer,
     /// Base URL for constructing resource URLs
     base_url: Option<Arc<Url>>,
     /// Price tag source - can be static or dynamic
@@ -440,10 +365,9 @@ pub struct X402MiddlewareService<TSource, TFacilitator> {
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
 
-impl<TSource, TFacilitator> Service<Request> for X402MiddlewareService<TSource, TFacilitator>
+impl<TSource> Service<Request> for X402MiddlewareService<TSource>
 where
     TSource: PriceTagSource,
-    TFacilitator: Facilitator + Clone + Send + Sync + 'static,
 {
     type Response = Response;
     type Error = Infallible;
@@ -461,7 +385,7 @@ where
     )]
     fn call(&mut self, req: Request) -> Self::Future {
         let price_source = self.price_source.clone();
-        let facilitator = self.facilitator.clone();
+        let server = self.server.clone();
         let base_url = self.base_url.clone();
         let resource_builder = Arc::clone(&self.resource);
         let settlement_mode = self.settlement_mode;
@@ -495,13 +419,19 @@ where
 
             let resource = resource_builder.resolve(base_url.as_deref(), &req);
 
-            let mut gate_builder = Paygate::builder(facilitator)
+            let mut gate_builder = Paygate::builder_from_server(server)
                 .accepts(accepts)
                 .resource(resource);
             if let Some(h) = hooks.as_ref() {
                 gate_builder = gate_builder.hooks_dyn(Arc::clone(h));
             }
             let mut gate = gate_builder.build();
+            if let Err(err) = gate.require_schemes().await {
+                return Ok(gate.error_response(err));
+            }
+            if let Err(err) = gate.assert_mode_compatible(settlement_mode) {
+                return Ok(gate.error_response(err));
+            }
             if let Err(err) = gate.build_payment_required().await {
                 return Ok(gate.error_response(err));
             }
@@ -547,23 +477,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_new_stores_parsed_facilitator_url() {
-        let input = "https://facilitator.example.com";
-        let middleware = X402Middleware::try_new(input).expect("valid facilitator URL");
-        let expected = Url::parse("https://facilitator.example.com/").expect("fixture URL");
-        assert_eq!(
-            middleware.facilitator_url(),
-            &expected,
-            "stored base URL must equal the parsed, slash-normalized input"
-        );
-        assert_eq!(
-            middleware.facilitator_url().as_str(),
-            "https://facilitator.example.com/"
-        );
-
-        let slashed = X402Middleware::try_new("https://facilitator.example.com/")
-            .expect("valid facilitator URL with trailing slash");
-        assert_eq!(slashed.facilitator_url(), middleware.facilitator_url());
+    fn try_new_accepts_valid_facilitator_url() {
+        assert!(X402Middleware::try_new("https://facilitator.example.com").is_ok());
+        assert!(X402Middleware::try_new("https://facilitator.example.com/").is_ok());
     }
 
     #[test]
@@ -583,13 +499,185 @@ mod tests {
 
     #[test]
     fn try_from_str_matches_try_new() {
-        let via_try_new =
-            X402Middleware::try_new("https://facilitator.example.com").expect("try_new");
-        let via_try_from =
-            X402Middleware::try_from("https://facilitator.example.com").expect("TryFrom<&str>");
-        assert_eq!(
-            via_try_new.facilitator_url(),
-            via_try_from.facilitator_url()
-        );
+        assert!(X402Middleware::try_new("https://facilitator.example.com").is_ok());
+        assert!(X402Middleware::try_from("https://facilitator.example.com").is_ok());
+        assert!(X402Middleware::try_from("https://facilitator.example.com".to_owned()).is_ok());
+    }
+
+    use std::collections::HashMap;
+    use std::future::Future;
+
+    use http::StatusCode;
+    use r402_core::FacilitatorError;
+    use r402_core::resource_server::{
+        PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
+    };
+    use r402_core::wire::{self, Extensions};
+
+    struct OkFacilitator;
+
+    impl Facilitator for OkFacilitator {
+        fn verify(
+            &self,
+            _request: wire::VerifyRequest,
+        ) -> impl Future<Output = Result<wire::VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(wire::VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: wire::SettleRequest,
+        ) -> impl Future<Output = Result<wire::SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(wire::SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "eip155:1".into(),
+                amount: Some("1".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::SupportedResponse::new()))
+        }
+    }
+
+    struct AuthScheme {
+        flows: HashMap<String, PaymentFlowConfig>,
+    }
+
+    impl AuthScheme {
+        fn authorization() -> Self {
+            let mut flows = HashMap::new();
+            flows.insert(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+                PaymentFlowConfig::authorization_only(),
+            );
+            Self { flows }
+        }
+
+        fn auth_and_upfront() -> Self {
+            let mut flows = HashMap::new();
+            flows.insert(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+                PaymentFlowConfig::authorization_and_upfront(),
+            );
+            Self { flows }
+        }
+    }
+
+    impl SchemeNetworkServer for AuthScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+    }
+
+    #[derive(Clone)]
+    struct OkInner;
+
+    impl Service<Request> for OkInner {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = std::future::Ready<Result<Response, Infallible>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Request) -> Self::Future {
+            std::future::ready(Ok(Response::new(axum_core::body::Body::from("ok"))))
+        }
+    }
+
+    fn eip155_tag() -> wire::PriceTag {
+        wire::PriceTag::new(wire::PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1000".into(),
+            "0xpay".into(),
+            "0xasset".into(),
+            60,
+        ))
+    }
+
+    fn upfront_tag() -> wire::PriceTag {
+        let mut requirements = eip155_tag().requirements;
+        requirements.extra = Some(serde_json::json!({ "paymentFlow": "upfront" }));
+        wire::PriceTag::new(requirements)
+    }
+
+    #[tokio::test]
+    async fn paid_route_without_scheme_is_missing_scheme_500() {
+        let layer = X402Middleware::from_facilitator(OkFacilitator).with_price_tag(eip155_tag());
+        let mut svc = layer.layer(OkInner);
+        let response = svc
+            .call(Request::new(axum_core::body::Body::empty()))
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn concurrent_upfront_is_incompatible_500() {
+        let layer = X402Middleware::from_facilitator(OkFacilitator)
+            .with_scheme(
+                ChainIdPattern::wildcard("eip155"),
+                AuthScheme::auth_and_upfront(),
+            )
+            .with_price_tag(upfront_tag())
+            .with_settlement_mode(SettlementMode::Concurrent);
+        let mut svc = layer.layer(OkInner);
+        let response = svc
+            .call(Request::new(axum_core::body::Body::empty()))
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn concurrent_mixed_authorization_and_upfront_is_500() {
+        let layer = X402Middleware::from_facilitator(OkFacilitator)
+            .with_scheme(
+                ChainIdPattern::wildcard("eip155"),
+                AuthScheme::auth_and_upfront(),
+            )
+            .with_price_tags(vec![eip155_tag(), upfront_tag()])
+            .with_settlement_mode(SettlementMode::Background);
+        let mut svc = layer.layer(OkInner);
+        let response = svc
+            .call(Request::new(axum_core::body::Body::empty()))
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn sequential_with_registered_scheme_challenges_unpaid() {
+        let layer = X402Middleware::from_facilitator(OkFacilitator)
+            .with_scheme(
+                ChainIdPattern::wildcard("eip155"),
+                AuthScheme::authorization(),
+            )
+            .with_price_tag(eip155_tag())
+            .with_settlement_mode(SettlementMode::Sequential);
+        let mut svc = layer.layer(OkInner);
+        let response = svc
+            .call(Request::new(axum_core::body::Body::empty()))
+            .await
+            .expect("infallible");
+        assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+        assert!(response.headers().get("Payment-Required").is_some());
     }
 }

@@ -232,6 +232,28 @@ impl ResourceServer {
         Ok(resolved.payment_flow)
     }
 
+    /// Whether the registered scheme yields cancel-settle requirements.
+    ///
+    /// Escrow accepts must return `true` before HTTP/MCP will serve them.
+    pub async fn has_settle_on_cancel(&self, requirements: &PaymentRequirements) -> bool {
+        let Some(scheme) =
+            self.registered_scheme(requirements.scheme.as_str(), &requirements.network)
+        else {
+            return false;
+        };
+        let ctx = VerifiedPaymentCanceledContext {
+            payment: PaymentHookContext {
+                payload: WirePaymentPayload::new(requirements.clone(), Value::Null),
+                requirements: requirements.clone(),
+            },
+            reason: CancelReason::HandlerFailed,
+            error: None,
+            response_status: None,
+            settled_phases: vec![SettlePhase::BeforeHandler],
+        };
+        scheme.settle_on_cancel(&ctx).await.is_some()
+    }
+
     /// Registers a protocol extension advertised on 402 responses.
     #[must_use]
     pub fn with_extension(mut self, extension: impl Extension + 'static) -> Self {
@@ -1897,6 +1919,19 @@ mod tests {
             .await;
         assert!(receipt.is_none());
         assert_eq!(mock.settles.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn has_settle_on_cancel_probes_scheme() {
+        let req = sample_payload().accepted;
+        let none =
+            ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), MockScheme::escrow());
+        assert!(!none.has_settle_on_cancel(&req).await);
+
+        let mut with_cancel = MockScheme::escrow();
+        with_cancel.cancel_requirements = Some(req.clone());
+        let some = ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), with_cancel);
+        assert!(some.has_settle_on_cancel(&req).await);
     }
 
     #[tokio::test]

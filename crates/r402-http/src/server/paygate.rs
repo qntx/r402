@@ -16,17 +16,23 @@
 //!   verify → spawn settle (fire-and-forget) → execute → return. Ideal for
 //!   streaming responses where the client should receive data immediately.
 
+use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 use axum_core::body::Body;
 use axum_core::extract::Request;
 use axum_core::response::{IntoResponse, Response};
+use compact_str::CompactString;
 use http::header::ACCESS_CONTROL_EXPOSE_HEADERS;
 use http::{HeaderMap, HeaderValue, StatusCode};
+use r402_core::SettlementOverrides;
+use r402_core::chain::ChainId;
 use r402_core::error::ErrorReason;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::resource_server::{
-    CancelReason, PaymentRequiredBuildContext, ResourceServer, ResourceServerHooks, SettlePhase,
+    CancelReason, CompletedSettlement, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
+    PaymentRequiredBuildContext, ResourceServer, ResourceServerHooks, SettlePhase,
+    resolve_payment_flow_phases,
 };
 use r402_core::wire;
 use r402_core::wire::{Base64Bytes, Extensions, PaymentRequired};
@@ -81,6 +87,52 @@ pub const fn reason_to_status(reason: &ErrorReason) -> StatusCode {
     }
 }
 
+/// Controls when on-chain settlement executes relative to the inner service.
+///
+/// This is a latency scheduler for authorization `settleAfterHandler`. It is
+/// not a substitute for `extra.paymentFlow`. Concurrent and Background are
+/// illegal with upfront and escrow.
+///
+/// # Variants
+///
+/// - **Sequential** (default): verify → execute → settle. Settlement only
+///   runs after the handler returns a successful response.
+///
+/// - **Concurrent**: verify → (settle ∥ execute) → await settle. Settlement
+///   is spawned immediately after verification and runs in parallel with the
+///   handler. Authorization only.
+///
+/// - **Background**: verify → spawn settle (fire-and-forget) → execute → return.
+///   Authorization only. The `Payment-Response` header is not attached.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum SettlementMode {
+    /// Settlement runs **after** the handler completes.
+    #[default]
+    Sequential,
+    /// Settlement runs **concurrently** with the handler; response waits for settlement.
+    Concurrent,
+    /// Settlement is fire-and-forget; response is returned immediately.
+    Background,
+}
+
+impl SettlementMode {
+    /// Stable lowercase name for error bodies.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Sequential => "sequential",
+            Self::Concurrent => "concurrent",
+            Self::Background => "background",
+        }
+    }
+}
+
+impl Display for SettlementMode {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Payment gate error encompassing header, verification, and settlement failures.
 #[derive(Debug, thiserror::Error)]
 pub enum PaygateError {
@@ -111,6 +163,28 @@ pub enum PaygateError {
     /// 402 body construction failed (hook policy / payment-flow extra).
     #[error("payment-required construction failed: {0}")]
     PaymentRequiredBuild(String),
+    /// Concurrent/Background used with an upfront or escrow accept.
+    #[error("incompatible settlement mode {mode} with payment flow {flow}")]
+    IncompatibleSettlementMode {
+        /// Configured HTTP settlement mode.
+        mode: SettlementMode,
+        /// Payment flow on the offending accept.
+        flow: PaymentFlowName,
+    },
+    /// No [`r402_core::SchemeNetworkServer`] registered for this accept.
+    #[error("missing scheme {scheme} on {network}")]
+    MissingScheme {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Escrow accept whose scheme does not implement `settle_on_cancel`.
+    #[error("escrow scheme {scheme} is missing settle_on_cancel")]
+    MissingSettleOnCancel {
+        /// Wire scheme name.
+        scheme: CompactString,
+    },
 }
 
 #[allow(
@@ -388,6 +462,68 @@ impl Paygate {
         &self.server
     }
 
+    /// Requires a registered [`r402_core::SchemeNetworkServer`] for every accept.
+    ///
+    /// Escrow additionally requires `settle_on_cancel` to return requirements.
+    ///
+    /// # Errors
+    ///
+    /// [`PaygateError::MissingScheme`], [`PaygateError::MissingSettleOnCancel`],
+    /// or [`PaygateError::PaymentRequiredBuild`] when flow resolution fails.
+    pub async fn require_schemes(&self) -> Result<(), PaygateError> {
+        for tag in self.accepts.iter() {
+            let requirements = &tag.requirements;
+            if self
+                .server
+                .registered_scheme(requirements.scheme.as_str(), &requirements.network)
+                .is_none()
+            {
+                return Err(PaygateError::MissingScheme {
+                    scheme: requirements.scheme.clone(),
+                    network: requirements.network.clone(),
+                });
+            }
+            let flow = self.payment_flow_of(requirements)?;
+            if flow == PaymentFlowName::Escrow
+                && !self.server.has_settle_on_cancel(requirements).await
+            {
+                return Err(PaygateError::MissingSettleOnCancel {
+                    scheme: requirements.scheme.clone(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Concurrent/Background are illegal if any resolved accept is upfront or escrow.
+    ///
+    /// Checked on **all** tags, not only the matched one.
+    ///
+    /// # Errors
+    ///
+    /// [`PaygateError::IncompatibleSettlementMode`] or flow-resolution errors.
+    pub fn assert_mode_compatible(&self, mode: SettlementMode) -> Result<(), PaygateError> {
+        if mode == SettlementMode::Sequential {
+            return Ok(());
+        }
+        for tag in self.accepts.iter() {
+            let flow = self.payment_flow_of(&tag.requirements)?;
+            if matches!(flow, PaymentFlowName::Upfront | PaymentFlowName::Escrow) {
+                return Err(PaygateError::IncompatibleSettlementMode { mode, flow });
+            }
+        }
+        Ok(())
+    }
+
+    fn payment_flow_of(
+        &self,
+        requirements: &wire::PaymentRequirements,
+    ) -> Result<PaymentFlowName, PaygateError> {
+        self.server
+            .get_payment_flow(requirements)
+            .map_err(|err| flow_error(err, &requirements.network))
+    }
+
     /// Returns a clone of the erased facilitator handle.
     #[must_use]
     pub fn facilitator(&self) -> Arc<dyn DynFacilitator> {
@@ -512,6 +648,32 @@ impl Paygate {
             PaygateError::PaymentRequiredBuild(ref detail) => json_status_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &json!({ "error": detail }),
+            ),
+            PaygateError::IncompatibleSettlementMode { mode, flow } => json_status_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &json!({
+                    "error": "incompatible settlement mode",
+                    "mode": mode.as_str(),
+                    "flow": flow.as_str(),
+                }),
+            ),
+            PaygateError::MissingScheme {
+                ref scheme,
+                ref network,
+            } => json_status_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &json!({
+                    "error": "missing scheme",
+                    "scheme": scheme,
+                    "network": network.to_string(),
+                }),
+            ),
+            PaygateError::MissingSettleOnCancel { ref scheme } => json_status_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &json!({
+                    "error": "missing settle_on_cancel",
+                    "scheme": scheme,
+                }),
             ),
             PaygateError::SettlementAborted(ref detail) => {
                 #[cfg(feature = "telemetry")]
@@ -656,13 +818,14 @@ impl Paygate {
         S::Future: Send,
     {
         let verified = self.verify_only(req.headers()).await?;
-        let cancel = verified.cancellation_guard();
-
-        // After-verify SkipHandler: settle without invoking the resource handler.
         if let Some(directive) = verified.skip_handler.clone() {
-            let settlement = verified.settle_with_override(None).await?;
-            return skip_handler_response(&directive, &settlement);
+            return skip_handler_settle(&verified, &directive).await;
         }
+
+        let flow = self.payment_flow_of(verified.requirements())?;
+        let phases = resolve_payment_flow_phases(flow);
+        let before_handler = settle_before_handler_if_needed(&verified, flow, phases).await?;
+        let cancel = cancellation_guard(&verified, before_handler.as_ref());
 
         let response = match call_inner(inner, req).await {
             Ok(r) => r,
@@ -694,17 +857,16 @@ impl Paygate {
         let override_amount =
             super::upto::resolve_response_settlement_amount(&mut response, verified.requirements())
                 .map_err(|e| PaygateError::SettlementAborted(e.to_string()))?;
+        let overrides = override_amount.as_deref().map(SettlementOverrides::amount);
 
         let settlement = verified
-            .settle_with_override(override_amount.as_deref())
+            .process_settlement(
+                SettlePhase::AfterHandler,
+                overrides.as_ref(),
+                before_handler.as_ref(),
+            )
             .await?;
-        let header_value = settlement_to_header(&settlement)?;
-
-        response
-            .headers_mut()
-            .insert("Payment-Response", header_value);
-        // Browser clients need Access-Control-Expose-Headers for Payment-Response.
-        ensure_expose_headers(response.headers_mut());
+        attach_payment_response(&mut response, &settlement)?;
         Ok(response)
     }
 }
@@ -743,12 +905,13 @@ impl Paygate {
         ReqBody: Send + 'static,
     {
         let verified = self.verify_only(req.headers()).await?;
-        let cancel = verified.cancellation_guard();
-
         if let Some(directive) = verified.skip_handler.clone() {
-            let settlement = verified.settle().await?;
-            return skip_handler_response(&directive, &settlement);
+            return skip_handler_settle(&verified, &directive).await;
         }
+
+        let flow = self.payment_flow_of(verified.requirements())?;
+        require_authorization_mode(SettlementMode::Concurrent, flow)?;
+        let cancel = cancellation_guard(&verified, None);
 
         // Concurrent settle runs at the signed maximum in parallel with the
         // handler. Partial settlement (Settlement-Overrides / UptoActualAmount)
@@ -799,10 +962,7 @@ impl Paygate {
         let settlement = settle_handle
             .await
             .map_err(|e| PaygateError::SettlementAborted(format!("settle task panicked: {e}")))??;
-        let header_value = settlement_to_header(&settlement)?;
-
-        res.headers_mut().insert("Payment-Response", header_value);
-        ensure_expose_headers(res.headers_mut());
+        attach_payment_response(&mut res, &settlement)?;
         Ok(res)
     }
 
@@ -846,14 +1006,13 @@ impl Paygate {
         ReqBody: Send + 'static,
     {
         let verified = self.verify_only(req.headers()).await?;
-        let cancel = verified.cancellation_guard();
-
-        // SkipHandler: no resource body to stream — settle inline and return
-        // the directive response (same as sequential/concurrent).
         if let Some(directive) = verified.skip_handler.clone() {
-            let settlement = verified.settle().await?;
-            return skip_handler_response(&directive, &settlement);
+            return skip_handler_settle(&verified, &directive).await;
         }
+
+        let flow = self.payment_flow_of(verified.requirements())?;
+        require_authorization_mode(SettlementMode::Background, flow)?;
+        let cancel = cancellation_guard(&verified, None);
 
         // F-103: spawn the settlement task and a supervisor that awaits the
         // join handle. The supervisor surfaces three failure modes that
@@ -973,17 +1132,42 @@ impl VerifiedPayment {
         self,
         actual_amount: Option<&str>,
     ) -> Result<wire::SettleResponse, PaygateError> {
-        use r402_core::SettlementOverrides;
-
         let overrides = actual_amount.map(SettlementOverrides::amount);
+        self.process_settlement(SettlePhase::AfterHandler, overrides.as_ref(), None)
+            .await
+    }
+
+    /// Official `processSettlement`: [`SettlePhase::AfterHandler`] no-ops when
+    /// `!settleAfterHandler` (echo before-handler receipt, or empty success).
+    async fn process_settlement(
+        &self,
+        phase: SettlePhase,
+        overrides: Option<&SettlementOverrides>,
+        before_handler: Option<&CompletedSettlement>,
+    ) -> Result<wire::SettleResponse, PaygateError> {
+        let flow = self
+            .server
+            .get_payment_flow(&self.requirements)
+            .map_err(|err| flow_error(err, &self.requirements.network))?;
+        let phases = resolve_payment_flow_phases(flow);
+
+        if phase != SettlePhase::BeforeHandler && !phases.settle_after_handler {
+            if let Some(before) = before_handler {
+                return Ok(before.result.clone());
+            }
+            return Ok(wire::SettleResponse::Success {
+                payer: CompactString::default(),
+                transaction: CompactString::default(),
+                network: self.requirements.network.to_string().into(),
+                amount: None,
+                extensions: Extensions::new(),
+                extra: None,
+            });
+        }
+
         let settlement = self
             .server
-            .settle_payment(
-                &self.payload,
-                &self.requirements,
-                overrides.as_ref(),
-                SettlePhase::AfterHandler,
-            )
+            .settle_payment(&self.payload, &self.requirements, overrides, phase)
             .await
             .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
 
@@ -1106,6 +1290,80 @@ pub fn settlement_to_header(
     })?;
     HeaderValue::from_bytes(encoded.as_ref())
         .map_err(|e| PaygateError::SettlementAborted(e.to_string()))
+}
+
+fn flow_error(err: PaymentFlowError, network: &ChainId) -> PaygateError {
+    match err {
+        PaymentFlowError::UnregisteredScheme { scheme, .. } => PaygateError::MissingScheme {
+            scheme: scheme.into(),
+            network: network.clone(),
+        },
+        other => PaygateError::PaymentRequiredBuild(other.to_string()),
+    }
+}
+
+const fn require_authorization_mode(
+    mode: SettlementMode,
+    flow: PaymentFlowName,
+) -> Result<(), PaygateError> {
+    if matches!(flow, PaymentFlowName::Upfront | PaymentFlowName::Escrow) {
+        return Err(PaygateError::IncompatibleSettlementMode { mode, flow });
+    }
+    Ok(())
+}
+
+fn cancellation_guard(
+    verified: &VerifiedPayment,
+    before_handler: Option<&CompletedSettlement>,
+) -> r402_core::CancellationGuard {
+    let guard = verified.cancellation_guard();
+    match before_handler {
+        Some(completed) => guard
+            .with_settled_phases([SettlePhase::BeforeHandler])
+            .with_before_handler(completed.clone()),
+        None => guard,
+    }
+}
+
+async fn settle_before_handler_if_needed(
+    verified: &VerifiedPayment,
+    flow: PaymentFlowName,
+    phases: PaymentFlowPhases,
+) -> Result<Option<CompletedSettlement>, PaygateError> {
+    if !phases.settle_before_handler {
+        return Ok(None);
+    }
+    let result = verified
+        .process_settlement(SettlePhase::BeforeHandler, None, None)
+        .await?;
+    Ok(Some(CompletedSettlement::new(
+        SettlePhase::BeforeHandler,
+        flow,
+        result,
+        verified.requirements().clone(),
+    )))
+}
+
+async fn skip_handler_settle(
+    verified: &VerifiedPayment,
+    directive: &r402_core::SkipHandlerDirective,
+) -> Result<Response, PaygateError> {
+    let settlement = verified
+        .process_settlement(SettlePhase::AfterHandler, None, None)
+        .await?;
+    skip_handler_response(directive, &settlement)
+}
+
+fn attach_payment_response(
+    response: &mut Response,
+    settlement: &wire::SettleResponse,
+) -> Result<(), PaygateError> {
+    let header_value = settlement_to_header(settlement)?;
+    response
+        .headers_mut()
+        .insert("Payment-Response", header_value);
+    ensure_expose_headers(response.headers_mut());
+    Ok(())
 }
 
 /// Builds the HTTP response for an after-verify `SkipHandler` directive.
@@ -1439,5 +1697,542 @@ mod tests {
         gate.verify_only(&payment_headers(&echoed))
             .await
             .expect("echoed extra matches the 402 accepts list");
+    }
+
+    use std::convert::Infallible;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::task::{Context as TaskContext, Poll};
+
+    use r402_core::resource_server::{
+        AfterVerifyDecision, BeforeOpDecision, ResourceServerHooks, SkipHandlerDirective,
+        VerifyResultContext,
+    };
+    use r402_core::{PaymentFlowName, PaymentHookContext};
+
+    use super::super::tracker::BackgroundSettlementTracker;
+
+    struct CountingFacilitator {
+        verifies: AtomicUsize,
+        settles: AtomicUsize,
+    }
+
+    impl CountingFacilitator {
+        fn new() -> Arc<Self> {
+            Arc::new(Self {
+                verifies: AtomicUsize::new(0),
+                settles: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    impl Facilitator for CountingFacilitator {
+        fn verify(
+            &self,
+            _request: wire::VerifyRequest,
+        ) -> impl Future<Output = Result<wire::VerifyResponse, r402_core::FacilitatorError>> + Send
+        {
+            self.verifies.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(wire::VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: wire::SettleRequest,
+        ) -> impl Future<Output = Result<wire::SettleResponse, r402_core::FacilitatorError>> + Send
+        {
+            self.settles.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(Ok(wire::SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "eip155:1".into(),
+                amount: Some("1000".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<wire::SupportedResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::SupportedResponse::new()))
+        }
+    }
+
+    struct FlowScheme {
+        flows: HashMap<String, PaymentFlowConfig>,
+        cancel: Option<wire::PaymentRequirements>,
+    }
+
+    impl FlowScheme {
+        fn with_config(
+            config: PaymentFlowConfig,
+            cancel: Option<wire::PaymentRequirements>,
+        ) -> Self {
+            let mut flows = HashMap::new();
+            flows.insert(SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(), config);
+            Self { flows, cancel }
+        }
+
+        fn authorization() -> Self {
+            Self::with_config(PaymentFlowConfig::authorization_only(), None)
+        }
+
+        fn auth_and_upfront() -> Self {
+            Self::with_config(PaymentFlowConfig::authorization_and_upfront(), None)
+        }
+
+        fn escrow(cancel: Option<wire::PaymentRequirements>) -> Self {
+            Self::with_config(
+                PaymentFlowConfig::new(vec![PaymentFlowName::Escrow], PaymentFlowName::Escrow),
+                cancel,
+            )
+        }
+    }
+
+    impl SchemeNetworkServer for FlowScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+
+        fn settle_on_cancel<'a>(
+            &'a self,
+            _: &'a r402_core::VerifiedPaymentCanceledContext,
+        ) -> impl Future<Output = Option<wire::PaymentRequirements>> + Send + 'a {
+            std::future::ready(self.cancel.clone())
+        }
+    }
+
+    struct SkipAfterVerify;
+
+    impl ResourceServerHooks for SkipAfterVerify {
+        fn after_verify<'a>(
+            &'a self,
+            _: &VerifyResultContext,
+        ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+            std::future::ready(AfterVerifyDecision::SkipHandler {
+                response: SkipHandlerDirective::empty(),
+            })
+        }
+    }
+
+    struct SkipVerifyThenHandler;
+
+    impl ResourceServerHooks for SkipVerifyThenHandler {
+        fn before_verify<'a>(
+            &'a self,
+            _: &'a PaymentHookContext,
+        ) -> impl Future<Output = BeforeOpDecision<wire::VerifyResponse>> + Send + 'a {
+            std::future::ready(BeforeOpDecision::Skip {
+                result: wire::VerifyResponse::valid("0xlocal"),
+            })
+        }
+
+        fn after_verify<'a>(
+            &'a self,
+            _: &VerifyResultContext,
+        ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+            std::future::ready(AfterVerifyDecision::SkipHandler {
+                response: SkipHandlerDirective::empty(),
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct StatusService {
+        status: StatusCode,
+    }
+
+    impl Service<Request> for StatusService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = std::future::Ready<Result<Response, Infallible>>;
+
+        fn poll_ready(&mut self, _: &mut TaskContext<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Request) -> Self::Future {
+            let mut response = Response::new(Body::from("ok"));
+            *response.status_mut() = self.status;
+            std::future::ready(Ok(response))
+        }
+    }
+
+    fn eip155_requirements() -> wire::PaymentRequirements {
+        wire::PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1000".into(),
+            "0xpay".into(),
+            "0xasset".into(),
+            60,
+        )
+    }
+
+    fn with_payment_flow(
+        mut requirements: wire::PaymentRequirements,
+        flow: &str,
+    ) -> wire::PaymentRequirements {
+        requirements.extra = Some(json!({ "paymentFlow": flow }));
+        requirements
+    }
+
+    fn paid_request(accepted: &wire::PaymentRequirements) -> Request {
+        let mut req = Request::new(Body::empty());
+        *req.headers_mut() = payment_headers(accepted);
+        req
+    }
+
+    async fn built_gate(
+        fac: Arc<CountingFacilitator>,
+        scheme: FlowScheme,
+        tags: Vec<wire::PriceTag>,
+        hook: Option<impl ResourceServerHooks + 'static>,
+    ) -> Paygate {
+        let mut server = ResourceServer::new(fac);
+        server.register_scheme(ChainIdPattern::wildcard("eip155"), scheme);
+        if let Some(hook) = hook {
+            server.add_hook(hook);
+        }
+        let mut gate = Paygate::builder_from_server(server)
+            .accepts(tags)
+            .resource(wire::ResourceInfo::new("https://example.com/paid"))
+            .build();
+        gate.build_payment_required().await.unwrap();
+        gate
+    }
+
+    async fn auth_gate(fac: Arc<CountingFacilitator>) -> Paygate {
+        built_gate(
+            fac,
+            FlowScheme::authorization(),
+            vec![wire::PriceTag::new(eip155_requirements())],
+            None::<SkipAfterVerify>,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn sequential_authorization_verifies_and_settles_after_handler() {
+        let fac = CountingFacilitator::new();
+        let gate = auth_gate(Arc::clone(&fac)).await;
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&eip155_requirements()),
+            )
+            .await
+            .expect("sequential authorization");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("Payment-Response").is_some());
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn sequential_upfront_settles_before_handler_and_echoes() {
+        let fac = CountingFacilitator::new();
+        let requirements = with_payment_flow(eip155_requirements(), "upfront");
+        let gate = built_gate(
+            Arc::clone(&fac),
+            FlowScheme::auth_and_upfront(),
+            vec![wire::PriceTag::new(requirements.clone())],
+            None::<SkipAfterVerify>,
+        )
+        .await;
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&requirements),
+            )
+            .await
+            .expect("sequential upfront");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("Payment-Response").is_some());
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 0);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn sequential_escrow_settles_before_and_after_on_success() {
+        let fac = CountingFacilitator::new();
+        let requirements = eip155_requirements();
+        let gate = built_gate(
+            Arc::clone(&fac),
+            FlowScheme::escrow(Some(requirements.clone())),
+            vec![wire::PriceTag::new(requirements.clone())],
+            None::<SkipAfterVerify>,
+        )
+        .await;
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&requirements),
+            )
+            .await
+            .expect("sequential escrow");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 0);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn sequential_escrow_handler_4xx_runs_cancel_settle() {
+        let fac = CountingFacilitator::new();
+        let requirements = eip155_requirements();
+        let gate = built_gate(
+            Arc::clone(&fac),
+            FlowScheme::escrow(Some(requirements.clone())),
+            vec![wire::PriceTag::new(requirements.clone())],
+            None::<SkipAfterVerify>,
+        )
+        .await;
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::BAD_REQUEST,
+                },
+                paid_request(&requirements),
+            )
+            .await
+            .expect("handler 4xx is returned");
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(response.headers().get("Payment-Response").is_none());
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 0);
+        // before-handler deposit + cancel settle
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn skip_handler_authorization_settles_after_handler() {
+        let fac = CountingFacilitator::new();
+        let mut server = ResourceServer::new(Arc::clone(&fac));
+        server.register_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FlowScheme::authorization(),
+        );
+        server.add_hook(SkipAfterVerify);
+        let mut gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(eip155_requirements()))
+            .resource(wire::ResourceInfo::new("https://example.com/paid"))
+            .build();
+        gate.build_payment_required().await.unwrap();
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&eip155_requirements()),
+            )
+            .await
+            .expect("skip handler");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn skip_handler_upfront_does_not_settle() {
+        let fac = CountingFacilitator::new();
+        let requirements = with_payment_flow(eip155_requirements(), "upfront");
+        let mut server = ResourceServer::new(Arc::clone(&fac));
+        server.register_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FlowScheme::auth_and_upfront(),
+        );
+        server.add_hook(SkipVerifyThenHandler);
+        let mut gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(requirements.clone()))
+            .resource(wire::ResourceInfo::new("https://example.com/paid"))
+            .build();
+        gate.build_payment_required().await.unwrap();
+        let response = gate
+            .handle_request(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&requirements),
+            )
+            .await
+            .expect("skip handler upfront");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 0);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_authorization_settles_in_parallel() {
+        let fac = CountingFacilitator::new();
+        let gate = auth_gate(Arc::clone(&fac)).await;
+        let response = gate
+            .handle_request_concurrent(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&eip155_requirements()),
+            )
+            .await
+            .expect("concurrent authorization");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("Payment-Response").is_some());
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn background_authorization_spawns_settle() {
+        let fac = CountingFacilitator::new();
+        let tracker = BackgroundSettlementTracker::new();
+        let mut server = ResourceServer::new(Arc::clone(&fac));
+        server.register_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FlowScheme::authorization(),
+        );
+        let mut gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(eip155_requirements()))
+            .resource(wire::ResourceInfo::new("https://example.com/paid"))
+            .with_settlement_tracker(tracker.clone())
+            .build();
+        gate.build_payment_required().await.unwrap();
+        let response = gate
+            .handle_request_background(
+                StatusService {
+                    status: StatusCode::OK,
+                },
+                paid_request(&eip155_requirements()),
+            )
+            .await
+            .expect("background authorization");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(response.headers().get("Payment-Response").is_none());
+        tracker
+            .wait_for_drain(std::time::Duration::from_secs(1))
+            .await
+            .expect("background settle drained");
+        assert_eq!(fac.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(fac.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn require_schemes_errors_when_unregistered() {
+        let gate = Paygate::builder(CountingFacilitator::new())
+            .accept(wire::PriceTag::new(eip155_requirements()))
+            .build();
+        let err = gate.require_schemes().await.expect_err("missing scheme");
+        assert!(matches!(err, PaygateError::MissingScheme { .. }), "{err:?}");
+        assert_eq!(
+            gate.error_response(err).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn require_schemes_escrow_without_cancel_errors() {
+        let fac = CountingFacilitator::new();
+        let mut server = ResourceServer::new(fac);
+        server.register_scheme(ChainIdPattern::wildcard("eip155"), FlowScheme::escrow(None));
+        let gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(eip155_requirements()))
+            .build();
+        let err = gate
+            .require_schemes()
+            .await
+            .expect_err("missing settle_on_cancel");
+        assert!(
+            matches!(err, PaygateError::MissingSettleOnCancel { .. }),
+            "{err:?}"
+        );
+        assert_eq!(
+            gate.error_response(err).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_upfront_is_incompatible() {
+        let fac = CountingFacilitator::new();
+        let requirements = with_payment_flow(eip155_requirements(), "upfront");
+        let mut server = ResourceServer::new(fac);
+        server.register_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FlowScheme::auth_and_upfront(),
+        );
+        let gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(requirements))
+            .build();
+        gate.require_schemes().await.unwrap();
+        let err = gate
+            .assert_mode_compatible(SettlementMode::Concurrent)
+            .expect_err("upfront + concurrent");
+        assert!(
+            matches!(
+                err,
+                PaygateError::IncompatibleSettlementMode {
+                    mode: SettlementMode::Concurrent,
+                    flow: PaymentFlowName::Upfront,
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            gate.error_response(err).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_mixed_authorization_and_escrow_is_incompatible() {
+        let fac = CountingFacilitator::new();
+        let auth = eip155_requirements();
+        let escrow = with_payment_flow(eip155_requirements(), "escrow");
+        let mut flows = HashMap::new();
+        flows.insert(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+            PaymentFlowConfig::new(
+                vec![PaymentFlowName::Authorization, PaymentFlowName::Escrow],
+                PaymentFlowName::Authorization,
+            ),
+        );
+        let mut server = ResourceServer::new(fac);
+        server.register_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FlowScheme {
+                flows,
+                cancel: Some(escrow.clone()),
+            },
+        );
+        let gate = Paygate::builder_from_server(server)
+            .accept(wire::PriceTag::new(auth))
+            .accept(wire::PriceTag::new(escrow))
+            .build();
+        gate.require_schemes().await.unwrap();
+        let err = gate
+            .assert_mode_compatible(SettlementMode::Background)
+            .expect_err("mixed escrow under background");
+        assert!(
+            matches!(
+                err,
+                PaygateError::IncompatibleSettlementMode {
+                    mode: SettlementMode::Background,
+                    flow: PaymentFlowName::Escrow,
+                }
+            ),
+            "{err:?}"
+        );
     }
 }
