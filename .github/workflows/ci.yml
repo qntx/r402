@@ -17,14 +17,4 @@ jobs:
     with:
       submodules: false
       apt-packages: protobuf-compiler
-
-  cargo-deny:
-    name: cargo deny check
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check all
+      deny: true
