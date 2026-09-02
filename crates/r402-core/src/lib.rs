@@ -32,14 +32,15 @@ pub mod scheme;
 pub mod wire;
 
 pub use resource_server::{
-    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, DynResourceServerHooks,
-    HookPolicyError, PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName,
-    PaymentFlowPhases, PaymentFlowScheme, PaymentHookContext, PaymentRequiredBuildContext,
-    RESERVED_PAYMENT_FLOW_EXTRA_KEYS, ResolvedPaymentFlow, ResourceServer, ResourceServerHooks,
-    SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettleContext, SettlePhase, SettleResponseCoreSnapshot,
-    SettleResultContext, SkipHandlerDirective, VerifiedPaymentCanceledContext,
-    VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload, apply_payment_flow_wire_extra,
-    assert_accepts_additive_extra_after_scheme_enrich,
+    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, CompletedSettlement,
+    DynResourceServerHooks, DynSchemeNetworkServer, HookPolicyError, PAYMENT_FLOWS,
+    PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases, PaymentFlowScheme,
+    PaymentHookContext, PaymentRequiredBuildContext, RESERVED_PAYMENT_FLOW_EXTRA_KEYS,
+    ResolvedPaymentFlow, ResourceServer, ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+    SchemeNetworkServer, SchemePaymentRequiredContext, SettleContext, SettlePhase,
+    SettleResponseCoreSnapshot, SettleResultContext, SkipHandlerDirective,
+    VerifiedPaymentCanceledContext, VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload,
+    apply_payment_flow_wire_extra, assert_accepts_additive_extra_after_scheme_enrich,
     assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
     assert_additive_settlement_extra, assert_settle_response_core_unchanged,
     is_vacant_string_field, merge_additive_settlement_extra, resolve_payment_flow,
