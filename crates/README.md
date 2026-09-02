@@ -1,8 +1,8 @@
 # Crates
 
-Workspace **0.18.0**. Empty TARGET shell: each crate is `src/lib.rs` (`//!` + `crate_loads`) only. Fill-in PRs add behavior bottom-up.
+Workspace **0.18.0**. Each crate is an empty library (`src/lib.rs` only). No path dependencies between r402 crates. Umbrella `default = []`.
 
-`r402-core` is gone (crates.io **0.17.1** is not yanked). **[`r402-contract`](r402-contract/)** is an unpublished workspace member — not on crates.io, not in `publish.yml`.
+crates.io **`r402-core` 0.17.1** is not yanked. **[`r402-contract`](r402-contract/)** is an unpublished workspace member — not on crates.io, not in `publish.yml`.
 
 | Crate | | Description |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ Workspace **0.18.0**. Empty TARGET shell: each crate is `src/lib.rs` (`//!` + `c
 | **[`r402-keeta`](r402-keeta/)** | [![crates.io][r402-keeta-crate]][r402-keeta-crate-url] [![docs.rs][r402-keeta-doc]][r402-keeta-doc-url] | Keeta — exact `SEND` (fee-payer sponsored) |
 | **[`r402-tvm`](r402-tvm/)** | [![crates.io][r402-tvm-crate]][r402-tvm-crate-url] [![docs.rs][r402-tvm-doc]][r402-tvm-doc-url] | TON — TEP-74 / W5R1 exact transfers (Highload V3 facilitator) |
 | **[`r402-stellar`](r402-stellar/)** | [![crates.io][r402-stellar-crate]][r402-stellar-crate-url] [![docs.rs][r402-stellar-doc]][r402-stellar-doc-url] | Stellar — SEP-41 exact transfers (auth-entry signing) |
-| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum layer, reqwest buyer, facilitator client |
+| **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum layer, reqwest buyer |
 | **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport on official **`rmcp`** (Go/TS parity) |
 | **[`r402-contract`](r402-contract/)** | unpublished | JSON contract assertions. Workspace member only. Not published. |
 
@@ -49,7 +49,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 
 ## Dependency graph
 
-Empty shell: no path dependencies between r402 crates. TARGET direction (fill-in PRs restore these):
+Crates currently have no path dependencies. Intended direction:
 
 ```text
 client        → protocol
@@ -67,7 +67,7 @@ Publish order (crates.io): `r402-protocol` → `r402-client` → `r402-facilitat
 
 ## Feature flags
 
-Empty shell: umbrella `default = []`, no optional member features. TARGET `default = ["evm", "http"]` (opening each crate's `client`+`server`) lands in a later PR.
+Umbrella `default = []`. No optional member features.
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
