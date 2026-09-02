@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use r402_core::resource_server::{ResourceServer, SkipHandlerDirective};
+use r402_core::resource_server::{ResourceServer, SettlePhase, SkipHandlerDirective};
 use r402_core::wire::{Extensions, PaymentRequired, PaymentRequirements, ResourceInfo};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::Value;
@@ -284,7 +284,7 @@ impl PaymentWrapper {
 
         let settle = match self
             .server
-            .settle_payment(&payload, &requirements, None)
+            .settle_payment(&payload, &requirements, None, SettlePhase::AfterHandler)
             .await
         {
             Ok(s) if s.is_success() => s,
@@ -398,7 +398,7 @@ mod tests {
                     reason: r402_core::ErrorReason::UnexpectedSettleError,
                     message: Some("boom".into()),
                     payer: None,
-                    transaction: Default::default(),
+                    transaction: "".into(),
                     network: "eip155:1".into(),
                     extensions: Extensions::new(),
                     extra: None,

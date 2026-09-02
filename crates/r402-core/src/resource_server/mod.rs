@@ -9,14 +9,20 @@
 //! server only sequences wire construction and hooks against a [`Facilitator`].
 
 mod hooks;
+mod payment_flow;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use hooks::{
     AfterVerifyDecision, BeforeOpDecision, CancelReason, DynResourceServerHooks,
-    PaymentHookContext, ResourceServerHooks, SettleResultContext, SkipHandlerDirective,
-    VerifiedPaymentCanceledContext, VerifyResultContext, WirePaymentPayload,
+    PaymentHookContext, ResourceServerHooks, SettleContext, SettleResultContext,
+    SkipHandlerDirective, VerifiedPaymentCanceledContext, VerifyResultContext, WirePaymentPayload,
+};
+pub use payment_flow::{
+    PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
+    PaymentFlowScheme, ResolvedPaymentFlow, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettlePhase,
+    apply_payment_flow_wire_extra, resolve_payment_flow, resolve_payment_flow_phases,
 };
 use serde::Serialize;
 
@@ -24,8 +30,8 @@ use crate::error::{FacilitatorError, VerificationError};
 use crate::facilitator::FailureRecovery;
 use crate::facilitator::{DynFacilitator, Facilitator};
 use crate::wire::{
-    PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2, VerifyRequest,
-    VerifyResponse, find_matching_requirements,
+    Extensions, PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2,
+    VerifyRequest, VerifyResponse, find_matching_requirements,
 };
 use crate::wire::{
     SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
@@ -221,6 +227,9 @@ impl ResourceServer {
     /// amounts are resolved against `requirements.amount` before hooks see the
     /// payment context (matches Go `SettlePaymentWithExtensions`).
     ///
+    /// `phase` is required ([`SettlePhase`]); hooks receive it on
+    /// [`SettleContext`].
+    ///
     /// # Errors
     ///
     /// Propagates facilitator / abort / invalid-override errors unless a
@@ -230,16 +239,21 @@ impl ResourceServer {
         payload: &WirePaymentPayload,
         requirements: &PaymentRequirements,
         overrides: Option<&SettlementOverrides>,
+        phase: SettlePhase,
     ) -> Result<SettleResponse, FacilitatorError> {
         let effective = apply_settlement_overrides(requirements, overrides)?;
-        let payment = PaymentHookContext {
-            payload: payload.clone(),
-            requirements: effective.clone(),
+        let settle_ctx = SettleContext {
+            payment: PaymentHookContext {
+                payload: payload.clone(),
+                requirements: effective,
+            },
+            declared_extensions: Extensions::new(),
+            phase,
         };
 
         let mut skipped: Option<SettleResponse> = None;
         for hook in &self.hooks {
-            match hook.before_settle(&payment).await {
+            match hook.before_settle(&settle_ctx).await {
                 BeforeOpDecision::Continue => {}
                 BeforeOpDecision::Abort { reason, message } => {
                     return Err(FacilitatorError::Aborted { reason, message });
@@ -254,14 +268,13 @@ impl ResourceServer {
         let response = if let Some(local) = skipped {
             local
         } else {
-            self.call_settle_with_failure_hooks(&payment, payload, &effective)
-                .await?
+            self.call_settle_with_failure_hooks(&settle_ctx).await?
         };
 
         // Official: afterSettle fires for settle results returned as Ok
         // (including unsuccessful settle responses from the facilitator).
         let result_ctx = SettleResultContext {
-            payment,
+            settle: settle_ctx,
             result: response.clone(),
         };
         for hook in &self.hooks {
@@ -348,14 +361,12 @@ impl ResourceServer {
 
     async fn call_settle_with_failure_hooks(
         &self,
-        payment: &PaymentHookContext,
-        payload: &WirePaymentPayload,
-        requirements: &PaymentRequirements,
+        settle: &SettleContext,
     ) -> Result<SettleResponse, FacilitatorError> {
-        let request = build_settle_request(payload, requirements)?;
+        let request = build_settle_request(&settle.payment.payload, &settle.payment.requirements)?;
         match self.settle_with_pending_retry(request).await {
             Ok(r) => Ok(r),
-            Err(error) => self.recover_settle(payment, error).await,
+            Err(error) => self.recover_settle(settle, error).await,
         }
     }
 
@@ -382,11 +393,11 @@ impl ResourceServer {
 
     async fn recover_settle(
         &self,
-        payment: &PaymentHookContext,
+        settle: &SettleContext,
         error: FacilitatorError,
     ) -> Result<SettleResponse, FacilitatorError> {
         for hook in &self.hooks {
-            if let FailureRecovery::Recovered(r) = hook.on_settle_failure(payment, &error).await {
+            if let FailureRecovery::Recovered(r) = hook.on_settle_failure(settle, &error).await {
                 return Ok(r);
             }
         }
@@ -517,6 +528,7 @@ fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError 
 )]
 mod tests {
     use std::future::Future;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use compact_str::CompactString;
@@ -603,7 +615,7 @@ mod tests {
         assert!(out.response.is_valid());
         assert!(out.skip_handler.is_none());
         assert!(
-            rs.settle_payment(&payload, &req, None)
+            rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
                 .await
                 .unwrap()
                 .is_success()
@@ -784,6 +796,92 @@ mod tests {
         assert!(guard.has_fired());
     }
 
+    struct RecordSettlePhase {
+        before: Arc<Mutex<Vec<SettlePhase>>>,
+        after: Arc<Mutex<Vec<SettlePhase>>>,
+        failure: Arc<Mutex<Vec<SettlePhase>>>,
+    }
+
+    impl ResourceServerHooks for RecordSettlePhase {
+        fn before_settle<'a>(
+            &'a self,
+            ctx: &'a SettleContext,
+        ) -> impl Future<Output = BeforeOpDecision<SettleResponse>> + Send + 'a {
+            self.before.lock().unwrap().push(ctx.phase);
+            std::future::ready(BeforeOpDecision::Continue)
+        }
+
+        fn after_settle<'a>(
+            &'a self,
+            ctx: &'a SettleResultContext,
+        ) -> impl Future<Output = ()> + Send + 'a {
+            self.after.lock().unwrap().push(ctx.settle.phase);
+            std::future::ready(())
+        }
+
+        fn on_settle_failure<'a>(
+            &'a self,
+            ctx: &'a SettleContext,
+            _: &'a FacilitatorError,
+        ) -> impl Future<Output = FailureRecovery<SettleResponse>> + Send + 'a {
+            self.failure.lock().unwrap().push(ctx.phase);
+            std::future::ready(FailureRecovery::Propagate)
+        }
+    }
+
+    #[tokio::test]
+    async fn settle_payment_forwards_phase_to_hooks() {
+        for phase in [
+            SettlePhase::BeforeHandler,
+            SettlePhase::AfterHandler,
+            SettlePhase::Cancel,
+        ] {
+            let hook = RecordSettlePhase {
+                before: Arc::new(Mutex::new(Vec::new())),
+                after: Arc::new(Mutex::new(Vec::new())),
+                failure: Arc::new(Mutex::new(Vec::new())),
+            };
+            let before = Arc::clone(&hook.before);
+            let after = Arc::clone(&hook.after);
+            let rs = ResourceServer::new(mock_ok()).with_hook(hook);
+            let payload = sample_payload();
+            let req = payload.accepted.clone();
+            assert!(
+                rs.settle_payment(&payload, &req, None, phase)
+                    .await
+                    .unwrap()
+                    .is_success()
+            );
+            assert_eq!(*before.lock().unwrap(), vec![phase]);
+            assert_eq!(*after.lock().unwrap(), vec![phase]);
+        }
+    }
+
+    #[tokio::test]
+    async fn settle_failure_hook_receives_phase() {
+        let hook = RecordSettlePhase {
+            before: Arc::new(Mutex::new(Vec::new())),
+            after: Arc::new(Mutex::new(Vec::new())),
+            failure: Arc::new(Mutex::new(Vec::new())),
+        };
+        let failure = Arc::clone(&hook.failure);
+        let mock = Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            fail_verify: false,
+            fail_settle: true,
+        });
+        let rs = ResourceServer::new(mock).with_hook(hook);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs
+            .settle_payment(&payload, &req, None, SettlePhase::Cancel)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, FacilitatorError::Onchain(_)));
+        assert_eq!(*failure.lock().unwrap(), vec![SettlePhase::Cancel]);
+    }
+
     fn pending_failure(transaction: &str) -> SettleResponse {
         SettleResponse::Failure {
             reason: crate::error::ErrorReason::SettlementPending,
@@ -820,18 +918,17 @@ mod tests {
     }
 
     struct QueueFacilitator {
-        settles:
-            std::sync::Mutex<std::collections::VecDeque<Result<SettleResponse, FacilitatorError>>>,
+        settles: Mutex<std::collections::VecDeque<Result<SettleResponse, FacilitatorError>>>,
         settle_calls: AtomicUsize,
-        requests: std::sync::Mutex<Vec<SettleRequest>>,
+        requests: Mutex<Vec<SettleRequest>>,
     }
 
     impl QueueFacilitator {
         fn new(responses: Vec<Result<SettleResponse, FacilitatorError>>) -> Arc<Self> {
             Arc::new(Self {
-                settles: std::sync::Mutex::new(responses.into()),
+                settles: Mutex::new(responses.into()),
                 settle_calls: AtomicUsize::new(0),
-                requests: std::sync::Mutex::new(Vec::new()),
+                requests: Mutex::new(Vec::new()),
             })
         }
     }
@@ -872,7 +969,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        let result = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
         assert!(result.is_success());
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
     }
@@ -883,7 +983,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        let result = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
         assert!(!result.is_success());
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
     }
@@ -895,7 +998,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let err = rs.settle_payment(&payload, &req, None).await.unwrap_err();
+        let err = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap_err();
         assert!(matches!(err, FacilitatorError::Onchain(_)));
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
     }
@@ -909,7 +1015,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        let result = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
         assert!(matches!(
             result,
             SettleResponse::Success { ref transaction, .. } if transaction == "0xconfirmed"
@@ -928,7 +1037,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        let result = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
         assert!(!result.is_success());
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
     }
@@ -942,7 +1054,10 @@ mod tests {
         let rs = ResourceServer::new(Arc::clone(&mock));
         let payload = sample_payload();
         let req = payload.accepted.clone();
-        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        let result = rs
+            .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+            .await
+            .unwrap();
         assert!(matches!(
             result,
             SettleResponse::Failure { ref transaction, .. } if transaction == "0xsecond"
