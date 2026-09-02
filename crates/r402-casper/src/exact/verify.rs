@@ -12,8 +12,7 @@
 //! `transfer_with_authorization` call are performed by the settlement
 //! facilitator, which holds the signing key and the node connection.
 //!
-//! Rules follow `specs/schemes/exact/scheme_exact_casper.md` and match the
-//! five-field `assert_requirements_match` used by `r402-evm` / `r402-solana`.
+//! Rules follow `specs/schemes/exact/scheme_exact_casper.md`.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -122,23 +121,13 @@ pub fn validate_at(
     })
 }
 
-/// Compares the five protocol-critical fields of `accepted` and
-/// `requirements`, matching EVM/SVM and the Go SDK's
-/// `FindMatchingRequirements` (ignores `maxTimeoutSeconds` and `extra`).
 fn assert_requirements_match(
     accepted: &v2::PaymentRequirements,
     requirements: &v2::PaymentRequirements,
 ) -> Result<(), CasperExactError> {
-    if accepted.scheme == requirements.scheme
-        && accepted.network == requirements.network
-        && accepted.amount == requirements.amount
-        && accepted.asset == requirements.asset
-        && accepted.pay_to == requirements.pay_to
-    {
+    if requirements.matches_payload_accepted(accepted) {
         Ok(())
     } else if accepted.network != requirements.network {
-        // Preserve the more specific network error when only the network
-        // diverges, so HTTP clients still see `invalid_network`.
         Err(CasperExactError::NetworkMismatch {
             payload: accepted.network.to_string(),
             requirements: requirements.network.to_string(),
@@ -341,6 +330,23 @@ mod tests {
     fn rejects_accepted_asset_mismatch() {
         let mut json = request_json();
         json["paymentPayload"]["accepted"]["asset"] = serde_json::json!("ab".repeat(32));
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
+    }
+
+    #[test]
+    fn rejects_accepted_max_timeout_mismatch() {
+        let mut json = request_json();
+        json["paymentPayload"]["accepted"]["maxTimeoutSeconds"] = serde_json::json!(999);
+        let err = validate_at(&request_from(json), NOW).unwrap_err();
+        assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
+    }
+
+    #[test]
+    fn rejects_accepted_extra_mismatch() {
+        let mut json = request_json();
+        json["paymentPayload"]["accepted"]["extra"] =
+            serde_json::json!({ "name": "Other Token", "version": "1" });
         let err = validate_at(&request_from(json), NOW).unwrap_err();
         assert_eq!(err, CasperExactError::AcceptedRequirementsMismatch);
     }

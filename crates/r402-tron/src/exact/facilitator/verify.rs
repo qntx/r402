@@ -38,18 +38,13 @@ pub(crate) fn assert_time(
     Ok(())
 }
 
-/// Validates that the accepted requirements match the server-side requirements
-/// on the five core fields: scheme, network, amount, asset, and `pay_to`.
+/// Validates that `accepted` satisfies `requirements` via
+/// [`r402_core::wire::PaymentRequirements::matches_payload_accepted`].
 pub(super) fn assert_requirements_match(
     accepted: &types::v2::PaymentRequirements,
     requirements: &types::v2::PaymentRequirements,
 ) -> Result<(), VerificationError> {
-    if accepted.scheme == requirements.scheme
-        && accepted.network == requirements.network
-        && accepted.amount == requirements.amount
-        && accepted.asset == requirements.asset
-        && accepted.pay_to == requirements.pay_to
-    {
+    if requirements.matches_payload_accepted(accepted) {
         Ok(())
     } else {
         Err(VerificationError::AcceptedRequirementsMismatch)
@@ -432,6 +427,45 @@ mod tests {
         assert!(matches!(
             assert_exact_value(&sent, &required),
             Err(VerificationError::InvalidPaymentAmount),
+        ));
+    }
+
+    fn sample_requirements(
+        timeout: u64,
+        extra: &serde_json::Value,
+    ) -> types::v2::PaymentRequirements {
+        serde_json::from_value(serde_json::json!({
+            "scheme": "exact",
+            "network": "tron:0x2b6653dc",
+            "amount": "1000000",
+            "payTo": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+            "maxTimeoutSeconds": timeout,
+            "asset": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+            "extra": extra,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn assert_requirements_match_rejects_max_timeout_mismatch() {
+        let extra = serde_json::json!({ "name": "USDT", "version": "1" });
+        let requirements = sample_requirements(60, &extra);
+        let accepted = sample_requirements(999, &extra);
+        assert!(matches!(
+            assert_requirements_match(&accepted, &requirements),
+            Err(VerificationError::AcceptedRequirementsMismatch),
+        ));
+    }
+
+    #[test]
+    fn assert_requirements_match_rejects_extra_mismatch() {
+        let requirements =
+            sample_requirements(60, &serde_json::json!({ "name": "USDT", "version": "1" }));
+        let accepted =
+            sample_requirements(60, &serde_json::json!({ "name": "USDC", "version": "1" }));
+        assert!(matches!(
+            assert_requirements_match(&accepted, &requirements),
+            Err(VerificationError::AcceptedRequirementsMismatch),
         ));
     }
 }

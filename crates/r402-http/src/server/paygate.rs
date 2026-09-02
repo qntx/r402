@@ -559,7 +559,16 @@ impl Paygate {
         let payload: PaymentPayload =
             decode_payment_payload(header_bytes).ok_or(PaygateError::InvalidPaymentHeader)?;
 
-        let requirements = match_requirements(&payload, &self.accepts)?;
+        let available: Vec<wire::PaymentRequirements> = self
+            .accepts
+            .iter()
+            .map(|pt| pt.requirements.clone())
+            .collect();
+        let requirements = self
+            .server
+            .find_matching_requirements(&available, &payload)
+            .cloned()
+            .ok_or(PaygateError::NoPaymentMatching)?;
         let outcome = self
             .server
             .verify_payment(&payload, &requirements)
@@ -1134,17 +1143,6 @@ fn inferred_status(err: &PaygateError) -> StatusCode {
     StatusCode::PAYMENT_REQUIRED
 }
 
-fn match_requirements(
-    payload: &PaymentPayload,
-    accepts: &[wire::PriceTag],
-) -> Result<wire::PaymentRequirements, PaygateError> {
-    accepts
-        .iter()
-        .find(|pt| **pt == payload.accepted)
-        .map(|pt| pt.requirements.clone())
-        .ok_or(PaygateError::NoPaymentMatching)
-}
-
 fn build_settle_request(
     payload: &PaymentPayload,
     requirements: &wire::PaymentRequirements,
@@ -1161,6 +1159,8 @@ fn build_settle_request(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+
     use super::*;
 
     #[test]
@@ -1224,5 +1224,95 @@ mod tests {
                 "reason {reason:?} should map to 402"
             );
         }
+    }
+
+    struct StubFacilitator;
+
+    impl Facilitator for StubFacilitator {
+        fn verify(
+            &self,
+            _request: wire::VerifyRequest,
+        ) -> impl Future<Output = Result<wire::VerifyResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: wire::SettleRequest,
+        ) -> impl Future<Output = Result<wire::SettleResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "eip155:1".into(),
+                amount: Some("1".into()),
+                extensions: wire::Extensions::new(),
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<wire::SupportedResponse, r402_core::FacilitatorError>> + Send
+        {
+            std::future::ready(Ok(wire::SupportedResponse::default()))
+        }
+    }
+
+    fn sample_requirements() -> wire::PaymentRequirements {
+        wire::PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1000000".into(),
+            "0xpayee".into(),
+            "0xasset".into(),
+            60,
+        )
+    }
+
+    fn payment_header(accepted: &wire::PaymentRequirements) -> HeaderMap {
+        let payload = PaymentPayload::new(accepted.clone(), serde_json::json!({}));
+        let encoded = Base64Bytes::encode(serde_json::to_vec(&payload).unwrap());
+        let mut headers = HeaderMap::new();
+        let _ = headers.insert(
+            PAYMENT_HEADER,
+            HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
+        );
+        headers
+    }
+
+    #[tokio::test]
+    async fn verify_only_rejects_max_timeout_mismatch() {
+        let req = sample_requirements();
+        let mut gate = Paygate::builder(StubFacilitator)
+            .accept(wire::PriceTag::new(req.clone()))
+            .build();
+        gate.enrich_accepts().await;
+        let mut accepted = req;
+        accepted.max_timeout_seconds = 999;
+        let err = gate
+            .verify_only(&payment_header(&accepted))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PaygateError::NoPaymentMatching));
+    }
+
+    #[tokio::test]
+    async fn verify_only_rejects_static_extra_mismatch() {
+        let req = sample_requirements().with_extra(serde_json::json!({
+            "feePayer": "FeePayer111111111111111111111111111111111"
+        }));
+        let mut gate = Paygate::builder(StubFacilitator)
+            .accept(wire::PriceTag::new(req.clone()))
+            .build();
+        gate.enrich_accepts().await;
+        let accepted = req.with_extra(serde_json::json!({
+            "feePayer": "OtherPayer1111111111111111111111111111111"
+        }));
+        let err = gate
+            .verify_only(&payment_header(&accepted))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, PaygateError::NoPaymentMatching));
     }
 }
