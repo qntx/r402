@@ -2,19 +2,17 @@
 //!
 //! A 402 challenge is [`PaymentRequired`]: resource metadata plus the
 //! [`PaymentRequirements`] the seller will accept. The buyer answers with a
-//! [`PaymentPayload`]. [`PriceTag`] is the seller-side builder that produces
-//! requirements, optionally enriching them from a facilitator `/supported`
-//! snapshot.
+//! [`PaymentPayload`]. [`PriceTag`] is the seller-side container for those
+//! requirements; scheme `extra` enrichment runs on
+//! [`crate::SchemeNetworkServer::enrich_payment_required_response`].
 
-use std::fmt::{self, Debug, Formatter};
 use std::str::FromStr;
-use std::sync::Arc;
 
 use compact_str::CompactString;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use super::{Extensions, SupportedResponse, V2, Version2};
+use super::{Extensions, V2, Version2};
 use crate::chain::ChainId;
 
 /// Human-readable metadata describing the paid resource.
@@ -205,8 +203,6 @@ pub struct PaymentRequirements<
 
 /// Finds the first entry in `available` that matches `accepted`
 /// ([`PaymentRequirements::matches_payload_accepted`]).
-///
-/// Mirrors Go `x402ResourceServer.FindMatchingRequirements` (`server.go`).
 #[must_use]
 pub fn find_matching_requirements<'a>(
     available: &'a [PaymentRequirements],
@@ -257,22 +253,98 @@ impl<TScheme, TAmount, TAddress, TExtra> PaymentRequirements<TScheme, TAmount, T
     }
 }
 
-impl PaymentRequirements {
-    /// Returns true when `accepted` matches this requirement under Go
-    /// `FindMatchingRequirements` rules (`server.go`):
-    /// `scheme`, `network`, `amount`, `asset`, `payTo` must be equal.
-    ///
-    /// `maxTimeoutSeconds` and `extra` are intentionally **not** compared
-    /// (same as the foundation Go / Casper preflight convention).
+impl<TScheme, TAmount, TAddress, TExtra> PaymentRequirements<TScheme, TAmount, TAddress, TExtra>
+where
+    TScheme: PartialEq,
+    TAmount: PartialEq,
+    TAddress: PartialEq,
+    TExtra: Serialize,
+{
+    /// Core fields including `maxTimeoutSeconds` must be equal.
+    /// Server-declared `extra` is a subset of `accepted.extra`.
     #[must_use]
     pub fn matches_payload_accepted(&self, accepted: &Self) -> bool {
+        self.matches_payload_accepted_with_dynamic(accepted, &[])
+    }
+
+    /// Like [`Self::matches_payload_accepted`], omitting `dynamic_extra_fields`
+    /// from both extras before the subset check.
+    #[must_use]
+    pub fn matches_payload_accepted_with_dynamic(
+        &self,
+        accepted: &Self,
+        dynamic_extra_fields: &[&str],
+    ) -> bool {
         self.scheme == accepted.scheme
             && self.network == accepted.network
             && self.amount == accepted.amount
             && self.asset == accepted.asset
             && self.pay_to == accepted.pay_to
+            && self.max_timeout_seconds == accepted.max_timeout_seconds
+            && extra_contains_subset(
+                self.extra.as_ref(),
+                accepted.extra.as_ref(),
+                dynamic_extra_fields,
+            )
     }
+}
 
+fn extra_contains_subset<T: Serialize>(
+    required: Option<&T>,
+    accepted: Option<&T>,
+    dynamic_extra_fields: &[&str],
+) -> bool {
+    let Some(required_extra) = required else {
+        return true;
+    };
+    let Ok(required_value) = serde_json::to_value(required_extra) else {
+        return false;
+    };
+    let accepted_value = accepted.and_then(|extra| serde_json::to_value(extra).ok());
+    if accepted.is_some() && accepted_value.is_none() {
+        return false;
+    }
+    let required_omitted = omit_fields(&required_value, dynamic_extra_fields);
+    let accepted_omitted = accepted_value
+        .as_ref()
+        .map(|value| omit_fields(value, dynamic_extra_fields));
+    object_contains_subset(&required_omitted, accepted_omitted.as_ref())
+}
+
+fn omit_fields(value: &serde_json::Value, fields: &[&str]) -> serde_json::Value {
+    if fields.is_empty() {
+        return value.clone();
+    }
+    let serde_json::Value::Object(map) = value else {
+        return value.clone();
+    };
+    let mut copied = map.clone();
+    for field in fields {
+        copied.remove(*field);
+    }
+    serde_json::Value::Object(copied)
+}
+
+/// Missing object keys match only when the required value is JSON `null`.
+fn object_contains_subset(
+    expected: &serde_json::Value,
+    actual: Option<&serde_json::Value>,
+) -> bool {
+    let serde_json::Value::Object(expected_map) = expected else {
+        return actual.is_some_and(|got| got == expected);
+    };
+    let Some(serde_json::Value::Object(actual_map)) = actual else {
+        return false;
+    };
+    expected_map.iter().all(|(key, value)| {
+        actual_map.get(key).map_or_else(
+            || value.is_null(),
+            |got| object_contains_subset(value, Some(got)),
+        )
+    })
+}
+
+impl PaymentRequirements {
     /// Attempts to convert the wire-level requirements (all-strings) into
     /// a concrete, strongly-typed variant.
     ///
@@ -327,38 +399,144 @@ mod payment_requirements_tests {
         assert!(serde_json::from_value::<PaymentRequirements>(json).is_err());
     }
 
-    /// Go `FindMatchingRequirements`: scheme/network/amount/asset/payTo only.
+    fn sample(network: &str, amount: &str, pay_to: &str, timeout: u64) -> PaymentRequirements {
+        PaymentRequirements::new(
+            "exact".into(),
+            network.parse().unwrap(),
+            amount.into(),
+            pay_to.into(),
+            "USDC".into(),
+            timeout,
+        )
+    }
+
     #[test]
     fn find_matching_requirements_go_semantics() {
-        let a = PaymentRequirements::new(
-            "exact".into(),
-            "eip155:1".parse().unwrap(),
-            "1000000".into(),
-            "0xrecipient1".into(),
-            "USDC".into(),
-            60,
-        );
-        let b = PaymentRequirements::new(
-            "exact".into(),
-            "eip155:8453".parse().unwrap(),
-            "2000000".into(),
-            "0xrecipient2".into(),
-            "USDC".into(),
-            30,
-        );
+        let a = sample("eip155:1", "1000000", "0xrecipient1", 60);
+        let b = sample("eip155:8453", "2000000", "0xrecipient2", 30);
         let available = [a.clone(), b.clone()];
 
-        // Match b even if maxTimeout differs on the accepted side.
-        let mut accepted = b;
-        accepted.max_timeout_seconds = 999;
-        let matched = find_matching_requirements(&available, &accepted).unwrap();
+        let matched = find_matching_requirements(&available, &b).unwrap();
         assert_eq!(matched.network.to_string(), "eip155:8453");
-        assert_eq!(matched.max_timeout_seconds, 30); // original available entry
+        assert_eq!(matched.max_timeout_seconds, 30);
 
-        // No match when scheme differs.
+        let mut timeout_miss = b;
+        timeout_miss.max_timeout_seconds = 999;
+        assert!(find_matching_requirements(&available, &timeout_miss).is_none());
+
         let mut miss = a;
         miss.scheme = "nonexistent".into();
         assert!(find_matching_requirements(&available, &miss).is_none());
+    }
+
+    #[test]
+    fn matches_when_accepted_extra_has_additional_object_keys() {
+        let required =
+            sample("eip155:8453", "1000000", "0xabc", 300).with_extra(serde_json::json!({
+                "name": "USDC",
+                "version": "2",
+                "nested": { "required": true }
+            }));
+        let accepted =
+            sample("eip155:8453", "1000000", "0xabc", 300).with_extra(serde_json::json!({
+                "name": "USDC",
+                "version": "2",
+                "nested": { "required": true, "clientOnly": "ok" },
+                "channelState": { "chargedCumulativeAmount": "2000" }
+            }));
+        assert!(required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn matches_when_required_extra_is_absent() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300);
+        let accepted = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "clientOnly": true }));
+        assert!(required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn matches_when_required_null_key_is_missing_on_accepted() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "k": null }));
+        let accepted =
+            sample("eip155:8453", "1000000", "0xabc", 300).with_extra(serde_json::json!({}));
+        assert!(required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn does_not_match_when_accepted_extra_overwrites_server_field() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "name": "USDC", "version": "2" }));
+        let accepted = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "name": "USDC", "version": "3" }));
+        assert!(!required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn does_not_match_when_accepted_extra_array_is_a_superset() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "allowedSigners": ["0xalice"] }));
+        let accepted = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "allowedSigners": ["0xmallory", "0xalice"] }));
+        assert!(!required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn does_not_match_when_accepted_extra_array_is_reordered() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "allowedSigners": ["0xalice", "0xbob"] }));
+        let accepted = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "allowedSigners": ["0xbob", "0xalice"] }));
+        assert!(!required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn does_not_match_when_accepted_extra_omits_server_fields() {
+        let required = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "name": "USDC", "version": "2" }));
+        let accepted = sample("eip155:8453", "1000000", "0xabc", 300)
+            .with_extra(serde_json::json!({ "name": "USDC" }));
+        assert!(!required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn matches_when_only_declared_dynamic_extra_fields_differ() {
+        let required =
+            sample("solana:mainnet", "1000000", "PayTo1", 60).with_extra(serde_json::json!({
+                "feePayer": "FeePayer111111111111111111111111111111111",
+                "recentBlockhash": "freshBlockhash",
+                "lastValidBlockHeight": "200"
+            }));
+        let accepted =
+            sample("solana:mainnet", "1000000", "PayTo1", 60).with_extra(serde_json::json!({
+                "feePayer": "FeePayer111111111111111111111111111111111",
+                "recentBlockhash": "staleBlockhash",
+                "lastValidBlockHeight": "100"
+            }));
+        assert!(required.matches_payload_accepted_with_dynamic(
+            &accepted,
+            &["recentBlockhash", "lastValidBlockHeight"],
+        ));
+        assert!(!required.matches_payload_accepted(&accepted));
+    }
+
+    #[test]
+    fn does_not_match_when_static_extra_differs_despite_dynamic_fields() {
+        let required =
+            sample("solana:mainnet", "1000000", "PayTo1", 60).with_extra(serde_json::json!({
+                "feePayer": "FeePayer111111111111111111111111111111111",
+                "recentBlockhash": "freshBlockhash"
+            }));
+        let accepted =
+            sample("solana:mainnet", "1000000", "PayTo1", 60).with_extra(serde_json::json!({
+                "feePayer": "OtherPayer1111111111111111111111111111111",
+                "recentBlockhash": "staleBlockhash"
+            }));
+        assert!(!required.matches_payload_accepted_with_dynamic(
+            &accepted,
+            &["recentBlockhash", "lastValidBlockHeight"],
+        ));
     }
 }
 
@@ -498,50 +676,23 @@ impl<TAccepted, TPayload> PaymentPayload<TAccepted, TPayload> {
     }
 }
 
-/// Type alias for enrichment callbacks.
+/// Seller-side payment-requirements container.
 ///
-/// An enricher receives mutable access to a [`PriceTag`] plus the
-/// facilitator's [`SupportedResponse`] so it can fill in scheme-specific
-/// `extra` fields (e.g. Solana fee payer, Permit2 nonce parameters).
-pub type Enricher = Arc<dyn Fn(&mut PriceTag, &SupportedResponse) + Send + Sync>;
-
-/// Mutable payment-requirements container with a lazy enrichment callback.
-///
-/// Sellers construct a `PriceTag` once from a price + chain + asset, then
-/// the HTTP paygate calls [`Self::enrich`] with the facilitator's
-/// capabilities to materialize chain-specific fields.
-#[derive(Clone)]
+/// Constructed from a price + chain + asset. Scheme-specific `extra`
+/// (fee payer, facilitator address, …) is filled by
+/// [`crate::SchemeNetworkServer::enrich_payment_required_response`] during
+/// 402 construction — not on this type.
+#[derive(Debug, Clone)]
 pub struct PriceTag {
-    /// The requirements being built.
+    /// The requirements being advertised.
     pub requirements: PaymentRequirements,
-    /// Optional enricher invoked by [`Self::enrich`].
-    #[doc(hidden)]
-    pub enricher: Option<Enricher>,
 }
 
 impl PriceTag {
-    /// Constructs a price tag around existing requirements (no enricher).
+    /// Constructs a price tag around existing requirements.
     #[must_use]
     pub const fn new(requirements: PaymentRequirements) -> Self {
-        Self {
-            requirements,
-            enricher: None,
-        }
-    }
-
-    /// Sets an enricher that runs on [`Self::enrich`].
-    #[must_use]
-    pub fn with_enricher(mut self, enricher: Enricher) -> Self {
-        self.enricher = Some(enricher);
-        self
-    }
-
-    /// Invokes the configured enricher, if any, with the facilitator's
-    /// capability snapshot.
-    pub fn enrich(&mut self, capabilities: &SupportedResponse) {
-        if let Some(enricher) = self.enricher.clone() {
-            enricher(self, capabilities);
-        }
+        Self { requirements }
     }
 
     /// Overrides the `maxTimeoutSeconds` field.
@@ -549,30 +700,5 @@ impl PriceTag {
     pub const fn with_timeout(mut self, seconds: u64) -> Self {
         self.requirements.max_timeout_seconds = seconds;
         self
-    }
-}
-
-impl Debug for PriceTag {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("PriceTag")
-            .field("requirements", &self.requirements)
-            .field("enricher", &self.enricher.as_ref().map(|_| "<fn>"))
-            .finish()
-    }
-}
-
-/// Matches a [`PriceTag`] against wire-level requirements on the five
-/// protocol-critical fields only (scheme / network / amount / asset / `pay_to`).
-///
-/// `max_timeout_seconds` and `extra` are deliberately ignored so enriched
-/// fields attached by the facilitator do not cause false negatives.
-impl PartialEq<PaymentRequirements> for PriceTag {
-    fn eq(&self, other: &PaymentRequirements) -> bool {
-        let this = &self.requirements;
-        this.scheme == other.scheme
-            && this.network == other.network
-            && this.amount == other.amount
-            && this.asset == other.asset
-            && this.pay_to == other.pay_to
     }
 }

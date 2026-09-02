@@ -28,7 +28,8 @@ V1 payment paths are omitted (r402 is V2-only).
 
 | Name | Value |
 | ---- | ----- |
-| `MCP_PAYMENT_REQUIRED_CODE` | **`402` (i32)** |
+| `MCP_PAYMENT_REQUIRED_CODE` | **`402` (i32)** (client parse) |
+| `JSONRPC_PAYMENT_REQUIRED_CODE` | **`-32042` (i32)** (client parse, SEP-1036) |
 | `MCP_PAYMENT_META_KEY` | `"x402/payment"` |
 | `MCP_PAYMENT_RESPONSE_META_KEY` | `"x402/payment-response"` |
 
@@ -67,7 +68,8 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 
 // 1. Facilitator that can verify + settle (your implementation / HTTP client)
 let facilitator = Arc::new(my_facilitator);
-let resource_server = ResourceServer::new(facilitator);
+let resource_server = ResourceServer::new(facilitator)
+    .with_scheme(/* CAIP-2 pattern */, my_scheme_impl);
 
 // 2. Advertise one or more payment options for this tool
 let accepts = vec![PaymentRequirements::new(
@@ -86,7 +88,7 @@ let config = PaymentWrapperConfig::try_new(
             .with_mime_type("application/json"),
     ),
 )?;
-let wrapper = PaymentWrapper::try_new(resource_server, config)?;
+let wrapper = PaymentWrapper::try_new(resource_server, config).await?;
 
 // 3a. One-shot: wrap a single tools/call
 async fn handle_tool(wrapper: &PaymentWrapper, params: CallToolRequestParams) -> CallToolResult {
@@ -107,10 +109,12 @@ let paid = wrapper.wrap(|_params| async move {
 Control flow (Go `PaymentWrapper.Wrap`):
 
 1. Extract `_meta["x402/payment"]`
-2. Match `accepts` → verify (tool-level 402 on failure)
-3. Hooks → business handler
-4. On tool success → settle → `_meta["x402/payment-response"]`
-5. Settlement failure uses the **same dual-format** payment-required body (R5)
+2. Match `create_payment_required_response.accepts` → verify
+3. `SkipHandler` → `processSettlement(AfterHandler)` (no-op when `!settleAfterHandler`); no cancel dispatcher
+4. Before-handler settle when the flow requires it
+5. Tool handler; `isError` → cancel + failure-path `_meta`
+6. After-handler settle (or echo before-handler)
+7. Settlement failure uses the **same dual-format** payment-required body (R5)
 
 ## Client usage
 
@@ -124,7 +128,8 @@ You implement two thin adapters:
 ```rust,ignore
 use r402_core::wire::PaymentRequired;
 use r402_mcp::{
-    McpPaymentPayload, McpToolCaller, PaymentSigner, X402McpClient, X402McpClientOptions,
+    McpCallError, McpPaymentPayload, McpToolCaller, PaymentSigner, X402McpClient,
+    X402McpClientOptions, mcp_call_error_from_rmcp,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::Map;
@@ -135,9 +140,11 @@ impl McpToolCaller for MyMcpSession {
     async fn call_tool(
         &self,
         params: CallToolRequestParams,
-    ) -> Result<CallToolResult, String> {
-        // forward to rmcp session.call_tool(...)
-        todo!()
+    ) -> Result<CallToolResult, McpCallError> {
+        self.session
+            .call_tool(params)
+            .await
+            .map_err(mcp_call_error_from_rmcp)
     }
 }
 
@@ -176,6 +183,8 @@ Hooks (`McpClientHooks`): `on_payment_required` (abort / supply payload),
 | `payment_required_tool_result` | dual-format 402 challenge |
 | `settlement_failed_tool_result` | R5 dual-format settle failure |
 | `extract_payment_required` | prefer structuredContent, else text |
+| `is_payment_required_rpc` / `extract_payment_required_from_rpc` | JSON-RPC `402` (`data`); `-32042` (`data` or `data.x402`) |
+| `mcp_call_error_from_rmcp` | `ServiceError::McpError` → `McpCallError::Rpc` |
 | `attach_payment_to_params` / `extract_payment_from_params` | `_meta["x402/payment"]` |
 | `attach_settle_response` / `extract_settle_response` | `_meta["x402/payment-response"]` |
 | `create_tool_resource_url` | `mcp://tool/{name}` or custom |
@@ -185,7 +194,7 @@ Hooks (`McpClientHooks`): `on_payment_required` (abort / supply payload),
 | Item | Notes |
 | ---- | ----- |
 | V1 | Not supported |
-| SEP-1036 / JSON-RPC `-32042` | TS-only path; not in Go pin |
+| SEP-1036 / JSON-RPC `-32042` | Client parses `402` and `-32042`; server emits spec/Go tool-result 402s |
 | Paid retry still 402 | `StillRequired { payment_required, recovery_requested }` for caller retry |
 | Live e2e example binary | Not shipped; use unit tests under `src/{server,client,encode}.rs` |
 

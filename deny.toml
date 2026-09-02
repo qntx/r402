@@ -19,8 +19,13 @@ allow = [
     "Unicode-DFS-2016",
     "CC0-1.0",
     "MPL-2.0",
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
+# tonlib-core (r402-tvm) depends on nacl.
+exceptions = [
+    { crate = "nacl", allow = ["LGPL-3.0-or-later"] },
+]
 
 [bans]
 multiple-versions = "allow"

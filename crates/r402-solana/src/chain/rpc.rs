@@ -38,6 +38,18 @@ pub trait RpcClientLike: Sync {
 
     /// Fetches the latest blockhash.
     fn get_latest_blockhash(&self) -> impl Future<Output = Result<Hash, ClientError>> + Send;
+
+    /// Fetches the latest blockhash and last valid block height at `commitment`.
+    fn get_latest_blockhash_with_commitment(
+        &self,
+        commitment: solana_commitment_config::CommitmentConfig,
+    ) -> impl Future<Output = Result<(Hash, u64), ClientError>> + Send;
+
+    /// Fetches the current slot at `commitment`.
+    fn get_slot_with_commitment(
+        &self,
+        commitment: solana_commitment_config::CommitmentConfig,
+    ) -> impl Future<Output = Result<u64, ClientError>> + Send;
 }
 
 impl<Container: AsRef<RpcClient> + Sync> RpcClientLike for Container {
@@ -62,5 +74,19 @@ impl<Container: AsRef<RpcClient> + Sync> RpcClientLike for Container {
     }
     fn get_latest_blockhash(&self) -> impl Future<Output = Result<Hash, ClientError>> + Send {
         RpcClient::get_latest_blockhash(self.as_ref())
+    }
+
+    fn get_latest_blockhash_with_commitment(
+        &self,
+        commitment: solana_commitment_config::CommitmentConfig,
+    ) -> impl Future<Output = Result<(Hash, u64), ClientError>> + Send {
+        RpcClient::get_latest_blockhash_with_commitment(self.as_ref(), commitment)
+    }
+
+    fn get_slot_with_commitment(
+        &self,
+        commitment: solana_commitment_config::CommitmentConfig,
+    ) -> impl Future<Output = Result<u64, ClientError>> + Send {
+        RpcClient::get_slot_with_commitment(self.as_ref(), commitment)
     }
 }

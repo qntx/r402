@@ -72,6 +72,7 @@ where
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extra: None,
         }
     } else {
         settle_failure(
@@ -95,10 +96,12 @@ fn settle_failure(
     payer: Option<CompactString>,
 ) -> SettleResponse {
     SettleResponse::Failure {
+        transaction: CompactString::default(),
         reason,
         message,
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }

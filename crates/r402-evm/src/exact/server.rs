@@ -3,13 +3,42 @@
 //! This module provides functionality for servers to create price tags
 //! that clients can use to generate payment authorizations.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use alloy_primitives::U256;
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
+use r402_core::{PaymentFlowConfig, SchemeNetworkServer};
 
 use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
 use crate::exact::{Eip155Exact, ExactScheme, PaymentRequirementsExtra};
+
+fn eip155_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        let row = PaymentFlowConfig::authorization_and_upfront();
+        HashMap::from([
+            ("eip3009".to_owned(), row.clone()),
+            ("permit2".to_owned(), row),
+        ])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for Eip155Exact {
+    fn scheme(&self) -> &'static str {
+        ExactScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        "eip3009"
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        eip155_exact_payment_flows()
+    }
+}
 
 impl Eip155Exact {
     /// Creates a price tag for an EVM exact payment.
@@ -38,9 +67,25 @@ impl Eip155Exact {
             300,
         )
         .with_optional_extra(extra);
-        wire::PriceTag {
-            requirements,
-            enricher: None,
-        }
+        wire::PriceTag::new(requirements)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use r402_core::PaymentFlowName;
+
+    use super::*;
+
+    #[test]
+    fn payment_flows_match_official_exact_evm() {
+        let scheme = Eip155Exact;
+        assert_eq!(scheme.scheme(), "exact");
+        assert_eq!(scheme.default_asset_transfer_method(), "eip3009");
+        let flows = scheme.payment_flows();
+        let expected = PaymentFlowConfig::authorization_and_upfront();
+        assert_eq!(flows.get("eip3009"), Some(&expected));
+        assert_eq!(flows.get("permit2"), Some(&expected));
+        assert_eq!(expected.default, PaymentFlowName::Authorization);
     }
 }

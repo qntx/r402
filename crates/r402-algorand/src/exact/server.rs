@@ -1,18 +1,59 @@
 //! Server-side price tag generation for the Algorand exact scheme.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::future::Future;
+use std::sync::LazyLock;
 
 use r402_core::chain::{ChainId, DeployedTokenAmount};
 use r402_core::wire;
+use r402_core::{
+    PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
+    SchemePaymentRequiredContext,
+};
 
 use crate::chain::{AlgorandAddress, AlgorandTokenDeployment};
 use crate::exact::{AlgorandExact, AlgorandExtra, ExactScheme};
 
+fn algorand_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
+    static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
+        HashMap::from([(
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD.to_owned(),
+            PaymentFlowConfig::authorization_and_upfront(),
+        )])
+    });
+    &FLOWS
+}
+
+impl SchemeNetworkServer for AlgorandExact {
+    fn scheme(&self) -> &'static str {
+        ExactScheme::VALUE
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        SDK_DEFAULT_ASSET_TRANSFER_METHOD
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        algorand_exact_payment_flows()
+    }
+
+    fn enrich_payment_required_response<'a>(
+        &'a self,
+        ctx: &'a SchemePaymentRequiredContext<'a>,
+    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+        let mut accepts = ctx.requirements.to_vec();
+        let changed = accepts.iter_mut().fold(false, |acc, req| {
+            acc | apply_algorand_fee_payer(req, ctx.supported)
+        });
+        std::future::ready(changed.then_some(accepts))
+    }
+}
+
 impl AlgorandExact {
     /// Creates a price tag for an Algorand ASA payment.
     ///
-    /// The enricher copies `feePayer` from the facilitator's `/supported`
-    /// extra when the tag does not already set `extra`.
+    /// Scheme enrich copies `feePayer` from the facilitator's `/supported`
+    /// extra when the accept does not already set `extra`.
     #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
@@ -31,36 +72,41 @@ impl AlgorandExact {
             asset.token.asset_id.to_string().into(),
             300,
         );
-        wire::PriceTag {
-            requirements,
-            enricher: Some(Arc::new(algorand_fee_payer_enricher)),
-        }
+        wire::PriceTag::new(requirements)
     }
 }
 
-/// Copies `feePayer` from `/supported` onto the price tag extra.
-pub fn algorand_fee_payer_enricher(
-    price_tag: &mut wire::PriceTag,
+fn apply_algorand_fee_payer(
+    req: &mut wire::PaymentRequirements,
     capabilities: &wire::SupportedResponse,
-) {
-    if price_tag.requirements.extra.is_some() {
-        return;
+) -> bool {
+    if req.scheme.as_str() != ExactScheme::VALUE || req.extra.is_some() {
+        return false;
     }
-
-    let extra = capabilities
-        .kinds
-        .iter()
-        .find(|kind| {
-            wire::V2 == kind.x402_version
-                && kind.scheme.as_str() == ExactScheme.as_ref()
-                && kind.network.as_str() == price_tag.requirements.network.to_string()
-        })
-        .and_then(|kind| kind.extra.as_ref())
+    let extra = matching_kind_extra(capabilities, ExactScheme::VALUE, &req.network.to_string())
         .and_then(|extra| serde_json::from_value::<AlgorandExtra>(extra.clone()).ok());
+    let Some(extra) = extra else {
+        return false;
+    };
+    let Ok(value) = serde_json::to_value(extra) else {
+        return false;
+    };
+    req.extra = Some(value);
+    true
+}
 
-    if let Some(extra) = extra {
-        price_tag.requirements.extra = serde_json::to_value(extra).ok();
-    }
+fn matching_kind_extra<'a>(
+    capabilities: &'a wire::SupportedResponse,
+    scheme: &str,
+    network: &str,
+) -> Option<&'a serde_json::Value> {
+    capabilities.kinds.iter().find_map(|kind| {
+        (wire::V2 == kind.x402_version
+            && kind.scheme.as_str() == scheme
+            && kind.network.as_str() == network)
+            .then_some(kind.extra.as_ref())
+            .flatten()
+    })
 }
 
 #[cfg(test)]
@@ -71,7 +117,7 @@ mod tests {
     use crate::chain::AlgorandAddress;
 
     #[test]
-    fn price_tag_has_fee_payer_enricher() {
+    fn price_tag_omits_extra_until_scheme_enrich() {
         let pay_to = AlgorandAddress::from_public_key([1u8; 32]);
         let tag = AlgorandExact::price_tag(pay_to, USDC::algorand_testnet().amount(1_000_000u64));
         assert_eq!(tag.requirements.scheme, "exact");
@@ -80,10 +126,20 @@ mod tests {
             "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe"
         );
         assert!(tag.requirements.extra.is_none());
-        assert!(tag.enricher.is_some());
         assert_eq!(
             tag.requirements.asset,
             USDC::algorand_testnet().asset_id.to_string()
+        );
+    }
+
+    #[test]
+    fn payment_flows_use_default_authorization_and_upfront() {
+        let scheme = AlgorandExact;
+        assert_eq!(
+            scheme
+                .payment_flows()
+                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
+            Some(&PaymentFlowConfig::authorization_and_upfront())
         );
     }
 }

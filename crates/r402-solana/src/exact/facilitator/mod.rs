@@ -133,6 +133,7 @@ where
             network: self.provider.chain_id().to_string().into(),
             amount: Some(amount.into()),
             extensions: wire::Extensions::new(),
+            extra: None,
         })
     }
 

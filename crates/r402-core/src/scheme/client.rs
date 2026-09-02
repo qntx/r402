@@ -8,7 +8,44 @@ use compact_str::CompactString;
 use super::Sealed;
 use crate::chain::{ChainId, ChainIdPattern};
 use crate::error::ClientError;
-use crate::wire::PaymentRequired;
+use crate::wire::{PaymentRequired, PaymentRequirements};
+
+/// USD-pegged default asset used for money strings and client spend caps.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DefaultAssetInfo {
+    /// Asset id as advertised in payment requirements.
+    pub asset: CompactString,
+    /// Token decimal places.
+    pub decimals: u32,
+    /// Ticker (`"USDC"`, `"USDT0"`, `"RLUSD"`, …).
+    pub symbol: CompactString,
+    /// Transfer-method override when the default is not the scheme ATM default.
+    pub asset_transfer_method: Option<CompactString>,
+}
+
+impl DefaultAssetInfo {
+    /// Constructs a default-asset row without a transfer-method override.
+    #[must_use]
+    pub fn new(
+        asset: impl Into<CompactString>,
+        decimals: u32,
+        symbol: impl Into<CompactString>,
+    ) -> Self {
+        Self {
+            asset: asset.into(),
+            decimals,
+            symbol: symbol.into(),
+            asset_transfer_method: None,
+        }
+    }
+
+    /// Builder: sets `assetTransferMethod`.
+    #[must_use]
+    pub fn with_asset_transfer_method(mut self, method: impl Into<CompactString>) -> Self {
+        self.asset_transfer_method = Some(method.into());
+        self
+    }
+}
 
 /// Client-side scheme interface.
 ///
@@ -17,6 +54,9 @@ pub trait SchemeClient: super::SchemeId + Sealed + Send + Sync {
     /// Examines a 402 response and returns all payment candidates this
     /// client can fulfil.
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate>;
+
+    /// Reverse lookup of a USD-pegged default asset for spend-cap conversion.
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo>;
 }
 
 /// A single payment option produced by [`SchemeClient::accept`].
@@ -31,6 +71,8 @@ pub struct PaymentCandidate {
     pub scheme: CompactString,
     /// Recipient address.
     pub pay_to: CompactString,
+    /// Wire requirements this candidate was built from.
+    pub requirements: PaymentRequirements,
     /// Signer that can produce the authorization.
     pub signer: Box<dyn PaymentCandidateSigner + Send + Sync>,
 }

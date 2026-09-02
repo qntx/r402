@@ -15,7 +15,7 @@ HTTP transport for the [x402 payment protocol][x402], part of the
   `r402_core::PaymentClient`: 402 → sign → retry, plus
   `on_payment_response` with one corrective recovery.
 - **Remote `FacilitatorClient`** — `/verify`, `/settle`, `/supported`
-  with 30s timeout, 429/5xx backoff, 10-minute `/supported` cache.
+  with 30s timeout, path-keyed auth, 429 Retry-After, opt-in `/supported` cache.
 - **CORS** — exposes `Payment-Required` and `Payment-Response`.
 
 ## Cargo Features

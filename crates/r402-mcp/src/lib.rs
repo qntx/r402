@@ -28,8 +28,10 @@
 //! | `client` | [`X402McpClient`], [`call_paid_tool`] |
 //! | `full` | both + telemetry |
 
-/// JSON-RPC / MCP error code for payment required (x402). Official value is **402**.
+/// Legacy x402 JSON-RPC payment-required code (`402`). Client parse only.
 pub const MCP_PAYMENT_REQUIRED_CODE: i32 = 402;
+/// SEP-1036 `UrlElicitationRequired` JSON-RPC code (`-32042`). Client parse only.
+pub const JSONRPC_PAYMENT_REQUIRED_CODE: i32 = -32042;
 /// MCP `_meta` key for the client → server payment payload.
 pub const MCP_PAYMENT_META_KEY: &str = "x402/payment";
 /// MCP `_meta` key for the server → client settlement response.
@@ -44,6 +46,7 @@ mod constants_tests {
     #[test]
     fn constants_match_foundation_go_and_ts() {
         assert_eq!(MCP_PAYMENT_REQUIRED_CODE, 402);
+        assert_eq!(JSONRPC_PAYMENT_REQUIRED_CODE, -32042);
         assert_eq!(MCP_PAYMENT_META_KEY, "x402/payment");
         assert_eq!(MCP_PAYMENT_RESPONSE_META_KEY, "x402/payment-response");
     }
@@ -76,11 +79,14 @@ pub use client::{
 #[cfg(any(feature = "server", feature = "client"))]
 pub use encode::{
     McpPaymentPayload, attach_payment_to_params, attach_settle_response, create_tool_resource_url,
-    extract_payment_from_params, extract_payment_required, extract_settle_response,
-    is_payment_required_result, payment_required_tool_result, settlement_failed_tool_result,
+    extract_payment_from_params, extract_payment_required, extract_payment_required_from_rpc,
+    extract_settle_response, is_payment_required_result, is_payment_required_rpc,
+    payment_required_tool_result, settlement_failed_tool_result,
 };
+#[cfg(feature = "client")]
+pub use error::mcp_call_error_from_rmcp;
 #[cfg(any(feature = "server", feature = "client"))]
-pub use error::{McpClientError, PaymentRequiredError};
+pub use error::{McpCallError, McpClientError, PaymentRequiredError};
 // `serde` is a workspace dep used transitively via wire types; silence when
 // no direct path reference exists under the selected feature set.
 use serde as _;

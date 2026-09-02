@@ -26,10 +26,13 @@ use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
 use std::pin::Pin;
 
+use super::payment_flow::SettlePhase;
 use crate::error::FacilitatorError;
 use crate::facilitator::BoxFuture;
 use crate::facilitator::FailureRecovery;
-use crate::wire::{PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse};
+use crate::wire::{
+    Extensions, PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse,
+};
 
 /// Wire payment payload with typed requirements and opaque scheme body.
 pub type WirePaymentPayload = PaymentPayload<PaymentRequirements, serde_json::Value>;
@@ -164,6 +167,17 @@ impl Debug for PaymentHookContext {
     }
 }
 
+impl PaymentHookContext {
+    /// Constructs a payment hook context.
+    #[must_use]
+    pub const fn new(payload: WirePaymentPayload, requirements: PaymentRequirements) -> Self {
+        Self {
+            payload,
+            requirements,
+        }
+    }
+}
+
 /// Context for after-verify hooks (includes facilitator result).
 #[derive(Clone)]
 #[non_exhaustive]
@@ -184,12 +198,48 @@ impl Debug for VerifyResultContext {
     }
 }
 
+/// Context for before-settle / settle-failure hooks.
+///
+/// Distinct from [`crate::facilitator::SettleContext`] and
+/// [`crate::extensions::SettleContext`].
+#[derive(Clone)]
+#[non_exhaustive]
+pub struct SettleContext {
+    /// Base payment context.
+    pub payment: PaymentHookContext,
+    /// Extension IDs declared on the 402 for this settle.
+    pub declared_extensions: Extensions,
+    /// Which settle invocation is running.
+    pub phase: SettlePhase,
+}
+
+impl Debug for SettleContext {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SettleContext")
+            .field("phase", &self.phase)
+            .field("payment", &self.payment)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SettleContext {
+    /// Constructs a settle context with empty declared extensions.
+    #[must_use]
+    pub fn new(payment: PaymentHookContext, phase: SettlePhase) -> Self {
+        Self {
+            payment,
+            declared_extensions: Extensions::new(),
+            phase,
+        }
+    }
+}
+
 /// Context for after-settle hooks.
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct SettleResultContext {
-    /// Base payment context.
-    pub payment: PaymentHookContext,
+    /// Settle invocation that produced `result`.
+    pub settle: SettleContext,
     /// Facilitator settle response.
     pub result: SettleResponse,
 }
@@ -197,7 +247,7 @@ pub struct SettleResultContext {
 impl Debug for SettleResultContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("SettleResultContext")
-            .field("payment", &self.payment)
+            .field("settle", &self.settle)
             .field("result_success", &self.result.is_success())
             .finish_non_exhaustive()
     }
@@ -207,7 +257,7 @@ impl Debug for SettleResultContext {
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct VerifiedPaymentCanceledContext {
-    /// Base payment context (same fields as settle context).
+    /// Base payment context.
     pub payment: PaymentHookContext,
     /// Cancellation reason.
     pub reason: CancelReason,
@@ -215,6 +265,8 @@ pub struct VerifiedPaymentCanceledContext {
     pub error: Option<String>,
     /// Optional HTTP/transport status from a failed handler response.
     pub response_status: Option<u16>,
+    /// Settle phases already completed for this payment.
+    pub settled_phases: Vec<SettlePhase>,
 }
 
 impl Debug for VerifiedPaymentCanceledContext {
@@ -222,7 +274,26 @@ impl Debug for VerifiedPaymentCanceledContext {
         f.debug_struct("VerifiedPaymentCanceledContext")
             .field("reason", &self.reason)
             .field("response_status", &self.response_status)
+            .field("settled_phases", &self.settled_phases)
             .finish_non_exhaustive()
+    }
+}
+
+impl VerifiedPaymentCanceledContext {
+    /// Constructs a cancel context.
+    #[must_use]
+    pub const fn new(
+        payment: PaymentHookContext,
+        reason: CancelReason,
+        settled_phases: Vec<SettlePhase>,
+    ) -> Self {
+        Self {
+            payment,
+            reason,
+            error: None,
+            response_status: None,
+            settled_phases,
+        }
     }
 }
 
@@ -258,7 +329,7 @@ pub trait ResourceServerHooks: Send + Sync {
     /// Runs before facilitator settle.
     fn before_settle<'a>(
         &'a self,
-        _ctx: &'a PaymentHookContext,
+        _ctx: &'a SettleContext,
     ) -> impl Future<Output = BeforeOpDecision<SettleResponse>> + Send + 'a {
         async { BeforeOpDecision::Continue }
     }
@@ -274,7 +345,7 @@ pub trait ResourceServerHooks: Send + Sync {
     /// Runs when facilitator settle returns an error.
     fn on_settle_failure<'a>(
         &'a self,
-        _ctx: &'a PaymentHookContext,
+        _ctx: &'a SettleContext,
         _error: &'a FacilitatorError,
     ) -> impl Future<Output = FailureRecovery<SettleResponse>> + Send + 'a {
         async { FailureRecovery::Propagate }
@@ -313,7 +384,7 @@ pub trait DynResourceServerHooks: Send + Sync {
     /// See [`ResourceServerHooks::before_settle`].
     fn before_settle<'a>(
         &'a self,
-        ctx: &'a PaymentHookContext,
+        ctx: &'a SettleContext,
     ) -> Pin<Box<dyn Future<Output = BeforeOpDecision<SettleResponse>> + Send + 'a>>;
 
     /// See [`ResourceServerHooks::after_settle`].
@@ -322,7 +393,7 @@ pub trait DynResourceServerHooks: Send + Sync {
     /// See [`ResourceServerHooks::on_settle_failure`].
     fn on_settle_failure<'a>(
         &'a self,
-        ctx: &'a PaymentHookContext,
+        ctx: &'a SettleContext,
         error: &'a FacilitatorError,
     ) -> BoxFuture<'a, FailureRecovery<SettleResponse>>;
 
@@ -360,7 +431,7 @@ impl<T: ResourceServerHooks + ?Sized> DynResourceServerHooks for T {
 
     fn before_settle<'a>(
         &'a self,
-        ctx: &'a PaymentHookContext,
+        ctx: &'a SettleContext,
     ) -> Pin<Box<dyn Future<Output = BeforeOpDecision<SettleResponse>> + Send + 'a>> {
         Box::pin(<Self as ResourceServerHooks>::before_settle(self, ctx))
     }
@@ -371,7 +442,7 @@ impl<T: ResourceServerHooks + ?Sized> DynResourceServerHooks for T {
 
     fn on_settle_failure<'a>(
         &'a self,
-        ctx: &'a PaymentHookContext,
+        ctx: &'a SettleContext,
         error: &'a FacilitatorError,
     ) -> BoxFuture<'a, FailureRecovery<SettleResponse>> {
         Box::pin(<Self as ResourceServerHooks>::on_settle_failure(

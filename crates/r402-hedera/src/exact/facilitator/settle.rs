@@ -84,6 +84,7 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extra: None,
         },
         Err(err) => settle_failure(
             ErrorReason::from_wire("transaction_failed"),
@@ -101,10 +102,12 @@ fn settle_failure(
     payer: Option<CompactString>,
 ) -> SettleResponse {
     SettleResponse::Failure {
+        transaction: CompactString::default(),
         reason,
         message,
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }

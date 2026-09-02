@@ -23,7 +23,7 @@ mod rpc;
 pub use codec::{Base64Bytes, U64String, UnixTimestamp, V2, Version, Version2};
 pub use extensions::{ExtensionEntry, Extensions};
 pub use offer::{
-    Enricher, PaymentPayload, PaymentRequired, PaymentRequirements, PriceTag, ResourceInfo,
+    PaymentPayload, PaymentRequired, PaymentRequirements, PriceTag, ResourceInfo,
     find_matching_requirements,
 };
 pub use rpc::{

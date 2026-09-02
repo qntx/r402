@@ -26,15 +26,27 @@ pub mod client;
 pub mod error;
 pub mod extensions;
 pub mod facilitator;
+pub mod pending_settlement;
 pub mod resource_server;
 pub mod scheme;
 pub mod wire;
 
 pub use resource_server::{
-    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, DynResourceServerHooks,
-    PaymentHookContext, ResourceServer, ResourceServerHooks, SettleResultContext,
-    SkipHandlerDirective, VerifiedPaymentCanceledContext, VerifyPaymentOutcome,
-    VerifyResultContext, WirePaymentPayload,
+    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, CompletedSettlement,
+    DynResourceServerHooks, DynSchemeNetworkServer, HookPolicyError, PAYMENT_FLOWS,
+    PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases, PaymentFlowScheme,
+    PaymentHookContext, PaymentRequiredBuildContext, RESERVED_PAYMENT_FLOW_EXTRA_KEYS,
+    ResolvedPaymentFlow, ResourceServer, ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+    SchemeNetworkServer, SchemePaymentRequiredContext, SettleContext, SettlePhase,
+    SettleResponseCoreSnapshot, SettleResultContext, SkipHandlerDirective,
+    VerifiedPaymentCanceledContext, VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload,
+    apply_payment_flow_wire_extra, assert_accepts_additive_extra_after_scheme_enrich,
+    assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
+    assert_additive_settlement_extra, assert_settle_response_core_unchanged,
+    build_failure_path_settlement_response, extra_payment_flow, is_authorization_payment_flow,
+    is_recognized_payment_flow, is_vacant_string_field, merge_additive_settlement_extra,
+    resolve_payment_flow, resolve_payment_flow_phases, snapshot_payment_requirements_list,
+    snapshot_settle_response_core,
 };
 
 #[cfg(feature = "cache")]
@@ -50,8 +62,9 @@ pub mod metrics;
 // trip `unused_crate_dependencies` because no unit test references it.
 // The empty re-import silences that lint without affecting binary size.
 pub use client::{
-    ClientHooks, CreatedPayment, DynClientHooks, PaymentClient, PaymentCreationContext,
-    PaymentResponseContext, PaymentResponseResult,
+    AllowedAssets, ClientHooks, CreatedPayment, DynClientHooks, MaxAmountPerPayment, PaymentClient,
+    PaymentCreationContext, PaymentResponseContext, PaymentResponseResult, SpendControlAsset,
+    SpendControls,
 };
 pub use error::{
     AsPaymentProblem, ClientError, ErrorReason, FacilitatorError, PaymentProblem, SettlementError,
@@ -60,6 +73,9 @@ pub use error::{
 pub use facilitator::{
     BoxFuture, DynFacilitator, DynFacilitatorHooks, Facilitator, FacilitatorHooks, FailureRecovery,
     HookDecision, HookedFacilitator,
+};
+pub use pending_settlement::{
+    InMemoryPendingSettlementStore, PENDING_SETTLEMENT_TTL, PendingSettlementStore,
 };
 #[cfg(test)]
 use proptest as _;

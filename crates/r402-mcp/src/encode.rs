@@ -5,13 +5,15 @@
 //! - settlement failure uses the **same** dual format (Go server R5)
 //! - meta keys `x402/payment` / `x402/payment-response`
 
-use r402_core::wire::{
-    Extensions, PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse,
-};
+use r402_core::wire::{PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, RequestMetaObject};
 use serde_json::Value;
 
-use crate::{MCP_PAYMENT_META_KEY, MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX};
+use crate::error::McpCallError;
+use crate::{
+    JSONRPC_PAYMENT_REQUIRED_CODE, MCP_PAYMENT_META_KEY, MCP_PAYMENT_REQUIRED_CODE,
+    MCP_PAYMENT_RESPONSE_META_KEY, MCP_TOOL_URL_PREFIX,
+};
 
 /// Wire payment payload shape used on MCP `_meta` (opaque scheme payload).
 pub type McpPaymentPayload = PaymentPayload<PaymentRequirements, Value>;
@@ -39,21 +41,11 @@ pub fn payment_required_tool_result(required: &PaymentRequired) -> CallToolResul
 
 /// Settlement-failed result (Go R5: same dual format as payment-required).
 ///
-/// Go `settlementFailedResult` delegates to `paymentRequiredResult`.
+/// `required` must be assembled via
+/// [`r402_core::ResourceServer::create_payment_required_response`].
 #[must_use]
-pub fn settlement_failed_tool_result(
-    accepts: &[PaymentRequirements],
-    resource: &r402_core::wire::ResourceInfo,
-    extensions: &Extensions,
-    error_msg: impl Into<String>,
-) -> CallToolResult {
-    let mut required = PaymentRequired::new(resource.clone())
-        .with_error(error_msg.into())
-        .with_accepts(accepts.to_vec());
-    if !extensions.is_empty() {
-        required = required.with_extensions(extensions.clone());
-    }
-    payment_required_tool_result(&required)
+pub fn settlement_failed_tool_result(required: &PaymentRequired) -> CallToolResult {
+    payment_required_tool_result(required)
 }
 
 /// Prefer `structuredContent`, else parse first text content as JSON.
@@ -149,14 +141,104 @@ pub fn is_payment_required_result(result: &CallToolResult) -> bool {
     extract_payment_required(result).is_some()
 }
 
+/// Extracts V2 [`PaymentRequired`] from a JSON-RPC payment challenge.
+///
+/// TS `isPaymentRequiredError`: code `402` uses `data`; `-32042` uses `data` or `data.x402`.
+#[must_use]
+pub fn extract_payment_required_from_rpc(err: &McpCallError) -> Option<PaymentRequired> {
+    let McpCallError::Rpc { code, data, .. } = err else {
+        return None;
+    };
+    let data = data.as_ref()?;
+    match *code {
+        MCP_PAYMENT_REQUIRED_CODE => payment_required_from_value(data),
+        JSONRPC_PAYMENT_REQUIRED_CODE => payment_required_from_value(data)
+            .or_else(|| data.get("x402").and_then(payment_required_from_value)),
+        _ => None,
+    }
+}
+
+/// True when a JSON-RPC error is an x402 payment-required challenge.
+#[must_use]
+pub fn is_payment_required_rpc(err: &McpCallError) -> bool {
+    extract_payment_required_from_rpc(err).is_some()
+}
+
 #[cfg(test)]
 mod tests {
-    use r402_core::wire::{PaymentRequirements, ResourceInfo};
+    use std::collections::HashMap;
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use r402_core::FacilitatorError;
+    use r402_core::chain::ChainIdPattern;
+    use r402_core::facilitator::Facilitator;
+    use r402_core::resource_server::{PaymentRequiredBuildContext, ResourceServer};
+    use r402_core::wire::{
+        Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
+        SupportedResponse, VerifyRequest, VerifyResponse,
+    };
+    use r402_core::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
 
     use super::*;
 
-    fn sample_required() -> PaymentRequired {
-        let resource = ResourceInfo::new("mcp://tool/demo");
+    struct ExactAuthScheme(HashMap<String, PaymentFlowConfig>);
+
+    impl ExactAuthScheme {
+        fn new() -> Self {
+            Self(HashMap::from([(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.to_owned(),
+                PaymentFlowConfig::authorization_and_upfront(),
+            )]))
+        }
+    }
+
+    impl SchemeNetworkServer for ExactAuthScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &'static str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.0
+        }
+    }
+
+    struct MockFacilitator;
+
+    impl Facilitator for MockFacilitator {
+        fn verify(
+            &self,
+            _request: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "eip155:84532".into(),
+                amount: Some("10000".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
+
+    async fn sample_required(error: &str) -> PaymentRequired {
         let req = PaymentRequirements::new(
             "exact".into(),
             "eip155:84532".parse().unwrap(),
@@ -165,14 +247,25 @@ mod tests {
             "0xasset".into(),
             60,
         );
-        PaymentRequired::new(resource)
-            .with_error("Payment required")
-            .with_accepts(vec![req])
+        ResourceServer::new(Arc::new(MockFacilitator))
+            .with_scheme(ChainIdPattern::wildcard("eip155"), ExactAuthScheme::new())
+            .create_payment_required_response(
+                vec![req],
+                PaymentRequiredBuildContext {
+                    resource: ResourceInfo::new("mcp://tool/demo"),
+                    error: Some(error.into()),
+                    extensions: Extensions::new(),
+                    supported: SupportedResponse::default(),
+                    payment_payload: None,
+                },
+            )
+            .await
+            .unwrap()
     }
 
-    #[test]
-    fn payment_required_sets_structured_and_text() {
-        let pr = sample_required();
+    #[tokio::test]
+    async fn payment_required_sets_structured_and_text() {
+        let pr = sample_required("Payment required").await;
         let result = payment_required_tool_result(&pr);
         assert_eq!(result.is_error, Some(true));
         let sc = result.structured_content.as_ref().unwrap();
@@ -190,15 +283,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn settlement_failed_uses_dual_format() {
-        let pr = sample_required();
-        let result = settlement_failed_tool_result(
-            &pr.accepts,
-            &pr.resource,
-            &Extensions::new(),
-            "Settlement failed",
-        );
+    #[tokio::test]
+    async fn settlement_failed_uses_dual_format() {
+        let pr = sample_required("Settlement failed").await;
+        let result = settlement_failed_tool_result(&pr);
         assert!(extract_payment_required(&result).is_some());
     }
 
@@ -277,10 +365,132 @@ mod tests {
             network: "eip155:1".into(),
             amount: Some("1".into()),
             extensions: Extensions::new(),
+            extra: None,
         };
         let result = CallToolResult::success(vec![ContentBlock::text("ok")]);
         let result = attach_settle_response(result, &settle);
         let extracted = extract_settle_response(&result).unwrap();
         assert!(extracted.is_success());
+    }
+
+    #[cfg(feature = "client")]
+    mod rpc {
+        use rmcp::ServiceError;
+        use rmcp::model::{ErrorCode, ErrorData};
+        use serde_json::json;
+
+        use super::*;
+        use crate::error::mcp_call_error_from_rmcp;
+
+        #[tokio::test]
+        async fn jsonrpc_32042_direct_data_is_payment_required() {
+            let data = serde_json::to_value(sample_required("Payment required").await).unwrap();
+            let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
+                code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
+                message: "Payment Required".into(),
+                data: Some(data),
+            }));
+            assert!(
+                is_payment_required_rpc(&err),
+                "direct -32042 data should parse"
+            );
+            let pr = extract_payment_required_from_rpc(&err).unwrap();
+            assert_eq!(
+                pr.accepts.first().map(|a| a.amount.as_str()),
+                Some("10000"),
+                "extracted amount"
+            );
+        }
+
+        #[tokio::test]
+        async fn jsonrpc_32042_namespaced_x402_is_payment_required() {
+            let data = json!({
+                "challenges": [{"method": "tempo"}],
+                "x402": sample_required("Payment required").await,
+            });
+            let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
+                code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
+                message: "Payment Required".into(),
+                data: Some(data),
+            }));
+            assert!(
+                is_payment_required_rpc(&err),
+                "namespaced -32042 data.x402 should parse"
+            );
+            let pr = extract_payment_required_from_rpc(&err).unwrap();
+            assert_eq!(
+                pr.accepts.first().map(|a| a.amount.as_str()),
+                Some("10000"),
+                "extracted namespaced amount"
+            );
+        }
+
+        #[tokio::test]
+        async fn jsonrpc_402_direct_data_is_payment_required() {
+            let data = serde_json::to_value(sample_required("Payment required").await).unwrap();
+            let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
+                code: ErrorCode(MCP_PAYMENT_REQUIRED_CODE),
+                message: "Payment Required".into(),
+                data: Some(data),
+            }));
+            assert!(
+                is_payment_required_rpc(&err),
+                "legacy 402 data should parse"
+            );
+        }
+
+        #[tokio::test]
+        async fn jsonrpc_402_does_not_read_namespaced_x402() {
+            let data = json!({
+                "challenges": [{"method": "tempo"}],
+                "x402": sample_required("Payment required").await,
+            });
+            let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
+                code: ErrorCode(MCP_PAYMENT_REQUIRED_CODE),
+                message: "Payment Required".into(),
+                data: Some(data),
+            }));
+            assert!(
+                !is_payment_required_rpc(&err),
+                "402 must not read data.x402"
+            );
+        }
+
+        #[test]
+        fn jsonrpc_32042_without_payment_required_is_not_a_challenge() {
+            let err = mcp_call_error_from_rmcp(ServiceError::McpError(ErrorData {
+                code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
+                message: "Payment Required".into(),
+                data: Some(json!({"unrelated": true})),
+            }));
+            assert!(
+                !is_payment_required_rpc(&err),
+                "-32042 without PaymentRequired is not a challenge"
+            );
+            match err {
+                McpCallError::Rpc { code, .. } => {
+                    assert_eq!(
+                        code, JSONRPC_PAYMENT_REQUIRED_CODE,
+                        "adapter keeps RPC code"
+                    );
+                }
+                McpCallError::Transport(msg) => panic!("expected Rpc, got Transport({msg})"),
+            }
+        }
+
+        #[test]
+        fn transport_service_error_is_not_a_challenge() {
+            let err = mcp_call_error_from_rmcp(ServiceError::TransportClosed);
+            assert!(
+                !is_payment_required_rpc(&err),
+                "transport errors are not payment challenges"
+            );
+            match err {
+                McpCallError::Transport(_) => {}
+                McpCallError::Rpc { code, message, .. } => {
+                    panic!("expected Transport, got Rpc {{ code: {code}, message: {message} }}")
+                }
+            }
+        }
     }
 }

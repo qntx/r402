@@ -80,6 +80,7 @@ pub async fn settle_request<P: KeetaPreflight>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extra: None,
         },
         Err(QueueError::Duplicate) => settle_failure(
             ErrorReason::from_wire("duplicate_block"),
@@ -103,10 +104,12 @@ fn settle_failure(
     payer: Option<CompactString>,
 ) -> SettleResponse {
     SettleResponse::Failure {
+        transaction: CompactString::default(),
         reason,
         message,
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }
