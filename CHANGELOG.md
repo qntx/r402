@@ -8,7 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Added
 
+- `SECURITY.md` — private disclosure via GitHub security advisories for
+  `qntx/r402`.
+- Explicit `cargo deny check` job in `.github/workflows/ci.yml`.
+- `deny.toml` exception: `nacl` may use `LGPL-3.0-or-later` (`tonlib-core`).
+
 ### Changed
+
+- `HookedFacilitator` records `r402_facilitator_verify_total` /
+  `r402_facilitator_settle_total` and the matching duration histograms when
+  the `metrics` feature is enabled.
 
 ## [0.17.1] — 2026-08-20
 

@@ -355,6 +355,9 @@ impl<T: FacilitatorHooks + ?Sized> DynFacilitatorHooks for T {
 /// - **Before** hooks run in registration order; first `Abort` wins.
 /// - **After** hooks run in registration order; errors are silently dropped.
 /// - **On-failure** hooks run in registration order; first `Recovered` wins.
+///
+/// With the `metrics` feature, each `verify` / `settle` records the
+/// `r402_facilitator_*` counters and duration histograms.
 pub struct HookedFacilitator<F> {
     inner: F,
     hooks: Vec<Box<dyn DynFacilitatorHooks>>,
@@ -461,8 +464,11 @@ impl<F: Sync> HookedFacilitator<F> {
     }
 }
 
-impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
-    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
+impl<F: Facilitator + Sync> HookedFacilitator<F> {
+    async fn verify_hooked(
+        &self,
+        request: VerifyRequest,
+    ) -> Result<VerifyResponse, FacilitatorError> {
         let ctx = VerifyContext {
             request: request.clone(),
         };
@@ -479,7 +485,10 @@ impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
         }
     }
 
-    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
+    async fn settle_hooked(
+        &self,
+        request: SettleRequest,
+    ) -> Result<SettleResponse, FacilitatorError> {
         let ctx = SettleContext {
             request: request.clone(),
         };
@@ -495,10 +504,66 @@ impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
             }
         }
     }
+}
+
+impl<F: Facilitator + Sync> Facilitator for HookedFacilitator<F> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let result = self.verify_hooked(request).await;
+        #[cfg(feature = "metrics")]
+        record_verify_metrics(&result, started.elapsed());
+        result
+    }
+
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let result = self.settle_hooked(request).await;
+        #[cfg(feature = "metrics")]
+        record_settle_metrics(&result, started.elapsed());
+        result
+    }
 
     async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
         self.inner.supported().await
     }
+}
+
+#[cfg(feature = "metrics")]
+fn record_verify_metrics(
+    result: &Result<VerifyResponse, FacilitatorError>,
+    elapsed: std::time::Duration,
+) {
+    let label = match result {
+        Ok(VerifyResponse::Valid { .. }) => "valid",
+        Ok(VerifyResponse::Invalid { .. }) => "invalid",
+        Err(_) => "error",
+    };
+    ::metrics::counter!(
+        crate::metrics::FACILITATOR_VERIFY_TOTAL,
+        "result" => label,
+    )
+    .increment(1);
+    ::metrics::histogram!(crate::metrics::FACILITATOR_VERIFY_DURATION_SECONDS).record(elapsed);
+}
+
+#[cfg(feature = "metrics")]
+fn record_settle_metrics(
+    result: &Result<SettleResponse, FacilitatorError>,
+    elapsed: std::time::Duration,
+) {
+    let label = match result {
+        Ok(SettleResponse::Success { .. }) => "success",
+        Ok(SettleResponse::Failure { .. }) => "failure",
+        Err(_) => "error",
+    };
+    ::metrics::counter!(
+        crate::metrics::FACILITATOR_SETTLE_TOTAL,
+        "result" => label,
+    )
+    .increment(1);
+    ::metrics::histogram!(crate::metrics::FACILITATOR_SETTLE_DURATION_SECONDS).record(elapsed);
 }
 
 #[cfg(test)]
@@ -757,6 +822,258 @@ mod tests {
                 assert_eq!(reason, ErrorReason::InvalidPayload);
             }
             VerifyResponse::Valid { .. } => panic!("expected invalid"),
+        }
+    }
+
+    #[cfg(feature = "metrics")]
+    mod metrics_recording {
+        use std::future::Future;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        use metrics::{
+            Counter, CounterFn, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder,
+            SharedString, Unit,
+        };
+
+        use super::{
+            AbortSettleHook, AbortVerifyHook, Facilitator, FacilitatorError, HookedFacilitator,
+            MockFacilitator, RecoverVerifyHook, SettleRequest, SettleResponse, SupportedResponse,
+            VerifyRequest, VerifyResponse, dummy_settle, dummy_verify,
+        };
+        use crate::error::ErrorReason;
+        use crate::metrics::{
+            FACILITATOR_SETTLE_DURATION_SECONDS, FACILITATOR_SETTLE_TOTAL,
+            FACILITATOR_VERIFY_DURATION_SECONDS, FACILITATOR_VERIFY_TOTAL,
+        };
+        use crate::wire::Extensions;
+
+        struct Count(AtomicU64);
+
+        impl Count {
+            fn arc() -> Arc<Self> {
+                Arc::new(Self(AtomicU64::new(0)))
+            }
+
+            fn get(handle: &Arc<Self>) -> u64 {
+                handle.0.load(Ordering::Relaxed)
+            }
+        }
+
+        impl CounterFn for Count {
+            fn increment(&self, value: u64) {
+                self.0.fetch_add(value, Ordering::Relaxed);
+            }
+
+            fn absolute(&self, value: u64) {
+                self.0.store(value, Ordering::Relaxed);
+            }
+        }
+
+        impl HistogramFn for Count {
+            fn record(&self, _value: f64) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        struct Capture {
+            verify_valid: Arc<Count>,
+            verify_invalid: Arc<Count>,
+            verify_error: Arc<Count>,
+            verify_duration: Arc<Count>,
+            settle_success: Arc<Count>,
+            settle_failure: Arc<Count>,
+            settle_error: Arc<Count>,
+            settle_duration: Arc<Count>,
+        }
+
+        impl Capture {
+            fn new() -> Self {
+                Self {
+                    verify_valid: Count::arc(),
+                    verify_invalid: Count::arc(),
+                    verify_error: Count::arc(),
+                    verify_duration: Count::arc(),
+                    settle_success: Count::arc(),
+                    settle_failure: Count::arc(),
+                    settle_error: Count::arc(),
+                    settle_duration: Count::arc(),
+                }
+            }
+
+            fn counter_handle(&self, name: &str, result: &str) -> Option<Arc<Count>> {
+                Some(Arc::clone(match (name, result) {
+                    (FACILITATOR_VERIFY_TOTAL, "valid") => &self.verify_valid,
+                    (FACILITATOR_VERIFY_TOTAL, "invalid") => &self.verify_invalid,
+                    (FACILITATOR_VERIFY_TOTAL, "error") => &self.verify_error,
+                    (FACILITATOR_SETTLE_TOTAL, "success") => &self.settle_success,
+                    (FACILITATOR_SETTLE_TOTAL, "failure") => &self.settle_failure,
+                    (FACILITATOR_SETTLE_TOTAL, "error") => &self.settle_error,
+                    _ => return None,
+                }))
+            }
+
+            fn histogram_handle(&self, name: &str) -> Option<Arc<Count>> {
+                Some(Arc::clone(match name {
+                    FACILITATOR_VERIFY_DURATION_SECONDS => &self.verify_duration,
+                    FACILITATOR_SETTLE_DURATION_SECONDS => &self.settle_duration,
+                    _ => return None,
+                }))
+            }
+        }
+
+        impl Recorder for Capture {
+            fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+            fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+            fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+            fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+                let result = key
+                    .labels()
+                    .find(|label| label.key() == "result")
+                    .map_or("", |label| label.value());
+                self.counter_handle(key.name(), result)
+                    .map_or_else(Counter::noop, Counter::from_arc)
+            }
+
+            fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+                Gauge::noop()
+            }
+
+            fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+                self.histogram_handle(key.name())
+                    .map_or_else(Histogram::noop, Histogram::from_arc)
+            }
+        }
+
+        struct InvalidVerify;
+        impl Facilitator for InvalidVerify {
+            fn verify(
+                &self,
+                _request: VerifyRequest,
+            ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+                std::future::ready(Ok(VerifyResponse::invalid(
+                    None,
+                    ErrorReason::InvalidPayload,
+                )))
+            }
+            fn settle(
+                &self,
+                _request: SettleRequest,
+            ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+                std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
+            }
+            fn supported(
+                &self,
+            ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send
+            {
+                std::future::ready(Ok(SupportedResponse::default()))
+            }
+        }
+
+        struct FailedSettle;
+        impl Facilitator for FailedSettle {
+            fn verify(
+                &self,
+                _request: VerifyRequest,
+            ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+                std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
+            }
+            fn settle(
+                &self,
+                _request: SettleRequest,
+            ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+                std::future::ready(Ok(SettleResponse::Failure {
+                    reason: ErrorReason::UnexpectedSettleError,
+                    message: None,
+                    payer: None,
+                    network: "eip155:1".into(),
+                    extensions: Extensions::new(),
+                }))
+            }
+            fn supported(
+                &self,
+            ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send
+            {
+                std::future::ready(Ok(SupportedResponse::default()))
+            }
+        }
+
+        #[tokio::test]
+        async fn hooked_verify_records_result_and_duration() {
+            let capture = Capture::new();
+            let _guard = metrics::set_default_local_recorder(&capture);
+
+            let ok = HookedFacilitator::new(MockFacilitator::ok());
+            assert!(
+                ok.verify(dummy_verify()).await.unwrap().is_valid(),
+                "ok verify"
+            );
+
+            let recovered =
+                HookedFacilitator::new(MockFacilitator::failing()).with_hook(RecoverVerifyHook);
+            assert!(
+                recovered.verify(dummy_verify()).await.unwrap().is_valid(),
+                "recovered verify"
+            );
+
+            let invalid = HookedFacilitator::new(InvalidVerify);
+            assert!(
+                !invalid.verify(dummy_verify()).await.unwrap().is_valid(),
+                "invalid verify"
+            );
+
+            let failing = HookedFacilitator::new(MockFacilitator::failing());
+            assert!(
+                failing.verify(dummy_verify()).await.is_err(),
+                "failing verify"
+            );
+
+            let aborted = HookedFacilitator::new(MockFacilitator::ok()).with_hook(AbortVerifyHook);
+            assert!(
+                aborted.verify(dummy_verify()).await.is_err(),
+                "aborted verify"
+            );
+
+            assert_eq!(Count::get(&capture.verify_valid), 2, "valid+recovered");
+            assert_eq!(Count::get(&capture.verify_invalid), 1, "invalid");
+            assert_eq!(Count::get(&capture.verify_error), 2, "error+abort");
+            assert_eq!(Count::get(&capture.verify_duration), 5, "verify samples");
+        }
+
+        #[tokio::test]
+        async fn hooked_settle_records_result_and_duration() {
+            let capture = Capture::new();
+            let _guard = metrics::set_default_local_recorder(&capture);
+
+            let ok = HookedFacilitator::new(MockFacilitator::ok());
+            assert!(
+                ok.settle(dummy_settle()).await.unwrap().is_success(),
+                "ok settle"
+            );
+
+            let failed = HookedFacilitator::new(FailedSettle);
+            assert!(
+                !failed.settle(dummy_settle()).await.unwrap().is_success(),
+                "failed settle"
+            );
+
+            let failing = HookedFacilitator::new(MockFacilitator::failing());
+            assert!(
+                failing.settle(dummy_settle()).await.is_err(),
+                "failing settle"
+            );
+
+            let aborted = HookedFacilitator::new(MockFacilitator::ok()).with_hook(AbortSettleHook);
+            assert!(
+                aborted.settle(dummy_settle()).await.is_err(),
+                "aborted settle"
+            );
+
+            assert_eq!(Count::get(&capture.settle_success), 1, "success");
+            assert_eq!(Count::get(&capture.settle_failure), 1, "failure");
+            assert_eq!(Count::get(&capture.settle_error), 2, "error+abort");
+            assert_eq!(Count::get(&capture.settle_duration), 4, "settle samples");
         }
     }
 }
