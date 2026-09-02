@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "XRPL chain support for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "xrpl", "xrp", "rlusd"]
 categories = [
     "api-bindings",
@@ -19,58 +18,6 @@ categories = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-
-[features]
-default = []
-telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
-client = [
-    "dep:hex",
-    "dep:reqwest",
-    "dep:rust_decimal",
-    "dep:serde_json",
-    "dep:sha2",
-    "dep:tokio",
-    "dep:url",
-]
-server = ["dep:serde_json"]
-facilitator = [
-    "dep:hex",
-    "dep:reqwest",
-    "dep:rust_decimal",
-    "dep:serde_json",
-    "dep:sha2",
-    "dep:tokio",
-    "dep:url",
-    "r402-core/cache",
-]
-full = ["telemetry", "client", "server", "facilitator"]
-
-[dependencies]
-compact_str = { workspace = true }
-r402-core = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
-# core + models only. Transport is workspace reqwest; do not enable wallet,
-# websocket, std, or json-rpc (std pulls tungstenite/reqwest 0.12).
-xrpl-rust = { workspace = true, default-features = false, features = ["core", "models"] }
-
-hex = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
-rust_decimal = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-sha2 = { version = "0.10", default-features = false, features = ["std"], optional = true }
-tokio = { workspace = true, optional = true, features = ["time"] }
-tracing = { workspace = true, optional = true }
-tracing-core = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-
-[dev-dependencies]
-hex = { workspace = true }
-serde_json = { workspace = true }
-sha2 = { version = "0.10", default-features = false, features = ["std"] }
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
-wiremock = { workspace = true }
-xrpl-rust = { workspace = true, default-features = false, features = ["core", "models"] }
 
 [lints]
 workspace = true

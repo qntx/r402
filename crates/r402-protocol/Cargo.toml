@@ -1,18 +1,19 @@
 [package]
-name = "r402-algorand"
+name = "r402-protocol"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Algorand chain support for the x402 payment protocol."
-keywords = ["x402", "payment", "algorand", "asa", "usdc"]
+description = "Wire types, CAIP-2, scheme markers, and money for the x402 payment protocol."
+keywords = ["x402", "payment", "protocol", "http-402", "caip"]
 categories = [
     "api-bindings",
-    "cryptography::cryptocurrencies",
+    "encoding",
+    "data-structures",
     "web-programming",
-    "asynchronous",
+    "cryptography::cryptocurrencies",
 ]
 
 [package.metadata.docs.rs]

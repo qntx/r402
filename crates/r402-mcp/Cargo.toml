@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "MCP transport for the x402 payment protocol (official rmcp SDK)."
-readme = "README.md"
 keywords = ["x402", "payment", "mcp", "ai", "http-402"]
 categories = [
     "api-bindings",
@@ -18,26 +17,6 @@ categories = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-
-[features]
-default = []
-telemetry = ["r402-core/telemetry", "dep:tracing"]
-# Server types use rmcp model (CallToolResult, meta) — no transport required.
-server = ["dep:rmcp", "dep:thiserror"]
-# Client types + rmcp `ServiceError` adapter.
-client = ["dep:rmcp", "dep:thiserror", "rmcp/client"]
-full = ["telemetry", "server", "client"]
-
-[dependencies]
-r402-core = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-rmcp = { workspace = true, optional = true, default-features = false }
-thiserror = { workspace = true, optional = true }
-tracing = { workspace = true, optional = true }
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

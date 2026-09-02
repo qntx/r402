@@ -1,0 +1,17 @@
+[package]
+name = "r402-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+description = "JSON contract assertions for the x402 payment protocol."
+keywords = ["x402", "payment", "contract"]
+categories = [
+    "development-tools::testing",
+]
+
+[lints]
+workspace = true

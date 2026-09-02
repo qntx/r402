@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "TON (TVM) chain support for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "ton", "tvm", "usdt"]
 categories = [
     "api-bindings",
@@ -19,47 +18,6 @@ categories = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-
-[features]
-default = []
-telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
-client = ["dep:ed25519-dalek", "dep:reqwest", "dep:tokio", "dep:url"]
-server = []
-facilitator = [
-    "dep:ed25519-dalek",
-    "dep:rand",
-    "dep:reqwest",
-    "dep:tokio",
-    "dep:url",
-    "r402-core/cache",
-]
-full = ["telemetry", "client", "server", "facilitator"]
-
-[dependencies]
-base64 = { workspace = true }
-compact_str = { workspace = true }
-hex = { workspace = true }
-num-bigint = "0.4"
-num-traits = "0.2"
-r402-core = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-# Cell/BoC only. Never enable tonlib-client / tonlib-sys (C++ tonlibjson).
-tonlib-core = { workspace = true }
-
-ed25519-dalek = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true, features = ["sync", "time"] }
-tracing = { workspace = true, optional = true }
-tracing-core = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-
-[dev-dependencies]
-ed25519-dalek = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
-wiremock = { workspace = true }
 
 [lints]
 workspace = true

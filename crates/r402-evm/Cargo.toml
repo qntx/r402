@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "EIP-155 (EVM) chain support for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "ethereum", "evm", "eip-3009"]
 categories = [
     "api-bindings",
@@ -19,66 +18,6 @@ categories = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
-
-[features]
-default = []
-telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
-
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
-client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
-server = []
-facilitator = [
-    "dep:alloy-contract",
-    "dep:alloy-network",
-    "dep:alloy-provider",
-    "dep:alloy-rpc-client",
-    "dep:alloy-rpc-types-eth",
-    "dep:alloy-signer",
-    "dep:alloy-signer-local",
-    "dep:alloy-sol-types",
-    "dep:alloy-transport",
-    "dep:alloy-transport-http",
-    "dep:async-trait",
-    "dep:dashmap",
-    "dep:tokio",
-    "dep:tower",
-    "dep:url",
-    "r402-core/cache",
-]
-full = ["telemetry", "client", "client-provider", "server", "facilitator"]
-
-[dependencies]
-alloy-primitives = { workspace = true }
-alloy-sol-types = { workspace = true, optional = true }
-compact_str = { workspace = true }
-r402-core = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-
-alloy-contract = { workspace = true, optional = true }
-alloy-network = { workspace = true, optional = true }
-alloy-provider = { workspace = true, optional = true }
-alloy-rpc-client = { workspace = true, optional = true }
-alloy-rpc-types-eth = { workspace = true, optional = true }
-alloy-signer = { workspace = true, optional = true }
-alloy-signer-local = { workspace = true, optional = true }
-alloy-transport = { workspace = true, optional = true }
-alloy-transport-http = { workspace = true, optional = true }
-async-trait = { workspace = true, optional = true }
-dashmap = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-tower = { workspace = true, optional = true }
-tracing = { workspace = true, optional = true }
-tracing-core = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-
-[dev-dependencies]
-alloy-provider = { workspace = true }
-alloy-transport-http = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
-url = { workspace = true }
 
 [lints]
 workspace = true

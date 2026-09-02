@@ -1,4 +1,4 @@
-//! NEAR chain support for the x402 payment protocol.
+//! Buyer register, select, and `spendControls` for the x402 payment protocol.
 
 #[cfg(test)]
 mod tests {
@@ -6,7 +6,7 @@ mod tests {
     fn crate_loads() {
         assert_eq!(
             env!("CARGO_PKG_NAME"),
-            "r402-near",
+            "r402-client",
             "package name must match the crate directory"
         );
     }
