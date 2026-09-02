@@ -92,21 +92,26 @@ where
                     .and_then(Value::as_str)
                     .map(CompactString::from),
                 extensions: Extensions::new(),
+                extra: None,
             },
             NearReceiptStatus::Failure { error } => SettleResponse::Failure {
                 reason: ErrorReason::from_wire("settlement_failed"),
                 message: Some(error.into()),
+                transaction: Default::default(),
                 payer,
                 network: network.into(),
                 extensions: Extensions::new(),
+                extra: None,
             },
         },
         Err(err) => SettleResponse::Failure {
             reason: ErrorReason::from_wire("settlement_failed"),
             message: Some(err.to_string().into()),
+            transaction: Default::default(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         },
     }
 }
@@ -119,8 +124,10 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
+        transaction: Default::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }

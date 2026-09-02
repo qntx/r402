@@ -121,8 +121,10 @@ fn settle_failure_emits_empty_transaction() {
         reason: ErrorReason::DuplicateSettlement,
         message: Some("already processed".into()),
         payer: Some("0xpayer".into()),
+        transaction: compact_str::CompactString::default(),
         network: "eip155:8453".into(),
         extensions: Extensions::new(),
+        extra: None,
     };
     let json = serde_json::to_value(&failure).unwrap();
     assert_eq!(
@@ -132,6 +134,25 @@ fn settle_failure_emits_empty_transaction() {
     assert_eq!(json["errorReason"], "duplicate_settlement");
     let back: SettleResponse = serde_json::from_value(json).unwrap();
     assert_eq!(back, failure);
+}
+
+#[test]
+fn settle_failure_pending_roundtrips_non_empty_transaction() {
+    let failure = SettleResponse::Failure {
+        reason: ErrorReason::SettlementPending,
+        message: Some("receipt wait timed out".into()),
+        payer: Some("0xpayer".into()),
+        transaction: "0xabc".into(),
+        network: "eip155:8453".into(),
+        extensions: Extensions::new(),
+        extra: None,
+    };
+    let json = serde_json::to_value(&failure).unwrap();
+    assert_eq!(json["errorReason"], "settlement_pending");
+    assert_eq!(json["transaction"], "0xabc");
+    let back: SettleResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(back, failure);
+    assert!(back.is_retryable_settlement_pending());
 }
 
 /// `VerifyResponse::Invalid` must serialise machine-readable error codes

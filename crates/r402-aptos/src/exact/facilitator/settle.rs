@@ -74,13 +74,16 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extra: None,
         },
         Err(err) => SettleResponse::Failure {
             reason: ErrorReason::from_wire("transaction_failed"),
             message: Some(err.to_string().into()),
+            transaction: Default::default(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         },
     }
 }
@@ -93,8 +96,10 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
+        transaction: Default::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }

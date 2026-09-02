@@ -277,6 +277,7 @@ mod tests {
             network: "eip155:1".into(),
             amount: Some("1".into()),
             extensions: Extensions::new(),
+            extra: None,
         };
         let result = CallToolResult::success(vec![ContentBlock::text("ok")]);
         let result = attach_settle_response(result, &settle);

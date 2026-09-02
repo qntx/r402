@@ -26,6 +26,7 @@ pub mod client;
 pub mod error;
 pub mod extensions;
 pub mod facilitator;
+pub mod pending_settlement;
 pub mod resource_server;
 pub mod scheme;
 pub mod wire;
@@ -60,6 +61,9 @@ pub use error::{
 pub use facilitator::{
     BoxFuture, DynFacilitator, DynFacilitatorHooks, Facilitator, FacilitatorHooks, FailureRecovery,
     HookDecision, HookedFacilitator,
+};
+pub use pending_settlement::{
+    InMemoryPendingSettlementStore, PENDING_SETTLEMENT_TTL, PendingSettlementStore,
 };
 #[cfg(test)]
 use proptest as _;

@@ -557,6 +557,7 @@ mod tests {
                     network: "eip155:1".into(),
                     amount: None,
                     extensions: Extensions::new(),
+                    extra: None,
                 })
             };
             std::future::ready(result)
@@ -619,6 +620,7 @@ mod tests {
                 network: "eip155:1".into(),
                 amount: None,
                 extensions: Extensions::new(),
+                extra: None,
             }))
         }
     }

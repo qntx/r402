@@ -381,6 +381,16 @@ pub enum ErrorReason {
     /// Unexpected error occurred during payment settlement.
     /// Wire code: `unexpected_settle_error`.
     UnexpectedSettleError,
+    /// Settlement was broadcast but confirmation could not be established.
+    /// Wire code: `settlement_pending`.
+    ///
+    /// Non-terminal: the transaction may still confirm. A
+    /// [`crate::wire::SettleResponse::Failure`] with this reason MUST carry a
+    /// non-empty `transaction` (spec §9). A [`crate::facilitator::Facilitator::settle`]
+    /// impl MUST NOT emit this code unless it writes that hash into a
+    /// [`crate::PendingSettlementStore`] on the first attempt and reads it on
+    /// the retry to reconcile instead of broadcasting again.
+    SettlementPending,
 
     // Cross-chain reserved codes (SDK consensus).
     /// Facilitator detected a duplicate settlement attempt and rejected it.
@@ -456,6 +466,7 @@ impl ErrorReason {
             Self::InvalidTransactionState => "invalid_transaction_state",
             Self::UnexpectedVerifyError => "unexpected_verify_error",
             Self::UnexpectedSettleError => "unexpected_settle_error",
+            Self::SettlementPending => "settlement_pending",
             Self::DuplicateSettlement => "duplicate_settlement",
             Self::NonceAlreadyUsed => "nonce_already_used",
             Self::Permit2AllowanceRequired => "permit2_allowance_required",
@@ -502,6 +513,7 @@ impl ErrorReason {
             "invalid_transaction_state" => Self::InvalidTransactionState,
             "unexpected_verify_error" => Self::UnexpectedVerifyError,
             "unexpected_settle_error" => Self::UnexpectedSettleError,
+            "settlement_pending" => Self::SettlementPending,
             "duplicate_settlement" => Self::DuplicateSettlement,
             "nonce_already_used" => Self::NonceAlreadyUsed,
             "permit2_allowance_required" => Self::Permit2AllowanceRequired,
@@ -599,4 +611,25 @@ impl PaymentProblem {
 pub trait AsPaymentProblem {
     /// Produces the canonical wire-level payment problem.
     fn as_payment_problem(&self) -> PaymentProblem;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ErrorReason;
+
+    #[test]
+    fn settlement_pending_wire_code() {
+        assert_eq!(
+            ErrorReason::SettlementPending.as_str(),
+            "settlement_pending"
+        );
+        assert_eq!(
+            ErrorReason::from_wire("settlement_pending"),
+            ErrorReason::SettlementPending
+        );
+        let json = serde_json::to_value(ErrorReason::SettlementPending).unwrap();
+        assert_eq!(json, serde_json::json!("settlement_pending"));
+        let back: ErrorReason = serde_json::from_value(json).unwrap();
+        assert_eq!(back, ErrorReason::SettlementPending);
+    }
 }

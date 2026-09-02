@@ -177,6 +177,7 @@ where
             network: network.into(),
             amount: Some(actual_amount.to_string().into()),
             extensions: wire::Extensions::new(),
+            extra: None,
         })
     }
 

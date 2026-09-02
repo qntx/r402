@@ -350,9 +350,29 @@ impl ResourceServer {
         requirements: &PaymentRequirements,
     ) -> Result<SettleResponse, FacilitatorError> {
         let request = build_settle_request(payload, requirements)?;
-        match DynFacilitator::settle(self.facilitator.as_ref(), request).await {
+        match self.settle_with_pending_retry(request).await {
             Ok(r) => Ok(r),
             Err(error) => self.recover_settle(payment, error).await,
+        }
+    }
+
+    /// Calls facilitator settle once, then retries identically iff the outcome
+    /// is [`crate::error::ErrorReason::SettlementPending`] with a non-empty
+    /// transaction hash.
+    ///
+    /// No sleep or backoff: the mechanism owns any bounded receipt wait.
+    /// Capped at one retry. The facilitator MUST have written that hash into
+    /// a [`crate::PendingSettlementStore`] before emitting the code.
+    async fn settle_with_pending_retry(
+        &self,
+        request: SettleRequest,
+    ) -> Result<SettleResponse, FacilitatorError> {
+        let first = DynFacilitator::settle(self.facilitator.as_ref(), request.clone()).await;
+        match &first {
+            Ok(response) if response.is_retryable_settlement_pending() => {
+                DynFacilitator::settle(self.facilitator.as_ref(), request).await
+            }
+            _ => first,
         }
     }
 
@@ -495,6 +515,8 @@ mod tests {
     use std::future::Future;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use compact_str::CompactString;
+
     use super::*;
     use crate::wire::{Extensions, SupportedResponse};
 
@@ -533,6 +555,7 @@ mod tests {
                     network: "eip155:1".into(),
                     amount: Some("1".into()),
                     extensions: Extensions::new(),
+                    extra: None,
                 })
             };
             std::future::ready(result)
@@ -755,5 +778,159 @@ mod tests {
         guard.cancel(CancelReason::HandlerThrew, None, None).await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(guard.has_fired());
+    }
+
+    fn pending_failure(transaction: &str) -> SettleResponse {
+        SettleResponse::Failure {
+            reason: crate::error::ErrorReason::SettlementPending,
+            message: None,
+            payer: None,
+            transaction: transaction.into(),
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+            extra: None,
+        }
+    }
+
+    fn terminal_failure() -> SettleResponse {
+        SettleResponse::Failure {
+            reason: crate::error::ErrorReason::UnexpectedSettleError,
+            message: None,
+            payer: None,
+            transaction: CompactString::default(),
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+            extra: None,
+        }
+    }
+
+    fn success_settle(transaction: &str) -> SettleResponse {
+        SettleResponse::Success {
+            payer: "0xpayer".into(),
+            transaction: transaction.into(),
+            network: "eip155:8453".into(),
+            amount: None,
+            extensions: Extensions::new(),
+            extra: None,
+        }
+    }
+
+    struct QueueFacilitator {
+        settles:
+            std::sync::Mutex<std::collections::VecDeque<Result<SettleResponse, FacilitatorError>>>,
+        settle_calls: AtomicUsize,
+        requests: std::sync::Mutex<Vec<SettleRequest>>,
+    }
+
+    impl QueueFacilitator {
+        fn new(responses: Vec<Result<SettleResponse, FacilitatorError>>) -> Arc<Self> {
+            Arc::new(Self {
+                settles: std::sync::Mutex::new(responses.into()),
+                settle_calls: AtomicUsize::new(0),
+                requests: std::sync::Mutex::new(Vec::new()),
+            })
+        }
+    }
+
+    impl Facilitator for QueueFacilitator {
+        fn verify(
+            &self,
+            _request: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            self.settle_calls.fetch_add(1, Ordering::SeqCst);
+            self.requests.lock().unwrap().push(request);
+            let next = self
+                .settles
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Ok(success_settle("0xfallback")));
+            std::future::ready(next)
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_retry_on_success() {
+        let mock = QueueFacilitator::new(vec![Ok(success_settle("0x1"))]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        assert!(result.is_success());
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_retry_on_terminal_failure() {
+        let mock = QueueFacilitator::new(vec![Ok(terminal_failure())]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        assert!(!result.is_success());
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn settle_retries_once_on_pending_then_success() {
+        let mock = QueueFacilitator::new(vec![
+            Ok(pending_failure("0xpending")),
+            Ok(success_settle("0xconfirmed")),
+        ]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        assert!(matches!(
+            result,
+            SettleResponse::Success { ref transaction, .. } if transaction == "0xconfirmed"
+        ));
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 2);
+        let requests = mock.requests.lock().unwrap();
+        assert_eq!(
+            requests[0].clone().into_json(),
+            requests[1].clone().into_json()
+        );
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_retry_pending_with_empty_transaction() {
+        let mock = QueueFacilitator::new(vec![Ok(pending_failure(""))]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        assert!(!result.is_success());
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn settle_caps_retry_when_second_attempt_still_pending() {
+        let mock = QueueFacilitator::new(vec![
+            Ok(pending_failure("0xfirst")),
+            Ok(pending_failure("0xsecond")),
+        ]);
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let result = rs.settle_payment(&payload, &req, None).await.unwrap();
+        assert!(matches!(
+            result,
+            SettleResponse::Failure { ref transaction, .. } if transaction == "0xsecond"
+        ));
+        assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 2);
     }
 }

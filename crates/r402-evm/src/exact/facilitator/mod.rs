@@ -305,6 +305,7 @@ where
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
                     extensions: wire::Extensions::new(),
+                    extra: None,
                 })
             }
             ExactPayload::Permit2(permit2) => {
@@ -324,6 +325,7 @@ where
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
                     extensions: wire::Extensions::new(),
+                    extra: None,
                 })
             }
         }

@@ -227,6 +227,7 @@ where
             network: requirements.network.to_string().into(),
             amount: Some(requirements.amount.0.to_string().into()),
             extensions: Extensions::new(),
+            extra: None,
         })
     }
 

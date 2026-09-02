@@ -99,14 +99,17 @@ where
                         .and_then(Value::as_str)
                         .map(CompactString::from),
                     extensions: Extensions::new(),
+                    extra: None,
                 }
             } else {
                 SettleResponse::Failure {
                     reason: ErrorReason::from_wire("settle_exact_stellar_transaction_failed"),
                     message: None,
                     payer: Some(payer),
+                    transaction: Default::default(),
                     network: network.into(),
                     extensions: Extensions::new(),
+                    extra: None,
                 }
             }
         }
@@ -127,16 +130,20 @@ where
                 reason,
                 message: Some(message.into()),
                 payer: Some(payer),
+                transaction: Default::default(),
                 network: network.into(),
                 extensions: Extensions::new(),
+                extra: None,
             }
         }
         Err(err) => SettleResponse::Failure {
             reason: ErrorReason::from_wire("unexpected_settle_error"),
             message: Some(err.to_string().into()),
             payer: Some(payer),
+            transaction: Default::default(),
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         },
     }
 }
@@ -149,8 +156,10 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
+        transaction: Default::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }

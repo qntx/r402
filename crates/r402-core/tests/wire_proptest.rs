@@ -160,6 +160,7 @@ fn arb_error_reason() -> impl Strategy<Value = ErrorReason> {
         Just(ErrorReason::InvalidPayload),
         Just(ErrorReason::InvalidNetwork),
         Just(ErrorReason::UnexpectedSettleError),
+        Just(ErrorReason::SettlementPending),
         Just(ErrorReason::DuplicateSettlement),
         Just(ErrorReason::Permit2AllowanceRequired),
         Just(ErrorReason::InvalidExactSolanaPayloadMemoMismatch),
@@ -170,22 +171,41 @@ fn arb_error_reason() -> impl Strategy<Value = ErrorReason> {
     ]
 }
 
+fn arb_extra() -> impl Strategy<Value = Option<serde_json::Value>> {
+    // Null is excluded: `skip_serializing_if = Option::is_none` drops Some(Null).
+    let value = prop_oneof![
+        any::<bool>().prop_map(serde_json::Value::Bool),
+        any::<i64>().prop_map(serde_json::Value::from),
+        arb_compact_string().prop_map(|s| serde_json::Value::String(s.to_string())),
+    ];
+    proptest::option::of(value)
+}
+
 fn arb_verify_response() -> impl Strategy<Value = VerifyResponse> {
     prop_oneof![
-        (arb_compact_string(), arb_extensions())
-            .prop_map(|(payer, extensions)| { VerifyResponse::Valid { payer, extensions } }),
+        (arb_compact_string(), arb_extensions(), arb_extra()).prop_map(
+            |(payer, extensions, extra)| {
+                VerifyResponse::Valid {
+                    payer,
+                    extensions,
+                    extra,
+                }
+            }
+        ),
         (
             arb_error_reason(),
             proptest::option::of(arb_compact_string()),
             proptest::option::of(arb_compact_string()),
             arb_extensions(),
+            arb_extra(),
         )
-            .prop_map(|(reason, message, payer, extensions)| {
+            .prop_map(|(reason, message, payer, extensions, extra)| {
                 VerifyResponse::Invalid {
                     reason,
                     message,
                     payer,
                     extensions,
+                    extra,
                 }
             }),
     ]
@@ -207,32 +227,46 @@ fn arb_settle_response() -> impl Strategy<Value = SettleResponse> {
             arb_compact_string(),           // network
             proptest::option::of("[0-9]{1,20}".prop_map(CompactString::from)),
             arb_extensions(),
+            arb_extra(),
         )
-            .prop_map(|(payer, transaction, network, amount, extensions)| {
+            .prop_map(|(payer, transaction, network, amount, extensions, extra)| {
                 SettleResponse::Success {
                     payer,
                     transaction,
                     network,
                     amount,
                     extensions,
+                    extra,
                 }
             }),
         (
             arb_error_reason(),
             proptest::option::of(arb_compact_string()),
             proptest::option::of(arb_compact_string()),
+            arb_compact_string(), // transaction (empty allowed except settlement_pending)
             arb_compact_string(),
             arb_extensions(),
+            arb_extra(),
         )
-            .prop_map(|(reason, message, payer, network, extensions)| {
-                SettleResponse::Failure {
-                    reason,
-                    message,
-                    payer,
-                    network,
-                    extensions,
+            .prop_map(
+                |(reason, message, payer, transaction, network, extensions, extra)| {
+                    let transaction =
+                        if reason == ErrorReason::SettlementPending && transaction.is_empty() {
+                            CompactString::from("0xpending")
+                        } else {
+                            transaction
+                        };
+                    SettleResponse::Failure {
+                        reason,
+                        message,
+                        payer,
+                        transaction,
+                        network,
+                        extensions,
+                        extra,
+                    }
                 }
-            }),
+            ),
     ]
 }
 
