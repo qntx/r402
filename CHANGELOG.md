@@ -15,9 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
-- `HookedFacilitator` records `r402_facilitator_verify_total` /
-  `r402_facilitator_settle_total` and the matching duration histograms when
-  the `metrics` feature is enabled.
+- `ResourceServer` records `r402_facilitator_verify_total` /
+  `r402_facilitator_settle_total` and the matching duration histograms on
+  the inner facilitator call when the `metrics` feature is enabled. The
+  default HTTP/MCP path emits without wrapping in `HookedFacilitator`.
 
 ## [0.17.1] — 2026-08-20
 

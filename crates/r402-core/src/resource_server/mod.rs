@@ -320,14 +320,19 @@ impl ResourceServer {
         requirements: &PaymentRequirements,
     ) -> Result<VerifyResponse, FacilitatorError> {
         let request = build_verify_request(payload, requirements)?;
-        match DynFacilitator::verify(self.facilitator.as_ref(), request).await {
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let result = match DynFacilitator::verify(self.facilitator.as_ref(), request).await {
             Ok(r) if r.is_valid() => Ok(r),
             Ok(invalid) => {
                 let error = facilitator_error_from_invalid(&invalid);
                 self.recover_verify(payment, error).await.or(Ok(invalid))
             }
             Err(error) => self.recover_verify(payment, error).await,
-        }
+        };
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_verify(&result, started.elapsed());
+        result
     }
 
     async fn recover_verify(
@@ -350,10 +355,15 @@ impl ResourceServer {
         requirements: &PaymentRequirements,
     ) -> Result<SettleResponse, FacilitatorError> {
         let request = build_settle_request(payload, requirements)?;
-        match DynFacilitator::settle(self.facilitator.as_ref(), request).await {
+        #[cfg(feature = "metrics")]
+        let started = std::time::Instant::now();
+        let result = match DynFacilitator::settle(self.facilitator.as_ref(), request).await {
             Ok(r) => Ok(r),
             Err(error) => self.recover_settle(payment, error).await,
-        }
+        };
+        #[cfg(feature = "metrics")]
+        crate::metrics::record_settle(&result, started.elapsed());
+        result
     }
 
     async fn recover_settle(
@@ -755,5 +765,318 @@ mod tests {
         guard.cancel(CancelReason::HandlerThrew, None, None).await;
         assert_eq!(count.load(Ordering::SeqCst), 1);
         assert!(guard.has_fired());
+    }
+
+    #[cfg(feature = "metrics")]
+    mod metrics_recording {
+        use std::future::Future;
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        use metrics::{
+            Counter, CounterFn, Gauge, Histogram, HistogramFn, Key, KeyName, Metadata, Recorder,
+            SharedString, Unit,
+        };
+
+        use super::{
+            AbortBeforeVerify, Facilitator, FacilitatorError, MockFacilitator, RecoverVerify,
+            ResourceServer, SkipVerify, SupportedResponse, VerifyRequest, VerifyResponse, mock_ok,
+            sample_payload,
+        };
+        use crate::error::ErrorReason;
+        use crate::metrics::{
+            FACILITATOR_SETTLE_DURATION_SECONDS, FACILITATOR_SETTLE_TOTAL,
+            FACILITATOR_VERIFY_DURATION_SECONDS, FACILITATOR_VERIFY_TOTAL,
+        };
+        use crate::wire::{Extensions, SettleRequest, SettleResponse};
+
+        struct Count(AtomicU64);
+
+        impl Count {
+            fn arc() -> Arc<Self> {
+                Arc::new(Self(AtomicU64::new(0)))
+            }
+
+            fn get(handle: &Arc<Self>) -> u64 {
+                handle.0.load(Ordering::Relaxed)
+            }
+        }
+
+        impl CounterFn for Count {
+            fn increment(&self, value: u64) {
+                self.0.fetch_add(value, Ordering::Relaxed);
+            }
+
+            fn absolute(&self, value: u64) {
+                self.0.store(value, Ordering::Relaxed);
+            }
+        }
+
+        impl HistogramFn for Count {
+            fn record(&self, _value: f64) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        struct Capture {
+            verify_valid: Arc<Count>,
+            verify_invalid: Arc<Count>,
+            verify_error: Arc<Count>,
+            verify_duration: Arc<Count>,
+            settle_success: Arc<Count>,
+            settle_failure: Arc<Count>,
+            settle_error: Arc<Count>,
+            settle_duration: Arc<Count>,
+        }
+
+        impl Capture {
+            fn new() -> Self {
+                Self {
+                    verify_valid: Count::arc(),
+                    verify_invalid: Count::arc(),
+                    verify_error: Count::arc(),
+                    verify_duration: Count::arc(),
+                    settle_success: Count::arc(),
+                    settle_failure: Count::arc(),
+                    settle_error: Count::arc(),
+                    settle_duration: Count::arc(),
+                }
+            }
+
+            fn counter_handle(&self, name: &str, result: &str) -> Option<Arc<Count>> {
+                Some(Arc::clone(match (name, result) {
+                    (FACILITATOR_VERIFY_TOTAL, "valid") => &self.verify_valid,
+                    (FACILITATOR_VERIFY_TOTAL, "invalid") => &self.verify_invalid,
+                    (FACILITATOR_VERIFY_TOTAL, "error") => &self.verify_error,
+                    (FACILITATOR_SETTLE_TOTAL, "success") => &self.settle_success,
+                    (FACILITATOR_SETTLE_TOTAL, "failure") => &self.settle_failure,
+                    (FACILITATOR_SETTLE_TOTAL, "error") => &self.settle_error,
+                    _ => return None,
+                }))
+            }
+
+            fn histogram_handle(&self, name: &str) -> Option<Arc<Count>> {
+                Some(Arc::clone(match name {
+                    FACILITATOR_VERIFY_DURATION_SECONDS => &self.verify_duration,
+                    FACILITATOR_SETTLE_DURATION_SECONDS => &self.settle_duration,
+                    _ => return None,
+                }))
+            }
+        }
+
+        impl Recorder for Capture {
+            fn describe_counter(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+            fn describe_gauge(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+            fn describe_histogram(&self, _: KeyName, _: Option<Unit>, _: SharedString) {}
+
+            fn register_counter(&self, key: &Key, _: &Metadata<'_>) -> Counter {
+                let result = key
+                    .labels()
+                    .find(|label| label.key() == "result")
+                    .map_or("", |label| label.value());
+                self.counter_handle(key.name(), result)
+                    .map_or_else(Counter::noop, Counter::from_arc)
+            }
+
+            fn register_gauge(&self, _: &Key, _: &Metadata<'_>) -> Gauge {
+                Gauge::noop()
+            }
+
+            fn register_histogram(&self, key: &Key, _: &Metadata<'_>) -> Histogram {
+                self.histogram_handle(key.name())
+                    .map_or_else(Histogram::noop, Histogram::from_arc)
+            }
+        }
+
+        struct InvalidVerify;
+        impl Facilitator for InvalidVerify {
+            fn verify(
+                &self,
+                _request: VerifyRequest,
+            ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+                std::future::ready(Ok(VerifyResponse::invalid(
+                    None,
+                    ErrorReason::InvalidPayload,
+                )))
+            }
+            fn settle(
+                &self,
+                _request: SettleRequest,
+            ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+                std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
+            }
+            fn supported(
+                &self,
+            ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send
+            {
+                std::future::ready(Ok(SupportedResponse::default()))
+            }
+        }
+
+        struct FailedSettle;
+        impl Facilitator for FailedSettle {
+            fn verify(
+                &self,
+                _request: VerifyRequest,
+            ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+                std::future::ready(Err(FacilitatorError::Onchain("unreachable".into())))
+            }
+            fn settle(
+                &self,
+                _request: SettleRequest,
+            ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+                std::future::ready(Ok(SettleResponse::Failure {
+                    reason: ErrorReason::UnexpectedSettleError,
+                    message: None,
+                    payer: None,
+                    network: "eip155:1".into(),
+                    extensions: Extensions::new(),
+                }))
+            }
+            fn supported(
+                &self,
+            ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send
+            {
+                std::future::ready(Ok(SupportedResponse::default()))
+            }
+        }
+
+        #[tokio::test]
+        async fn resource_server_verify_records_without_hooked_wrapper() {
+            let capture = Capture::new();
+            let _guard = metrics::set_default_local_recorder(&capture);
+            let payload = sample_payload();
+            let req = payload.accepted.clone();
+
+            let ok = ResourceServer::new(mock_ok());
+            assert!(
+                ok.verify_payment(&payload, &req)
+                    .await
+                    .unwrap()
+                    .response
+                    .is_valid(),
+                "ok verify"
+            );
+
+            let recovered = ResourceServer::new(Arc::new(MockFacilitator {
+                verifies: std::sync::atomic::AtomicUsize::new(0),
+                settles: std::sync::atomic::AtomicUsize::new(0),
+                fail_verify: true,
+                fail_settle: false,
+            }))
+            .with_hook(RecoverVerify);
+            assert!(
+                recovered
+                    .verify_payment(&payload, &req)
+                    .await
+                    .unwrap()
+                    .response
+                    .is_valid(),
+                "recovered verify"
+            );
+
+            let invalid = ResourceServer::new(Arc::new(InvalidVerify));
+            assert!(
+                !invalid
+                    .verify_payment(&payload, &req)
+                    .await
+                    .unwrap()
+                    .response
+                    .is_valid(),
+                "invalid verify"
+            );
+
+            let failing = ResourceServer::new(Arc::new(MockFacilitator {
+                verifies: std::sync::atomic::AtomicUsize::new(0),
+                settles: std::sync::atomic::AtomicUsize::new(0),
+                fail_verify: true,
+                fail_settle: false,
+            }));
+            assert!(
+                failing.verify_payment(&payload, &req).await.is_err(),
+                "failing verify"
+            );
+
+            assert_eq!(Count::get(&capture.verify_valid), 2, "valid+recovered");
+            assert_eq!(Count::get(&capture.verify_invalid), 1, "invalid");
+            assert_eq!(Count::get(&capture.verify_error), 1, "error");
+            assert_eq!(Count::get(&capture.verify_duration), 4, "verify samples");
+        }
+
+        #[tokio::test]
+        async fn resource_server_skip_and_abort_do_not_record_verify() {
+            let capture = Capture::new();
+            let _guard = metrics::set_default_local_recorder(&capture);
+            let payload = sample_payload();
+            let req = payload.accepted.clone();
+
+            let skipped = ResourceServer::new(mock_ok()).with_hook(SkipVerify);
+            assert!(
+                skipped
+                    .verify_payment(&payload, &req)
+                    .await
+                    .unwrap()
+                    .response
+                    .is_valid(),
+                "skipped verify"
+            );
+
+            let aborted = ResourceServer::new(mock_ok()).with_hook(AbortBeforeVerify);
+            assert!(
+                aborted.verify_payment(&payload, &req).await.is_err(),
+                "aborted verify"
+            );
+
+            assert_eq!(Count::get(&capture.verify_valid), 0, "skip is not a verify");
+            assert_eq!(
+                Count::get(&capture.verify_error),
+                0,
+                "abort is not a verify"
+            );
+            assert_eq!(Count::get(&capture.verify_duration), 0, "no duration");
+        }
+
+        #[tokio::test]
+        async fn resource_server_settle_records_without_hooked_wrapper() {
+            let capture = Capture::new();
+            let _guard = metrics::set_default_local_recorder(&capture);
+            let payload = sample_payload();
+            let req = payload.accepted.clone();
+
+            let ok = ResourceServer::new(mock_ok());
+            assert!(
+                ok.settle_payment(&payload, &req, None)
+                    .await
+                    .unwrap()
+                    .is_success(),
+                "ok settle"
+            );
+
+            let failed = ResourceServer::new(Arc::new(FailedSettle));
+            assert!(
+                !failed
+                    .settle_payment(&payload, &req, None)
+                    .await
+                    .unwrap()
+                    .is_success(),
+                "failed settle"
+            );
+
+            let failing = ResourceServer::new(Arc::new(MockFacilitator {
+                verifies: std::sync::atomic::AtomicUsize::new(0),
+                settles: std::sync::atomic::AtomicUsize::new(0),
+                fail_verify: false,
+                fail_settle: true,
+            }));
+            assert!(
+                failing.settle_payment(&payload, &req, None).await.is_err(),
+                "failing settle"
+            );
+
+            assert_eq!(Count::get(&capture.settle_success), 1, "success");
+            assert_eq!(Count::get(&capture.settle_failure), 1, "failure");
+            assert_eq!(Count::get(&capture.settle_error), 1, "error");
+            assert_eq!(Count::get(&capture.settle_duration), 3, "settle samples");
+        }
     }
 }

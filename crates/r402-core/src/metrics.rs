@@ -25,9 +25,14 @@
 #![cfg(feature = "metrics")]
 #![cfg_attr(docsrs, doc(cfg(feature = "metrics")))]
 
+use std::time::Duration;
+
+use crate::error::FacilitatorError;
+use crate::wire::{SettleResponse, VerifyResponse};
+
 /// Counter incremented every time a facilitator's `verify` returns.
 ///
-/// Recorded by [`crate::HookedFacilitator`].
+/// Recorded by [`crate::ResourceServer`] on the inner facilitator call.
 ///
 /// Labels:
 /// - `result` — `valid` for `VerifyResponse::Valid`, `invalid` for
@@ -37,7 +42,7 @@ pub const FACILITATOR_VERIFY_TOTAL: &str = "r402_facilitator_verify_total";
 
 /// Counter incremented every time a facilitator's `settle` returns.
 ///
-/// Recorded by [`crate::HookedFacilitator`].
+/// Recorded by [`crate::ResourceServer`] on the inner facilitator call.
 ///
 /// Labels:
 /// - `result` — `success` for `SettleResponse::Success`, `failure` for
@@ -46,12 +51,12 @@ pub const FACILITATOR_SETTLE_TOTAL: &str = "r402_facilitator_settle_total";
 
 /// Histogram of facilitator `verify` durations in seconds.
 ///
-/// Recorded by [`crate::HookedFacilitator`].
+/// Recorded by [`crate::ResourceServer`] on the inner facilitator call.
 pub const FACILITATOR_VERIFY_DURATION_SECONDS: &str = "r402_facilitator_verify_duration_seconds";
 
 /// Histogram of facilitator `settle` durations in seconds.
 ///
-/// Recorded by [`crate::HookedFacilitator`].
+/// Recorded by [`crate::ResourceServer`] on the inner facilitator call.
 pub const FACILITATOR_SETTLE_DURATION_SECONDS: &str = "r402_facilitator_settle_duration_seconds";
 
 /// Counter incremented every time the settlement deduplication cache
@@ -67,3 +72,25 @@ pub const SETTLEMENT_CACHE_RESERVE_TOTAL: &str = "r402_settlement_cache_reserve_
 /// Labels:
 /// - `result` — `ok`, `error`, `panic`, or `cancelled`.
 pub const PAYGATE_BACKGROUND_SETTLE_TOTAL: &str = "r402_paygate_background_settle_total";
+
+/// Emits verify counter + duration for one inner facilitator call.
+pub(crate) fn record_verify(result: &Result<VerifyResponse, FacilitatorError>, elapsed: Duration) {
+    let label = match result {
+        Ok(VerifyResponse::Valid { .. }) => "valid",
+        Ok(VerifyResponse::Invalid { .. }) => "invalid",
+        Err(_) => "error",
+    };
+    ::metrics::counter!(FACILITATOR_VERIFY_TOTAL, "result" => label).increment(1);
+    ::metrics::histogram!(FACILITATOR_VERIFY_DURATION_SECONDS).record(elapsed);
+}
+
+/// Emits settle counter + duration for one inner facilitator call.
+pub(crate) fn record_settle(result: &Result<SettleResponse, FacilitatorError>, elapsed: Duration) {
+    let label = match result {
+        Ok(SettleResponse::Success { .. }) => "success",
+        Ok(SettleResponse::Failure { .. }) => "failure",
+        Err(_) => "error",
+    };
+    ::metrics::counter!(FACILITATOR_SETTLE_TOTAL, "result" => label).increment(1);
+    ::metrics::histogram!(FACILITATOR_SETTLE_DURATION_SECONDS).record(elapsed);
+}
