@@ -243,6 +243,7 @@ mod tests {
                 network: "eip155:1".into(),
                 amount: None,
                 extensions: Extensions::new(),
+                extra: None,
             }))
         }
 

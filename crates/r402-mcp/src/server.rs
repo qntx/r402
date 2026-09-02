@@ -391,14 +391,17 @@ mod tests {
                     network: "eip155:1".into(),
                     amount: Some("1".into()),
                     extensions: Extensions::new(),
+                    extra: None,
                 })
             } else {
                 Ok(SettleResponse::Failure {
                     reason: r402_core::ErrorReason::UnexpectedSettleError,
                     message: Some("boom".into()),
                     payer: None,
+                    transaction: Default::default(),
                     network: "eip155:1".into(),
                     extensions: Extensions::new(),
+                    extra: None,
                 })
             })
         }

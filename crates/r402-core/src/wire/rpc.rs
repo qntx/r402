@@ -271,6 +271,8 @@ pub enum VerifyResponse {
         payer: CompactString,
         /// Facilitator-attached extension data.
         extensions: Extensions,
+        /// Scheme-specific additional data.
+        extra: Option<serde_json::Value>,
     },
     /// Payload was well-formed but failed verification.
     Invalid {
@@ -282,6 +284,8 @@ pub enum VerifyResponse {
         payer: Option<CompactString>,
         /// Facilitator-attached extension data.
         extensions: Extensions,
+        /// Scheme-specific additional data.
+        extra: Option<serde_json::Value>,
     },
 }
 
@@ -292,6 +296,7 @@ impl VerifyResponse {
         Self::Valid {
             payer: payer.into(),
             extensions: Extensions::new(),
+            extra: None,
         }
     }
 
@@ -303,6 +308,7 @@ impl VerifyResponse {
             message: None,
             payer,
             extensions: Extensions::new(),
+            extra: None,
         }
     }
 
@@ -318,6 +324,7 @@ impl VerifyResponse {
             message: Some(message.into()),
             payer,
             extensions: Extensions::new(),
+            extra: None,
         }
     }
 
@@ -337,6 +344,7 @@ impl VerifyResponse {
             message: Some(CompactString::from(problem.details())),
             payer: None,
             extensions: Extensions::new(),
+            extra: None,
         }
     }
 }
@@ -354,29 +362,38 @@ struct VerifyResponseWire {
     invalid_message: Option<CompactString>,
     #[serde(default, skip_serializing_if = "Extensions::is_empty")]
     extensions: Extensions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extra: Option<serde_json::Value>,
 }
 
 impl From<VerifyResponse> for VerifyResponseWire {
     fn from(value: VerifyResponse) -> Self {
         match value {
-            VerifyResponse::Valid { payer, extensions } => Self {
+            VerifyResponse::Valid {
+                payer,
+                extensions,
+                extra,
+            } => Self {
                 is_valid: true,
                 payer: Some(payer),
                 invalid_reason: None,
                 invalid_message: None,
                 extensions,
+                extra,
             },
             VerifyResponse::Invalid {
                 reason,
                 message,
                 payer,
                 extensions,
+                extra,
             } => Self {
                 is_valid: false,
                 payer,
                 invalid_reason: Some(reason),
                 invalid_message: message,
                 extensions,
+                extra,
             },
         }
     }
@@ -389,6 +406,7 @@ impl TryFrom<VerifyResponseWire> for VerifyResponse {
             Ok(Self::Valid {
                 payer: wire.payer.ok_or("missing field: payer")?,
                 extensions: wire.extensions,
+                extra: wire.extra,
             })
         } else {
             Ok(Self::Invalid {
@@ -396,6 +414,7 @@ impl TryFrom<VerifyResponseWire> for VerifyResponse {
                 message: wire.invalid_message,
                 payer: wire.payer,
                 extensions: wire.extensions,
+                extra: wire.extra,
             })
         }
     }
@@ -422,6 +441,8 @@ pub enum SettleResponse {
         amount: Option<CompactString>,
         /// Facilitator-attached extension data.
         extensions: Extensions,
+        /// Scheme-specific additional data.
+        extra: Option<serde_json::Value>,
     },
     /// Settlement failed.
     Failure {
@@ -431,10 +452,15 @@ pub enum SettleResponse {
         message: Option<CompactString>,
         /// Optional payer address if identifiable.
         payer: Option<CompactString>,
+        /// Broadcast transaction hash. Empty when no transaction was submitted.
+        /// Spec §9: MUST be non-empty when `reason` is [`ErrorReason::SettlementPending`].
+        transaction: CompactString,
         /// CAIP-2 chain identifier on which settlement was attempted.
         network: CompactString,
         /// Facilitator-attached extension data.
         extensions: Extensions,
+        /// Scheme-specific additional data.
+        extra: Option<serde_json::Value>,
     },
 }
 
@@ -477,18 +503,43 @@ impl SettleResponse {
     }
 
     /// Builds a `Failure` response from a [`FacilitatorError`].
+    ///
+    /// The caller supplies `transaction` (`""` when no broadcast hash is known).
+    /// [`ErrorReason::SettlementPending`] with an empty hash is a programming error.
     #[must_use]
     pub fn from_facilitator_error(
         error: &FacilitatorError,
         network: impl Into<CompactString>,
+        transaction: impl Into<CompactString>,
     ) -> Self {
         let problem = error.as_payment_problem();
+        let reason = problem.reason();
+        let transaction = transaction.into();
+        debug_assert!(
+            reason != ErrorReason::SettlementPending || !transaction.is_empty(),
+            "settlement_pending requires a non-empty transaction hash"
+        );
         Self::Failure {
-            reason: problem.reason(),
+            reason,
             message: Some(CompactString::from(problem.details())),
             payer: None,
+            transaction,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
+        }
+    }
+
+    /// `success: false`, `errorReason == settlement_pending`, and a non-empty hash.
+    #[must_use]
+    pub fn is_retryable_settlement_pending(&self) -> bool {
+        match self {
+            Self::Failure {
+                reason: ErrorReason::SettlementPending,
+                transaction,
+                ..
+            } => !transaction.is_empty(),
+            _ => false,
         }
     }
 }
@@ -514,6 +565,8 @@ struct SettleResponseWire {
     amount: Option<CompactString>,
     #[serde(default, skip_serializing_if = "Extensions::is_empty")]
     extensions: Extensions,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    extra: Option<serde_json::Value>,
 }
 
 impl From<SettleResponse> for SettleResponseWire {
@@ -525,6 +578,7 @@ impl From<SettleResponse> for SettleResponseWire {
                 network,
                 amount,
                 extensions,
+                extra,
             } => Self {
                 success: true,
                 error_reason: None,
@@ -534,22 +588,26 @@ impl From<SettleResponse> for SettleResponseWire {
                 network,
                 amount,
                 extensions,
+                extra,
             },
             SettleResponse::Failure {
                 reason,
                 message,
                 payer,
+                transaction,
                 network,
                 extensions,
+                extra,
             } => Self {
                 success: false,
                 error_reason: Some(reason),
                 error_message: message,
                 payer,
-                transaction: CompactString::default(),
+                transaction,
                 network,
                 amount: None,
                 extensions,
+                extra,
             },
         }
     }
@@ -566,14 +624,17 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
                 network: wire.network,
                 amount: wire.amount,
                 extensions: wire.extensions,
+                extra: wire.extra,
             })
         } else {
             Ok(Self::Failure {
                 reason: wire.error_reason.ok_or("missing field: errorReason")?,
                 message: wire.error_message,
                 payer: wire.payer,
+                transaction: wire.transaction,
                 network: wire.network,
                 extensions: wire.extensions,
+                extra: wire.extra,
             })
         }
     }
@@ -608,6 +669,7 @@ mod response_tests {
         let response = VerifyResponse::Valid {
             payer: "0xABC".into(),
             extensions,
+            extra: None,
         };
         let encoded = serde_json::to_value(&response).unwrap();
         assert_eq!(
@@ -641,6 +703,7 @@ mod response_tests {
             network: "eip155:8453".into(),
             amount: Some("1000000".into()),
             extensions: Extensions::new(),
+            extra: None,
         };
         let encoded = serde_json::to_value(&response).unwrap();
         assert_eq!(encoded["success"], true);
@@ -657,6 +720,7 @@ mod response_tests {
             network: "eip155:1".into(),
             amount: None,
             extensions: Extensions::new(),
+            extra: None,
         };
         let encoded = serde_json::to_value(&response).unwrap();
         assert!(encoded.get("amount").is_none());
@@ -686,31 +750,150 @@ mod response_tests {
             reason: ErrorReason::DuplicateSettlement,
             message: Some("already processed".into()),
             payer: None,
+            transaction: CompactString::default(),
             network: "solana:mainnet".into(),
             extensions: Extensions::new(),
+            extra: None,
         };
         let encoded = serde_json::to_value(&response).unwrap();
         assert_eq!(encoded["errorReason"], "duplicate_settlement");
+        assert_eq!(encoded["transaction"], "");
         let back: SettleResponse = serde_json::from_value(encoded).unwrap();
         assert_eq!(back, response);
     }
 
-    /// Regression test for F-002: spec §5.3.2 marks `transaction` as Required
-    /// (empty string on failure). Go SDK rejects responses lacking the field.
+    /// Spec §5.3.2 marks `transaction` as Required (empty string on terminal
+    /// failure). Go SDK rejects responses lacking the field.
     #[test]
     fn settle_failure_serializes_empty_transaction() {
         let response = SettleResponse::Failure {
             reason: ErrorReason::UnexpectedSettleError,
             message: None,
             payer: None,
+            transaction: CompactString::default(),
             network: "eip155:8453".into(),
             extensions: Extensions::new(),
+            extra: None,
         };
         let encoded = serde_json::to_value(&response).unwrap();
         assert_eq!(
             encoded["transaction"], "",
             "spec §5.3.2 requires `transaction` field present (empty on failure)"
         );
+    }
+
+    #[test]
+    fn settle_failure_pending_roundtrip_preserves_transaction() {
+        let response = SettleResponse::Failure {
+            reason: ErrorReason::SettlementPending,
+            message: Some("rpc timeout waiting for receipt".into()),
+            payer: Some("0xpayer".into()),
+            transaction: "0xabc".into(),
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+            extra: None,
+        };
+        let encoded = serde_json::to_value(&response).unwrap();
+        assert_eq!(encoded["success"], false);
+        assert_eq!(encoded["errorReason"], "settlement_pending");
+        assert_eq!(encoded["transaction"], "0xabc");
+        assert!(encoded.get("extra").is_none());
+        let back: SettleResponse = serde_json::from_value(encoded).unwrap();
+        assert_eq!(back, response);
+        assert!(back.is_retryable_settlement_pending());
+    }
+
+    #[test]
+    fn settle_failure_pending_empty_transaction_is_not_retryable() {
+        let response = SettleResponse::Failure {
+            reason: ErrorReason::SettlementPending,
+            message: None,
+            payer: None,
+            transaction: CompactString::default(),
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+            extra: None,
+        };
+        assert!(!response.is_retryable_settlement_pending());
+    }
+
+    #[test]
+    fn verify_and_settle_extra_roundtrip() {
+        let extra = json!({"assetTransferMethod": "eip3009"});
+        let verify = VerifyResponse::Valid {
+            payer: "0xABC".into(),
+            extensions: Extensions::new(),
+            extra: Some(extra.clone()),
+        };
+        let verify_json = serde_json::to_value(&verify).unwrap();
+        assert_eq!(verify_json["extra"]["assetTransferMethod"], "eip3009");
+        let verify_back: VerifyResponse = serde_json::from_value(verify_json).unwrap();
+        assert_eq!(verify_back, verify);
+
+        let settle = SettleResponse::Success {
+            payer: "0xABC".into(),
+            transaction: "0xTX".into(),
+            network: "eip155:1".into(),
+            amount: None,
+            extensions: Extensions::new(),
+            extra: Some(extra.clone()),
+        };
+        let settle_json = serde_json::to_value(&settle).unwrap();
+        assert_eq!(settle_json["extra"]["assetTransferMethod"], "eip3009");
+        let settle_back: SettleResponse = serde_json::from_value(settle_json).unwrap();
+        assert_eq!(settle_back, settle);
+
+        let failure = SettleResponse::Failure {
+            reason: ErrorReason::UnexpectedSettleError,
+            message: None,
+            payer: None,
+            transaction: CompactString::default(),
+            network: "eip155:1".into(),
+            extensions: Extensions::new(),
+            extra: Some(extra),
+        };
+        let failure_json = serde_json::to_value(&failure).unwrap();
+        assert_eq!(failure_json["extra"]["assetTransferMethod"], "eip3009");
+        let failure_back: SettleResponse = serde_json::from_value(failure_json).unwrap();
+        assert_eq!(failure_back, failure);
+    }
+
+    #[test]
+    fn verify_settle_deny_unknown_top_level_fields() {
+        let verify_typo = json!({
+            "isValid": true,
+            "payer": "0xABC",
+            "extraTypo": {"k": 1}
+        });
+        assert!(serde_json::from_value::<VerifyResponse>(verify_typo).is_err());
+
+        let settle_typo = json!({
+            "success": true,
+            "payer": "0xABC",
+            "transaction": "0xTX",
+            "network": "eip155:1",
+            "extraTypo": {"k": 1}
+        });
+        assert!(serde_json::from_value::<SettleResponse>(settle_typo).is_err());
+    }
+
+    #[test]
+    fn from_facilitator_error_carries_transaction() {
+        let err = FacilitatorError::Onchain("rpc timeout".into());
+        let response = SettleResponse::from_facilitator_error(&err, "eip155:8453", "0xpending");
+        match response {
+            SettleResponse::Failure {
+                transaction,
+                network,
+                extra,
+                ..
+            } => {
+                assert_eq!(transaction, "0xpending");
+                assert_eq!(network, "eip155:8453");
+                assert!(extra.is_none());
+            }
+            SettleResponse::Success { .. } => panic!("expected failure"),
+        }
     }
 
     #[test]
@@ -721,6 +904,7 @@ mod response_tests {
             network: "eip155:1".into(),
             amount: None,
             extensions: Extensions::new(),
+            extra: None,
         };
         assert!(success.encode_base64().is_some());
 
@@ -728,8 +912,10 @@ mod response_tests {
             reason: ErrorReason::UnexpectedSettleError,
             message: None,
             payer: None,
+            transaction: CompactString::default(),
             network: "eip155:1".into(),
             extensions: Extensions::new(),
+            extra: None,
         };
         assert!(failure.encode_base64().is_none());
     }

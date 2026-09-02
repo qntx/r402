@@ -36,6 +36,10 @@ pub trait Facilitator: Send + Sync {
     ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send;
 
     /// Settles a previously verified payment on-chain.
+    ///
+    /// [`crate::error::ErrorReason::SettlementPending`] must be returned as
+    /// `Ok(SettleResponse::Failure { transaction, .. })` with a non-empty
+    /// hash. `Err` is never retried by [`crate::ResourceServer`].
     fn settle(
         &self,
         request: SettleRequest,
@@ -557,6 +561,7 @@ mod tests {
                     network: "eip155:1".into(),
                     amount: None,
                     extensions: Extensions::new(),
+                    extra: None,
                 })
             };
             std::future::ready(result)
@@ -619,6 +624,7 @@ mod tests {
                 network: "eip155:1".into(),
                 amount: None,
                 extensions: Extensions::new(),
+                extra: None,
             }))
         }
     }

@@ -117,6 +117,7 @@ where
             network: typed.payment_requirements.network.to_string().into(),
             amount: Some(charge.0.to_string().into()),
             extensions: Extensions::new(),
+            extra: None,
         })
     }
 

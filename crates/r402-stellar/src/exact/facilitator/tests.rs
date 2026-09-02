@@ -779,9 +779,13 @@ async fn settle_maps_poll_failed_and_send_rejected() {
     .await;
     match failed {
         SettleResponse::Failure {
-            reason, message, ..
+            reason,
+            message,
+            transaction,
+            ..
         } => {
             assert_eq!(reason.as_str(), "settle_exact_stellar_transaction_failed");
+            assert_eq!(transaction, "aa".repeat(32));
             assert!(
                 message
                     .as_ref()
@@ -812,11 +816,16 @@ async fn settle_maps_poll_failed_and_send_rejected() {
     )
     .await;
     match rejected {
-        SettleResponse::Failure { reason, .. } => {
+        SettleResponse::Failure {
+            reason,
+            transaction,
+            ..
+        } => {
             assert_eq!(
                 reason.as_str(),
                 "settle_exact_stellar_transaction_submission_failed"
             );
+            assert_eq!(transaction, "bb".repeat(32));
         }
         _ => panic!("expected submission failure"),
     }
@@ -839,8 +848,13 @@ async fn settle_maps_poll_failed_and_send_rejected() {
     )
     .await;
     match timed_out {
-        SettleResponse::Failure { reason, .. } => {
+        SettleResponse::Failure {
+            reason,
+            transaction,
+            ..
+        } => {
             assert_eq!(reason.as_str(), "settle_exact_stellar_transaction_failed");
+            assert_eq!(transaction, "cc".repeat(32));
         }
         _ => panic!("expected timeout as transaction_failed"),
     }

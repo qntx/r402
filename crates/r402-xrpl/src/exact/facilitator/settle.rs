@@ -173,21 +173,26 @@ where
                     .and_then(Value::as_str)
                     .map(CompactString::from),
                 extensions: Extensions::new(),
+                extra: None,
             }
         }
         Ok(outcome) => SettleResponse::Failure {
             reason: ErrorReason::from_wire(&format!("transaction_failed: {}", outcome.result_code)),
             message: None,
+            transaction: outcome.hash.into(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         },
         Err(err) => SettleResponse::Failure {
             reason: ErrorReason::from_wire(&format!("transaction_failed: {err}")),
             message: Some(err.to_string().into()),
+            transaction: Default::default(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         },
     }
 }
@@ -200,9 +205,11 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
+        transaction: Default::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }
 

@@ -111,8 +111,10 @@ where
             reason: ErrorReason::from_wire("invalid_exact_avm_settlement_failed"),
             message: Some(format!("Failed to submit transaction: {err}").into()),
             payer,
+            transaction: CompactString::default(),
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         };
     }
 
@@ -120,9 +122,11 @@ where
         return SettleResponse::Failure {
             reason: ErrorReason::from_wire("invalid_exact_avm_confirmation_failed"),
             message: Some(format!("Transaction submitted but confirmation failed: {err}").into()),
+            transaction: payment_txid.into(),
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extra: None,
         };
     }
 
@@ -136,6 +140,7 @@ where
             .and_then(Value::as_str)
             .map(CompactString::from),
         extensions: Extensions::new(),
+        extra: None,
     }
 }
 
@@ -147,8 +152,10 @@ fn settle_failure(
     SettleResponse::Failure {
         reason,
         message: None,
+        transaction: Default::default(),
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extra: None,
     }
 }
