@@ -26,11 +26,9 @@ pub enum CasperExactError {
         /// Network declared by the seller's requirements.
         requirements: String,
     },
-    /// Core fields of `paymentPayload.accepted` and `paymentRequirements`
-    /// disagree (`scheme` / `network` / `amount` / `asset` / `payTo`).
-    ///
-    /// Mirrors EVM/SVM `assert_requirements_match` and the Go SDK's
-    /// `FindMatchingRequirements`.
+    /// `paymentPayload.accepted` does not satisfy `paymentRequirements`
+    /// (`scheme` / `network` / `amount` / `asset` / `payTo` /
+    /// `maxTimeoutSeconds` / extra subset).
     #[error("accepted requirements do not match payment requirements")]
     AcceptedRequirementsMismatch,
     /// The network is not a supported Casper chain.
