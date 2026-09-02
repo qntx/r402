@@ -44,7 +44,8 @@ const GET_SUPPORTED_RETRY_DELAY_MS: u64 = 1000;
 /// Upper bound on retry delay.
 const MAX_RETRY_DELAY_MS: u64 = 30_000;
 
-type BoxedAuthHeadersFuture = Pin<Box<dyn Future<Output = serde_json::Value> + Send>>;
+type BoxedAuthHeadersFuture =
+    Pin<Box<dyn Future<Output = Result<serde_json::Value, FacilitatorClientError>> + Send>>;
 type BoxedCreateAuthHeaders = dyn Fn() -> BoxedAuthHeadersFuture + Send + Sync;
 
 /// Path-keyed authentication headers for a remote facilitator.
@@ -69,10 +70,10 @@ impl FacilitatorAuthHeaders {
             return Err(FacilitatorClientError::FlatAuthHeaders);
         }
         Ok(Self {
-            verify: header_map_at(value, "verify"),
-            settle: header_map_at(value, "settle"),
-            supported: header_map_at(value, "supported"),
-            bazaar: header_map_at(value, "bazaar"),
+            verify: header_map_at(value, "verify")?,
+            settle: header_map_at(value, "settle")?,
+            supported: header_map_at(value, "supported")?,
+            bazaar: header_map_at(value, "bazaar")?,
         })
     }
 
@@ -243,6 +244,17 @@ pub enum FacilitatorClientError {
          https://github.com/x402-foundation/x402/issues/2762"
     )]
     FlatAuthHeaders,
+    /// Auth callback failed before producing headers.
+    #[error("createAuthHeaders failed: {0}")]
+    Auth(String),
+    /// A path-keyed auth object contained a non-string or illegal header.
+    #[error("createAuthHeaders {path} header {name} is not a valid string header value")]
+    InvalidAuthHeader {
+        /// Facilitator path (`verify`, `settle`, `supported`, or `bazaar`).
+        path: &'static str,
+        /// Header name as given in the JSON object.
+        name: String,
+    },
 }
 
 /// Delay before the next `/supported` retry.
@@ -288,10 +300,13 @@ fn looks_flat(auth_headers: &serde_json::Value) -> bool {
     !has_path_key && some_not_header
 }
 
-fn header_map_at(value: &serde_json::Value, path: &str) -> HeaderMap {
+fn header_map_at(
+    value: &serde_json::Value,
+    path: &'static str,
+) -> Result<HeaderMap, FacilitatorClientError> {
     match value.get(path) {
-        Some(headers) if is_header_object(headers) => json_object_to_header_map(headers),
-        _ => HeaderMap::new(),
+        Some(headers) if is_header_object(headers) => json_object_to_header_map(headers, path),
+        _ => Ok(HeaderMap::new()),
     }
 }
 
@@ -308,24 +323,36 @@ fn supported_retry_delay(err: &FacilitatorClientError, attempt: u32) -> Option<D
     }
 }
 
-fn json_object_to_header_map(value: &serde_json::Value) -> HeaderMap {
+fn json_object_to_header_map(
+    value: &serde_json::Value,
+    path: &'static str,
+) -> Result<HeaderMap, FacilitatorClientError> {
     let Some(obj) = value.as_object() else {
-        return HeaderMap::new();
+        return Ok(HeaderMap::new());
     };
     let mut headers = HeaderMap::new();
     for (key, val) in obj {
         let Some(val) = val.as_str() else {
-            continue;
+            return Err(FacilitatorClientError::InvalidAuthHeader {
+                path,
+                name: key.clone(),
+            });
         };
         let Ok(name) = HeaderName::try_from(key.as_str()) else {
-            continue;
+            return Err(FacilitatorClientError::InvalidAuthHeader {
+                path,
+                name: key.clone(),
+            });
         };
         let Ok(header_value) = HeaderValue::try_from(val) else {
-            continue;
+            return Err(FacilitatorClientError::InvalidAuthHeader {
+                path,
+                name: key.clone(),
+            });
         };
         headers.insert(name, header_value);
     }
-    headers
+    Ok(headers)
 }
 
 impl FacilitatorClient {
@@ -427,12 +454,12 @@ impl FacilitatorClient {
     ///
     /// The JSON object must be keyed by `verify`, `settle`, `supported`, and
     /// optionally `bazaar`. A flat headers object is rejected when headers
-    /// are resolved.
+    /// are resolved. Credential-fetch failures should be returned as `Err`.
     #[must_use]
     pub fn with_auth<F, Fut>(mut self, create: F) -> Self
     where
         F: Fn() -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = serde_json::Value> + Send + 'static,
+        Fut: Future<Output = Result<serde_json::Value, FacilitatorClientError>> + Send + 'static,
     {
         self.create_auth_headers = Some(CreateAuthHeadersCallback(Arc::new(move || {
             Box::pin(create())
@@ -470,7 +497,9 @@ impl FacilitatorClient {
     ///
     /// Returns [`FacilitatorClientError::FlatAuthHeaders`] when the callback
     /// result has no object-valued `verify`/`settle`/`supported`/`bazaar` key
-    /// and some value is not a header object.
+    /// and some value is not a header object. Returns
+    /// [`FacilitatorClientError::InvalidAuthHeader`] when a path object has a
+    /// non-string or illegal header. Propagates callback `Err` values.
     pub async fn create_auth_headers(
         &self,
         path: &str,
@@ -478,7 +507,7 @@ impl FacilitatorClient {
         let Some(callback) = &self.create_auth_headers else {
             return Ok(HeaderMap::new());
         };
-        let value = (callback.0)().await;
+        let value = (callback.0)().await?;
         let parsed = FacilitatorAuthHeaders::from_json(&value)?;
         Ok(parsed.for_path(path))
     }
@@ -662,26 +691,21 @@ fn parse_facilitator_body<R>(
 where
     R: serde::de::DeserializeOwned,
 {
-    match serde_json::from_slice::<R>(body_bytes) {
-        Ok(parsed) => Ok(parsed),
-        Err(parse_err) => {
-            let body = String::from_utf8_lossy(body_bytes).into_owned();
-            if status.is_success() {
-                Err(FacilitatorClientError::JsonDeserialization {
-                    context,
-                    source: parse_err,
-                    body,
-                })
-            } else {
-                Err(FacilitatorClientError::HttpStatus {
-                    context,
-                    status,
-                    body,
-                    retry_after,
-                })
-            }
-        }
+    if !status.is_success() {
+        return Err(FacilitatorClientError::HttpStatus {
+            context,
+            status,
+            body: String::from_utf8_lossy(body_bytes).into_owned(),
+            retry_after,
+        });
     }
+    serde_json::from_slice::<R>(body_bytes).map_err(|parse_err| {
+        FacilitatorClientError::JsonDeserialization {
+            context,
+            source: parse_err,
+            body: String::from_utf8_lossy(body_bytes).into_owned(),
+        }
+    })
 }
 
 impl Facilitator for FacilitatorClient {
@@ -857,7 +881,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_supported_cache_caches_response() {
+    async fn try_new_does_not_cache_supported() {
         let mock_server = MockServer::start().await;
         let test_response = create_test_supported_response();
 
@@ -874,6 +898,28 @@ mod tests {
         assert_eq!(result1.kinds.len(), 1);
 
         let result2 = client.supported().await.unwrap();
+        assert_eq!(result2.kinds.len(), 1);
+        assert_eq!(result1.kinds[0].scheme, result2.kinds[0].scheme);
+    }
+
+    #[tokio::test]
+    async fn with_supported_cache_ttl_caches_response() {
+        let mock_server = MockServer::start().await;
+        let test_response = create_test_supported_response();
+
+        Mock::given(method("GET"))
+            .and(path("/supported"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&test_response))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client =
+            test_client(&mock_server.uri()).with_supported_cache_ttl(Duration::from_mins(10));
+
+        let result1 = client.supported().await.unwrap();
+        let result2 = client.supported().await.unwrap();
+        assert_eq!(result1.kinds.len(), 1);
         assert_eq!(result2.kinds.len(), 1);
         assert_eq!(result1.kinds[0].scheme, result2.kinds[0].scheme);
     }
@@ -974,11 +1020,11 @@ mod tests {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
             .with_auth(|| async {
-                serde_json::json!({
+                Ok(serde_json::json!({
                     "verify": { "Authorization": "Bearer verify" },
                     "settle": { "Authorization": "Bearer settle" },
                     "supported": { "Authorization": "Bearer supported" },
-                })
+                }))
             });
 
         let verify = client.create_auth_headers("verify").await.unwrap();
@@ -993,7 +1039,7 @@ mod tests {
     async fn create_auth_headers_empty_object_is_not_flat() {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
-            .with_auth(|| async { serde_json::json!({}) });
+            .with_auth(|| async { Ok(serde_json::json!({})) });
         let headers = client.create_auth_headers("verify").await.unwrap();
         assert!(headers.is_empty(), "empty object yields no headers");
     }
@@ -1002,7 +1048,7 @@ mod tests {
     async fn create_auth_headers_looks_flat_rejects_authorization_string() {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
-            .with_auth(|| async { serde_json::json!({ "Authorization": "Bearer token" }) });
+            .with_auth(|| async { Ok(serde_json::json!({ "Authorization": "Bearer token" })) });
         let err = client.create_auth_headers("verify").await.unwrap_err();
         assert!(
             matches!(err, FacilitatorClientError::FlatAuthHeaders),
@@ -1018,7 +1064,7 @@ mod tests {
     async fn create_auth_headers_looks_flat_rejects_non_object_values() {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
-            .with_auth(|| async { serde_json::json!({ "Authorization": 123 }) });
+            .with_auth(|| async { Ok(serde_json::json!({ "Authorization": 123 })) });
         let err = client.create_auth_headers("verify").await.unwrap_err();
         assert!(
             matches!(err, FacilitatorClientError::FlatAuthHeaders),
@@ -1030,7 +1076,7 @@ mod tests {
     async fn create_auth_headers_nested_non_path_object_is_not_flat() {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
-            .with_auth(|| async { serde_json::json!({ "X-Api-Key": { "nested": "1" } }) });
+            .with_auth(|| async { Ok(serde_json::json!({ "X-Api-Key": { "nested": "1" } })) });
         let headers = client.create_auth_headers("verify").await.unwrap();
         assert!(
             headers.is_empty(),
@@ -1043,12 +1089,49 @@ mod tests {
         let client = FacilitatorClient::try_from("https://facilitator.example.com")
             .unwrap()
             .with_auth(|| async {
-                serde_json::json!({ "bazaar": { "Authorization": "Bearer bazaar" } })
+                Ok(serde_json::json!({ "bazaar": { "Authorization": "Bearer bazaar" } }))
             });
         let verify = client.create_auth_headers("verify").await.unwrap();
         assert!(verify.is_empty(), "verify omitted on a bazaar-only object");
         let bazaar = client.create_auth_headers("bazaar").await.unwrap();
         assert_eq!(bazaar.get("Authorization").unwrap(), "Bearer bazaar");
+    }
+
+    #[tokio::test]
+    async fn create_auth_headers_propagates_callback_err() {
+        let client = FacilitatorClient::try_from("https://facilitator.example.com")
+            .unwrap()
+            .with_auth(|| async {
+                Err(FacilitatorClientError::Auth(
+                    "token refresh failed".to_owned(),
+                ))
+            });
+        let err = client.create_auth_headers("verify").await.unwrap_err();
+        match err {
+            FacilitatorClientError::Auth(message) => {
+                assert_eq!(message, "token refresh failed");
+            }
+            other => panic!("expected Auth, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn create_auth_headers_rejects_non_string_path_header() {
+        let client = FacilitatorClient::try_from("https://facilitator.example.com")
+            .unwrap()
+            .with_auth(|| async {
+                Ok(serde_json::json!({
+                    "verify": { "Authorization": 123 }
+                }))
+            });
+        let err = client.create_auth_headers("verify").await.unwrap_err();
+        match err {
+            FacilitatorClientError::InvalidAuthHeader { path, name } => {
+                assert_eq!(path, "verify");
+                assert_eq!(name, "Authorization");
+            }
+            other => panic!("expected InvalidAuthHeader, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -1065,11 +1148,11 @@ mod tests {
             .await;
 
         let client = test_client(&mock_server.uri()).with_auth(|| async {
-            serde_json::json!({
+            Ok(serde_json::json!({
                 "verify": { "Authorization": "Bearer verify" },
                 "settle": { "Authorization": "Bearer settle" },
                 "supported": { "Authorization": "Bearer supported" },
-            })
+            }))
         });
 
         client
@@ -1112,6 +1195,36 @@ mod tests {
             elapsed < Duration::from_secs(4),
             "retry delay must not use a later backoff step, elapsed {elapsed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn supported_retries_429_even_when_body_is_supported_json() {
+        let mock_server = MockServer::start().await;
+        let test_response = create_test_supported_response();
+
+        Mock::given(method("GET"))
+            .and(path("/supported"))
+            .respond_with(
+                ResponseTemplate::new(429)
+                    .insert_header("Retry-After", "0")
+                    .set_body_json(&test_response),
+            )
+            .up_to_n_times(1)
+            .mount(&mock_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/supported"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(&test_response))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = test_client(&mock_server.uri());
+        let result = client
+            .supported()
+            .await
+            .expect("429 with a SupportedResponse-shaped body must still retry");
+        assert_eq!(result.kinds.len(), 1);
     }
 
     #[tokio::test]
