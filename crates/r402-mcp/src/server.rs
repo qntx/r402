@@ -9,7 +9,9 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use r402_core::resource_server::{ResourceServer, SettlePhase, SkipHandlerDirective};
+use r402_core::resource_server::{
+    PaymentRequiredBuildContext, ResourceServer, SettlePhase, SkipHandlerDirective,
+};
 use r402_core::wire::{Extensions, PaymentRequired, PaymentRequirements, ResourceInfo};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::Value;
@@ -173,44 +175,96 @@ impl PaymentWrapper {
     }
 
     /// Go `paymentRequiredResult`.
-    #[must_use]
-    pub fn payment_required_result(&self, error_msg: impl Into<String>) -> CallToolResult {
-        let mut required = PaymentRequired::new(self.resource_or_default())
-            .with_error(error_msg.into())
-            .with_accepts(self.config.accepts.clone());
-        if !self.config.extensions.is_empty() {
-            required = required.with_extensions(self.config.extensions.clone());
+    pub async fn payment_required_result(&self, error_msg: impl Into<String>) -> CallToolResult {
+        self.payment_required_result_inner(error_msg, None).await
+    }
+
+    async fn payment_required_result_inner(
+        &self,
+        error_msg: impl Into<String>,
+        payload: Option<&McpPaymentPayload>,
+    ) -> CallToolResult {
+        match self
+            .create_payment_required(error_msg.into(), payload)
+            .await
+        {
+            Ok(required) => payment_required_tool_result(&required),
+            Err(err) => CallToolResult::structured_error(serde_json::json!({
+                "error": err.to_string(),
+            })),
         }
-        payment_required_tool_result(&required)
     }
 
     /// Go `settlementFailedResult` (R5: same dual format as payment-required).
-    #[must_use]
-    pub fn settlement_failed_result(&self, error_msg: impl Into<String>) -> CallToolResult {
-        settlement_failed_tool_result(
-            &self.config.accepts,
-            &self.resource_or_default(),
-            &self.config.extensions,
-            error_msg,
-        )
+    pub async fn settlement_failed_result(&self, error_msg: impl Into<String>) -> CallToolResult {
+        match self.create_payment_required(error_msg.into(), None).await {
+            Ok(required) => settlement_failed_tool_result(&required),
+            Err(err) => CallToolResult::structured_error(serde_json::json!({
+                "error": err.to_string(),
+            })),
+        }
+    }
+
+    async fn create_payment_required(
+        &self,
+        error_msg: String,
+        payload: Option<&McpPaymentPayload>,
+    ) -> Result<PaymentRequired, r402_core::FacilitatorError> {
+        let supported = self
+            .server
+            .facilitator()
+            .supported()
+            .await
+            .unwrap_or_default();
+        self.server
+            .create_payment_required_response(
+                self.config.accepts.clone(),
+                PaymentRequiredBuildContext {
+                    resource: self.resource_or_default(),
+                    error: Some(error_msg.into()),
+                    extensions: self.config.extensions.clone(),
+                    supported,
+                    payment_payload: payload.cloned(),
+                },
+            )
+            .await
     }
 
     /// Full pipeline (Go `Wrap` body). Prefer [`Self::wrap`] for rmcp registration.
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Go Wrap control flow is one sequential pipeline"
+    )]
     pub async fn invoke<H, Fut>(&self, params: CallToolRequestParams, handler: H) -> CallToolResult
     where
         H: FnOnce(CallToolRequestParams) -> Fut,
         Fut: Future<Output = CallToolResult>,
     {
-        let Some(payload) = extract_payment_from_params(&params) else {
-            return self.payment_required_result("Payment Required");
+        let payload = extract_payment_from_params(&params);
+        let challenge = match self
+            .create_payment_required("Payment Required".into(), payload.as_ref())
+            .await
+        {
+            Ok(pr) => pr,
+            Err(err) => {
+                return CallToolResult::structured_error(serde_json::json!({
+                    "error": err.to_string(),
+                }));
+            }
+        };
+
+        let Some(payload) = payload else {
+            return payment_required_tool_result(&challenge);
         };
 
         let Some(requirements) = self
             .server
-            .find_matching_requirements(&self.config.accepts, &payload)
+            .find_matching_requirements(&challenge.accepts, &payload)
             .cloned()
         else {
-            return self.payment_required_result("No matching payment requirements found");
+            let mut unmatched = challenge.clone();
+            unmatched.error = Some("No matching payment requirements found".into());
+            return payment_required_tool_result(&unmatched);
         };
 
         let verify_out = match self.server.verify_payment(&payload, &requirements).await {
@@ -224,10 +278,19 @@ impl PaymentWrapper {
                     _ => "Payment verification failed".into(),
                 };
                 return self
-                    .payment_required_result(format!("Payment verification failed: {reason}"));
+                    .payment_required_result_inner(
+                        format!("Payment verification failed: {reason}"),
+                        Some(&payload),
+                    )
+                    .await;
             }
             Err(err) => {
-                return self.payment_required_result(format!("Payment verification error: {err}"));
+                return self
+                    .payment_required_result_inner(
+                        format!("Payment verification error: {err}"),
+                        Some(&payload),
+                    )
+                    .await;
             }
         };
 
@@ -258,7 +321,9 @@ impl PaymentWrapper {
                         None,
                     )
                     .await;
-                return self.payment_required_result("Execution aborted by OnBeforeExecution hook");
+                return self
+                    .payment_required_result("Execution aborted by OnBeforeExecution hook")
+                    .await;
             }
 
             let result = handler(params).await;
@@ -296,10 +361,14 @@ impl PaymentWrapper {
                     // Success handled above; `_` for non_exhaustive future variants.
                     _ => "Settlement failed".into(),
                 };
-                return self.settlement_failed_result(format!("Settlement failed: {reason}"));
+                let mut failed = challenge.clone();
+                failed.error = Some(format!("Settlement failed: {reason}").into());
+                return settlement_failed_tool_result(&failed);
             }
             Err(err) => {
-                return self.settlement_failed_result(format!("Settlement error: {err}"));
+                let mut failed = challenge.clone();
+                failed.error = Some(format!("Settlement error: {err}").into());
+                return settlement_failed_tool_result(&failed);
             }
         };
 
@@ -354,7 +423,10 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::encode::{McpPaymentPayload, attach_payment_to_params, extract_settle_response};
+    use crate::encode::{
+        McpPaymentPayload, attach_payment_to_params, extract_payment_required,
+        extract_settle_response,
+    };
 
     struct MockFacilitator {
         verifies: AtomicUsize,
@@ -587,5 +659,55 @@ mod tests {
     fn empty_accepts_rejected() {
         let err = PaymentWrapperConfig::try_new(vec![], None).unwrap_err();
         assert!(matches!(err, PaymentWrapperConfigError::EmptyAccepts));
+    }
+
+    #[tokio::test]
+    async fn invoke_matches_pipeline_accepts_not_raw_config() {
+        let fac = Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            verify_ok: true,
+            settle_ok: true,
+        });
+        let server = ResourceServer::new(fac);
+        let advertised = PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            60,
+        )
+        .with_extra(json!({"feePayer": "payer"}));
+        let config = PaymentWrapperConfig::try_new(vec![advertised], None).unwrap();
+        let w = PaymentWrapper::try_new(server, config).unwrap();
+
+        let omitted = sample_payload();
+        let omitted_params = attach_payment_to_params(CallToolRequestParams::new("demo"), &omitted);
+        let omitted_result = w
+            .invoke(omitted_params, |_| async {
+                CallToolResult::success(vec![ContentBlock::text("should not run")])
+            })
+            .await;
+        assert_eq!(omitted_result.is_error, Some(true));
+        let pr = extract_payment_required(&omitted_result).unwrap();
+        assert_eq!(
+            pr.accepts
+                .first()
+                .and_then(|accept| accept.extra.as_ref())
+                .and_then(|extra| extra.get("feePayer"))
+                .and_then(Value::as_str),
+            Some("payer"),
+        );
+
+        let mut echoed = sample_payload();
+        echoed.accepted.extra = pr.accepts.first().and_then(|accept| accept.extra.clone());
+        let echoed_params = attach_payment_to_params(CallToolRequestParams::new("demo"), &echoed);
+        let echoed_result = w
+            .invoke(echoed_params, |_| async {
+                CallToolResult::success(vec![ContentBlock::text("ok")])
+            })
+            .await;
+        assert!(!echoed_result.is_error.unwrap_or(false));
     }
 }

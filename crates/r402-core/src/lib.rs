@@ -33,12 +33,17 @@ pub mod wire;
 
 pub use resource_server::{
     AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, DynResourceServerHooks,
-    PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
-    PaymentFlowScheme, PaymentHookContext, ResolvedPaymentFlow, ResourceServer,
-    ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettleContext, SettlePhase,
+    HookPolicyError, PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName,
+    PaymentFlowPhases, PaymentFlowScheme, PaymentHookContext, PaymentRequiredBuildContext,
+    RESERVED_PAYMENT_FLOW_EXTRA_KEYS, ResolvedPaymentFlow, ResourceServer, ResourceServerHooks,
+    SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettleContext, SettlePhase, SettleResponseCoreSnapshot,
     SettleResultContext, SkipHandlerDirective, VerifiedPaymentCanceledContext,
     VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload, apply_payment_flow_wire_extra,
-    resolve_payment_flow, resolve_payment_flow_phases,
+    assert_accepts_additive_extra_after_scheme_enrich,
+    assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
+    assert_additive_settlement_extra, assert_settle_response_core_unchanged,
+    is_vacant_string_field, merge_additive_settlement_extra, resolve_payment_flow,
+    resolve_payment_flow_phases, snapshot_payment_requirements_list, snapshot_settle_response_core,
 };
 
 #[cfg(feature = "cache")]

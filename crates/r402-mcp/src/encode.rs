@@ -5,9 +5,7 @@
 //! - settlement failure uses the **same** dual format (Go server R5)
 //! - meta keys `x402/payment` / `x402/payment-response`
 
-use r402_core::wire::{
-    Extensions, PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse,
-};
+use r402_core::wire::{PaymentPayload, PaymentRequired, PaymentRequirements, SettleResponse};
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, RequestMetaObject};
 use serde_json::Value;
 
@@ -43,21 +41,11 @@ pub fn payment_required_tool_result(required: &PaymentRequired) -> CallToolResul
 
 /// Settlement-failed result (Go R5: same dual format as payment-required).
 ///
-/// Go `settlementFailedResult` delegates to `paymentRequiredResult`.
+/// `required` must be assembled via
+/// [`r402_core::ResourceServer::create_payment_required_response`].
 #[must_use]
-pub fn settlement_failed_tool_result(
-    accepts: &[PaymentRequirements],
-    resource: &r402_core::wire::ResourceInfo,
-    extensions: &Extensions,
-    error_msg: impl Into<String>,
-) -> CallToolResult {
-    let mut required = PaymentRequired::new(resource.clone())
-        .with_error(error_msg.into())
-        .with_accepts(accepts.to_vec());
-    if !extensions.is_empty() {
-        required = required.with_extensions(extensions.clone());
-    }
-    payment_required_tool_result(&required)
+pub fn settlement_failed_tool_result(required: &PaymentRequired) -> CallToolResult {
+    payment_required_tool_result(required)
 }
 
 /// Prefer `structuredContent`, else parse first text content as JSON.
@@ -178,12 +166,52 @@ pub fn is_payment_required_rpc(err: &McpCallError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use r402_core::wire::{PaymentRequirements, ResourceInfo};
+    use std::sync::Arc;
+
+    use std::future::Future;
+
+    use r402_core::FacilitatorError;
+    use r402_core::facilitator::Facilitator;
+    use r402_core::resource_server::{PaymentRequiredBuildContext, ResourceServer};
+    use r402_core::wire::{
+        Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
+        SupportedResponse, VerifyRequest, VerifyResponse,
+    };
 
     use super::*;
 
-    fn sample_required() -> PaymentRequired {
-        let resource = ResourceInfo::new("mcp://tool/demo");
+    struct MockFacilitator;
+
+    impl Facilitator for MockFacilitator {
+        fn verify(
+            &self,
+            _request: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
+        }
+
+        fn settle(
+            &self,
+            _request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xtx".into(),
+                network: "eip155:84532".into(),
+                amount: Some("10000".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
+
+    async fn sample_required(error: &str) -> PaymentRequired {
         let req = PaymentRequirements::new(
             "exact".into(),
             "eip155:84532".parse().unwrap(),
@@ -192,14 +220,24 @@ mod tests {
             "0xasset".into(),
             60,
         );
-        PaymentRequired::new(resource)
-            .with_error("Payment required")
-            .with_accepts(vec![req])
+        ResourceServer::new(Arc::new(MockFacilitator))
+            .create_payment_required_response(
+                vec![req],
+                PaymentRequiredBuildContext {
+                    resource: ResourceInfo::new("mcp://tool/demo"),
+                    error: Some(error.into()),
+                    extensions: Extensions::new(),
+                    supported: SupportedResponse::default(),
+                    payment_payload: None,
+                },
+            )
+            .await
+            .unwrap()
     }
 
-    #[test]
-    fn payment_required_sets_structured_and_text() {
-        let pr = sample_required();
+    #[tokio::test]
+    async fn payment_required_sets_structured_and_text() {
+        let pr = sample_required("Payment required").await;
         let result = payment_required_tool_result(&pr);
         assert_eq!(result.is_error, Some(true));
         let sc = result.structured_content.as_ref().unwrap();
@@ -217,15 +255,10 @@ mod tests {
         );
     }
 
-    #[test]
-    fn settlement_failed_uses_dual_format() {
-        let pr = sample_required();
-        let result = settlement_failed_tool_result(
-            &pr.accepts,
-            &pr.resource,
-            &Extensions::new(),
-            "Settlement failed",
-        );
+    #[tokio::test]
+    async fn settlement_failed_uses_dual_format() {
+        let pr = sample_required("Settlement failed").await;
+        let result = settlement_failed_tool_result(&pr);
         assert!(extract_payment_required(&result).is_some());
     }
 

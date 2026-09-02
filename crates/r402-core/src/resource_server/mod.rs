@@ -8,12 +8,23 @@
 //! [`crate::scheme::SchemeRegistry`] (or a remote facilitator). The resource
 //! server only sequences wire construction and hooks against a [`Facilitator`].
 
+mod hook_policy;
 mod hooks;
 mod payment_flow;
 
+use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use compact_str::CompactString;
+pub use hook_policy::{
+    HookPolicyError, RESERVED_PAYMENT_FLOW_EXTRA_KEYS, SettleResponseCoreSnapshot,
+    assert_accepts_additive_extra_after_scheme_enrich,
+    assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
+    assert_additive_settlement_extra, assert_settle_response_core_unchanged,
+    is_vacant_string_field, merge_additive_settlement_extra, snapshot_payment_requirements_list,
+    snapshot_settle_response_core,
+};
 pub use hooks::{
     AfterVerifyDecision, BeforeOpDecision, CancelReason, DynResourceServerHooks,
     PaymentHookContext, ResourceServerHooks, SettleContext, SettleResultContext,
@@ -25,13 +36,16 @@ pub use payment_flow::{
     apply_payment_flow_wire_extra, resolve_payment_flow, resolve_payment_flow_phases,
 };
 use serde::Serialize;
+use serde_json::Value;
 
 use crate::error::{FacilitatorError, VerificationError};
+use crate::extensions::{AdvertiseContext, Extension, ExtensionRegistry};
 use crate::facilitator::FailureRecovery;
 use crate::facilitator::{DynFacilitator, Facilitator};
 use crate::wire::{
-    Extensions, PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2,
-    VerifyRequest, VerifyResponse, find_matching_requirements,
+    Extensions, PaymentRequired, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
+    SupportedResponse, TypedVerifyRequest, V2, VerifyRequest, VerifyResponse,
+    find_matching_requirements,
 };
 use crate::wire::{
     SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
@@ -47,10 +61,26 @@ pub struct VerifyPaymentOutcome {
     pub skip_handler: Option<SkipHandlerDirective>,
 }
 
+/// Inputs for [`ResourceServer::create_payment_required_response`].
+#[derive(Debug, Clone)]
+pub struct PaymentRequiredBuildContext {
+    /// Resource metadata placed on the 402 body.
+    pub resource: ResourceInfo,
+    /// Optional error string (`PaymentRequired.error`).
+    pub error: Option<CompactString>,
+    /// Declared extension entries copied onto the 402 body before advertise.
+    pub extensions: Extensions,
+    /// Facilitator `/supported` snapshot (scheme enrich reads this later).
+    pub supported: SupportedResponse,
+    /// Failed payment payload, when building a 402 after a paid attempt.
+    pub payment_payload: Option<WirePaymentPayload>,
+}
+
 /// Server-side payment orchestrator (official `X402ResourceServer`, V2-only).
 pub struct ResourceServer {
     facilitator: Arc<dyn DynFacilitator>,
     hooks: Vec<Arc<dyn DynResourceServerHooks>>,
+    extensions: ExtensionRegistry,
 }
 
 impl Clone for ResourceServer {
@@ -58,6 +88,7 @@ impl Clone for ResourceServer {
         Self {
             facilitator: Arc::clone(&self.facilitator),
             hooks: self.hooks.clone(),
+            extensions: self.extensions.clone(),
         }
     }
 }
@@ -66,6 +97,7 @@ impl std::fmt::Debug for ResourceServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResourceServer")
             .field("hooks", &self.hooks.len())
+            .field("extensions", &self.extensions.len())
             .finish_non_exhaustive()
     }
 }
@@ -81,6 +113,7 @@ impl ResourceServer {
         Self {
             facilitator: erased,
             hooks: Vec::new(),
+            extensions: ExtensionRegistry::new(),
         }
     }
 
@@ -90,6 +123,7 @@ impl ResourceServer {
         Self {
             facilitator,
             hooks: Vec::new(),
+            extensions: ExtensionRegistry::new(),
         }
     }
 
@@ -103,6 +137,13 @@ impl ResourceServer {
     /// Registers a lifecycle hook after construction.
     pub fn add_hook(&mut self, hook: impl ResourceServerHooks + 'static) {
         self.hooks.push(Arc::new(hook));
+    }
+
+    /// Registers a protocol extension advertised on 402 responses.
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl Extension + 'static) -> Self {
+        self.extensions.register(extension);
+        self
     }
 
     /// Number of registered resource-server hooks.
@@ -132,6 +173,40 @@ impl ResourceServer {
         payload: &WirePaymentPayload,
     ) -> Option<&'a PaymentRequirements> {
         find_matching_requirements(available, &payload.accepted)
+    }
+
+    /// Official `CreatePaymentRequiredResponse`: one 402 body used for both
+    /// unpaid challenges and paid matching.
+    ///
+    /// # Errors
+    ///
+    /// [`FacilitatorError::Internal`] when hook policy or payment-flow wire
+    /// extra application fails (fail-closed).
+    #[allow(
+        clippy::unused_async,
+        reason = "official createPaymentRequiredResponse is async"
+    )]
+    pub async fn create_payment_required_response(
+        &self,
+        accepts: Vec<PaymentRequirements>,
+        ctx: PaymentRequiredBuildContext,
+    ) -> Result<PaymentRequired, FacilitatorError> {
+        let PaymentRequiredBuildContext {
+            resource,
+            error,
+            extensions,
+            supported: _,
+            payment_payload: _,
+        } = ctx;
+        let mut response = PaymentRequired::new(resource)
+            .with_accepts(accepts)
+            .with_extensions(extensions);
+        if let Some(error) = error {
+            response = response.with_error(error);
+        }
+        advertise_registered_extensions(&self.extensions, &mut response)?;
+        apply_payment_flow_extras(&mut response.accepts)?;
+        Ok(response)
     }
 
     /// Official `VerifyPayment`: before hooks → facilitator → after hooks.
@@ -515,6 +590,58 @@ fn apply_settlement_overrides(
     Ok(effective)
 }
 
+fn advertise_registered_extensions(
+    registry: &ExtensionRegistry,
+    response: &mut PaymentRequired,
+) -> Result<(), FacilitatorError> {
+    for ext in registry.iter() {
+        let baseline = snapshot_payment_requirements_list(&response.accepts);
+        if response.extensions.get(ext.id()).is_none()
+            && let Some(entry) = ext.advertise(&AdvertiseContext { requirement: None })
+        {
+            response.extensions.insert(ext.id(), entry);
+        }
+        assert_accepts_allowlisted_after_extension_enrich(&baseline, &response.accepts, ext.id())
+            .map_err(FacilitatorError::internal)?;
+    }
+    Ok(())
+}
+
+fn apply_payment_flow_extras(accepts: &mut [PaymentRequirements]) -> Result<(), FacilitatorError> {
+    for accept in accepts {
+        let atm = accept
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("assetTransferMethod"))
+            .and_then(Value::as_str)
+            .unwrap_or(SDK_DEFAULT_ASSET_TRANSFER_METHOD);
+        let flow = match accept
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("paymentFlow"))
+        {
+            None | Some(Value::Null) => PaymentFlowName::Authorization,
+            Some(Value::String(label)) => {
+                PaymentFlowName::from_str(label).map_err(FacilitatorError::internal)?
+            }
+            Some(other) => {
+                PaymentFlowName::from_str(&other.to_string()).map_err(FacilitatorError::internal)?
+            }
+        };
+        let resolved = ResolvedPaymentFlow {
+            asset_transfer_method: atm.to_owned(),
+            payment_flow: flow,
+        };
+        let next = apply_payment_flow_wire_extra(accept.extra.as_ref(), &resolved);
+        accept.extra = if next.is_empty() {
+            None
+        } else {
+            Some(Value::Object(next))
+        };
+    }
+    Ok(())
+}
+
 fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError {
     match invalid {
         VerifyResponse::Invalid {
@@ -544,7 +671,8 @@ mod tests {
     use compact_str::CompactString;
 
     use super::*;
-    use crate::wire::{Extensions, SupportedResponse};
+    use crate::extensions::{AdvertiseContext, Extension};
+    use crate::wire::{ExtensionEntry, Extensions, SupportedResponse};
 
     struct MockFacilitator {
         verifies: AtomicUsize,
@@ -1039,6 +1167,7 @@ mod tests {
             requests[0].clone().into_json(),
             requests[1].clone().into_json()
         );
+        drop(requests);
     }
 
     #[tokio::test]

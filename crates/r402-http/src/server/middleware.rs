@@ -502,7 +502,9 @@ where
                 gate_builder = gate_builder.hooks_dyn(Arc::clone(h));
             }
             let mut gate = gate_builder.build();
-            gate.enrich_accepts().await;
+            if let Err(err) = gate.build_payment_required().await {
+                return Ok(gate.error_response(err));
+            }
 
             // Fix-8: after the paygate verifies the payment, fire
             // on_payment_verified so hooks can stamp request extensions
