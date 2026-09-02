@@ -24,8 +24,8 @@ default = []
 telemetry = ["r402-core/telemetry", "dep:tracing"]
 # Server types use rmcp model (CallToolResult, meta) — no transport required.
 server = ["dep:rmcp", "dep:thiserror"]
-# Client types + tool-call adapter.
-client = ["dep:rmcp", "dep:thiserror"]
+# Client types + rmcp `ServiceError` adapter.
+client = ["dep:rmcp", "dep:thiserror", "rmcp/client"]
 full = ["telemetry", "server", "client"]
 
 [dependencies]

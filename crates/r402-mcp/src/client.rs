@@ -12,10 +12,10 @@ use rmcp::model::{CallToolRequestParams, CallToolResult};
 use serde_json::{Map, Value};
 
 use crate::encode::{
-    McpPaymentPayload, attach_payment_to_params, extract_payment_required, extract_settle_response,
-    is_payment_required_result,
+    McpPaymentPayload, attach_payment_to_params, extract_payment_required,
+    extract_payment_required_from_rpc, extract_settle_response,
 };
-use crate::error::{McpClientError, PaymentRequiredError};
+use crate::error::{McpCallError, McpClientError, PaymentRequiredError};
 
 /// Minimal tool-call surface (Go `MCPCaller`).
 pub trait McpToolCaller: Send + Sync {
@@ -23,7 +23,7 @@ pub trait McpToolCaller: Send + Sync {
     fn call_tool(
         &self,
         params: CallToolRequestParams,
-    ) -> impl Future<Output = Result<CallToolResult, String>> + Send;
+    ) -> impl Future<Output = Result<CallToolResult, McpCallError>> + Send;
 }
 
 /// Signs a [`PaymentRequired`] into a wire payment payload.
@@ -185,23 +185,17 @@ where
             params = params.with_arguments(args.clone());
         }
 
-        let first = self
-            .caller
-            .call_tool(params.clone())
-            .await
-            .map_err(McpClientError::Transport)?;
+        let (first, required) = interpret_call(self.caller.call_tool(params.clone()).await)?;
 
-        if !is_payment_required_result(&first) {
+        let Some(required) = required else {
+            let result = first.ok_or_else(missing_tool_result)?;
             return Ok(PaidToolCallResult {
-                payment_response: extract_settle_response(&first),
-                result: first,
+                payment_response: extract_settle_response(&result),
+                result,
                 payment_made: false,
                 recovery_requested: false,
             });
-        }
-
-        let required = extract_payment_required(&first)
-            .ok_or_else(|| McpClientError::Payment("missing PaymentRequired body".into()))?;
+        };
 
         let pr_ctx = PaymentRequiredContext {
             tool_name: name.clone(),
@@ -280,20 +274,11 @@ where
         }
         let params = attach_payment_to_params(params, &payload);
 
-        let result = self
-            .caller
-            .call_tool(params)
-            .await
-            .map_err(McpClientError::Transport)?;
+        let (result, corrective) = interpret_call(self.caller.call_tool(params).await)?;
 
         let signed_payload = encode_mcp_payload_b64(&payload);
-        let settle = extract_settle_response(&result);
-        let still_required = is_payment_required_result(&result);
-        let corrective = if still_required {
-            extract_payment_required(&result)
-        } else {
-            None
-        };
+        let settle = result.as_ref().and_then(extract_settle_response);
+        let still_required = corrective.is_some();
 
         let mut recovery_requested = false;
         if let Some(ref hook) = self.hooks.on_payment_response {
@@ -321,6 +306,8 @@ where
                 recovery_requested,
             });
         }
+
+        let result = result.ok_or_else(missing_tool_result)?;
 
         if let Some(ref after) = self.hooks.on_after_payment {
             after(AfterPaymentContext {
@@ -353,13 +340,28 @@ where
         if let Some(args) = arguments {
             params = params.with_arguments(args);
         }
-        let result = self
-            .caller
-            .call_tool(params)
-            .await
-            .map_err(McpClientError::Transport)?;
-        Ok(extract_payment_required(&result))
+        let (_, required) = interpret_call(self.caller.call_tool(params).await)?;
+        Ok(required)
     }
+}
+
+fn interpret_call(
+    result: Result<CallToolResult, McpCallError>,
+) -> Result<(Option<CallToolResult>, Option<PaymentRequired>), McpClientError> {
+    match result {
+        Ok(result) => {
+            let required = extract_payment_required(&result);
+            Ok((Some(result), required))
+        }
+        Err(err) => extract_payment_required_from_rpc(&err)
+            .map_or_else(|| Err(err.into()), |required| Ok((None, Some(required)))),
+    }
+}
+
+fn missing_tool_result() -> McpClientError {
+    McpClientError::Transport(
+        "mcp tool call returned neither a result nor a payment challenge".into(),
+    )
 }
 
 fn encode_mcp_payload_b64(payload: &McpPaymentPayload) -> String {
@@ -394,10 +396,28 @@ mod tests {
     use std::sync::Mutex;
 
     use r402_core::wire::{PaymentRequirements, ResourceInfo};
-    use serde_json::json;
+    use rmcp::ServiceError;
+    use rmcp::model::{ErrorCode, ErrorData};
+    use serde_json::{Value, json};
 
     use super::*;
+    use crate::JSONRPC_PAYMENT_REQUIRED_CODE;
     use crate::encode::payment_required_tool_result;
+    use crate::error::mcp_call_error_from_rmcp;
+
+    fn sample_required() -> PaymentRequired {
+        let network = "eip155:1".parse().expect("fixture network");
+        let resource = ResourceInfo::new("mcp://tool/demo");
+        let req = PaymentRequirements::new(
+            "exact".into(),
+            network,
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            60,
+        );
+        PaymentRequired::new(resource).with_accepts(vec![req])
+    }
 
     struct MockCaller {
         calls: Mutex<u8>,
@@ -407,15 +427,21 @@ mod tests {
         fn call_tool(
             &self,
             params: CallToolRequestParams,
-        ) -> impl Future<Output = Result<CallToolResult, String>> + Send {
+        ) -> impl Future<Output = Result<CallToolResult, McpCallError>> + Send {
             std::future::ready(self.handle_call(&params))
         }
     }
 
     impl MockCaller {
-        fn handle_call(&self, params: &CallToolRequestParams) -> Result<CallToolResult, String> {
+        fn handle_call(
+            &self,
+            params: &CallToolRequestParams,
+        ) -> Result<CallToolResult, McpCallError> {
             let unpaid = params.meta.is_none();
-            let mut n = self.calls.lock().map_err(|e| e.to_string())?;
+            let mut n = self
+                .calls
+                .lock()
+                .map_err(|e| McpCallError::Transport(e.to_string()))?;
             *n = n.saturating_add(1);
             drop(n);
             if !unpaid {
@@ -423,20 +449,48 @@ mod tests {
                     rmcp::model::ContentBlock::text("ok"),
                 ]));
             }
-            let network = "eip155:1"
-                .parse()
-                .map_err(|e| format!("fixture network: {e}"))?;
-            let resource = ResourceInfo::new("mcp://tool/demo");
-            let req = PaymentRequirements::new(
-                "exact".into(),
-                network,
-                "1".into(),
-                "0xa".into(),
-                "0xb".into(),
-                60,
-            );
-            let pr = PaymentRequired::new(resource).with_accepts(vec![req]);
-            Ok(payment_required_tool_result(&pr))
+            Ok(payment_required_tool_result(&sample_required()))
+        }
+    }
+
+    struct RpcCaller {
+        calls: Mutex<u8>,
+        data: Value,
+    }
+
+    impl McpToolCaller for RpcCaller {
+        fn call_tool(
+            &self,
+            params: CallToolRequestParams,
+        ) -> impl Future<Output = Result<CallToolResult, McpCallError>> + Send {
+            std::future::ready(self.handle_call(&params))
+        }
+    }
+
+    impl RpcCaller {
+        fn handle_call(
+            &self,
+            params: &CallToolRequestParams,
+        ) -> Result<CallToolResult, McpCallError> {
+            let unpaid = params.meta.is_none();
+            let mut n = self
+                .calls
+                .lock()
+                .map_err(|e| McpCallError::Transport(e.to_string()))?;
+            *n = n.saturating_add(1);
+            drop(n);
+            if !unpaid {
+                return Ok(CallToolResult::success(vec![
+                    rmcp::model::ContentBlock::text("ok"),
+                ]));
+            }
+            Err(mcp_call_error_from_rmcp(ServiceError::McpError(
+                ErrorData {
+                    code: ErrorCode(JSONRPC_PAYMENT_REQUIRED_CODE),
+                    message: "Payment Required".into(),
+                    data: Some(self.data.clone()),
+                },
+            )))
         }
     }
 
@@ -466,8 +520,11 @@ mod tests {
             MockSigner,
         );
         let out = client.call_tool("demo", None).await.unwrap();
-        assert!(out.payment_made);
-        assert!(!out.result.is_error.unwrap_or(false));
+        assert!(out.payment_made, "tool-result 402 should auto-pay");
+        assert!(
+            !out.result.is_error.unwrap_or(false),
+            "paid retry should succeed"
+        );
     }
 
     #[tokio::test]
@@ -483,8 +540,83 @@ mod tests {
         });
         let err = client.call_tool("demo", None).await.unwrap_err();
         match err {
-            McpClientError::PaymentRequired(e) => assert_eq!(e.code, 402),
+            McpClientError::PaymentRequired(e) => {
+                assert_eq!(e.code, 402, "user-facing error stays 402");
+            }
             other => panic!("expected PaymentRequired, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn auto_pays_on_jsonrpc_32042_direct_data() {
+        let data = serde_json::to_value(sample_required()).unwrap();
+        let client = X402McpClient::new(
+            RpcCaller {
+                calls: Mutex::new(0),
+                data,
+            },
+            MockSigner,
+        );
+        let out = client.call_tool("demo", None).await.unwrap();
+        assert!(out.payment_made, "-32042 direct data should auto-pay");
+        assert!(
+            !out.result.is_error.unwrap_or(false),
+            "paid retry should succeed"
+        );
+    }
+
+    #[tokio::test]
+    async fn auto_pays_on_jsonrpc_32042_namespaced_x402() {
+        let data = json!({
+            "challenges": [{"method": "tempo"}],
+            "x402": sample_required(),
+        });
+        let client = X402McpClient::new(
+            RpcCaller {
+                calls: Mutex::new(0),
+                data,
+            },
+            MockSigner,
+        );
+        let out = client.call_tool("demo", None).await.unwrap();
+        assert!(out.payment_made, "-32042 data.x402 should auto-pay");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_32042_disabled_auto_payment_returns_402() {
+        let data = serde_json::to_value(sample_required()).unwrap();
+        let client = X402McpClient::new(
+            RpcCaller {
+                calls: Mutex::new(0),
+                data,
+            },
+            MockSigner,
+        )
+        .with_options(X402McpClientOptions {
+            auto_payment: false,
+        });
+        let err = client.call_tool("demo", None).await.unwrap_err();
+        match err {
+            McpClientError::PaymentRequired(e) => {
+                assert_eq!(e.code, 402, "user-facing error stays 402");
+            }
+            other => panic!("expected PaymentRequired, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn non_payment_rpc_is_transport() {
+        let client = X402McpClient::new(
+            RpcCaller {
+                calls: Mutex::new(0),
+                data: json!({"unrelated": true}),
+            },
+            MockSigner,
+        );
+        let err = client.call_tool("demo", None).await.unwrap_err();
+        match err {
+            McpClientError::Transport(_) => {}
+            other => panic!("expected Transport, got {other:?}"),
         }
     }
 }
