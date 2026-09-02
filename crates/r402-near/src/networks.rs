@@ -3,9 +3,11 @@
 //! This module provides static network metadata and USDC NEP-141 token
 //! deployment information for NEAR mainnet and testnet.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{NearAddress, NearChainReference, NearTokenDeployment};
@@ -62,6 +64,25 @@ pub fn usdc_near_deployments() -> &'static [NearTokenDeployment] {
 #[must_use]
 pub fn usdc_near_deployment(chain: NearChainReference) -> Option<&'static NearTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by NEP-141 account id and CAIP-2 network.
+#[must_use]
+pub fn find_default_near_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "near" {
+        return None;
+    }
+    let chain = NearChainReference::from_str(network.reference()).ok()?;
+    let address: NearAddress = asset.parse().ok()?;
+    usdc_near_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known NEAR chains.
@@ -125,5 +146,8 @@ mod tests {
         assert_eq!(USDC::near_testnet().decimals, DEFAULT_TOKEN_DECIMALS);
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(NEAR_NETWORKS.len(), 2);
+        let network: ChainId = "near:mainnet".parse().unwrap();
+        let info = find_default_near_asset(USDC::near().address.as_str(), &network).unwrap();
+        assert_eq!(info.symbol, "USDC");
     }
 }

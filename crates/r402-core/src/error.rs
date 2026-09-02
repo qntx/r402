@@ -322,6 +322,14 @@ pub enum ClientError {
     /// JSON (de)serialisation failed.
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    /// Spend controls rejected every remaining payment option.
+    #[error("{0}")]
+    SpendControls(String),
+
+    /// No remaining accept has a recognized `extra.paymentFlow`.
+    #[error("no payment requirements with a recognized paymentFlow")]
+    UnrecognizedPaymentFlow,
 }
 
 /// Canonical error code returned on the wire when a payment fails.

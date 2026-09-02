@@ -84,6 +84,34 @@ impl FromStr for PaymentFlowName {
     }
 }
 
+/// `extra.paymentFlow` when `extra` is a JSON object.
+#[must_use]
+pub fn extra_payment_flow(extra: Option<&Value>) -> Option<&Value> {
+    extra.and_then(|value| value.get("paymentFlow"))
+}
+
+/// Whether `extra.paymentFlow` is absent/null or a closed payment-flow name.
+///
+/// Used by client selection (official `IsRecognizedPaymentFlow`).
+#[must_use]
+pub fn is_recognized_payment_flow(extra: Option<&Value>) -> bool {
+    match extra_payment_flow(extra) {
+        None | Some(Value::Null) => true,
+        Some(Value::String(name)) => name.parse::<PaymentFlowName>().is_ok(),
+        Some(_) => false,
+    }
+}
+
+/// Whether the accept is authorization (omit, JSON null, or `"authorization"`).
+#[must_use]
+pub fn is_authorization_payment_flow(extra: Option<&Value>) -> bool {
+    match extra_payment_flow(extra) {
+        None | Some(Value::Null) => true,
+        Some(Value::String(name)) => name == PaymentFlowName::Authorization.as_str(),
+        Some(_) => false,
+    }
+}
+
 /// Which settle invocation is running.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -694,5 +722,32 @@ mod tests {
         );
         assert_eq!(next.get("name").and_then(Value::as_str), Some("USDC"));
         assert!(!next.contains_key("assetTransferMethod"));
+    }
+
+    #[test]
+    fn recognized_payment_flow_accepts_omit_null_and_closed_names() {
+        assert!(is_recognized_payment_flow(None));
+        assert!(is_recognized_payment_flow(Some(&serde_json::json!({}))));
+        assert!(is_recognized_payment_flow(Some(
+            &serde_json::json!({"paymentFlow": null})
+        )));
+        for name in ["authorization", "upfront", "escrow"] {
+            assert!(is_recognized_payment_flow(Some(
+                &serde_json::json!({"paymentFlow": name})
+            )));
+        }
+        assert!(!is_recognized_payment_flow(Some(
+            &serde_json::json!({"paymentFlow": "future-flow"})
+        )));
+        assert!(!is_recognized_payment_flow(Some(
+            &serde_json::json!({"paymentFlow": 1})
+        )));
+        assert!(is_authorization_payment_flow(None));
+        assert!(is_authorization_payment_flow(Some(
+            &serde_json::json!({"paymentFlow": "authorization"})
+        )));
+        assert!(!is_authorization_payment_flow(Some(
+            &serde_json::json!({"paymentFlow": "upfront"})
+        )));
     }
 }

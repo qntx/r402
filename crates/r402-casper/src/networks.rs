@@ -3,9 +3,11 @@
 //! This module provides static network metadata and the wCSPR (CEP-18)
 //! deployments r402 ships with.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::chain::{CasperChainReference, CasperTokenDeployment, ContractPackageHash};
 use crate::motes::CSPR_DECIMALS;
@@ -74,6 +76,25 @@ pub fn wcspr_casper_deployment(
     WCSPR_DEPLOYMENTS
         .iter()
         .find(|deployment| deployment.chain_reference == chain)
+}
+
+/// Reverse lookup by CEP-18 package hash and CAIP-2 network.
+#[must_use]
+pub fn find_default_casper_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "casper" {
+        return None;
+    }
+    let chain = CasperChainReference::from_str(network.reference()).ok()?;
+    let package: ContractPackageHash = asset.parse().ok()?;
+    wcspr_casper_deployment(chain)
+        .filter(|deployment| deployment.address == package)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.to_string(),
+                u32::from(deployment.decimals),
+                "wCSPR",
+            )
+        })
 }
 
 /// Ergonomic accessors for wCSPR token deployments on well-known Casper
@@ -157,6 +178,10 @@ mod tests {
         assert_eq!(deployment.name, WCSPR_NAME);
         assert_eq!(deployment.version, WCSPR_VERSION);
         assert_eq!(deployment.address.to_string(), WCSPR_TESTNET_PACKAGE);
+        let network: ChainId = "casper:casper-test".parse().unwrap();
+        let info = find_default_casper_asset(WCSPR_TESTNET_PACKAGE, &network).unwrap();
+        assert_eq!(info.symbol, "wCSPR");
+        assert_eq!(info.decimals, u32::from(CSPR_DECIMALS));
     }
 
     #[test]

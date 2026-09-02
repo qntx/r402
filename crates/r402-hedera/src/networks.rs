@@ -1,8 +1,10 @@
 //! Well-known Hedera network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::chain::{
     HBAR_ASSET_ID, HBAR_DECIMALS, HEDERA_MAINNET_USDC, HEDERA_TESTNET_USDC, HederaAddress,
@@ -76,6 +78,24 @@ pub fn usdc_hedera_deployment(
     chain: HederaChainReference,
 ) -> Option<&'static HederaTokenDeployment> {
     USDC_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by HTS token id and CAIP-2 network.
+#[must_use]
+pub fn find_default_hedera_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "hedera" {
+        return None;
+    }
+    let chain = HederaChainReference::from_str(network.reference()).ok()?;
+    usdc_hedera_deployment(chain)
+        .filter(|deployment| deployment.address.as_str() == asset)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.as_str(),
+                u32::from(deployment.decimals),
+                "USDC",
+            )
+        })
 }
 
 /// Returns the HBAR deployment for a specific Hedera chain.
@@ -178,5 +198,9 @@ mod tests {
         assert_eq!(HBAR::hedera().address.as_str(), HBAR_ASSET_ID);
         assert_eq!(HBAR::hedera().decimals, HBAR_DECIMALS);
         assert_eq!(HEDERA_NETWORKS.len(), 2);
+        let network: ChainId = "hedera:mainnet".parse().unwrap();
+        let info = find_default_hedera_asset(HEDERA_MAINNET_USDC, &network).unwrap();
+        assert_eq!(info.symbol, "USDC");
+        assert!(find_default_hedera_asset(HBAR_ASSET_ID, &network).is_none());
     }
 }

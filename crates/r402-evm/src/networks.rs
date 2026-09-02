@@ -6,7 +6,9 @@
 use std::sync::LazyLock;
 
 use alloy_primitives::Address;
-use r402_core::chain::NetworkInfo;
+use compact_str::CompactString;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::asset::AssetTransferMethod;
 use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentEip712};
@@ -444,6 +446,31 @@ pub fn find_default_evm_asset(
         .find(|entry| entry.chain_reference == chain && entry.address == asset)
 }
 
+impl EvmDefaultAsset {
+    /// Client spend-cap view of this row.
+    #[must_use]
+    pub fn to_default_asset_info(&self) -> DefaultAssetInfo {
+        let info = DefaultAssetInfo::new(
+            CompactString::from(self.address.to_checksum(None)),
+            u32::from(self.decimals),
+            self.symbol,
+        );
+        match self.asset_transfer_method {
+            Some(AssetTransferMethod::Permit2) => info.with_asset_transfer_method("permit2"),
+            Some(AssetTransferMethod::Eip3009) => info.with_asset_transfer_method("eip3009"),
+            None => info,
+        }
+    }
+}
+
+/// Reverse lookup by advertised asset id and CAIP-2 network.
+#[must_use]
+pub fn find_default_evm_asset_info(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    let chain = Eip155ChainReference::try_from(network).ok()?;
+    let address = asset.parse().ok()?;
+    find_default_evm_asset(address, chain).map(EvmDefaultAsset::to_default_asset_info)
+}
+
 /// Ergonomic accessors for USDC token deployments on well-known EVM chains.
 ///
 /// Provides named methods for each supported chain, returning a static
@@ -839,5 +866,22 @@ mod tests {
         );
         assert_eq!(EXTRA_DEFAULT_ASSETS.len(), 11);
         assert_eq!(USDM_DEPLOYMENTS.len(), 1);
+    }
+
+    #[test]
+    fn find_default_evm_asset_info_matches_lowercase_address() {
+        let network = "eip155:8453".parse().unwrap();
+        let info =
+            find_default_evm_asset_info("0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", &network)
+                .unwrap();
+        assert_eq!(info.symbol, "USDC");
+        assert_eq!(info.decimals, 6);
+        assert!(info.asset_transfer_method.is_none());
+        let mega = "eip155:4326".parse().unwrap();
+        let mega_info =
+            find_default_evm_asset_info("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7", &mega)
+                .unwrap();
+        assert_eq!(mega_info.symbol, "MegaUSD");
+        assert_eq!(mega_info.asset_transfer_method.as_deref(), Some("permit2"));
     }
 }

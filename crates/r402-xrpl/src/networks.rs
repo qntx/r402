@@ -1,9 +1,11 @@
 //! Well-known XRPL network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use compact_str::CompactString;
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::chain::{
     XrplAsset, XrplChainReference, XrplClassicAddress, XrplIssuedCurrency, XrplTokenDeployment,
@@ -95,6 +97,24 @@ pub fn rlusd_deployment(chain: XrplChainReference) -> Option<&'static XrplTokenD
         .find(|d| d.chain_reference == chain)
 }
 
+/// Reverse lookup by RLUSD currency hex and CAIP-2 network.
+#[must_use]
+pub fn find_default_xrpl_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "xrpl" {
+        return None;
+    }
+    let chain = XrplChainReference::from_str(network.reference()).ok()?;
+    rlusd_deployment(chain)
+        .filter(|deployment| deployment.asset.as_str().eq_ignore_ascii_case(asset))
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.asset.as_str(),
+                u32::from(deployment.decimals),
+                "RLUSD",
+            )
+        })
+}
+
 /// Ergonomic accessors for native XRP.
 #[derive(Debug, Clone, Copy)]
 #[allow(
@@ -178,5 +198,10 @@ mod tests {
             }
             XrplAsset::Xrp => panic!("expected IOU"),
         }
+        let network: ChainId = "xrpl:0".parse().unwrap();
+        let info = find_default_xrpl_asset(RLUSD_CURRENCY, &network).unwrap();
+        assert_eq!(info.symbol, "RLUSD");
+        assert_eq!(info.decimals, u32::from(RLUSD_DECIMALS));
+        assert!(find_default_xrpl_asset("XRP", &network).is_none());
     }
 }

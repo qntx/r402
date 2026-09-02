@@ -7,7 +7,7 @@
 
 use http::{Extensions, HeaderMap, StatusCode};
 use r402_core::ClientHooks;
-use r402_core::client::{CreatedPayment, PaymentClient, PaymentResponseContext};
+use r402_core::client::{CreatedPayment, PaymentClient, PaymentResponseContext, SpendControls};
 use r402_core::error::ClientError;
 use r402_core::scheme::{FirstMatch, PaymentPolicy, PaymentSelector, SchemeClient};
 use r402_core::wire;
@@ -87,6 +87,20 @@ impl<TSelector> X402Client<TSelector> {
     #[must_use]
     pub fn with_hook(mut self, hook: impl ClientHooks + 'static) -> Self {
         self.inner = self.inner.with_hook(hook);
+        self
+    }
+
+    /// Enables spend controls with the given configuration.
+    #[must_use]
+    pub fn with_spend_controls(mut self, controls: SpendControls) -> Self {
+        self.inner = self.inner.with_spend_controls(controls);
+        self
+    }
+
+    /// Disables all spend controls (any asset, no caps).
+    #[must_use]
+    pub fn disable_spend_controls(mut self) -> Self {
+        self.inner = self.inner.disable_spend_controls();
         self
     }
 }

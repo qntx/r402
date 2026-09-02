@@ -38,6 +38,7 @@ pub use resource_server::{
     ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettleContext, SettlePhase,
     SettleResultContext, SkipHandlerDirective, VerifiedPaymentCanceledContext,
     VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload, apply_payment_flow_wire_extra,
+    extra_payment_flow, is_authorization_payment_flow, is_recognized_payment_flow,
     resolve_payment_flow, resolve_payment_flow_phases,
 };
 
@@ -54,8 +55,9 @@ pub mod metrics;
 // trip `unused_crate_dependencies` because no unit test references it.
 // The empty re-import silences that lint without affecting binary size.
 pub use client::{
-    ClientHooks, CreatedPayment, DynClientHooks, PaymentClient, PaymentCreationContext,
-    PaymentResponseContext, PaymentResponseResult,
+    AllowedAssets, ClientHooks, CreatedPayment, DynClientHooks, MaxAmountPerPayment, PaymentClient,
+    PaymentCreationContext, PaymentResponseContext, PaymentResponseResult, SpendControlAsset,
+    SpendControls,
 };
 pub use error::{
     AsPaymentProblem, ClientError, ErrorReason, FacilitatorError, PaymentProblem, SettlementError,

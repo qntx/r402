@@ -1,8 +1,10 @@
 //! Well-known TON network definitions and token deployments.
 
+use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::NetworkInfo;
+use r402_core::chain::{ChainId, NetworkInfo};
+use r402_core::scheme::DefaultAssetInfo;
 
 use crate::chain::{TvmAddress, TvmChainReference, TvmTokenDeployment};
 use crate::{DEFAULT_TOKEN_DECIMALS, USDT_MAINNET_MINTER, USDT_TESTNET_MINTER};
@@ -59,6 +61,25 @@ pub fn usdt_tvm_deployments() -> &'static [TvmTokenDeployment] {
 #[must_use]
 pub fn usdt_tvm_deployment(chain: TvmChainReference) -> Option<&'static TvmTokenDeployment> {
     USDT_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
+}
+
+/// Reverse lookup by jetton minter and CAIP-2 network.
+#[must_use]
+pub fn find_default_tvm_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+    if network.namespace() != "tvm" {
+        return None;
+    }
+    let chain = TvmChainReference::from_str(network.reference()).ok()?;
+    let address: TvmAddress = asset.parse().ok()?;
+    usdt_tvm_deployment(chain)
+        .filter(|deployment| deployment.address == address)
+        .map(|deployment| {
+            DefaultAssetInfo::new(
+                deployment.address.as_str(),
+                u32::from(deployment.decimals),
+                "USDT",
+            )
+        })
 }
 
 /// Ergonomic accessors for USDT token deployments on well-known TON chains.
@@ -118,5 +139,8 @@ mod tests {
         assert_eq!(TVM_NETWORKS.len(), 2);
         assert_eq!(TVM_NETWORKS.first().map(|n| n.reference), Some("-239"));
         assert_eq!(TVM_NETWORKS.get(1).map(|n| n.reference), Some("-3"));
+        let network: ChainId = "tvm:-239".parse().unwrap();
+        let info = find_default_tvm_asset(USDT_MAINNET_MINTER, &network).unwrap();
+        assert_eq!(info.symbol, "USDT");
     }
 }

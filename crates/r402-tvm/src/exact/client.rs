@@ -3,9 +3,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
+use r402_core::chain::ChainId;
 use r402_core::error::ClientError;
 use r402_core::scheme::SchemeId;
-use r402_core::scheme::{PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_core::wire::Base64Bytes;
 use r402_core::wire::PaymentRequired;
 use r402_core::wire::ResourceInfo;
@@ -238,6 +239,7 @@ where
                     amount: requirements.amount.as_str().into(),
                     scheme: self.scheme().into(),
                     pay_to: requirements.pay_to.to_string().into(),
+                    requirements: v.clone(),
                     signer: Box::new(V2PayloadSigner {
                         signer: self.signer.clone(),
                         rpc: self.rpc.clone(),
@@ -247,6 +249,10 @@ where
                 })
             })
             .collect()
+    }
+
+    fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
+        crate::find_default_tvm_asset(asset, network)
     }
 }
 
