@@ -32,7 +32,7 @@ use r402_core::facilitator::{DynFacilitator, Facilitator};
 use r402_core::resource_server::{
     CancelReason, CompletedSettlement, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
     PaymentRequiredBuildContext, ResourceServer, ResourceServerHooks, SettlePhase,
-    resolve_payment_flow_phases,
+    build_failure_path_settlement_response, resolve_payment_flow_phases,
 };
 use r402_core::wire;
 use r402_core::wire::{Base64Bytes, Extensions, PaymentRequired};
@@ -791,10 +791,12 @@ impl Paygate {
     /// Handles an incoming request with **sequential** settlement.
     ///
     /// ```text
-    /// verify → execute → settle → attach header → return
+    /// verify → settle-before-handler (upfront/escrow) → execute
+    ///        → settle-after-handler (authorization/escrow) → attach header
     /// ```
     ///
-    /// Settlement only runs if the handler returns a success status (not 4xx/5xx).
+    /// Handler 4xx/5xx runs cancel-settle and attaches official
+    /// failure-path `Payment-Response` (cancel receipt, else deposit echo).
     ///
     /// # Errors
     ///
@@ -830,26 +832,40 @@ impl Paygate {
         let response = match call_inner(inner, req).await {
             Ok(r) => r,
             Err(err) => {
-                cancel
+                let cancel_settlement = cancel
                     .cancel(
                         CancelReason::HandlerThrew,
                         Some("inner service error"),
                         None,
                     )
                     .await;
-                return Ok(err.into_response());
+                let mut response = err.into_response();
+                attach_failure_path_settlement(
+                    &mut response,
+                    cancel_settlement.as_ref(),
+                    before_handler.as_ref(),
+                    Some(&verified.payload),
+                )?;
+                return Ok(response);
             }
         };
 
         if response.status().is_client_error() || response.status().is_server_error() {
-            cancel
+            let cancel_settlement = cancel
                 .cancel(
                     CancelReason::HandlerFailed,
                     Some("handler returned error status"),
                     Some(response.status().as_u16()),
                 )
                 .await;
-            return Ok(response.into_response());
+            let mut response = response.into_response();
+            attach_failure_path_settlement(
+                &mut response,
+                cancel_settlement.as_ref(),
+                before_handler.as_ref(),
+                Some(&verified.payload),
+            )?;
+            return Ok(response);
         }
 
         let mut response = response.into_response();
@@ -1359,6 +1375,30 @@ fn attach_payment_response(
     settlement: &wire::SettleResponse,
 ) -> Result<(), PaygateError> {
     let header_value = settlement_to_header(settlement)?;
+    response
+        .headers_mut()
+        .insert("Payment-Response", header_value);
+    ensure_expose_headers(response.headers_mut());
+    Ok(())
+}
+
+/// Official `CreateFailurePathSettlementHeaders`: cancel receipt, else deposit echo.
+fn attach_failure_path_settlement(
+    response: &mut Response,
+    cancel_settlement: Option<&wire::SettleResponse>,
+    before_handler: Option<&CompletedSettlement>,
+    payment_payload: Option<&PaymentPayload>,
+) -> Result<(), PaygateError> {
+    let Some(receipt) =
+        build_failure_path_settlement_response(cancel_settlement, before_handler, payment_payload)
+    else {
+        return Ok(());
+    };
+    let encoded = receipt.encode_base64_any().ok_or_else(|| {
+        PaygateError::SettlementAborted("cannot encode failure-path settlement".to_owned())
+    })?;
+    let header_value = HeaderValue::from_bytes(encoded.as_ref())
+        .map_err(|e| PaygateError::SettlementAborted(e.to_string()))?;
     response
         .headers_mut()
         .insert("Payment-Response", header_value);
@@ -2012,7 +2052,7 @@ mod tests {
             .await
             .expect("handler 4xx is returned");
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert!(response.headers().get("Payment-Response").is_none());
+        assert!(response.headers().get("Payment-Response").is_some());
         assert_eq!(fac.verifies.load(Ordering::SeqCst), 0);
         // before-handler deposit + cancel settle
         assert_eq!(fac.settles.load(Ordering::SeqCst), 2);
