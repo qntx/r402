@@ -25,7 +25,7 @@ use http::header::ACCESS_CONTROL_EXPOSE_HEADERS;
 use http::{HeaderMap, HeaderValue, StatusCode};
 use r402_core::error::ErrorReason;
 use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::resource_server::{CancelReason, ResourceServer, ResourceServerHooks};
+use r402_core::resource_server::{CancelReason, ResourceServer, ResourceServerHooks, SettlePhase};
 use r402_core::wire;
 use r402_core::wire::Base64Bytes;
 use serde_json::json;
@@ -945,7 +945,12 @@ impl VerifiedPayment {
         let overrides = actual_amount.map(SettlementOverrides::amount);
         let settlement = self
             .server
-            .settle_payment(&self.payload, &self.requirements, overrides.as_ref())
+            .settle_payment(
+                &self.payload,
+                &self.requirements,
+                overrides.as_ref(),
+                SettlePhase::AfterHandler,
+            )
             .await
             .map_err(|e| PaygateError::SettlementAborted(format!("{e}")))?;
 
