@@ -19,5 +19,39 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+client = [
+    "dep:async-trait",
+    "dep:r402-client",
+    "dep:r402-protocol",
+    "dep:reqwest",
+    "dep:reqwest-middleware",
+    "dep:serde_json",
+]
+
+[dependencies]
+http = { workspace = true }
+
+async-trait = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-protocol = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+reqwest-middleware = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+r402-client = { workspace = true }
+r402-protocol = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = { workspace = true }
+
+[[test]]
+name = "buyer"
+required-features = ["client"]
+
 [lints]
 workspace = true
