@@ -28,6 +28,14 @@ pub struct AdvertiseContext<'a> {
     pub requirement: Option<&'a PaymentRequirements>,
 }
 
+impl<'a> AdvertiseContext<'a> {
+    /// Constructs an advertise context.
+    #[must_use]
+    pub const fn new(requirement: Option<&'a PaymentRequirements>) -> Self {
+        Self { requirement }
+    }
+}
+
 /// Context passed to [`Extension::on_verify`].
 #[non_exhaustive]
 pub struct VerifyContext<'a> {

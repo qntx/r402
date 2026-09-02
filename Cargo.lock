@@ -1475,6 +1475,17 @@ dependencies = [
 [[package]]
 name = "r402-server"
 version = "0.18.0"
+dependencies = [
+ "compact_str",
+ "metrics",
+ "r402-facilitator",
+ "r402-protocol",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "r402-solana"

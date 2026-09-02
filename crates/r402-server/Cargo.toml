@@ -19,5 +19,26 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+telemetry = ["dep:tracing"]
+metrics = ["dep:metrics"]
+
+[dependencies]
+compact_str = { workspace = true }
+r402-facilitator = { workspace = true }
+r402-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["sync", "time"] }
+
+metrics = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+
 [lints]
 workspace = true
