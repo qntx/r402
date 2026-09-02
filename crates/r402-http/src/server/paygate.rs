@@ -1253,6 +1253,7 @@ mod tests {
                 network: "eip155:1".into(),
                 amount: Some("1".into()),
                 extensions: wire::Extensions::new(),
+                extra: None,
             }))
         }
 

@@ -32,10 +32,11 @@ pub mod scheme;
 pub mod wire;
 
 pub use resource_server::{
-    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, DynResourceServerHooks,
-    PAYMENT_FLOWS, PaymentFlowConfig, PaymentFlowError, PaymentFlowName, PaymentFlowPhases,
-    PaymentFlowScheme, PaymentHookContext, ResolvedPaymentFlow, ResourceServer,
-    ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettleContext, SettlePhase,
+    AfterVerifyDecision, BeforeOpDecision, CancelReason, CancellationGuard, CompletedSettlement,
+    DynResourceServerHooks, DynSchemeNetworkServer, PAYMENT_FLOWS, PaymentFlowConfig,
+    PaymentFlowError, PaymentFlowName, PaymentFlowPhases, PaymentFlowScheme, PaymentHookContext,
+    ResolvedPaymentFlow, ResourceServer, ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+    SchemeNetworkServer, SchemePaymentRequiredContext, SettleContext, SettlePhase,
     SettleResultContext, SkipHandlerDirective, VerifiedPaymentCanceledContext,
     VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload, apply_payment_flow_wire_extra,
     resolve_payment_flow, resolve_payment_flow_phases,

@@ -4,12 +4,13 @@
 //! transports: match requirements, verify, settle, and lifecycle hooks
 //! including verified-payment cancellation.
 //!
-//! This type does **not** own pricing or route maps; scheme handlers live in
-//! [`crate::scheme::SchemeRegistry`] (or a remote facilitator). The resource
-//! server only sequences wire construction and hooks against a [`Facilitator`].
+//! This type does **not** own pricing or route maps. Registered
+//! [`SchemeNetworkServer`] adapters resolve payment flow; verify and settle
+//! still go through a [`Facilitator`].
 
 mod hooks;
 mod payment_flow;
+mod scheme;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,14 +25,16 @@ pub use payment_flow::{
     PaymentFlowScheme, ResolvedPaymentFlow, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SettlePhase,
     apply_payment_flow_wire_extra, resolve_payment_flow, resolve_payment_flow_phases,
 };
+pub use scheme::{DynSchemeNetworkServer, SchemeNetworkServer, SchemePaymentRequiredContext};
 use serde::Serialize;
 
+use crate::chain::{ChainId, ChainIdPattern};
 use crate::error::{FacilitatorError, VerificationError};
 use crate::facilitator::FailureRecovery;
 use crate::facilitator::{DynFacilitator, Facilitator};
 use crate::wire::{
     Extensions, PaymentRequirements, SettleRequest, SettleResponse, TypedVerifyRequest, V2,
-    VerifyRequest, VerifyResponse, find_matching_requirements,
+    VerifyRequest, VerifyResponse,
 };
 use crate::wire::{
     SettlementOverrides, asset_decimals_from_extra, resolve_settlement_override_amount,
@@ -51,6 +54,7 @@ pub struct VerifyPaymentOutcome {
 pub struct ResourceServer {
     facilitator: Arc<dyn DynFacilitator>,
     hooks: Vec<Arc<dyn DynResourceServerHooks>>,
+    schemes: Vec<(ChainIdPattern, Arc<dyn DynSchemeNetworkServer>)>,
 }
 
 impl Clone for ResourceServer {
@@ -58,6 +62,7 @@ impl Clone for ResourceServer {
         Self {
             facilitator: Arc::clone(&self.facilitator),
             hooks: self.hooks.clone(),
+            schemes: self.schemes.clone(),
         }
     }
 }
@@ -66,6 +71,7 @@ impl std::fmt::Debug for ResourceServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResourceServer")
             .field("hooks", &self.hooks.len())
+            .field("schemes", &self.schemes.len())
             .finish_non_exhaustive()
     }
 }
@@ -81,6 +87,7 @@ impl ResourceServer {
         Self {
             facilitator: erased,
             hooks: Vec::new(),
+            schemes: Vec::new(),
         }
     }
 
@@ -90,6 +97,7 @@ impl ResourceServer {
         Self {
             facilitator,
             hooks: Vec::new(),
+            schemes: Vec::new(),
         }
     }
 
@@ -117,29 +125,108 @@ impl ResourceServer {
         Arc::clone(&self.facilitator)
     }
 
+    /// Registers a scheme/network adapter. Returns `self` for builder chaining.
+    #[must_use]
+    pub fn with_scheme(
+        mut self,
+        network: ChainIdPattern,
+        scheme: impl SchemeNetworkServer + 'static,
+    ) -> Self {
+        self.register_scheme(network, scheme);
+        self
+    }
+
+    /// Registers a scheme/network adapter after construction.
+    pub fn register_scheme(
+        &mut self,
+        network: ChainIdPattern,
+        scheme: impl SchemeNetworkServer + 'static,
+    ) {
+        self.schemes.push((network, Arc::new(scheme)));
+    }
+
+    /// Registered adapter for `scheme` on `network`, if any.
+    ///
+    /// Exact CAIP-2 registrations win over wildcard/set patterns.
+    #[must_use]
+    pub fn registered_scheme(
+        &self,
+        scheme: &str,
+        network: &ChainId,
+    ) -> Option<&dyn DynSchemeNetworkServer> {
+        let mut patterned: Option<&dyn DynSchemeNetworkServer> = None;
+        for (pattern, server) in &self.schemes {
+            if server.scheme() != scheme || !pattern.matches(network) {
+                continue;
+            }
+            if matches!(pattern, ChainIdPattern::Exact { .. }) {
+                return Some(server.as_ref());
+            }
+            if patterned.is_none() {
+                patterned = Some(server.as_ref());
+            }
+        }
+        patterned
+    }
+
+    /// Resolves the payment-flow name for this accept from the scheme table.
+    ///
+    /// # Errors
+    ///
+    /// [`PaymentFlowError::UnregisteredScheme`] when no adapter matches this
+    /// accept, or ATM/flow errors from [`resolve_payment_flow`].
+    pub fn get_payment_flow(
+        &self,
+        requirements: &PaymentRequirements,
+    ) -> Result<PaymentFlowName, PaymentFlowError> {
+        let Some(scheme) =
+            self.registered_scheme(requirements.scheme.as_str(), &requirements.network)
+        else {
+            return Err(PaymentFlowError::UnregisteredScheme {
+                scheme: requirements.scheme.to_string(),
+                network: requirements.network.to_string(),
+            });
+        };
+        let resolved = resolve_payment_flow(
+            &PaymentFlowScheme {
+                scheme: scheme.scheme(),
+                default_asset_transfer_method: scheme.default_asset_transfer_method(),
+                payment_flows: scheme.payment_flows(),
+            },
+            requirements,
+        )?;
+        Ok(resolved.payment_flow)
+    }
+
     /// Official `FindMatchingRequirements`.
     ///
-    /// Method form matches the Go `X402ResourceServer` surface even though
-    /// matching is pure over the arguments.
+    /// Scheme-declared [`SchemeNetworkServer::dynamic_extra_fields`] are
+    /// omitted from the extra-subset comparison.
     #[must_use]
-    #[allow(
-        clippy::unused_self,
-        reason = "API parity with Go X402ResourceServer.FindMatchingRequirements"
-    )]
     pub fn find_matching_requirements<'a>(
         &self,
         available: &'a [PaymentRequirements],
         payload: &WirePaymentPayload,
     ) -> Option<&'a PaymentRequirements> {
-        find_matching_requirements(available, &payload.accepted)
+        available.iter().find(|req| {
+            let dynamic = self
+                .registered_scheme(req.scheme.as_str(), &req.network)
+                .map_or(&[][..], DynSchemeNetworkServer::dynamic_extra_fields);
+            req.matches_payload_accepted_with_dynamic(&payload.accepted, dynamic)
+        })
     }
 
     /// Official `VerifyPayment`: before hooks → facilitator → after hooks.
     ///
+    /// When `schemes` is empty, facilitator verify always runs. When schemes
+    /// are registered and the resolved flow has `!verify_before_handler`,
+    /// returns Valid without the facilitator and without `after_verify`.
+    ///
     /// # Errors
     ///
     /// Propagates facilitator errors (unless recovered), before-hook aborts,
-    /// and after-verify aborts (`FacilitatorError::Aborted`).
+    /// after-verify aborts (`FacilitatorError::Aborted`), and payment-flow
+    /// resolution failures.
     pub async fn verify_payment(
         &self,
         payload: &WirePaymentPayload,
@@ -150,7 +237,6 @@ impl ResourceServer {
             requirements: requirements.clone(),
         };
 
-        // before_verify: first Abort / Skip wins
         let mut skipped: Option<VerifyResponse> = None;
         for hook in &self.hooks {
             match hook.before_verify(&payment).await {
@@ -167,54 +253,26 @@ impl ResourceServer {
 
         let response = if let Some(local) = skipped {
             local
-        } else {
+        } else if self.schemes.is_empty() {
             self.call_verify_with_failure_hooks(&payment, payload, requirements)
                 .await?
-        };
-
-        // Official Go: isValid:false is a hard verify failure that runs
-        // onVerifyFailure (security: reachable facilitator ≠ payment valid).
-        // Unrecovered invalids skip after_verify.
-        if !response.is_valid() {
-            return Ok(VerifyPaymentOutcome {
-                response,
-                skip_handler: None,
-            });
-        }
-
-        let result_ctx = VerifyResultContext {
-            payment: payment.clone(),
-            result: response.clone(),
-        };
-
-        let mut skip_handler: Option<SkipHandlerDirective> = None;
-        for hook in &self.hooks {
-            match hook.after_verify(&result_ctx).await {
-                AfterVerifyDecision::Continue => {}
-                AfterVerifyDecision::Abort { reason, message } => {
-                    self.notify_verified_payment_canceled(
-                        payload,
-                        requirements,
-                        CancelReason::AfterVerifyAborted,
-                        Some(message.as_str()),
-                        None,
-                    )
-                    .await;
-                    return Err(FacilitatorError::Aborted { reason, message });
-                }
-                AfterVerifyDecision::SkipHandler {
-                    response: directive,
-                } => {
-                    // Last SkipHandler wins (matches Go).
-                    skip_handler = Some(directive);
-                }
+        } else {
+            let flow = self.get_payment_flow(requirements).map_err(|err| {
+                FacilitatorError::Verification(VerificationError::InvalidFormat(err.to_string()))
+            })?;
+            if resolve_payment_flow_phases(flow).verify_before_handler {
+                self.call_verify_with_failure_hooks(&payment, payload, requirements)
+                    .await?
+            } else {
+                return Ok(VerifyPaymentOutcome {
+                    response: VerifyResponse::valid(""),
+                    skip_handler: None,
+                });
             }
-        }
+        };
 
-        Ok(VerifyPaymentOutcome {
-            response,
-            skip_handler,
-        })
+        self.run_after_verify(payload, requirements, payment, response)
+            .await
     }
 
     /// Official `SettlePayment`: optional amount overrides → before hooks →
@@ -308,6 +366,7 @@ impl ResourceServer {
             reason,
             error: error.map(str::to_owned),
             response_status,
+            settled_phases: Vec::new(),
         };
         for hook in &self.hooks {
             hook.on_verified_payment_canceled(&ctx).await;
@@ -326,6 +385,86 @@ impl ResourceServer {
             payload,
             requirements,
             fired: AtomicBool::new(false),
+            settled_phases: Vec::new(),
+            before_handler: None,
+        }
+    }
+
+    async fn run_after_verify(
+        &self,
+        payload: &WirePaymentPayload,
+        requirements: &PaymentRequirements,
+        payment: PaymentHookContext,
+        response: VerifyResponse,
+    ) -> Result<VerifyPaymentOutcome, FacilitatorError> {
+        if !response.is_valid() {
+            return Ok(VerifyPaymentOutcome {
+                response,
+                skip_handler: None,
+            });
+        }
+
+        let result_ctx = VerifyResultContext {
+            payment,
+            result: response.clone(),
+        };
+
+        let mut skip_handler: Option<SkipHandlerDirective> = None;
+        for hook in &self.hooks {
+            match hook.after_verify(&result_ctx).await {
+                AfterVerifyDecision::Continue => {}
+                AfterVerifyDecision::Abort { reason, message } => {
+                    self.notify_verified_payment_canceled(
+                        payload,
+                        requirements,
+                        CancelReason::AfterVerifyAborted,
+                        Some(message.as_str()),
+                        None,
+                    )
+                    .await;
+                    return Err(FacilitatorError::Aborted { reason, message });
+                }
+                AfterVerifyDecision::SkipHandler {
+                    response: directive,
+                } => {
+                    skip_handler = Some(directive);
+                }
+            }
+        }
+
+        Ok(VerifyPaymentOutcome {
+            response,
+            skip_handler,
+        })
+    }
+
+    async fn settle_canceled_payment(
+        &self,
+        ctx: &VerifiedPaymentCanceledContext,
+    ) -> Option<SettleResponse> {
+        if !ctx.settled_phases.contains(&SettlePhase::BeforeHandler) {
+            return None;
+        }
+        let scheme = self.registered_scheme(
+            ctx.payment.requirements.scheme.as_str(),
+            &ctx.payment.requirements.network,
+        )?;
+        let cancel_requirements = scheme.settle_on_cancel(ctx).await?;
+        match self
+            .settle_payment(
+                &ctx.payment.payload,
+                &cancel_requirements,
+                None,
+                SettlePhase::Cancel,
+            )
+            .await
+        {
+            Ok(response) => Some(response),
+            Err(error) => Some(SettleResponse::from_facilitator_error(
+                &error,
+                ctx.payment.requirements.network.to_string(),
+                "",
+            )),
         }
     }
 
@@ -405,6 +544,38 @@ impl ResourceServer {
     }
 }
 
+/// Successful settle captured for a later phase (echo / cancel).
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct CompletedSettlement {
+    /// Settle invocation that produced `result`.
+    pub phase: SettlePhase,
+    /// Payment flow in effect when this settle ran.
+    pub flow: PaymentFlowName,
+    /// Facilitator settle response.
+    pub result: SettleResponse,
+    /// Requirements used for this settle.
+    pub requirements: PaymentRequirements,
+}
+
+impl CompletedSettlement {
+    /// Constructs a completed-settlement record.
+    #[must_use]
+    pub const fn new(
+        phase: SettlePhase,
+        flow: PaymentFlowName,
+        result: SettleResponse,
+        requirements: PaymentRequirements,
+    ) -> Self {
+        Self {
+            phase,
+            flow,
+            result,
+            requirements,
+        }
+    }
+}
+
 /// Ensures `on_verified_payment_canceled` runs at most once for a payment.
 #[derive(Debug)]
 pub struct CancellationGuard {
@@ -412,32 +583,69 @@ pub struct CancellationGuard {
     payload: WirePaymentPayload,
     requirements: PaymentRequirements,
     fired: AtomicBool,
+    settled_phases: Vec<SettlePhase>,
+    before_handler: Option<CompletedSettlement>,
 }
 
 impl CancellationGuard {
+    /// Records settle phases already completed before the handler.
+    #[must_use]
+    pub fn with_settled_phases(mut self, phases: impl IntoIterator<Item = SettlePhase>) -> Self {
+        self.settled_phases = phases.into_iter().collect();
+        self
+    }
+
+    /// Stores the before-handler settle receipt for failure-path echo.
+    #[must_use]
+    pub fn with_before_handler(mut self, settlement: CompletedSettlement) -> Self {
+        self.before_handler = Some(settlement);
+        self
+    }
+
+    /// Settle phases recorded on this guard.
+    #[must_use]
+    pub const fn settled_phases(&self) -> &[SettlePhase] {
+        self.settled_phases.as_slice()
+    }
+
+    /// Before-handler settle receipt, when one was stored.
+    #[must_use]
+    pub const fn before_handler(&self) -> Option<&CompletedSettlement> {
+        self.before_handler.as_ref()
+    }
+
     /// Fires cancel hooks if not already fired.
+    ///
+    /// When [`SettlePhase::BeforeHandler`] is in [`Self::settled_phases`] and
+    /// the matched scheme's `settle_on_cancel` returns requirements, settles
+    /// at [`SettlePhase::Cancel`].
     pub async fn cancel(
         &self,
         reason: CancelReason,
         error: Option<&str>,
         response_status: Option<u16>,
-    ) {
+    ) -> Option<SettleResponse> {
         if self
             .fired
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
-            return;
+            return None;
         }
-        self.server
-            .notify_verified_payment_canceled(
-                &self.payload,
-                &self.requirements,
-                reason,
-                error,
-                response_status,
-            )
-            .await;
+        let ctx = VerifiedPaymentCanceledContext {
+            payment: PaymentHookContext {
+                payload: self.payload.clone(),
+                requirements: self.requirements.clone(),
+            },
+            reason,
+            error: error.map(str::to_owned),
+            response_status,
+            settled_phases: self.settled_phases.clone(),
+        };
+        for hook in &self.server.hooks {
+            hook.on_verified_payment_canceled(&ctx).await;
+        }
+        self.server.settle_canceled_payment(&ctx).await
     }
 
     /// Returns `true` when cancel has already been dispatched.
@@ -527,6 +735,7 @@ fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError 
     reason = "hook + mock facilitator tests nest async bodies"
 )]
 mod tests {
+    use std::collections::HashMap;
     use std::future::Future;
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -534,6 +743,7 @@ mod tests {
     use compact_str::CompactString;
 
     use super::*;
+    use crate::chain::ChainIdPattern;
     use crate::wire::{Extensions, SupportedResponse};
 
     struct MockFacilitator {
@@ -1024,11 +1234,14 @@ mod tests {
             SettleResponse::Success { ref transaction, .. } if transaction == "0xconfirmed"
         ));
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 2);
-        let requests = mock.requests.lock().unwrap();
-        assert_eq!(
-            requests[0].clone().into_json(),
-            requests[1].clone().into_json()
-        );
+        let (first, second) = {
+            let requests = mock.requests.lock().unwrap();
+            (
+                requests[0].clone().into_json(),
+                requests[1].clone().into_json(),
+            )
+        };
+        assert_eq!(first, second);
     }
 
     #[tokio::test]
@@ -1063,5 +1276,422 @@ mod tests {
             SettleResponse::Failure { ref transaction, .. } if transaction == "0xsecond"
         ));
         assert_eq!(mock.settle_calls.load(Ordering::SeqCst), 2);
+    }
+
+    struct MockScheme {
+        name: &'static str,
+        default_atm: &'static str,
+        flows: HashMap<String, PaymentFlowConfig>,
+        dynamic: &'static [&'static str],
+        cancel_requirements: Option<PaymentRequirements>,
+    }
+
+    impl MockScheme {
+        fn with_flow(flow: PaymentFlowName) -> Self {
+            let mut flows = HashMap::new();
+            flows.insert(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+                PaymentFlowConfig::new(vec![flow], flow),
+            );
+            Self {
+                name: "exact",
+                default_atm: SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+                flows,
+                dynamic: &[],
+                cancel_requirements: None,
+            }
+        }
+
+        fn authorization() -> Self {
+            Self::with_flow(PaymentFlowName::Authorization)
+        }
+
+        fn upfront() -> Self {
+            Self::with_flow(PaymentFlowName::Upfront)
+        }
+
+        fn escrow() -> Self {
+            Self::with_flow(PaymentFlowName::Escrow)
+        }
+
+        fn auth_and_upfront() -> Self {
+            let mut flows = HashMap::new();
+            flows.insert(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(),
+                PaymentFlowConfig::new(
+                    vec![PaymentFlowName::Authorization, PaymentFlowName::Upfront],
+                    PaymentFlowName::Authorization,
+                ),
+            );
+            Self {
+                name: "exact",
+                default_atm: SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+                flows,
+                dynamic: &[],
+                cancel_requirements: None,
+            }
+        }
+    }
+
+    impl SchemeNetworkServer for MockScheme {
+        fn scheme(&self) -> &str {
+            self.name
+        }
+
+        fn default_asset_transfer_method(&self) -> &str {
+            self.default_atm
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.flows
+        }
+
+        fn dynamic_extra_fields(&self) -> &[&str] {
+            self.dynamic
+        }
+
+        fn settle_on_cancel<'a>(
+            &'a self,
+            _: &'a VerifiedPaymentCanceledContext,
+        ) -> impl Future<Output = Option<PaymentRequirements>> + Send + 'a {
+            std::future::ready(self.cancel_requirements.clone())
+        }
+    }
+
+    struct AfterVerifyCount(Arc<AtomicUsize>);
+    impl ResourceServerHooks for AfterVerifyCount {
+        fn after_verify<'a>(
+            &'a self,
+            _: &VerifyResultContext,
+        ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            std::future::ready(AfterVerifyDecision::Continue)
+        }
+    }
+
+    struct RecordCancelPhases(Arc<Mutex<Vec<SettlePhase>>>);
+    impl ResourceServerHooks for RecordCancelPhases {
+        fn on_verified_payment_canceled<'a>(
+            &'a self,
+            ctx: &'a VerifiedPaymentCanceledContext,
+        ) -> impl Future<Output = ()> + Send + 'a {
+            self.0
+                .lock()
+                .unwrap()
+                .extend(ctx.settled_phases.iter().copied());
+            std::future::ready(())
+        }
+    }
+
+    fn eip155_wildcard() -> ChainIdPattern {
+        ChainIdPattern::wildcard("eip155")
+    }
+
+    #[test]
+    fn get_payment_flow_errors_when_table_empty() {
+        let rs = ResourceServer::new(mock_ok());
+        let req = sample_payload().accepted;
+        let err = rs.get_payment_flow(&req).unwrap_err();
+        assert!(matches!(
+            err,
+            PaymentFlowError::UnregisteredScheme { ref scheme, ref network }
+                if scheme == "exact" && network == "eip155:1"
+        ));
+        assert!(
+            err.to_string().contains(
+                "No server implementation registered for scheme: exact, network: eip155:1"
+            )
+        );
+    }
+
+    #[test]
+    fn get_payment_flow_errors_if_unregistered_on_non_empty_table() {
+        let rs = ResourceServer::new(mock_ok()).with_scheme(
+            ChainIdPattern::exact("eip155", "8453"),
+            MockScheme::authorization(),
+        );
+        let err = rs.get_payment_flow(&sample_payload().accepted).unwrap_err();
+        assert!(matches!(err, PaymentFlowError::UnregisteredScheme { .. }));
+    }
+
+    #[test]
+    fn get_payment_flow_resolves_registered_scheme() {
+        let rs =
+            ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), MockScheme::upfront());
+        assert_eq!(
+            rs.get_payment_flow(&sample_payload().accepted).unwrap(),
+            PaymentFlowName::Upfront
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_unregistered_scheme_on_non_empty_table_errors() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock)).with_scheme(
+            ChainIdPattern::exact("solana", "mainnet"),
+            MockScheme::authorization(),
+        );
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::InvalidFormat(ref msg))
+                if msg.contains("No server implementation registered")
+        ));
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn verify_skips_facilitator_and_after_verify_when_not_verify_before_handler() {
+        let mock = mock_ok();
+        let after = Arc::new(AtomicUsize::new(0));
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::upfront())
+            .with_hook(AfterVerifyCount(Arc::clone(&after)))
+            .with_hook(AfterAbort);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let out = rs.verify_payment(&payload, &req).await.unwrap();
+        assert!(out.response.is_valid());
+        assert!(out.skip_handler.is_none());
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+        assert_eq!(after.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn verify_escrow_also_skips_facilitator() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::escrow());
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        assert!(
+            rs.verify_payment(&payload, &req)
+                .await
+                .unwrap()
+                .response
+                .is_valid()
+        );
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn verify_authorization_scheme_still_calls_facilitator() {
+        let mock = mock_ok();
+        let after = Arc::new(AtomicUsize::new(0));
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(AfterVerifyCount(Arc::clone(&after)));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        assert!(
+            rs.verify_payment(&payload, &req)
+                .await
+                .unwrap()
+                .response
+                .is_valid()
+        );
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 1);
+        assert_eq!(after.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn before_verify_skip_still_runs_after_verify_with_upfront_scheme() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::upfront())
+            .with_hook(SkipVerify)
+            .with_hook(AfterAbort);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "post"));
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn before_verify_abort_runs_before_scheme_lookup() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(
+                ChainIdPattern::exact("solana", "mainnet"),
+                MockScheme::authorization(),
+            )
+            .with_hook(AbortBeforeVerify);
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn verify_unsupported_payment_flow_errors() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::auth_and_upfront());
+        let payload = sample_payload();
+        let mut req = payload.accepted.clone();
+        req.extra = Some(serde_json::json!({ "paymentFlow": "escrow" }));
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::InvalidFormat(ref msg))
+                if msg.contains("does not support paymentFlow \"escrow\"")
+        ));
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn exact_registration_wins_over_wildcard() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::upfront())
+            .with_scheme(
+                ChainIdPattern::exact("eip155", "1"),
+                MockScheme::authorization(),
+            );
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        rs.verify_payment(&payload, &req).await.unwrap();
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn find_matching_omits_scheme_dynamic_extra_fields() {
+        let mut required = sample_payload().accepted;
+        required.extra = Some(serde_json::json!({
+            "feePayer": "FeePayer111111111111111111111111111111111",
+            "recentBlockhash": "fresh"
+        }));
+        let mut accepted = required.clone();
+        accepted.extra = Some(serde_json::json!({
+            "feePayer": "FeePayer111111111111111111111111111111111",
+            "recentBlockhash": "stale"
+        }));
+        let payload = WirePaymentPayload::new(accepted, serde_json::json!({ "k": 1 }));
+        let available = [required];
+
+        let empty = ResourceServer::new(mock_ok());
+        assert!(
+            empty
+                .find_matching_requirements(&available, &payload)
+                .is_none()
+        );
+
+        let mut scheme = MockScheme::authorization();
+        scheme.dynamic = &["recentBlockhash"];
+        let rs = ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), scheme);
+        assert!(
+            rs.find_matching_requirements(&available, &payload)
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_settles_when_before_handler_and_settle_on_cancel() {
+        let mock = mock_ok();
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let mut scheme = MockScheme::escrow();
+        scheme.cancel_requirements = Some(req.clone());
+        let phases = Arc::new(Mutex::new(Vec::new()));
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), scheme)
+            .with_hook(RecordCancelPhases(Arc::clone(&phases)));
+        let guard = rs
+            .cancellation_guard(payload, req)
+            .with_settled_phases([SettlePhase::BeforeHandler]);
+        let receipt = guard
+            .cancel(CancelReason::HandlerFailed, Some("4xx"), Some(400))
+            .await;
+        assert!(receipt.unwrap().is_success());
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 1);
+        assert_eq!(*phases.lock().unwrap(), vec![SettlePhase::BeforeHandler]);
+        assert!(guard.has_fired());
+        assert!(
+            guard
+                .cancel(CancelReason::HandlerThrew, None, None)
+                .await
+                .is_none()
+        );
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn cancel_skips_settle_without_before_handler_phase() {
+        let mock = mock_ok();
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let mut scheme = MockScheme::escrow();
+        scheme.cancel_requirements = Some(req.clone());
+        let rs = ResourceServer::new(Arc::clone(&mock)).with_scheme(eip155_wildcard(), scheme);
+        let receipt = rs
+            .cancellation_guard(payload, req)
+            .cancel(CancelReason::HandlerFailed, None, None)
+            .await;
+        assert!(receipt.is_none());
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_skips_settle_when_settle_on_cancel_returns_none() {
+        let mock = mock_ok();
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::escrow());
+        let receipt = rs
+            .cancellation_guard(payload, req)
+            .with_settled_phases([SettlePhase::BeforeHandler])
+            .cancel(CancelReason::HandlerFailed, None, None)
+            .await;
+        assert!(receipt.is_none());
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cancel_settle_error_becomes_failed_receipt() {
+        let mock = Arc::new(MockFacilitator {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            fail_verify: false,
+            fail_settle: true,
+        });
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let mut scheme = MockScheme::escrow();
+        scheme.cancel_requirements = Some(req.clone());
+        let rs = ResourceServer::new(Arc::clone(&mock)).with_scheme(eip155_wildcard(), scheme);
+        let receipt = rs
+            .cancellation_guard(payload, req)
+            .with_settled_phases([SettlePhase::BeforeHandler])
+            .cancel(CancelReason::HandlerThrew, None, None)
+            .await
+            .unwrap();
+        assert!(!receipt.is_success());
+        assert_eq!(mock.settles.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cancellation_guard_stores_before_handler_receipt() {
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let settlement = CompletedSettlement::new(
+            SettlePhase::BeforeHandler,
+            PaymentFlowName::Upfront,
+            success_settle("0xdeposit"),
+            req.clone(),
+        );
+        let guard = ResourceServer::new(mock_ok())
+            .cancellation_guard(payload, req)
+            .with_before_handler(settlement)
+            .with_settled_phases([SettlePhase::BeforeHandler]);
+        assert_eq!(
+            guard.before_handler().unwrap().phase,
+            SettlePhase::BeforeHandler
+        );
+        assert_eq!(guard.settled_phases(), [SettlePhase::BeforeHandler]);
     }
 }

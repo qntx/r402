@@ -250,6 +250,14 @@ pub enum PaymentFlowError {
         /// Rejected token.
         phase: String,
     },
+    /// No [`super::SchemeNetworkServer`] is registered for this scheme/network.
+    #[error("[x402] No server implementation registered for scheme: {scheme}, network: {network}")]
+    UnregisteredScheme {
+        /// Requested scheme name.
+        scheme: String,
+        /// Requested CAIP-2 network.
+        network: String,
+    },
 }
 
 /// Resolves the phase table for a payment flow name.

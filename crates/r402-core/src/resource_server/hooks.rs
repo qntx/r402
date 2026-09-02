@@ -242,6 +242,8 @@ pub struct VerifiedPaymentCanceledContext {
     pub error: Option<String>,
     /// Optional HTTP/transport status from a failed handler response.
     pub response_status: Option<u16>,
+    /// Settle phases already completed for this payment.
+    pub settled_phases: Vec<SettlePhase>,
 }
 
 impl Debug for VerifiedPaymentCanceledContext {
@@ -249,6 +251,7 @@ impl Debug for VerifiedPaymentCanceledContext {
         f.debug_struct("VerifiedPaymentCanceledContext")
             .field("reason", &self.reason)
             .field("response_status", &self.response_status)
+            .field("settled_phases", &self.settled_phases)
             .finish_non_exhaustive()
     }
 }
