@@ -361,9 +361,11 @@ impl ResourceServer {
 
     /// Official `VerifyPayment`: before hooks → facilitator → after hooks.
     ///
-    /// When `schemes` is empty, facilitator verify always runs. When schemes
-    /// are registered and the resolved flow has `!verify_before_handler`,
-    /// returns Valid without the facilitator and without `after_verify`.
+    /// Every accept must have a registered [`SchemeNetworkServer`]. Empty
+    /// `schemes` is a programming error ([`PaymentFlowError::UnregisteredScheme`]),
+    /// not an always-facilitator fallback. When the resolved flow has
+    /// `!verify_before_handler`, returns Valid without the facilitator and
+    /// without `after_verify`.
     ///
     /// # Errors
     ///
@@ -396,9 +398,6 @@ impl ResourceServer {
 
         let response = if let Some(local) = skipped {
             local
-        } else if self.schemes.is_empty() {
-            self.call_verify_with_failure_hooks(&payment, payload, requirements)
-                .await?
         } else {
             let flow = self.get_payment_flow(requirements).map_err(|err| {
                 FacilitatorError::Verification(VerificationError::InvalidFormat(err.to_string()))
@@ -729,6 +728,106 @@ impl CompletedSettlement {
     }
 }
 
+/// Settlement receipt attached when the resource handler fails after verify
+/// (Go `BuildFailurePathSettlementResponse`).
+///
+/// Preference: successful cancel settle, then failed cancel with deposit-recovery
+/// extras, then before-handler echo, else `None`.
+#[must_use]
+pub fn build_failure_path_settlement_response(
+    cancel_settlement: Option<&SettleResponse>,
+    before_handler: Option<&CompletedSettlement>,
+    payment_payload: Option<&WirePaymentPayload>,
+) -> Option<SettleResponse> {
+    if let Some(cancel) = cancel_settlement {
+        if cancel.is_success() {
+            return Some(cancel.clone());
+        }
+        return Some(build_failed_cancel_receipt(
+            cancel,
+            before_handler,
+            payment_payload,
+        ));
+    }
+    before_handler.map(|completed| completed.result.clone())
+}
+
+/// Failed cancel receipt with deposit-recovery facts in `extra`.
+fn build_failed_cancel_receipt(
+    cancel: &SettleResponse,
+    before_handler: Option<&CompletedSettlement>,
+    payment_payload: Option<&WirePaymentPayload>,
+) -> SettleResponse {
+    let SettleResponse::Failure {
+        reason,
+        message,
+        payer,
+        network,
+        extensions,
+        extra: cancel_extra,
+        ..
+    } = cancel
+    else {
+        return cancel.clone();
+    };
+
+    let mut extra_map = match cancel_extra {
+        Some(Value::Object(map)) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    if let Some(before) = before_handler {
+        extra_map.insert(
+            "depositTransaction".into(),
+            Value::String(settle_response_transaction(&before.result).to_owned()),
+        );
+        extra_map.insert(
+            "depositAmount".into(),
+            Value::String(
+                settle_response_amount(&before.result)
+                    .unwrap_or("")
+                    .to_owned(),
+            ),
+        );
+    }
+    if let Some(payload) = payment_payload
+        && let Some(channel_id) = payload
+            .payload
+            .get("channelId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+    {
+        extra_map.insert("channelId".into(), Value::String(channel_id.to_owned()));
+    }
+    let merged_extra = if extra_map.is_empty() {
+        None
+    } else {
+        Some(Value::Object(extra_map))
+    };
+    SettleResponse::Failure {
+        reason: reason.clone(),
+        message: message.clone(),
+        payer: payer.clone(),
+        transaction: CompactString::default(),
+        network: network.clone(),
+        extensions: extensions.clone(),
+        extra: merged_extra,
+    }
+}
+
+fn settle_response_transaction(response: &SettleResponse) -> &str {
+    match response {
+        SettleResponse::Success { transaction, .. }
+        | SettleResponse::Failure { transaction, .. } => transaction.as_str(),
+    }
+}
+
+fn settle_response_amount(response: &SettleResponse) -> Option<&str> {
+    match response {
+        SettleResponse::Success { amount, .. } => amount.as_deref(),
+        SettleResponse::Failure { .. } => None,
+    }
+}
+
 /// Ensures `on_verified_payment_canceled` runs at most once for a payment.
 #[derive(Debug)]
 pub struct CancellationGuard {
@@ -1023,7 +1122,8 @@ mod tests {
     #[tokio::test]
     async fn verify_and_settle_invoke_facilitator() {
         let mock = mock_ok();
-        let rs = ResourceServer::new(Arc::clone(&mock));
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::authorization());
         let payload = sample_payload();
         let req = payload.accepted.clone();
         let out = rs.verify_payment(&payload, &req).await.unwrap();
@@ -1065,7 +1165,9 @@ mod tests {
 
     #[tokio::test]
     async fn before_verify_abort() {
-        let rs = ResourceServer::new(mock_ok()).with_hook(AbortBeforeVerify);
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(AbortBeforeVerify);
         let payload = sample_payload();
         let req = payload.accepted.clone();
         let err = rs.verify_payment(&payload, &req).await.unwrap_err();
@@ -1087,7 +1189,9 @@ mod tests {
     #[tokio::test]
     async fn before_verify_skip_bypasses_facilitator() {
         let mock = mock_ok();
-        let rs = ResourceServer::new(Arc::clone(&mock)).with_hook(SkipVerify);
+        let rs = ResourceServer::new(Arc::clone(&mock))
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(SkipVerify);
         let payload = sample_payload();
         let req = payload.accepted.clone();
         let out = rs.verify_payment(&payload, &req).await.unwrap();
@@ -1124,6 +1228,7 @@ mod tests {
     async fn after_verify_abort_fires_cancel() {
         let cancels = Arc::new(AtomicUsize::new(0));
         let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
             .with_hook(AfterAbort)
             .with_hook(CancelHook(Arc::clone(&cancels)));
         let payload = sample_payload();
@@ -1147,7 +1252,9 @@ mod tests {
 
     #[tokio::test]
     async fn after_verify_skip_handler() {
-        let rs = ResourceServer::new(mock_ok()).with_hook(SkipHandlerHook);
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(SkipHandlerHook);
         let payload = sample_payload();
         let req = payload.accepted.clone();
         let out = rs.verify_payment(&payload, &req).await.unwrap();
@@ -1173,7 +1280,9 @@ mod tests {
             fail_verify: true,
             fail_settle: false,
         });
-        let rs = ResourceServer::new(mock).with_hook(RecoverVerify);
+        let rs = ResourceServer::new(mock)
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(RecoverVerify);
         let payload = sample_payload();
         let req = payload.accepted.clone();
         assert!(
@@ -1199,7 +1308,9 @@ mod tests {
     #[tokio::test]
     async fn cancellation_guard_fires_once() {
         let count = Arc::new(AtomicUsize::new(0));
-        let rs = ResourceServer::new(mock_ok()).with_hook(CancelCountHook(Arc::clone(&count)));
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization())
+            .with_hook(CancelCountHook(Arc::clone(&count)));
         let payload = sample_payload();
         let req = payload.accepted.clone();
         let guard = rs.cancellation_guard(payload, req);
@@ -1590,6 +1701,21 @@ mod tests {
 
     fn eip155_wildcard() -> ChainIdPattern {
         ChainIdPattern::wildcard("eip155")
+    }
+
+    #[tokio::test]
+    async fn verify_payment_errors_when_table_empty() {
+        let mock = mock_ok();
+        let rs = ResourceServer::new(Arc::clone(&mock));
+        let payload = sample_payload();
+        let req = payload.accepted.clone();
+        let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+        assert!(matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::InvalidFormat(ref msg))
+                if msg.contains("No server implementation registered")
+        ));
+        assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -1992,5 +2118,95 @@ mod tests {
             SettlePhase::BeforeHandler
         );
         assert_eq!(guard.settled_phases(), [SettlePhase::BeforeHandler]);
+    }
+
+    #[test]
+    fn failure_path_prefers_successful_cancel() {
+        let payload = sample_payload();
+        let req = payload.accepted;
+        let before = CompletedSettlement::new(
+            SettlePhase::BeforeHandler,
+            PaymentFlowName::Escrow,
+            success_settle("0xdeposit"),
+            req,
+        );
+        let cancel = success_settle("0xrefund");
+        let got = build_failure_path_settlement_response(Some(&cancel), Some(&before), None);
+        assert!(matches!(
+            got,
+            Some(SettleResponse::Success { ref transaction, .. }) if transaction == "0xrefund"
+        ));
+    }
+
+    #[test]
+    fn failure_path_failed_cancel_includes_deposit_recovery() {
+        let payload = WirePaymentPayload::new(
+            sample_payload().accepted,
+            serde_json::json!({"channelId": "channel-123"}),
+        );
+        let req = payload.accepted.clone();
+        let before = CompletedSettlement::new(
+            SettlePhase::BeforeHandler,
+            PaymentFlowName::Escrow,
+            SettleResponse::Success {
+                payer: "0xpayer".into(),
+                transaction: "0xdeposit".into(),
+                network: "eip155:8453".into(),
+                amount: Some("1000".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            },
+            req,
+        );
+        let cancel = SettleResponse::Failure {
+            reason: crate::error::ErrorReason::UnexpectedSettleError,
+            message: Some("refund_failed".into()),
+            payer: None,
+            transaction: "should-clear".into(),
+            network: "eip155:8453".into(),
+            extensions: Extensions::new(),
+            extra: None,
+        };
+        let got =
+            build_failure_path_settlement_response(Some(&cancel), Some(&before), Some(&payload))
+                .unwrap();
+        match got {
+            SettleResponse::Failure {
+                ref transaction,
+                ref extra,
+                ..
+            } => {
+                assert!(transaction.is_empty());
+                let extra = extra.as_ref().and_then(Value::as_object).unwrap();
+                assert_eq!(
+                    extra.get("depositTransaction"),
+                    Some(&Value::from("0xdeposit"))
+                );
+                assert_eq!(extra.get("depositAmount"), Some(&Value::from("1000")));
+                assert_eq!(extra.get("channelId"), Some(&Value::from("channel-123")));
+            }
+            other => panic!("expected failure receipt, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn failure_path_echoes_before_handler_when_cancel_absent() {
+        let req = sample_payload().accepted;
+        let before = CompletedSettlement::new(
+            SettlePhase::BeforeHandler,
+            PaymentFlowName::Upfront,
+            success_settle("0xdeposit"),
+            req,
+        );
+        let got = build_failure_path_settlement_response(None, Some(&before), None);
+        assert!(matches!(
+            got,
+            Some(SettleResponse::Success { ref transaction, .. }) if transaction == "0xdeposit"
+        ));
+    }
+
+    #[test]
+    fn failure_path_none_when_nothing_available() {
+        assert!(build_failure_path_settlement_response(None, None, None).is_none());
     }
 }

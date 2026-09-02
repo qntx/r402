@@ -68,7 +68,8 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 
 // 1. Facilitator that can verify + settle (your implementation / HTTP client)
 let facilitator = Arc::new(my_facilitator);
-let resource_server = ResourceServer::new(facilitator);
+let resource_server = ResourceServer::new(facilitator)
+    .with_scheme(/* CAIP-2 pattern */, my_scheme_impl);
 
 // 2. Advertise one or more payment options for this tool
 let accepts = vec![PaymentRequirements::new(
@@ -87,7 +88,7 @@ let config = PaymentWrapperConfig::try_new(
             .with_mime_type("application/json"),
     ),
 )?;
-let wrapper = PaymentWrapper::try_new(resource_server, config)?;
+let wrapper = PaymentWrapper::try_new(resource_server, config).await?;
 
 // 3a. One-shot: wrap a single tools/call
 async fn handle_tool(wrapper: &PaymentWrapper, params: CallToolRequestParams) -> CallToolResult {
@@ -108,10 +109,12 @@ let paid = wrapper.wrap(|_params| async move {
 Control flow (Go `PaymentWrapper.Wrap`):
 
 1. Extract `_meta["x402/payment"]`
-2. Match `accepts` → verify (tool-level 402 on failure)
-3. Hooks → business handler
-4. On tool success → settle → `_meta["x402/payment-response"]`
-5. Settlement failure uses the **same dual-format** payment-required body (R5)
+2. Match `create_payment_required_response.accepts` → verify
+3. `SkipHandler` → `processSettlement(AfterHandler)` (no-op when `!settleAfterHandler`); no cancel dispatcher
+4. Before-handler settle when the flow requires it
+5. Tool handler; `isError` → cancel + failure-path `_meta`
+6. After-handler settle (or echo before-handler)
+7. Settlement failure uses the **same dual-format** payment-required body (R5)
 
 ## Client usage
 

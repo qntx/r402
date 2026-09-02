@@ -42,10 +42,11 @@ pub use resource_server::{
     VerifiedPaymentCanceledContext, VerifyPaymentOutcome, VerifyResultContext, WirePaymentPayload,
     apply_payment_flow_wire_extra, assert_accepts_additive_extra_after_scheme_enrich,
     assert_accepts_allowlisted_after_extension_enrich, assert_additive_payload_enrichment,
-    assert_additive_settlement_extra, assert_settle_response_core_unchanged, extra_payment_flow,
-    is_authorization_payment_flow, is_recognized_payment_flow, is_vacant_string_field,
-    merge_additive_settlement_extra, resolve_payment_flow, resolve_payment_flow_phases,
-    snapshot_payment_requirements_list, snapshot_settle_response_core,
+    assert_additive_settlement_extra, assert_settle_response_core_unchanged,
+    build_failure_path_settlement_response, extra_payment_flow, is_authorization_payment_flow,
+    is_recognized_payment_flow, is_vacant_string_field, merge_additive_settlement_extra,
+    resolve_payment_flow, resolve_payment_flow_phases, snapshot_payment_requirements_list,
+    snapshot_settle_response_core,
 };
 
 #[cfg(feature = "cache")]
