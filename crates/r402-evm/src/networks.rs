@@ -1,12 +1,14 @@
 //! Well-known EVM network definitions and token deployments.
 //!
-//! This module provides static network metadata and USDC/USDM token deployment
-//! information for all supported EIP-155 chains.
+//! Static network metadata, USDC/USDM deployments, and the unified USD-pegged
+//! default-asset table ([`get_default_evm_asset`], [`find_default_evm_asset`]).
 
 use std::sync::LazyLock;
 
+use alloy_primitives::Address;
 use r402_core::chain::NetworkInfo;
 
+use crate::asset::AssetTransferMethod;
 use crate::chain::{Eip155ChainReference, Eip155TokenDeployment, TokenDeploymentEip712};
 
 macro_rules! evm_networks {
@@ -33,6 +35,51 @@ macro_rules! evm_token_deployment {
             address: alloy_primitives::address!($addr),
             decimals: $dec,
             eip712: None,
+        }
+    };
+}
+
+macro_rules! evm_default_asset {
+    ($chain_id:expr, $addr:literal, $dec:literal, $symbol:literal, eip712: $name:literal / $ver:literal) => {
+        EvmDefaultAsset {
+            chain_reference: Eip155ChainReference::new($chain_id),
+            address: alloy_primitives::address!($addr),
+            decimals: $dec,
+            symbol: $symbol,
+            eip712: Some(TokenDeploymentEip712 {
+                name: $name.into(),
+                version: $ver.into(),
+            }),
+            asset_transfer_method: None,
+            supports_eip2612: false,
+        }
+    };
+    ($chain_id:expr, $addr:literal, $dec:literal, $symbol:literal, eip712: $name:literal / $ver:literal, permit2) => {
+        EvmDefaultAsset {
+            chain_reference: Eip155ChainReference::new($chain_id),
+            address: alloy_primitives::address!($addr),
+            decimals: $dec,
+            symbol: $symbol,
+            eip712: Some(TokenDeploymentEip712 {
+                name: $name.into(),
+                version: $ver.into(),
+            }),
+            asset_transfer_method: Some(AssetTransferMethod::Permit2),
+            supports_eip2612: false,
+        }
+    };
+    ($chain_id:expr, $addr:literal, $dec:literal, $symbol:literal, eip712: $name:literal / $ver:literal, permit2_eip2612) => {
+        EvmDefaultAsset {
+            chain_reference: Eip155ChainReference::new($chain_id),
+            address: alloy_primitives::address!($addr),
+            decimals: $dec,
+            symbol: $symbol,
+            eip712: Some(TokenDeploymentEip712 {
+                name: $name.into(),
+                version: $ver.into(),
+            }),
+            asset_transfer_method: Some(AssetTransferMethod::Permit2),
+            supports_eip2612: true,
         }
     };
 }
@@ -99,6 +146,17 @@ pub static EVM_NETWORKS: &[NetworkInfo] = evm_networks![
     "peaq",               "3338";
     "iotex",              "4689";
     "megaeth",            "4326";
+    "stable",             "988";
+    "stable-testnet",     "2201";
+    "mezo",               "31612";
+    "mezo-testnet",       "31611";
+    "radius",             "723487";
+    "radius-testnet",     "72344";
+    "adi",                "36900";
+    "hpp",                "190415";
+    "hpp-sepolia",        "181228";
+    "igra",               "38833";
+    "flare",              "14";
 ];
 
 /// Well-known USDC token deployments on EVM (EIP-155) networks.
@@ -273,6 +331,119 @@ pub fn usdm_evm_deployment(chain: Eip155ChainReference) -> Option<&'static Eip15
     USDM_DEPLOYMENTS.iter().find(|d| d.chain_reference == chain)
 }
 
+/// USD-pegged default asset for dollar-string prices and spend-cap lookup.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct EvmDefaultAsset {
+    /// Chain the token is deployed on.
+    pub chain_reference: Eip155ChainReference,
+    /// Token contract address.
+    pub address: Address,
+    /// Token decimal places.
+    pub decimals: u8,
+    /// Ticker (`"USDC"`, `"USDT0"`, `"mUSD"`, …).
+    pub symbol: &'static str,
+    /// EIP-712 domain `name` / `version` when the token declares them.
+    pub eip712: Option<TokenDeploymentEip712>,
+    /// Transfer-method override. `None` means EIP-3009.
+    pub asset_transfer_method: Option<AssetTransferMethod>,
+    /// Whether a Permit2 token implements EIP-2612 `permit()`.
+    pub supports_eip2612: bool,
+}
+
+fn usdc_as_default_asset(d: &Eip155TokenDeployment) -> EvmDefaultAsset {
+    EvmDefaultAsset {
+        chain_reference: d.chain_reference,
+        address: d.address,
+        decimals: d.decimals,
+        symbol: "USDC",
+        eip712: d.eip712.clone(),
+        asset_transfer_method: None,
+        supports_eip2612: false,
+    }
+}
+
+fn usdm_as_default_asset(d: &Eip155TokenDeployment) -> EvmDefaultAsset {
+    EvmDefaultAsset {
+        chain_reference: d.chain_reference,
+        address: d.address,
+        decimals: d.decimals,
+        symbol: "MegaUSD",
+        eip712: d.eip712.clone(),
+        asset_transfer_method: Some(AssetTransferMethod::Permit2),
+        supports_eip2612: true,
+    }
+}
+
+/// Additional USD-pegged default assets (`USDT0`, `mUSD`, `SBC`, `USDC.e`).
+static EXTRA_DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
+    vec![
+        // Stable mainnet USDT0
+        evm_default_asset!(988, "0x779Ded0c9e1022225f8E0630b35a9b54bE713736", 6, "USDT0", eip712: "USDT0" / "1"),
+        // Stable testnet USDT0
+        evm_default_asset!(2201, "0x78Cf24370174180738C5B8E352B6D14c83a6c9A9", 6, "USDT0", eip712: "USDT0" / "1"),
+        // Mezo mainnet mUSD
+        evm_default_asset!(31612, "0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186", 18, "mUSD", eip712: "Mezo USD" / "1", permit2_eip2612),
+        // Mezo testnet mUSD
+        evm_default_asset!(31611, "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503", 18, "mUSD", eip712: "Mezo USD" / "1", permit2_eip2612),
+        // Radius Network SBC
+        evm_default_asset!(723_487, "0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb", 6, "SBC", eip712: "Stable Coin" / "1", permit2_eip2612),
+        // Radius testnet SBC
+        evm_default_asset!(72344, "0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb", 6, "SBC", eip712: "Stable Coin" / "1", permit2_eip2612),
+        // ADI Chain USDC.e
+        evm_default_asset!(36900, "0x9cb8142aEBBcdc60AF7c97Af897A67A8f3CA71C2", 6, "USDC.e", eip712: "USDC.e" / "2"),
+        // HPP mainnet USDC.e
+        evm_default_asset!(190_415, "0x401eCb1D350407f13ba348573E5630B83638E30D", 6, "USDC.e", eip712: "Bridged USDC" / "2"),
+        // HPP Sepolia USDC.e
+        evm_default_asset!(181_228, "0x401eCb1D350407f13ba348573E5630B83638E30D", 6, "USDC.e", eip712: "Bridged USDC" / "2"),
+        // Igra mainnet USDC
+        evm_default_asset!(38833, "0xA5b8BF902b2844dA17d4506cc827F7F1681735E7", 6, "USDC", eip712: "USDC" / "1", permit2),
+        // Flare mainnet USD₮0
+        evm_default_asset!(14, "0xe7cd86e13AC4309349F30B3435a9d337750fC82D", 6, "USDT0", eip712: "USD\u{20AE}0" / "1"),
+    ]
+});
+
+static DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
+    let mut assets = Vec::with_capacity(
+        USDC_DEPLOYMENTS.len() + USDM_DEPLOYMENTS.len() + EXTRA_DEFAULT_ASSETS.len(),
+    );
+    assets.extend(USDC_DEPLOYMENTS.iter().map(usdc_as_default_asset));
+    assets.extend(USDM_DEPLOYMENTS.iter().map(usdm_as_default_asset));
+    assets.extend(EXTRA_DEFAULT_ASSETS.iter().cloned());
+    assets
+});
+
+/// USD-pegged allowlist for dollar-string prices and spend caps, including r402 extra Circle USDC.
+#[must_use]
+pub fn default_evm_assets() -> &'static [EvmDefaultAsset] {
+    &DEFAULT_ASSETS
+}
+
+/// Forward lookup: network default when `symbol` is `None`; ticker match is case-insensitive.
+#[must_use]
+pub fn get_default_evm_asset(
+    chain: Eip155ChainReference,
+    symbol: Option<&str>,
+) -> Option<&'static EvmDefaultAsset> {
+    let mut on_chain = DEFAULT_ASSETS
+        .iter()
+        .filter(|asset| asset.chain_reference == chain);
+    match symbol {
+        None => on_chain.next(),
+        Some(symbol) => on_chain.find(|asset| asset.symbol.eq_ignore_ascii_case(symbol)),
+    }
+}
+
+/// Reverse lookup by token address and chain.
+#[must_use]
+pub fn find_default_evm_asset(
+    asset: Address,
+    chain: Eip155ChainReference,
+) -> Option<&'static EvmDefaultAsset> {
+    DEFAULT_ASSETS
+        .iter()
+        .find(|entry| entry.chain_reference == chain && entry.address == asset)
+}
+
 /// Ergonomic accessors for USDC token deployments on well-known EVM chains.
 ///
 /// Provides named methods for each supported chain, returning a static
@@ -430,5 +601,243 @@ impl USDM {
         token: USDM, lookup: usdm_evm_deployment;
         /// USDM (MegaUSD) on MegaETH (eip155:4326).
         megaeth => 4326, "MegaETH";
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::address;
+
+    use super::*;
+
+    fn chain(id: u64) -> Eip155ChainReference {
+        Eip155ChainReference::new(id)
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "asserted row fields")]
+    fn assert_default_row(
+        chain_id: u64,
+        asset: Address,
+        decimals: u8,
+        symbol: &'static str,
+        name: &'static str,
+        version: &'static str,
+        atm: Option<AssetTransferMethod>,
+        eip2612: bool,
+    ) {
+        let found = find_default_evm_asset(asset, chain(chain_id));
+        assert_eq!(found.map(|a| a.address), Some(asset), "chain {chain_id}");
+        assert_eq!(found.map(|a| a.decimals), Some(decimals));
+        assert_eq!(found.map(|a| a.symbol), Some(symbol));
+        assert_eq!(found.and_then(|a| a.asset_transfer_method), atm);
+        assert_eq!(found.map(|a| a.supports_eip2612), Some(eip2612));
+        assert_eq!(
+            found.and_then(|a| a.eip712.as_ref().map(|e| e.name.as_str())),
+            Some(name)
+        );
+        assert_eq!(
+            found.and_then(|a| a.eip712.as_ref().map(|e| e.version.as_str())),
+            Some(version)
+        );
+        assert_eq!(
+            get_default_evm_asset(chain(chain_id), None).map(|a| a.address),
+            Some(asset)
+        );
+        assert_eq!(
+            get_default_evm_asset(chain(chain_id), Some(symbol)).map(|a| a.address),
+            Some(asset)
+        );
+    }
+
+    #[test]
+    fn extra_circle_usdc_stays_in_union() {
+        let optimism = address!("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85");
+        let found = find_default_evm_asset(optimism, chain(10));
+        assert_eq!(found.map(|a| a.symbol), Some("USDC"));
+        assert_eq!(found.and_then(|a| a.asset_transfer_method), None);
+        assert_eq!(
+            get_default_evm_asset(chain(10), None).map(|a| a.address),
+            Some(optimism)
+        );
+    }
+
+    #[test]
+    fn megaeth_usdm_is_union_default_not_extra_row() {
+        let mega = address!("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7");
+        let found = find_default_evm_asset(mega, chain(4326));
+        assert_eq!(found.map(|a| a.symbol), Some("MegaUSD"));
+        assert_eq!(
+            found.and_then(|a| a.asset_transfer_method),
+            Some(AssetTransferMethod::Permit2)
+        );
+        assert_eq!(found.map(|a| a.supports_eip2612), Some(true));
+        assert_eq!(
+            default_evm_assets()
+                .iter()
+                .filter(|a| a.chain_reference == chain(4326))
+                .count(),
+            1
+        );
+        assert!(
+            !EXTRA_DEFAULT_ASSETS
+                .iter()
+                .any(|a| a.chain_reference == chain(4326))
+        );
+    }
+
+    #[test]
+    fn extra_default_assets_match_source_rows() {
+        assert_default_row(
+            988,
+            address!("0x779Ded0c9e1022225f8E0630b35a9b54bE713736"),
+            6,
+            "USDT0",
+            "USDT0",
+            "1",
+            None,
+            false,
+        );
+        assert_default_row(
+            2201,
+            address!("0x78Cf24370174180738C5B8E352B6D14c83a6c9A9"),
+            6,
+            "USDT0",
+            "USDT0",
+            "1",
+            None,
+            false,
+        );
+        assert_default_row(
+            31612,
+            address!("0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186"),
+            18,
+            "mUSD",
+            "Mezo USD",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            true,
+        );
+        assert_default_row(
+            31611,
+            address!("0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503"),
+            18,
+            "mUSD",
+            "Mezo USD",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            true,
+        );
+        assert_default_row(
+            723_487,
+            address!("0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb"),
+            6,
+            "SBC",
+            "Stable Coin",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            true,
+        );
+        assert_default_row(
+            72344,
+            address!("0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb"),
+            6,
+            "SBC",
+            "Stable Coin",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            true,
+        );
+        assert_default_row(
+            36900,
+            address!("0x9cb8142aEBBcdc60AF7c97Af897A67A8f3CA71C2"),
+            6,
+            "USDC.e",
+            "USDC.e",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            190_415,
+            address!("0x401eCb1D350407f13ba348573E5630B83638E30D"),
+            6,
+            "USDC.e",
+            "Bridged USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            181_228,
+            address!("0x401eCb1D350407f13ba348573E5630B83638E30D"),
+            6,
+            "USDC.e",
+            "Bridged USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            38833,
+            address!("0xA5b8BF902b2844dA17d4506cc827F7F1681735E7"),
+            6,
+            "USDC",
+            "USDC",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            false,
+        );
+        assert_default_row(
+            14,
+            address!("0xe7cd86e13AC4309349F30B3435a9d337750fC82D"),
+            6,
+            "USDT0",
+            "USD\u{20AE}0",
+            "1",
+            None,
+            false,
+        );
+    }
+
+    #[test]
+    fn get_default_asset_symbol_is_case_insensitive() {
+        let musd = get_default_evm_asset(chain(31612), Some("musd"));
+        assert_eq!(musd.map(|a| a.symbol), Some("mUSD"));
+        let usdce = get_default_evm_asset(chain(36900), Some("usdc.e"));
+        assert_eq!(usdce.map(|a| a.symbol), Some("USDC.e"));
+        assert!(get_default_evm_asset(chain(8453), Some("USDT")).is_none());
+        assert!(get_default_evm_asset(chain(999_999), None).is_none());
+        assert!(find_default_evm_asset(Address::ZERO, chain(8453)).is_none());
+    }
+
+    #[test]
+    fn new_networks_are_registered() {
+        for (name, reference) in [
+            ("stable", "988"),
+            ("stable-testnet", "2201"),
+            ("mezo", "31612"),
+            ("mezo-testnet", "31611"),
+            ("radius", "723487"),
+            ("radius-testnet", "72344"),
+            ("adi", "36900"),
+            ("hpp", "190415"),
+            ("hpp-sepolia", "181228"),
+            ("igra", "38833"),
+            ("flare", "14"),
+        ] {
+            let info = EVM_NETWORKS.iter().find(|n| n.name == name);
+            assert_eq!(info.map(|n| n.reference), Some(reference));
+            assert_eq!(info.map(|n| n.namespace), Some("eip155"));
+        }
+    }
+
+    #[test]
+    fn union_is_usdc_plus_usdm_plus_extra() {
+        assert_eq!(
+            default_evm_assets().len(),
+            USDC_DEPLOYMENTS.len() + USDM_DEPLOYMENTS.len() + EXTRA_DEFAULT_ASSETS.len()
+        );
+        assert_eq!(EXTRA_DEFAULT_ASSETS.len(), 11);
+        assert_eq!(USDM_DEPLOYMENTS.len(), 1);
     }
 }
