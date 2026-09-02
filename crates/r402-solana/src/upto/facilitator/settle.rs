@@ -27,7 +27,6 @@ use super::config::SolanaUptoFacilitatorConfig;
 use super::storage::{UptoChannelRecord, UptoChannelStorage};
 use super::verify::{OpenAuth, UptoFailure, decode_transaction, unix_now};
 use crate::chain::provider::{SolanaChainProviderError, SolanaChainProviderLike};
-
 use crate::upto::error::codes;
 use crate::upto::payment_channels::{
     ChannelStatus, DistributeInstructionArgs, build_distribute_instruction,
@@ -38,6 +37,11 @@ use crate::upto::shared::{
     PaymentChannelConfig, resolve_payment_channel_config, resolve_token_program,
 };
 use crate::upto::types::UptoSvmPayload;
+
+struct BroadcastFailure {
+    signature: Option<Signature>,
+    error: Box<SolanaChainProviderError>,
+}
 
 /// In-flight deposit/claim dedup keys (released on simulation failure).
 #[derive(Debug, Default)]
@@ -124,18 +128,24 @@ pub async fn settle_deposit<P: SolanaChainProviderLike>(
                 &payload.from,
             ))
         }
-        Err((Some(signature), err)) => {
+        Err(BroadcastFailure {
+            signature: Some(signature),
+            error,
+        }) => {
             pending.set(&deposit_key, signature.to_string().into());
             Ok(pending_failure(
                 &signature.to_string(),
                 &payload.from,
                 &network,
-                &err.to_string(),
+                &error.to_string(),
             ))
         }
-        Err((None, err)) => {
+        Err(BroadcastFailure {
+            signature: None,
+            error,
+        }) => {
             inflight.release(&deposit_key);
-            Ok(failure(codes::CHANNEL_BROADCAST, payload, err.to_string()).into_settle(&network))
+            Ok(failure(codes::CHANNEL_BROADCAST, payload, error.to_string()).into_settle(&network))
         }
     }
 }
@@ -268,18 +278,24 @@ pub async fn settle_claim<P: SolanaChainProviderLike>(
                 &payload.from,
             ))
         }
-        Err((Some(tx_sig), err)) => {
+        Err(BroadcastFailure {
+            signature: Some(tx_sig),
+            error,
+        }) => {
             pending.set(&claim_key, tx_sig.to_string().into());
             Ok(pending_failure(
                 &tx_sig.to_string(),
                 &payload.from,
                 &network,
-                &err.to_string(),
+                &error.to_string(),
             ))
         }
-        Err((None, err)) => {
+        Err(BroadcastFailure {
+            signature: None,
+            error,
+        }) => {
             inflight.release(&claim_key);
-            Ok(failure("transaction_failed", payload, err.to_string()).into_settle(&network))
+            Ok(failure("transaction_failed", payload, error.to_string()).into_settle(&network))
         }
     }
 }
@@ -345,21 +361,31 @@ async fn submit_claim<P: SolanaChainProviderLike>(
     provider: &P,
     fee_payer: Pubkey,
     ixs: Vec<Instruction>,
-) -> Result<Signature, (Option<Signature>, SolanaChainProviderError)> {
+) -> Result<Signature, BroadcastFailure> {
     let rpc = provider.rpc_client();
     let (blockhash, _) = rpc
         .get_latest_blockhash_with_commitment(CommitmentConfig {
             commitment: CommitmentLevel::Confirmed,
         })
         .await
-        .map_err(|err| (None, SolanaChainProviderError::from(err)))?;
-    let message = MessageV0::try_compile(&fee_payer, &ixs, &[], blockhash)
-        .map_err(|err| (None, SolanaChainProviderError::Custom(err.to_string())))?;
+        .map_err(|err| BroadcastFailure {
+            signature: None,
+            error: Box::new(SolanaChainProviderError::from(err)),
+        })?;
+    let message = MessageV0::try_compile(&fee_payer, &ixs, &[], blockhash).map_err(|err| {
+        BroadcastFailure {
+            signature: None,
+            error: Box::new(SolanaChainProviderError::Custom(err.to_string())),
+        }
+    })?;
     let tx = VersionedTransaction {
         signatures: vec![],
         message: VersionedMessage::V0(message),
     };
-    let signed = provider.sign(tx).map_err(|err| (None, err))?;
+    let signed = provider.sign(tx).map_err(|err| BroadcastFailure {
+        signature: None,
+        error: Box::new(err),
+    })?;
     match provider.send(&signed).await {
         Ok(signature) => match provider
             .send_and_confirm(
@@ -371,17 +397,28 @@ async fn submit_claim<P: SolanaChainProviderLike>(
             .await
         {
             Ok(confirmed) => Ok(confirmed),
-            Err(err) => Err((Some(signature), err)),
+            Err(error) => Err(BroadcastFailure {
+                signature: Some(signature),
+                error: Box::new(error),
+            }),
         },
-        Err(err) => Err((None, err)),
+        Err(error) => Err(BroadcastFailure {
+            signature: None,
+            error: Box::new(error),
+        }),
     }
 }
 
 async fn broadcast_open<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: VersionedTransaction,
-) -> Result<Signature, (Option<Signature>, SolanaChainProviderError)> {
-    let signed = provider.sign(transaction).map_err(|err| (None, err))?;
+) -> Result<Signature, BroadcastFailure> {
+    let signed = provider
+        .sign(transaction)
+        .map_err(|error| BroadcastFailure {
+            signature: None,
+            error: Box::new(error),
+        })?;
     match provider.send(&signed).await {
         Ok(signature) => match provider
             .send_and_confirm(
@@ -393,9 +430,15 @@ async fn broadcast_open<P: SolanaChainProviderLike>(
             .await
         {
             Ok(confirmed) => Ok(confirmed),
-            Err(err) => Err((Some(signature), err)),
+            Err(error) => Err(BroadcastFailure {
+                signature: Some(signature),
+                error: Box::new(error),
+            }),
         },
-        Err(err) => Err((None, err)),
+        Err(error) => Err(BroadcastFailure {
+            signature: None,
+            error: Box::new(error),
+        }),
     }
 }
 

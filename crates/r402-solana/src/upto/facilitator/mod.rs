@@ -10,6 +10,7 @@ mod storage;
 mod verify;
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 
 use compact_str::CompactString;
@@ -98,24 +99,28 @@ impl<P> Facilitator for SolanaUptoFacilitator<P>
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
-    async fn verify(
+    fn verify(
         &self,
         request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
-        let (payload, requirements, accepted_scheme, accepted_network) =
-            decode_request(&request.into_json())?;
-        match validate_open_authorization(
-            &self.provider,
-            &payload,
-            &requirements,
-            &accepted_scheme,
-            &accepted_network,
-            true,
-            &self.config,
-        ) {
-            Ok(auth) => Ok(wire::VerifyResponse::valid(auth.payload.from)),
-            Err(failure) => Ok(failure.into_verify()),
-        }
+    ) -> impl Future<Output = Result<wire::VerifyResponse, FacilitatorError>> + Send {
+        std::future::ready((|| {
+            let (payload, requirements, accepted_scheme, accepted_network) =
+                decode_request(&request.into_json())?;
+            Ok(
+                match validate_open_authorization(
+                    &self.provider,
+                    &payload,
+                    &requirements,
+                    &accepted_scheme,
+                    &accepted_network,
+                    true,
+                    &self.config,
+                ) {
+                    Ok(auth) => wire::VerifyResponse::valid(auth.payload.from),
+                    Err(failure) => failure.into_verify(),
+                },
+            )
+        })())
     }
 
     async fn settle(
@@ -279,8 +284,6 @@ fn payload_amount(raw: &str, payload: &UptoSvmPayload) -> Result<u64, Facilitato
 fn invalid(message: &str) -> FacilitatorError {
     FacilitatorError::Verification(VerificationError::InvalidFormat(message.into()))
 }
-
-use std::future::Future;
 
 #[cfg(test)]
 mod tests {
