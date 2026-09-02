@@ -19,5 +19,13 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[dependencies]
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
 [lints]
 workspace = true

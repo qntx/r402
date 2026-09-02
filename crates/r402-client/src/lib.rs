@@ -1,13 +1,20 @@
 //! Buyer register, select, and `spendControls` for the x402 payment protocol.
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn crate_loads() {
-        assert_eq!(
-            env!("CARGO_PKG_NAME"),
-            "r402-client",
-            "package name must match the crate directory"
-        );
-    }
-}
+#![cfg_attr(docsrs, feature(doc_cfg))]
+
+mod candidate;
+mod hooks;
+mod policy;
+mod register;
+mod select;
+mod spend;
+
+pub use candidate::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+pub use hooks::{
+    BoxFuture, ClientHooks, CreatedPayment, DynClientHooks, FailureRecovery, HookDecision,
+    PaymentCreationContext, PaymentResponseContext, PaymentResponseResult,
+};
+pub use policy::{MaxAmountPolicy, NetworkPolicy, PaymentPolicy, SchemePolicy};
+pub use register::PaymentClient;
+pub use select::{FirstMatch, MaxAmount, PaymentSelector, PreferChain};
+pub use spend::{AllowedAssets, MaxAmountPerPayment, SpendControlAsset, SpendControls};

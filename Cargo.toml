@@ -18,6 +18,7 @@ description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
 r402-protocol = { path = "crates/r402-protocol" }
+r402-client = { path = "crates/r402-client" }
 r402-facilitator = { path = "crates/r402-facilitator" }
 
 # Core

@@ -1397,6 +1397,12 @@ version = "0.18.0"
 [[package]]
 name = "r402-client"
 version = "0.18.0"
+dependencies = [
+ "compact_str",
+ "r402-protocol",
+ "serde_json",
+ "tokio",
+]
 
 [[package]]
 name = "r402-contract"
