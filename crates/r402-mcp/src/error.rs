@@ -37,13 +37,11 @@ impl std::fmt::Display for PaymentRequiredError {
 impl std::error::Error for PaymentRequiredError {}
 
 /// Failure from an MCP `tools/call`.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, Clone)]
 pub enum McpCallError {
     /// Transport or non-RPC service failure.
-    #[error("{0}")]
     Transport(String),
     /// JSON-RPC error from `rmcp` `ServiceError::McpError`.
-    #[error("{code}: {message}")]
     Rpc {
         /// JSON-RPC error code.
         code: i32,
@@ -53,6 +51,27 @@ pub enum McpCallError {
         data: Option<Value>,
     },
 }
+
+impl std::fmt::Display for McpCallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(msg) => f.write_str(msg),
+            Self::Rpc {
+                code,
+                message,
+                data,
+            } => {
+                write!(f, "{code}: {message}")?;
+                if let Some(data) = data {
+                    write!(f, "({data})")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+impl std::error::Error for McpCallError {}
 
 /// Maps [`rmcp::ServiceError`] from an rmcp tool call into [`McpCallError`].
 #[cfg(feature = "client")]
@@ -83,7 +102,7 @@ pub enum McpClientError {
     /// `on_payment_response` requested recovery so callers can retry.
     #[error("payment still required after attempt")]
     StillRequired {
-        /// Corrective `PaymentRequired` from the tool result, if parsed.
+        /// Corrective `PaymentRequired` from the tool result or a JSON-RPC `402` / `-32042` error, if parsed.
         payment_required: Option<Box<PaymentRequired>>,
         /// `true` when payment-response hooks signalled recovery.
         recovery_requested: bool,
@@ -101,11 +120,52 @@ impl From<PaymentRequiredError> for McpClientError {
 
 impl From<McpCallError> for McpClientError {
     fn from(value: McpCallError) -> Self {
-        match value {
-            McpCallError::Transport(msg) => Self::Transport(msg),
-            McpCallError::Rpc { code, message, .. } => {
-                Self::Transport(format!("{code}: {message}"))
+        Self::Transport(value.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn rpc_display_includes_data() {
+        let data = json!({"mode": "url"});
+        let err = McpCallError::Rpc {
+            code: -32042,
+            message: "elicit".into(),
+            data: Some(data.clone()),
+        };
+        assert_eq!(
+            err.to_string(),
+            format!("-32042: elicit({data})"),
+            "Display keeps JSON-RPC data like rmcp ErrorData"
+        );
+        match McpClientError::from(err) {
+            McpClientError::Transport(s) => {
+                assert_eq!(
+                    s,
+                    format!("-32042: elicit({data})"),
+                    "From keeps JSON-RPC data"
+                );
             }
+            other => panic!("expected Transport, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn rpc_display_omits_missing_data() {
+        let err = McpCallError::Rpc {
+            code: -32603,
+            message: "internal".into(),
+            data: None,
+        };
+        assert_eq!(
+            err.to_string(),
+            "-32603: internal",
+            "no empty parentheses when data is absent"
+        );
     }
 }

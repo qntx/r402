@@ -180,7 +180,7 @@ Hooks (`McpClientHooks`): `on_payment_required` (abort / supply payload),
 | `payment_required_tool_result` | dual-format 402 challenge |
 | `settlement_failed_tool_result` | R5 dual-format settle failure |
 | `extract_payment_required` | prefer structuredContent, else text |
-| `is_payment_required_rpc` / `extract_payment_required_from_rpc` | JSON-RPC `402` / `-32042` (`data` or `data.x402`) |
+| `is_payment_required_rpc` / `extract_payment_required_from_rpc` | JSON-RPC `402` (`data`); `-32042` (`data` or `data.x402`) |
 | `mcp_call_error_from_rmcp` | `ServiceError::McpError` → `McpCallError::Rpc` |
 | `attach_payment_to_params` / `extract_payment_from_params` | `_meta["x402/payment"]` |
 | `attach_settle_response` / `extract_settle_response` | `_meta["x402/payment-response"]` |
