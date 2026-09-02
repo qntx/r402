@@ -381,13 +381,13 @@ static EXTRA_DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
         evm_default_asset!(988, "0x779Ded0c9e1022225f8E0630b35a9b54bE713736", 6, "USDT0", eip712: "USDT0" / "1"),
         // Stable testnet USDT0
         evm_default_asset!(2201, "0x78Cf24370174180738C5B8E352B6D14c83a6c9A9", 6, "USDT0", eip712: "USDT0" / "1"),
-        // Mezo mainnet mUSD — Permit2 + EIP-2612
+        // Mezo mainnet mUSD
         evm_default_asset!(31612, "0xdD468A1DDc392dcdbEf6db6e34E89AA338F9F186", 18, "mUSD", eip712: "Mezo USD" / "1", permit2_eip2612),
-        // Mezo testnet mUSD — Permit2 + EIP-2612
+        // Mezo testnet mUSD
         evm_default_asset!(31611, "0x118917a40FAF1CD7a13dB0Ef56C86De7973Ac503", 18, "mUSD", eip712: "Mezo USD" / "1", permit2_eip2612),
-        // Radius Network SBC — Permit2 + EIP-2612
+        // Radius Network SBC
         evm_default_asset!(723_487, "0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb", 6, "SBC", eip712: "Stable Coin" / "1", permit2_eip2612),
-        // Radius testnet SBC — Permit2 + EIP-2612
+        // Radius testnet SBC
         evm_default_asset!(72344, "0x33ad9e4BD16B69B5BFdED37D8B5D9fF9aba014Fb", 6, "SBC", eip712: "Stable Coin" / "1", permit2_eip2612),
         // ADI Chain USDC.e
         evm_default_asset!(36900, "0x9cb8142aEBBcdc60AF7c97Af897A67A8f3CA71C2", 6, "USDC.e", eip712: "USDC.e" / "2"),
@@ -395,14 +395,13 @@ static EXTRA_DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
         evm_default_asset!(190_415, "0x401eCb1D350407f13ba348573E5630B83638E30D", 6, "USDC.e", eip712: "Bridged USDC" / "2"),
         // HPP Sepolia USDC.e
         evm_default_asset!(181_228, "0x401eCb1D350407f13ba348573E5630B83638E30D", 6, "USDC.e", eip712: "Bridged USDC" / "2"),
-        // Igra mainnet USDC — Permit2, no EIP-2612
+        // Igra mainnet USDC
         evm_default_asset!(38833, "0xA5b8BF902b2844dA17d4506cc827F7F1681735E7", 6, "USDC", eip712: "USDC" / "1", permit2),
         // Flare mainnet USD₮0
         evm_default_asset!(14, "0xe7cd86e13AC4309349F30B3435a9d337750fC82D", 6, "USDT0", eip712: "USD\u{20AE}0" / "1"),
     ]
 });
 
-/// Union of USDC, USDM, and extra default-asset rows.
 static DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
     let mut assets = Vec::with_capacity(
         USDC_DEPLOYMENTS.len() + USDM_DEPLOYMENTS.len() + EXTRA_DEFAULT_ASSETS.len(),
@@ -413,7 +412,7 @@ static DEFAULT_ASSETS: LazyLock<Vec<EvmDefaultAsset>> = LazyLock::new(|| {
     assets
 });
 
-/// Returns every USD-pegged default asset (USDC, USDM, and extra rows).
+/// USD-pegged allowlist for dollar-string prices and spend caps, including r402 extra Circle USDC.
 #[must_use]
 pub fn default_evm_assets() -> &'static [EvmDefaultAsset] {
     &DEFAULT_ASSETS
