@@ -1,6 +1,7 @@
 //! Server-side [`UptoSvmScheme`]: escrow payment flow, 402 enrich, voucher attach.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::LazyLock;
 
 use r402_core::chain::{ChainId, DeployedTokenAmount};
@@ -119,11 +120,12 @@ impl<S: Signer + Send + Sync> SchemeNetworkServer for UptoSvmScheme<S> {
         Some(self.enrich_accepts(ctx).await)
     }
 
-    async fn enrich_settlement_payload<'a>(
+    fn enrich_settlement_payload<'a>(
         &'a self,
         ctx: &'a SettleContext,
-    ) -> Result<Option<Map<String, Value>>, FacilitatorError> {
-        self.attach_voucher(ctx)
+    ) -> impl Future<Output = Result<Option<Map<String, Value>>, FacilitatorError>> + Send + 'a
+    {
+        std::future::ready(self.attach_voucher(ctx))
     }
 
     fn settle_on_cancel<'a>(
@@ -353,11 +355,19 @@ fn invalid_payload(field: &str) -> FacilitatorError {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use r402_core::chain::ChainIdPattern;
+    use r402_core::facilitator::Facilitator;
     use r402_core::resource_server::{
-        PaymentHookContext, SettleContext, SettlePhase, VerifiedPaymentCanceledContext,
-        WirePaymentPayload,
+        PaymentHookContext, PaymentRequiredBuildContext, ResourceServer, SettleContext,
+        SettlePhase, VerifiedPaymentCanceledContext, WirePaymentPayload,
     };
-    use r402_core::wire::{ResourceInfo, SupportedPaymentKind, SupportedResponse};
+    use r402_core::wire::{
+        Extensions, ResourceInfo, SettleRequest, SettleResponse, SupportedPaymentKind,
+        SupportedResponse, VerifyRequest, VerifyResponse,
+    };
     use solana_keypair::Keypair;
     use solana_pubkey::Pubkey;
     use solana_signer::Signer;
@@ -365,6 +375,37 @@ mod tests {
     use super::*;
     use crate::USDC;
     use crate::upto::payment_channels::{encode_voucher_message, verify_voucher_signature};
+
+    struct NoopFacilitator;
+
+    impl Facilitator for NoopFacilitator {
+        fn verify(
+            &self,
+            _request: VerifyRequest,
+        ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(VerifyResponse::valid("payer")))
+        }
+
+        fn settle(
+            &self,
+            _request: SettleRequest,
+        ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SettleResponse::Success {
+                payer: "payer".into(),
+                transaction: "sig".into(),
+                network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".into(),
+                amount: Some("10000".into()),
+                extensions: Extensions::new(),
+                extra: None,
+            }))
+        }
+
+        fn supported(
+            &self,
+        ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+            std::future::ready(Ok(SupportedResponse::default()))
+        }
+    }
 
     fn scheme() -> (UptoSvmScheme<Keypair>, Keypair) {
         let key = Keypair::new();
@@ -428,6 +469,44 @@ mod tests {
             PaymentFlowConfig::new(vec![PaymentFlowName::Escrow], PaymentFlowName::Escrow)
         );
         assert!(scheme.dynamic_extra_fields().is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_writes_escrow_payment_flow() {
+        let (scheme, _) = scheme();
+        let rs = ResourceServer::new(Arc::new(NoopFacilitator))
+            .with_scheme(ChainIdPattern::wildcard("solana"), scheme);
+        let req = PaymentRequirements::new(
+            "upto".into(),
+            "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".parse().unwrap(),
+            "10000".into(),
+            "SysvarRent111111111111111111111111111111111".into(),
+            USDC::solana_devnet().address.to_string().into(),
+            600,
+        );
+        let built = rs
+            .create_payment_required_response(
+                vec![req],
+                PaymentRequiredBuildContext {
+                    resource: ResourceInfo::new("https://example.com/upto"),
+                    error: None,
+                    extensions: Extensions::new(),
+                    supported: SupportedResponse::default(),
+                    payment_payload: None,
+                },
+            )
+            .await
+            .unwrap();
+        let extra = built
+            .accepts
+            .first()
+            .and_then(|accept| accept.extra.as_ref())
+            .expect("upto 402 extra");
+        assert_eq!(
+            extra.get("paymentFlow").and_then(Value::as_str),
+            Some("escrow")
+        );
+        assert!(extra.get("assetTransferMethod").is_none());
     }
 
     #[test]

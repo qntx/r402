@@ -1127,7 +1127,7 @@ mod tests {
     async fn escrow_success_settles_before_and_after() {
         let fac = MockFacilitator::new(true, true);
         let settles = Arc::clone(&fac);
-        let requirements = accepts().into_iter().next().unwrap();
+        let requirements = with_payment_flow(accepts().into_iter().next().unwrap(), "escrow");
         let w = wrapper_with(
             fac,
             FlowScheme::escrow(Some(requirements.clone())),
@@ -1154,7 +1154,7 @@ mod tests {
     async fn escrow_tool_error_prefers_cancel_receipt() {
         let fac = MockFacilitator::new(true, true);
         let settles = Arc::clone(&fac);
-        let requirements = accepts().into_iter().next().unwrap();
+        let requirements = with_payment_flow(accepts().into_iter().next().unwrap(), "escrow");
         let w = wrapper_with(
             fac,
             FlowScheme::escrow(Some(requirements.clone())),
@@ -1192,7 +1192,7 @@ mod tests {
             settle_ok: true,
             fail_settle_from: Some(2),
         });
-        let requirements = accepts().into_iter().next().unwrap();
+        let requirements = with_payment_flow(accepts().into_iter().next().unwrap(), "escrow");
         let w = wrapper_with(
             Arc::clone(&fac),
             FlowScheme::escrow(Some(requirements.clone())),

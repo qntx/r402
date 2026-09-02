@@ -13,7 +13,6 @@ mod hooks;
 mod payment_flow;
 mod scheme;
 
-use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -203,6 +202,34 @@ impl ResourceServer {
         patterned
     }
 
+    /// Resolves ATM + payment flow from the registered scheme table.
+    ///
+    /// # Errors
+    ///
+    /// [`PaymentFlowError::UnregisteredScheme`] when no adapter matches this
+    /// accept, or ATM/flow errors from [`resolve_payment_flow`].
+    fn resolved_payment_flow(
+        &self,
+        requirements: &PaymentRequirements,
+    ) -> Result<ResolvedPaymentFlow, PaymentFlowError> {
+        let Some(scheme) =
+            self.registered_scheme(requirements.scheme.as_str(), &requirements.network)
+        else {
+            return Err(PaymentFlowError::UnregisteredScheme {
+                scheme: requirements.scheme.to_string(),
+                network: requirements.network.to_string(),
+            });
+        };
+        resolve_payment_flow(
+            &PaymentFlowScheme {
+                scheme: scheme.scheme(),
+                default_asset_transfer_method: scheme.default_asset_transfer_method(),
+                payment_flows: scheme.payment_flows(),
+            },
+            requirements,
+        )
+    }
+
     /// Resolves the payment-flow name for this accept from the scheme table.
     ///
     /// # Errors
@@ -213,23 +240,7 @@ impl ResourceServer {
         &self,
         requirements: &PaymentRequirements,
     ) -> Result<PaymentFlowName, PaymentFlowError> {
-        let Some(scheme) =
-            self.registered_scheme(requirements.scheme.as_str(), &requirements.network)
-        else {
-            return Err(PaymentFlowError::UnregisteredScheme {
-                scheme: requirements.scheme.to_string(),
-                network: requirements.network.to_string(),
-            });
-        };
-        let resolved = resolve_payment_flow(
-            &PaymentFlowScheme {
-                scheme: scheme.scheme(),
-                default_asset_transfer_method: scheme.default_asset_transfer_method(),
-                payment_flows: scheme.payment_flows(),
-            },
-            requirements,
-        )?;
-        Ok(resolved.payment_flow)
+        Ok(self.resolved_payment_flow(requirements)?.payment_flow)
     }
 
     /// Whether the registered scheme yields cancel-settle requirements.
@@ -264,10 +275,15 @@ impl ResourceServer {
     /// Official `CreatePaymentRequiredResponse`: one 402 body used for both
     /// unpaid challenges and paid matching.
     ///
+    /// After scheme enrich and extension advertise, each accept is resolved
+    /// through the registered scheme table (official `resolvePaymentFlow`) and
+    /// written with official `applyPaymentFlowWireExtra`. Unregistered schemes
+    /// fail closed.
+    ///
     /// # Errors
     ///
-    /// [`FacilitatorError::Internal`] when hook policy or payment-flow wire
-    /// extra application fails (fail-closed).
+    /// [`FacilitatorError::Internal`] when hook policy, unregistered scheme,
+    /// or payment-flow resolution / wire extra application fails.
     pub async fn create_payment_required_response(
         &self,
         accepts: Vec<PaymentRequirements>,
@@ -293,8 +309,32 @@ impl ResourceServer {
         )
         .await?;
         advertise_registered_extensions(&self.extensions, &mut response)?;
-        apply_payment_flow_extras(&mut response.accepts)?;
+        self.apply_payment_flow_extras(&mut response.accepts)?;
         Ok(response)
+    }
+
+    /// Official `BuildPaymentRequirements` wire step: scheme-table resolve, then
+    /// [`apply_payment_flow_wire_extra`].
+    ///
+    /// Omit ATM → scheme default. Omit `paymentFlow` → that ATM's table default.
+    /// Non-authorization flows are written onto `extra.paymentFlow`. The SDK
+    /// ATM sentinel `"default"` is stripped. Unregistered schemes fail closed.
+    fn apply_payment_flow_extras(
+        &self,
+        accepts: &mut [PaymentRequirements],
+    ) -> Result<(), FacilitatorError> {
+        for accept in accepts {
+            let resolved = self
+                .resolved_payment_flow(accept)
+                .map_err(FacilitatorError::internal)?;
+            let next = apply_payment_flow_wire_extra(accept.extra.as_ref(), &resolved);
+            accept.extra = if next.is_empty() {
+                None
+            } else {
+                Some(Value::Object(next))
+            };
+        }
+        Ok(())
     }
 
     /// Official per-accept scheme enrich, then additive-extra hook policy.
@@ -1018,41 +1058,6 @@ fn advertise_registered_extensions(
         }
         assert_accepts_allowlisted_after_extension_enrich(&baseline, &response.accepts, ext.id())
             .map_err(FacilitatorError::internal)?;
-    }
-    Ok(())
-}
-
-fn apply_payment_flow_extras(accepts: &mut [PaymentRequirements]) -> Result<(), FacilitatorError> {
-    for accept in accepts {
-        let atm = accept
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("assetTransferMethod"))
-            .and_then(Value::as_str)
-            .unwrap_or(SDK_DEFAULT_ASSET_TRANSFER_METHOD);
-        let flow = match accept
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("paymentFlow"))
-        {
-            None | Some(Value::Null) => PaymentFlowName::Authorization,
-            Some(Value::String(label)) => {
-                PaymentFlowName::from_str(label).map_err(FacilitatorError::internal)?
-            }
-            Some(other) => {
-                PaymentFlowName::from_str(&other.to_string()).map_err(FacilitatorError::internal)?
-            }
-        };
-        let resolved = ResolvedPaymentFlow {
-            asset_transfer_method: atm.to_owned(),
-            payment_flow: flow,
-        };
-        let next = apply_payment_flow_wire_extra(accept.extra.as_ref(), &resolved);
-        accept.extra = if next.is_empty() {
-            None
-        } else {
-            Some(Value::Object(next))
-        };
     }
     Ok(())
 }
@@ -1791,6 +1796,18 @@ mod tests {
                 cancel_requirements: None,
             }
         }
+
+        /// SVM `upto` table: ATM `channel`, escrow-only, default escrow.
+        fn upto_channel_escrow() -> Self {
+            let mut scheme = Self::escrow();
+            scheme.name = "upto";
+            scheme.default_atm = "channel";
+            scheme.flows = HashMap::from([(
+                "channel".into(),
+                PaymentFlowConfig::new(vec![PaymentFlowName::Escrow], PaymentFlowName::Escrow),
+            )]);
+            scheme
+        }
     }
 
     impl SchemeNetworkServer for MockScheme {
@@ -1845,6 +1862,16 @@ mod tests {
 
     fn eip155_wildcard() -> ChainIdPattern {
         ChainIdPattern::wildcard("eip155")
+    }
+
+    fn sample_build_ctx() -> PaymentRequiredBuildContext {
+        PaymentRequiredBuildContext {
+            resource: ResourceInfo::new("https://example.com/paid"),
+            error: None,
+            extensions: Extensions::new(),
+            supported: SupportedResponse::default(),
+            payment_payload: None,
+        }
     }
 
     #[tokio::test]
@@ -2135,13 +2162,135 @@ mod tests {
             )
             .await
             .unwrap();
+        let extra = built
+            .accepts
+            .first()
+            .and_then(|accept| accept.extra.as_ref());
+        assert_eq!(
+            extra.and_then(|value| value.get("feePayer")),
+            Some(&Value::String("0xfee".into()))
+        );
+        assert!(extra.and_then(|value| value.get("paymentFlow")).is_none());
+        assert!(
+            extra
+                .and_then(|value| value.get("assetTransferMethod"))
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_omits_authorization_payment_flow() {
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization());
+        let built = rs
+            .create_payment_required_response(vec![sample_payload().accepted], sample_build_ctx())
+            .await
+            .unwrap();
+        let extra = built
+            .accepts
+            .first()
+            .and_then(|accept| accept.extra.as_ref());
+        assert!(extra.and_then(|value| value.get("paymentFlow")).is_none());
+        assert!(
+            extra
+                .and_then(|value| value.get("assetTransferMethod"))
+                .is_none()
+        );
+        assert!(is_authorization_payment_flow(extra));
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_writes_scheme_default_escrow_payment_flow() {
+        let rs = ResourceServer::new(mock_ok()).with_scheme(
+            ChainIdPattern::wildcard("solana"),
+            MockScheme::upto_channel_escrow(),
+        );
+        let req = PaymentRequirements::new(
+            "upto".into(),
+            "solana:mainnet".parse().unwrap(),
+            "1".into(),
+            "PayTo".into(),
+            "Mint".into(),
+            60,
+        );
+        assert_eq!(rs.get_payment_flow(&req).unwrap(), PaymentFlowName::Escrow);
+        let built = rs
+            .create_payment_required_response(vec![req], sample_build_ctx())
+            .await
+            .unwrap();
+        let extra = built
+            .accepts
+            .first()
+            .and_then(|accept| accept.extra.as_ref());
+        assert_eq!(
+            extra
+                .and_then(|value| value.get("paymentFlow"))
+                .and_then(Value::as_str),
+            Some("escrow")
+        );
+        assert!(
+            extra
+                .and_then(|value| value.get("assetTransferMethod"))
+                .is_none()
+        );
+        assert!(!is_authorization_payment_flow(extra));
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_writes_upfront_when_scheme_defaults_to_upfront() {
+        let rs =
+            ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), MockScheme::upfront());
+        let built = rs
+            .create_payment_required_response(vec![sample_payload().accepted], sample_build_ctx())
+            .await
+            .unwrap();
         assert_eq!(
             built
                 .accepts
                 .first()
                 .and_then(|accept| accept.extra.as_ref())
-                .and_then(|extra| extra.get("feePayer")),
-            Some(&Value::String("0xfee".into()))
+                .and_then(|extra| extra.get("paymentFlow"))
+                .and_then(Value::as_str),
+            Some("upfront")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_strips_sdk_atm_sentinel() {
+        let rs = ResourceServer::new(mock_ok())
+            .with_scheme(eip155_wildcard(), MockScheme::authorization());
+        let mut req = sample_payload().accepted;
+        req.extra = Some(serde_json::json!({
+            "assetTransferMethod": SDK_DEFAULT_ASSET_TRANSFER_METHOD,
+            "name": "USDC",
+        }));
+        let built = rs
+            .create_payment_required_response(vec![req], sample_build_ctx())
+            .await
+            .unwrap();
+        let extra = built
+            .accepts
+            .first()
+            .and_then(|accept| accept.extra.as_ref())
+            .expect("extra retained");
+        assert_eq!(extra.get("name").and_then(Value::as_str), Some("USDC"));
+        assert!(extra.get("assetTransferMethod").is_none());
+        assert!(extra.get("paymentFlow").is_none());
+    }
+
+    #[tokio::test]
+    async fn create_payment_required_fails_unregistered_scheme() {
+        let rs = ResourceServer::new(mock_ok());
+        let err = rs
+            .create_payment_required_response(vec![sample_payload().accepted], sample_build_ctx())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, FacilitatorError::Internal(_))
+                && err.to_string().contains(
+                    "No server implementation registered for scheme: exact, network: eip155:1"
+                ),
+            "{err}"
         );
     }
 

@@ -166,18 +166,46 @@ pub fn is_payment_required_rpc(err: &McpCallError) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::future::Future;
     use std::sync::Arc;
 
     use r402_core::FacilitatorError;
+    use r402_core::chain::ChainIdPattern;
     use r402_core::facilitator::Facilitator;
     use r402_core::resource_server::{PaymentRequiredBuildContext, ResourceServer};
     use r402_core::wire::{
         Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
         SupportedResponse, VerifyRequest, VerifyResponse,
     };
+    use r402_core::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
 
     use super::*;
+
+    struct ExactAuthScheme(HashMap<String, PaymentFlowConfig>);
+
+    impl ExactAuthScheme {
+        fn new() -> Self {
+            Self(HashMap::from([(
+                SDK_DEFAULT_ASSET_TRANSFER_METHOD.to_owned(),
+                PaymentFlowConfig::authorization_and_upfront(),
+            )]))
+        }
+    }
+
+    impl SchemeNetworkServer for ExactAuthScheme {
+        fn scheme(&self) -> &'static str {
+            "exact"
+        }
+
+        fn default_asset_transfer_method(&self) -> &'static str {
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
+        }
+
+        fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+            &self.0
+        }
+    }
 
     struct MockFacilitator;
 
@@ -220,6 +248,7 @@ mod tests {
             60,
         );
         ResourceServer::new(Arc::new(MockFacilitator))
+            .with_scheme(ChainIdPattern::wildcard("eip155"), ExactAuthScheme::new())
             .create_payment_required_response(
                 vec![req],
                 PaymentRequiredBuildContext {

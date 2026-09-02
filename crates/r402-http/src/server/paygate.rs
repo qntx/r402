@@ -1969,7 +1969,7 @@ mod tests {
     #[tokio::test]
     async fn sequential_escrow_settles_before_and_after_on_success() {
         let fac = CountingFacilitator::new();
-        let requirements = eip155_requirements();
+        let requirements = with_payment_flow(eip155_requirements(), "escrow");
         let gate = built_gate(
             Arc::clone(&fac),
             FlowScheme::escrow(Some(requirements.clone())),
@@ -1994,7 +1994,7 @@ mod tests {
     #[tokio::test]
     async fn sequential_escrow_handler_4xx_runs_cancel_settle() {
         let fac = CountingFacilitator::new();
-        let requirements = eip155_requirements();
+        let requirements = with_payment_flow(eip155_requirements(), "escrow");
         let gate = built_gate(
             Arc::clone(&fac),
             FlowScheme::escrow(Some(requirements.clone())),
