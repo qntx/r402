@@ -1,6 +1,7 @@
 //! Errors for MCP × x402 (Go `PaymentRequiredError` + client errors).
 
 use r402_core::wire::PaymentRequired;
+use serde_json::Value;
 
 use crate::MCP_PAYMENT_REQUIRED_CODE;
 
@@ -35,6 +36,38 @@ impl std::fmt::Display for PaymentRequiredError {
 
 impl std::error::Error for PaymentRequiredError {}
 
+/// Failure from an MCP `tools/call`.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum McpCallError {
+    /// Transport or non-RPC service failure.
+    #[error("{0}")]
+    Transport(String),
+    /// JSON-RPC error from `rmcp` `ServiceError::McpError`.
+    #[error("{code}: {message}")]
+    Rpc {
+        /// JSON-RPC error code.
+        code: i32,
+        /// JSON-RPC error message.
+        message: String,
+        /// JSON-RPC `data` member.
+        data: Option<Value>,
+    },
+}
+
+/// Maps [`rmcp::ServiceError`] from an rmcp tool call into [`McpCallError`].
+#[cfg(feature = "client")]
+#[must_use]
+pub fn mcp_call_error_from_rmcp(err: rmcp::ServiceError) -> McpCallError {
+    match err {
+        rmcp::ServiceError::McpError(data) => McpCallError::Rpc {
+            code: data.code.0,
+            message: data.message.into_owned(),
+            data: data.data,
+        },
+        other => McpCallError::Transport(other.to_string()),
+    }
+}
+
 /// Client orchestration errors.
 #[derive(Debug, thiserror::Error)]
 pub enum McpClientError {
@@ -63,5 +96,16 @@ pub enum McpClientError {
 impl From<PaymentRequiredError> for McpClientError {
     fn from(value: PaymentRequiredError) -> Self {
         Self::PaymentRequired(Box::new(value))
+    }
+}
+
+impl From<McpCallError> for McpClientError {
+    fn from(value: McpCallError) -> Self {
+        match value {
+            McpCallError::Transport(msg) => Self::Transport(msg),
+            McpCallError::Rpc { code, message, .. } => {
+                Self::Transport(format!("{code}: {message}"))
+            }
+        }
     }
 }
