@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use compact_str::CompactString;
 use r402_facilitator::{FacilitatorClient, FacilitatorClientError};
-use r402_protocol::payment::PaymentRequirements;
 use reqwest::Client;
 use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
@@ -57,7 +56,7 @@ pub struct SearchDiscoveryResourcesParams {
 /// A discovered x402 resource from the bazaar catalog.
 #[allow(
     clippy::derive_partial_eq_without_eq,
-    reason = "PaymentRequirements extra and extension JSON use serde_json::Value"
+    reason = "accepts and extensions are open JSON (serde_json::Value is not Eq)"
 )]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -69,8 +68,8 @@ pub struct DiscoveryResource {
     pub resource_type: CompactString,
     /// x402 protocol version supported by this resource.
     pub x402_version: u32,
-    /// Accepted payment methods.
-    pub accepts: Vec<PaymentRequirements>,
+    /// Catalog JSON for each accept. Extra or incomplete keys must not fail the page.
+    pub accepts: Vec<Value>,
     /// ISO 8601 timestamp of the last catalog update.
     pub last_updated: CompactString,
     /// Human-readable description.
@@ -108,7 +107,7 @@ pub struct DiscoveryPagination {
 /// Response from `GET /discovery/resources`.
 #[allow(
     clippy::derive_partial_eq_without_eq,
-    reason = "items carry serde_json::Value via PaymentRequirements"
+    reason = "items carry open JSON accepts/extensions"
 )]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -136,7 +135,7 @@ pub struct SearchPagination {
 /// Omitted and JSON-`null` `pagination` both deserialize as [`None`].
 #[allow(
     clippy::derive_partial_eq_without_eq,
-    reason = "resources carry serde_json::Value via PaymentRequirements"
+    reason = "resources carry open JSON accepts/extensions"
 )]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -464,5 +463,35 @@ mod tests {
         let url = discovery_url(&base(), "discovery/search", &params.query_pairs()).unwrap();
         assert!(url.path().ends_with("/discovery/search"));
         assert_eq!(url.query().unwrap(), "query=weather+APIs");
+    }
+
+    #[test]
+    fn accepts_keeps_incomplete_and_unknown_keys() {
+        let resource: DiscoveryResource = serde_json::from_value(serde_json::json!({
+            "resource": "https://api.example.com/weather",
+            "type": "http",
+            "x402Version": 2,
+            "accepts": [
+                {"scheme": "exact", "network": "eip155:8453"},
+                {
+                    "scheme": "exact",
+                    "network": "eip155:8453",
+                    "asset": "0x0",
+                    "amount": "1",
+                    "payTo": "0x1",
+                    "maxTimeoutSeconds": 60,
+                    "description": "v1 leftover",
+                    "resource": "https://api.example.com/weather",
+                    "maxAmountRequired": "1"
+                }
+            ],
+            "lastUpdated": "2026-01-01T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(resource.accepts.len(), 2);
+        assert_eq!(resource.accepts[0]["scheme"], "exact");
+        assert!(resource.accepts[0].get("asset").is_none());
+        assert_eq!(resource.accepts[1]["description"], "v1 leftover");
+        assert_eq!(resource.accepts[1]["maxAmountRequired"], "1");
     }
 }

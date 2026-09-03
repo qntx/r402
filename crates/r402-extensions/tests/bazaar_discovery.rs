@@ -359,6 +359,50 @@ async fn list_resources_sends_bazaar_auth_headers() {
         .unwrap();
 }
 
+#[tokio::test]
+async fn list_resources_does_not_fail_page_on_open_accepts() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "items": [{
+                "resource": "https://api.example.com/weather",
+                "type": "http",
+                "x402Version": 2,
+                "accepts": [
+                    {"scheme": "exact", "network": "eip155:8453"},
+                    {
+                        "scheme": "exact",
+                        "network": "eip155:8453",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                        "amount": "1000",
+                        "payTo": "0xa2477E16dCB42E2AD80f03FE97D7F1a1646cd1c0",
+                        "maxTimeoutSeconds": 60,
+                        "description": "v1 leftover",
+                        "resource": "https://api.example.com/weather",
+                        "maxAmountRequired": "1000"
+                    }
+                ],
+                "lastUpdated": "2026-01-01T00:00:00Z"
+            }],
+            "pagination": { "limit": 20, "offset": 0, "total": 1 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let result = client
+        .list_resources(&ListDiscoveryResourcesParams::default())
+        .await
+        .unwrap();
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].accepts.len(), 2);
+    assert_eq!(result.items[0].accepts[0]["network"], "eip155:8453");
+    assert_eq!(result.items[0].accepts[1]["maxAmountRequired"], "1000");
+}
+
 #[test]
 fn discovery_resource_deserializes_optional_extensions() {
     let resource: r402_extensions::DiscoveryResource = serde_json::from_value(json!({
