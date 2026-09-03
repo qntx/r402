@@ -23,35 +23,85 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = []
 client = [
     "dep:async-trait",
+    "dep:http",
     "dep:r402-client",
     "dep:r402-protocol",
     "dep:reqwest",
     "dep:reqwest-middleware",
     "dep:serde_json",
 ]
+server = [
+    "dep:axum-core",
+    "dep:compact_str",
+    "dep:http",
+    "dep:r402-facilitator",
+    "dep:r402-protocol",
+    "dep:r402-server",
+    "dep:serde_json",
+    "dep:thiserror",
+    "dep:tower",
+    "dep:url",
+]
 
 [dependencies]
-http = { workspace = true }
-
 async-trait = { workspace = true, optional = true }
+axum-core = { workspace = true, optional = true }
+compact_str = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true, features = ["http-client"] }
 r402-protocol = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 reqwest-middleware = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tower = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 
 [dev-dependencies]
+axum-core = { workspace = true }
+compact_str = { workspace = true }
+http = { workspace = true }
 r402-client = { workspace = true }
+r402-facilitator = { workspace = true, features = ["http-client"] }
 r402-protocol = { workspace = true }
+r402-server = { workspace = true }
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tower = { workspace = true }
+url = { workspace = true }
 wiremock = { workspace = true }
 
 [[test]]
 name = "buyer"
 required-features = ["client"]
+
+[[test]]
+name = "sequential"
+required-features = ["server"]
+
+[[test]]
+name = "headers"
+required-features = ["server"]
+
+[[test]]
+name = "boundary"
+required-features = ["server"]
+
+[[test]]
+name = "overrides"
+required-features = ["server"]
+
+[[test]]
+name = "upfront"
+required-features = ["server"]
+
+[[test]]
+name = "build"
+required-features = ["server"]
 
 [lints]
 workspace = true

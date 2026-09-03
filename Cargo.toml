@@ -21,7 +21,7 @@ r402-protocol = { path = "crates/r402-protocol" }
 r402-client = { path = "crates/r402-client" }
 r402-facilitator = { path = "crates/r402-facilitator", default-features = false }
 r402-server = { path = "crates/r402-server" }
-r402-http = { path = "crates/r402-http" }
+r402-http = { path = "crates/r402-http", default-features = false }
 
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy
