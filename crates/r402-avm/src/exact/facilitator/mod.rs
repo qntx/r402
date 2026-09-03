@@ -86,7 +86,7 @@ impl<P> std::fmt::Debug for AlgorandExactFacilitator<P> {
 impl Facilitator for AlgorandExactFacilitator<AlgorandChainProvider> {
     #[cfg_attr(
         feature = "telemetry",
-        tracing::instrument(name = "r402_algorand::exact::verify", skip_all)
+        tracing::instrument(name = "r402_avm::exact::verify", skip_all)
     )]
     async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
@@ -105,7 +105,7 @@ impl Facilitator for AlgorandExactFacilitator<AlgorandChainProvider> {
 
     #[cfg_attr(
         feature = "telemetry",
-        tracing::instrument(name = "r402_algorand::exact::settle", skip_all)
+        tracing::instrument(name = "r402_avm::exact::settle", skip_all)
     )]
     async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();

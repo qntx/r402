@@ -1,4 +1,4 @@
-//! Algorand chain support for the x402 payment protocol.
+//! AVM (Algorand) chain support for the x402 payment protocol.
 //!
 //! Exact scheme: an atomic group with an ASA transfer to `payTo` and an
 //! optional 0-amount fee-payer payment. The facilitator signs the fee-payer
@@ -66,7 +66,7 @@ mod tests {
     fn crate_loads() {
         assert_eq!(
             env!("CARGO_PKG_NAME"),
-            "r402-algorand",
+            "r402-avm",
             "package name must match the crate directory"
         );
     }

@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+- **`r402-algorand` crate** — renamed to **`r402-avm`**. Types `AlgorandExact` /
+  `ExactAvmPayload` and CAIP-2 `algorand:` are unchanged. crates.io first
+  publish is `r402-avm` 0.18.0; last `r402-algorand` remains 0.17.1 (not yanked).
+  No alias crate. No umbrella `avm` feature.
 - **`r402-solana` crate** — renamed to **`r402-svm`**. Types `SolanaExact` /
   `UptoSvmScheme` and CAIP-2 `solana:` are unchanged. crates.io resumes
   `r402-svm` at 0.18.0; last `r402-solana` remains 0.17.1 (not yanked).

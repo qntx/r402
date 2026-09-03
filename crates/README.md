@@ -24,7 +24,7 @@ SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 | **[`r402-near`](r402-near/)** | [![crates.io][r402-near-crate]][r402-near-crate-url] [![docs.rs][r402-near-doc]][r402-near-doc-url] | NEAR — NEP-141 / NEP-366 exact transfers |
 | **[`r402-xrpl`](r402-xrpl/)** | [![crates.io][r402-xrpl-crate]][r402-xrpl-crate-url] [![docs.rs][r402-xrpl-doc]][r402-xrpl-doc-url] | XRPL — XRP / RLUSD exact transfers |
 | **[`r402-hedera`](r402-hedera/)** | [![crates.io][r402-hedera-crate]][r402-hedera-crate-url] [![docs.rs][r402-hedera-doc]][r402-hedera-doc-url] | Hedera — HBAR / HTS exact transfers |
-| **[`r402-algorand`](r402-algorand/)** | [![crates.io][r402-algorand-crate]][r402-algorand-crate-url] [![docs.rs][r402-algorand-doc]][r402-algorand-doc-url] | Algorand — ASA exact transfers via algod REST |
+| **[`r402-avm`](r402-avm/)** | [![crates.io][r402-avm-crate]][r402-avm-crate-url] [![docs.rs][r402-avm-doc]][r402-avm-doc-url] | AVM (Algorand) — ASA exact transfers via algod REST |
 | **[`r402-aptos`](r402-aptos/)** | [![crates.io][r402-aptos-crate]][r402-aptos-crate-url] [![docs.rs][r402-aptos-doc]][r402-aptos-doc-url] | Aptos — FA exact transfers via aptos-sdk 0.6 |
 | **[`r402-keeta`](r402-keeta/)** | [![crates.io][r402-keeta-crate]][r402-keeta-crate-url] [![docs.rs][r402-keeta-doc]][r402-keeta-doc-url] | Keeta — exact `SEND` (fee-payer sponsored) |
 | **[`r402-tvm`](r402-tvm/)** | [![crates.io][r402-tvm-crate]][r402-tvm-crate-url] [![docs.rs][r402-tvm-doc]][r402-tvm-doc-url] | TON — TEP-74 / W5R1 exact transfers (Highload V3 facilitator) |
@@ -47,7 +47,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | [`r402-near`](r402-near/) | `near:mainnet`, `near:testnet` | `exact` | In-process via JSON-RPC (relayer-sponsored) |
 | [`r402-xrpl`](r402-xrpl/) | `xrpl:0`, `xrpl:1`, `xrpl:2` | `exact` | In-process via JSON-RPC (payer-signed blob) |
 | [`r402-hedera`](r402-hedera/) | `hedera:mainnet`, `hedera:testnet` | `exact` | In-process via Mirror REST + Hiero SDK (fee-payer-sponsored) |
-| [`r402-algorand`](r402-algorand/) | `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k`, `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe` | `exact` | In-process via algod REST (fee-payer-sponsored) |
+| [`r402-avm`](r402-avm/) | `algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k`, `algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDe` | `exact` | In-process via algod REST (fee-payer-sponsored) |
 | [`r402-aptos`](r402-aptos/) | `aptos:1`, `aptos:2` | `exact` | In-process via `aptos-sdk` 0.6 (fee-payer-sponsored) |
 | [`r402-keeta`](r402-keeta/) | `keeta:21378`, `keeta:1413829460` | `exact` | In-process via `keetanetwork-client` (fee-payer sponsored) |
 | [`r402-tvm`](r402-tvm/) | `tvm:-239`, `tvm:-3` | `exact` | In-process via REST (Highload V3 relay) |
@@ -112,8 +112,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-xrpl-crate-url]: https://crates.io/crates/r402-xrpl
 [r402-hedera-crate]: https://img.shields.io/crates/v/r402-hedera.svg
 [r402-hedera-crate-url]: https://crates.io/crates/r402-hedera
-[r402-algorand-crate]: https://img.shields.io/crates/v/r402-algorand.svg
-[r402-algorand-crate-url]: https://crates.io/crates/r402-algorand
+[r402-avm-crate]: https://img.shields.io/crates/v/r402-avm.svg
+[r402-avm-crate-url]: https://crates.io/crates/r402-avm
 [r402-aptos-crate]: https://img.shields.io/crates/v/r402-aptos.svg
 [r402-aptos-crate-url]: https://crates.io/crates/r402-aptos
 [r402-keeta-crate]: https://img.shields.io/crates/v/r402-keeta.svg
@@ -154,8 +154,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-xrpl-doc-url]: https://docs.rs/r402-xrpl
 [r402-hedera-doc]: https://img.shields.io/docsrs/r402-hedera.svg
 [r402-hedera-doc-url]: https://docs.rs/r402-hedera
-[r402-algorand-doc]: https://img.shields.io/docsrs/r402-algorand.svg
-[r402-algorand-doc-url]: https://docs.rs/r402-algorand
+[r402-avm-doc]: https://img.shields.io/docsrs/r402-avm.svg
+[r402-avm-doc-url]: https://docs.rs/r402-avm
 [r402-aptos-doc]: https://img.shields.io/docsrs/r402-aptos.svg
 [r402-aptos-doc-url]: https://docs.rs/r402-aptos
 [r402-keeta-doc]: https://img.shields.io/docsrs/r402-keeta.svg

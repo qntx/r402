@@ -1,13 +1,13 @@
 [package]
-name = "r402-algorand"
+name = "r402-avm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Algorand chain support for the x402 payment protocol."
-keywords = ["x402", "payment", "algorand", "asa", "usdc"]
+description = "AVM (Algorand) chain support for the x402 payment protocol."
+keywords = ["x402", "payment", "algorand", "avm", "asa"]
 categories = [
     "api-bindings",
     "cryptography::cryptocurrencies",

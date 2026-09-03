@@ -19,13 +19,13 @@
 
 //! In-process exact-scheme tests. No live algod. No HTTP E2E.
 
-use r402_algorand::chain::AlgorandChainReference;
-use r402_algorand::{ALGORAND_NETWORKS, AlgorandExact, USDC, USDC_MAINNET_ASA_ID};
+use r402_avm::chain::AlgorandChainReference;
+use r402_avm::{ALGORAND_NETWORKS, AlgorandExact, USDC, USDC_MAINNET_ASA_ID};
 use r402_protocol::scheme::SchemeId;
 
 #[test]
 fn crate_name_matches_directory() {
-    assert_eq!(env!("CARGO_PKG_NAME"), "r402-algorand");
+    assert_eq!(env!("CARGO_PKG_NAME"), "r402-avm");
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn chain_reference_converts_to_caip2() {
 #[test]
 fn spec_fixture_round_trips() {
     let json = include_str!("../../../tests/fixtures/algorand/spec_payment_group.json");
-    let payload: r402_algorand::exact::ExactAvmPayload = serde_json::from_str(json).unwrap();
+    let payload: r402_avm::exact::ExactAvmPayload = serde_json::from_str(json).unwrap();
     assert_eq!(payload.payment_index, 1);
     assert_eq!(payload.payment_group.len(), 2);
     let encoded = serde_json::to_value(&payload).unwrap();
@@ -72,7 +72,7 @@ fn spec_fixture_round_trips() {
 #[cfg(feature = "client")]
 #[test]
 fn find_default_algorand_asset_covers_usdc() {
-    use r402_algorand::find_default_algorand_asset;
+    use r402_avm::find_default_algorand_asset;
     use r402_protocol::ChainId;
 
     let mainnet: ChainId = "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73k"
@@ -88,7 +88,7 @@ fn find_default_algorand_asset_covers_usdc() {
 #[cfg(feature = "server")]
 #[test]
 fn price_tag_is_two_arg() {
-    use r402_algorand::chain::AlgorandAddress;
+    use r402_avm::chain::AlgorandAddress;
 
     let pay_to = AlgorandAddress::from_public_key([1u8; 32]);
     let tag = AlgorandExact::price_tag(pay_to, USDC::algorand_testnet().amount(1_000_000u64));
@@ -102,8 +102,8 @@ fn price_tag_is_two_arg() {
 
 #[cfg(feature = "facilitator")]
 fn try_new_question_mark() -> Result<(), r402_protocol::FacilitatorError> {
-    use r402_algorand::chain::{AlgorandChainProvider, AlgorandSigner};
-    use r402_algorand::exact::AlgorandExactFacilitator;
+    use r402_avm::chain::{AlgorandChainProvider, AlgorandSigner};
+    use r402_avm::exact::AlgorandExactFacilitator;
 
     let signer = AlgorandSigner::from_seed([2u8; 32]);
     let provider = AlgorandChainProvider::new(
@@ -125,8 +125,8 @@ fn try_new_question_mark_compiles() {
 #[cfg(feature = "facilitator")]
 #[tokio::test]
 async fn try_new_supported_is_exact_on_provider_chain() {
-    use r402_algorand::chain::{AlgorandChainProvider, AlgorandSigner};
-    use r402_algorand::exact::AlgorandExactFacilitator;
+    use r402_avm::chain::{AlgorandChainProvider, AlgorandSigner};
+    use r402_avm::exact::AlgorandExactFacilitator;
     use r402_facilitator::Facilitator;
 
     let signer = AlgorandSigner::from_seed([2u8; 32]);
@@ -154,18 +154,18 @@ async fn try_new_supported_is_exact_on_provider_chain() {
 #[cfg(feature = "facilitator")]
 mod verify_settle {
     use base64::Engine;
-    use r402_algorand::chain::codec::{
+    use r402_avm::chain::codec::{
         SignedTransaction, Transaction, TxnType, assign_group, encode_signed, encode_txn,
     };
-    use r402_algorand::chain::rpc::{
+    use r402_avm::chain::rpc::{
         AlgodError, AlgodRpc, PendingTransaction, SimulateResult, SuggestedParams,
     };
-    use r402_algorand::chain::signer::AlgorandSigner;
-    use r402_algorand::chain::{AlgorandAddress, AlgorandChainReference};
-    use r402_algorand::exact::ExactAvmPayload;
-    use r402_algorand::exact::error::invalid;
-    use r402_algorand::exact::facilitator::{settle_request, verify_request_json};
-    use r402_algorand::{MAX_TRANSACTION_GROUP_SIZE, USDC_TESTNET_ASA_ID};
+    use r402_avm::chain::signer::AlgorandSigner;
+    use r402_avm::chain::{AlgorandAddress, AlgorandChainReference};
+    use r402_avm::exact::ExactAvmPayload;
+    use r402_avm::exact::error::invalid;
+    use r402_avm::exact::facilitator::{settle_request, verify_request_json};
+    use r402_avm::{MAX_TRANSACTION_GROUP_SIZE, USDC_TESTNET_ASA_ID};
     use r402_facilitator::SettlementCache;
     use r402_protocol::error::ErrorReason;
     use r402_protocol::payment::{SettleResponse, VerifyResponse};
@@ -444,11 +444,8 @@ mod verify_settle {
 
     fn sign_with(
         signer: &AlgorandSigner,
-    ) -> impl FnMut(
-        &Transaction,
-        &str,
-    ) -> Result<Vec<u8>, r402_algorand::exact::error::AlgorandInvalid>
-    + '_ {
+    ) -> impl FnMut(&Transaction, &str) -> Result<Vec<u8>, r402_avm::exact::error::AlgorandInvalid> + '_
+    {
         move |txn, sender| {
             if signer.address().to_string() != sender {
                 return Err(invalid("invalid_exact_avm_invalid_fee_payer"));
@@ -847,7 +844,7 @@ mod verify_settle {
         let raw = base64::engine::general_purpose::STANDARD
             .decode(&payload.payment_group[1])
             .unwrap();
-        let mut stxn = r402_algorand::chain::codec::decode_signed(&raw).unwrap();
+        let mut stxn = r402_avm::chain::codec::decode_signed(&raw).unwrap();
         if let Some(sig) = stxn.sig.as_mut() {
             sig[0] ^= 0xff;
         }
@@ -1054,7 +1051,7 @@ mod verify_settle {
         let client = seed(1);
         let fee_payer = seed(2);
         let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
-        let payload = r402_algorand::exact::client::create_payment_group(
+        let payload = r402_avm::exact::client::create_payment_group(
             &client,
             &MockRpc::default(),
             pay_to,
@@ -1067,7 +1064,7 @@ mod verify_settle {
         .unwrap();
         assert_eq!(payload.payment_index, 1);
         assert_eq!(payload.payment_group.len(), 2);
-        let pay = r402_algorand::chain::codec::decode_signed(
+        let pay = r402_avm::chain::codec::decode_signed(
             &base64::engine::general_purpose::STANDARD
                 .decode(&payload.payment_group[0])
                 .unwrap(),
@@ -1076,7 +1073,7 @@ mod verify_settle {
         assert!(pay.sig.is_none());
         assert_eq!(pay.txn.txn_type, TxnType::Pay);
         assert!(pay.txn.fee >= 1000);
-        let axfer = r402_algorand::chain::codec::decode_signed(
+        let axfer = r402_avm::chain::codec::decode_signed(
             &base64::engine::general_purpose::STANDARD
                 .decode(&payload.payment_group[1])
                 .unwrap(),
@@ -1086,7 +1083,7 @@ mod verify_settle {
         assert_eq!(axfer.txn.asset_amount, 1_000_000);
         assert_eq!(
             axfer.txn.genesis_hash,
-            r402_algorand::chain::ALGORAND_TESTNET_GENESIS_HASH
+            r402_avm::chain::ALGORAND_TESTNET_GENESIS_HASH
         );
         assert_ne!(
             axfer.txn.genesis_hash.as_slice(),
@@ -1100,7 +1097,7 @@ mod verify_settle {
         let txn = Transaction::new(TxnType::Pay, AlgorandAddress::from_public_key([1u8; 32]));
         let size = encode_txn(&txn).len();
         assert!(size > 0);
-        assert_eq!(r402_algorand::chain::codec::txn_fee(0, 1000, size), 1000);
-        assert_eq!(r402_algorand::chain::codec::txn_fee(10, 1000, 50), 1000);
+        assert_eq!(r402_avm::chain::codec::txn_fee(0, 1000, size), 1000);
+        assert_eq!(r402_avm::chain::codec::txn_fee(10, 1000, 50), 1000);
     }
 }
