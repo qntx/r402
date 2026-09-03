@@ -6,10 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-04
+
 ### Breaking
 
 - Workspace version **0.19.0**. GitHub `0.18.0` at `6363c18` was never
-  tagged; crates.io remains 0.17.1 until humans publish 0.19.
+  tagged; crates.io remains 0.17.1 until this 0.19 publish.
 - `BuildError` expanded (`MissingScheme`, `PaymentFlow`, `Mode`,
   `EmptyPriceTags`, `MissingSettleOnCancel`); no longer `Copy`.
 - `X402Layer::with_price_tag` and `with_settlement_mode` return
