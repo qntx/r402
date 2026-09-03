@@ -19,5 +19,35 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = ["dep:aptos-sdk", "dep:r402-client"]
+server = ["dep:r402-server"]
+facilitator = [
+    "dep:aptos-sdk",
+    "dep:r402-facilitator",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+base64 = { workspace = true }
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+aptos-sdk = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+aptos-sdk = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
 [lints]
 workspace = true
