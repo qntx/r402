@@ -1,6 +1,6 @@
 # Crates
 
-Workspace **0.19.0**. Path dependencies match the graph below. Umbrella
+Workspace **0.19.1**. Path dependencies match the graph below. Umbrella
 `default = ["evm", "http"]`. Concordium is opt-in (`r402` feature `concordium`),
 not default. **[`r402-contract`](r402-contract/)** is an unpublished workspace
 member — not on crates.io, not in `publish.yml`. crates.io **`r402-core` 0.17.1**

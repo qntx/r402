@@ -103,6 +103,7 @@ tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }
 
 [dev-dependencies]
+hex = { workspace = true }
 r402-facilitator = { workspace = true }
 r402-protocol = { workspace = true }
 r402-server = { workspace = true }

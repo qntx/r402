@@ -14,7 +14,7 @@ use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt, TransactionRequest};
 use alloy_transport::TransportError;
 use alloy_transport::layers::{FallbackLayer, ThrottleLayer};
-use alloy_transport_http::Http;
+use alloy_transport_http::{Client, Http};
 use r402_protocol::network::{ChainId, ChainProvider};
 use tower::ServiceBuilder;
 #[cfg(feature = "telemetry")]
@@ -33,6 +33,9 @@ pub enum Eip155ChainProviderError {
     /// No HTTP(S) RPC URL remained after filtering non-HTTP endpoints.
     #[error("at least one HTTP RPC endpoint is required")]
     NoHttpEndpoint,
+    /// `reqwest` client failed to build.
+    #[error("failed to build HTTP RPC client")]
+    HttpClient,
 }
 
 /// Combined filler type for gas, blob gas, nonce, and chain ID.
@@ -99,8 +102,9 @@ impl Eip155ChainProvider {
     /// # Errors
     ///
     /// Returns [`Eip155ChainProviderError::EmptyWallet`] if the wallet has no
-    /// signers, or [`Eip155ChainProviderError::NoHttpEndpoint`] if no HTTP RPC
-    /// URL remains after filtering.
+    /// signers, [`Eip155ChainProviderError::NoHttpEndpoint`] if no HTTP RPC
+    /// URL remains after filtering, or [`Eip155ChainProviderError::HttpClient`]
+    /// if the HTTP client cannot be built.
     pub fn new(
         chain: Eip155ChainReference,
         wallet: EthereumWallet,
@@ -159,13 +163,25 @@ impl Eip155ChainProvider {
     /// # Errors
     ///
     /// Returns [`Eip155ChainProviderError::NoHttpEndpoint`] if no HTTP(S)
-    /// endpoint remains after filtering.
+    /// endpoint remains after filtering, or
+    /// [`Eip155ChainProviderError::HttpClient`] if the HTTP client cannot be
+    /// built.
+    ///
+    /// The client is HTTP/1.1-only and ignores env/system proxies.
+    /// Workspace unification turns on `reqwest/{http2,system-proxy}` via
+    /// other crates; HTTP/2 or a macOS system proxy against loopback
+    /// JSON-RPC (wiremock) surfaces as `rpc_read_failed` / bad signatures.
     pub fn rpc_client(
         chain_id: &ChainId,
         endpoints: &[(Url, Option<u32>)],
     ) -> Result<RpcClient, Eip155ChainProviderError> {
         #[cfg(not(feature = "telemetry"))]
         let _ = chain_id;
+        let http_client = Client::builder()
+            .http1_only()
+            .no_proxy()
+            .build()
+            .map_err(|_| Eip155ChainProviderError::HttpClient)?;
         let transports = endpoints
             .iter()
             .filter_map(|(url, rate_limit)| {
@@ -179,7 +195,7 @@ impl Eip155ChainProvider {
                 let limit = rate_limit.unwrap_or(u32::MAX);
                 let service = ServiceBuilder::new()
                     .layer(ThrottleLayer::new(limit))
-                    .service(Http::new(url.clone()));
+                    .service(Http::with_client(http_client.clone(), url.clone()));
                 Some(service)
             })
             .collect::<Vec<_>>();
