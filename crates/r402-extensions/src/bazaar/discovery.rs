@@ -174,6 +174,9 @@ pub enum BazaarDiscoveryError {
     /// 2xx body was not valid discovery JSON.
     #[error("failed to parse discovery response: {0}")]
     Parse(String),
+    /// Untrusted discovery extension schema contained a non-fragment `$ref` / `$id`.
+    #[error("schema must not contain external $ref/$id references")]
+    ExternalSchemaRef,
     /// Auth-header callback or URL construction on the inner client failed.
     #[error(transparent)]
     FacilitatorClient(#[from] FacilitatorClientError),
@@ -233,34 +236,54 @@ impl BazaarDiscoveryClient {
     ///
     /// # Errors
     ///
-    /// Transport, auth, non-success HTTP, or JSON parse failures.
+    /// Transport, auth, non-success HTTP, JSON parse, or
+    /// [`BazaarDiscoveryError::ExternalSchemaRef`].
     pub async fn list_resources(
         &self,
         params: &ListDiscoveryResourcesParams,
     ) -> Result<DiscoveryResourcesResponse, BazaarDiscoveryError> {
-        self.send(
-            "discovery/resources",
-            &params.query_pairs(),
-            BazaarDiscoveryError::list_failed,
-        )
-        .await
+        let result: DiscoveryResourcesResponse = self
+            .send(
+                "discovery/resources",
+                &params.query_pairs(),
+                BazaarDiscoveryError::list_failed,
+            )
+            .await?;
+        if result
+            .items
+            .iter()
+            .any(|item| discovery_extensions_have_external_ref(item.extensions.as_ref()))
+        {
+            return Err(BazaarDiscoveryError::ExternalSchemaRef);
+        }
+        Ok(result)
     }
 
     /// Searches cataloged resources. `params.query` is always sent.
     ///
     /// # Errors
     ///
-    /// Transport, auth, non-success HTTP, or JSON parse failures.
+    /// Transport, auth, non-success HTTP, JSON parse, or
+    /// [`BazaarDiscoveryError::ExternalSchemaRef`].
     pub async fn search(
         &self,
         params: &SearchDiscoveryResourcesParams,
     ) -> Result<SearchDiscoveryResourcesResponse, BazaarDiscoveryError> {
-        self.send(
-            "discovery/search",
-            &params.query_pairs(),
-            BazaarDiscoveryError::search_failed,
-        )
-        .await
+        let result: SearchDiscoveryResourcesResponse = self
+            .send(
+                "discovery/search",
+                &params.query_pairs(),
+                BazaarDiscoveryError::search_failed,
+            )
+            .await?;
+        if result
+            .resources
+            .iter()
+            .any(|item| discovery_extensions_have_external_ref(item.extensions.as_ref()))
+        {
+            return Err(BazaarDiscoveryError::ExternalSchemaRef);
+        }
+        Ok(result)
     }
 
     async fn send<T: DeserializeOwned>(
@@ -414,6 +437,10 @@ fn is_loopback(url: &Url) -> bool {
         Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
         None => false,
     }
+}
+
+fn discovery_extensions_have_external_ref(ext: Option<&Value>) -> bool {
+    ext.is_some_and(r402_protocol::schema_has_external_ref)
 }
 
 #[cfg(test)]

@@ -39,7 +39,7 @@ pub use payment::{
     SettleResponse, SettlementOverrideError, SettlementOverrides, SupportedPaymentKind,
     SupportedResponse, TypedVerifyRequest, U64String, UnixTimestamp, V2, VerifyRequest,
     VerifyResponse, Version, Version2, asset_decimals_from_extra, find_matching_requirements,
-    resolve_settlement_override_amount,
+    resolve_settlement_override_amount, schema_has_external_ref,
 };
 #[cfg(test)]
 use proptest as _;

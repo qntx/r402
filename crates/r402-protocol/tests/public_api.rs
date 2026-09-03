@@ -186,3 +186,26 @@ fn background_settle_metric_name() {
         "r402_background_settle_total"
     );
 }
+
+#[test]
+fn schema_has_external_ref_is_crate_root() {
+    use r402_protocol::schema_has_external_ref;
+
+    assert!(schema_has_external_ref(&serde_json::json!({
+        "$ref": "http://127.0.0.1/attacker-schema.json"
+    })));
+    assert!(schema_has_external_ref(&serde_json::json!({
+        "$ref": "file:///etc/passwd"
+    })));
+    assert!(schema_has_external_ref(&serde_json::json!({
+        "properties": { "input": { "$ref": "http://evil.example/schema.json" } }
+    })));
+    assert!(schema_has_external_ref(&serde_json::json!({ "$ref": 1 })));
+    assert!(!schema_has_external_ref(&serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema"
+    })));
+    assert!(!schema_has_external_ref(&serde_json::json!({
+        "$ref": "#/definitions/root"
+    })));
+    assert!(!schema_has_external_ref(&serde_json::json!({ "$id": "#" })));
+}

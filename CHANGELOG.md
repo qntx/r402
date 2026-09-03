@@ -62,6 +62,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - Tracked `docs/` construction notes. `.gitignore` ignores `docs/`.
 
+### Security
+
+- Reject external `$ref`/`$id` in untrusted extension schemas
+  (`r402_protocol::schema_has_external_ref`). Same-document `#` fragments
+  only. Discovery fails the page (`BazaarDiscoveryError::ExternalSchemaRef`);
+  verify returns `VerificationError::InvalidFormat` (`invalid_payload`).
+
 ## [0.17.1] — 2026-08-20
 
 ### Fixed

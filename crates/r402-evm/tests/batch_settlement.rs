@@ -495,6 +495,10 @@ struct FacHarness {
     send_mode: Arc<Mutex<SendMode>>,
     rpc: RpcScript,
     pending: Arc<InMemoryPendingSettlementStore>,
+    /// Keep the mock RPC listener alive for the test. Dropping it lets the
+    /// kernel reuse the port; a sibling test's provider then talks to the
+    /// wrong mock and `eth_getCode` / allowance reads go stale.
+    _server: wiremock::MockServer,
 }
 
 async fn harness() -> FacHarness {
@@ -519,15 +523,12 @@ async fn harness() -> FacHarness {
         send_mode,
         rpc,
         pending,
+        _server: server,
     }
 }
 
-async fn recording_fac() -> (
-    Eip155BatchSettlementFacilitator<RecordingProvider>,
-    Arc<Mutex<Vec<Bytes>>>,
-) {
-    let h = harness().await;
-    (h.fac, h.sent)
+async fn recording_fac() -> FacHarness {
+    harness().await
 }
 
 fn sample_config(payer: Address) -> ChannelConfig {
@@ -683,8 +684,8 @@ async fn deposit_6492_empty_allowlist_is_factory_not_allowed() {
         }),
     };
     let req = settle_request(payload, requirements_for(&config));
-    let (fac, _) = recording_fac().await;
-    let resp = fac.settle(req).await.expect("structured failure");
+    let h = recording_fac().await;
+    let resp = h.fac.settle(req).await.expect("structured failure");
     match resp {
         SettleResponse::Failure {
             reason,
@@ -700,7 +701,7 @@ async fn deposit_6492_empty_allowlist_is_factory_not_allowed() {
 
 #[tokio::test]
 async fn claim_settle_broadcasts_claim_with_signature_selector() {
-    let (fac, sent) = recording_fac().await;
+    let h = recording_fac().await;
     let (signer, _) = wallet();
     let config = sample_config(signer.address());
     let payload = BatchSettlementPayload::Claim {
@@ -714,13 +715,14 @@ async fn claim_settle_broadcasts_claim_with_signature_selector() {
         }],
         claim_authorizer_signature: Some(Bytes::from(vec![0u8; 65])),
     };
-    let resp = fac
+    let resp = h
+        .fac
         .settle(settle_request(payload, requirements_for(&config)))
         .await
         .expect("claim settle");
     assert_success_hash(resp);
     assert_eq!(
-        first_selector(&sent),
+        first_selector(&h.sent),
         sel(
             "claimWithSignature((((address,address,address,address,address,uint40,bytes32),uint128),bytes,uint128)[],bytes)"
         )
@@ -729,23 +731,24 @@ async fn claim_settle_broadcasts_claim_with_signature_selector() {
 
 #[tokio::test]
 async fn contract_settle_broadcasts_settle_selector() {
-    let (fac, sent) = recording_fac().await;
+    let h = recording_fac().await;
     let config = sample_config(Address::repeat_byte(0x11));
     let payload = BatchSettlementPayload::Settle {
         receiver: config.receiver,
         token: config.token,
     };
-    let resp = fac
+    let resp = h
+        .fac
         .settle(settle_request(payload, requirements_for(&config)))
         .await
         .expect("contract settle");
     assert_success_hash(resp);
-    assert_eq!(first_selector(&sent), sel("settle(address,address)"));
+    assert_eq!(first_selector(&h.sent), sel("settle(address,address)"));
 }
 
 #[tokio::test]
 async fn refund_broadcasts_refund_with_signature_selector() {
-    let (fac, sent) = recording_fac().await;
+    let h = recording_fac().await;
     let (signer, _) = wallet();
     let config = sample_config(signer.address());
     let channel_id = compute_channel_id(&config, 8453).expect("id");
@@ -763,13 +766,14 @@ async fn refund_broadcasts_refund_with_signature_selector() {
         refund_authorizer_signature: Some(Bytes::from(vec![0u8; 65])),
         claim_authorizer_signature: None,
     };
-    let resp = fac
+    let resp = h
+        .fac
         .settle(settle_request(payload, requirements_for(&config)))
         .await
         .expect("refund settle");
     assert_success_hash(resp);
     assert_eq!(
-        first_selector(&sent),
+        first_selector(&h.sent),
         sel(
             "refundWithSignature((address,address,address,address,address,uint40,bytes32),uint128,uint256,bytes)"
         )
@@ -778,16 +782,17 @@ async fn refund_broadcasts_refund_with_signature_selector() {
 
 #[tokio::test]
 async fn deposit_broadcasts_deposit_selector() {
-    let (fac, sent) = recording_fac().await;
+    let h = recording_fac().await;
     let (signer, _) = wallet();
     let (payload, config, _) = signed_deposit(&signer).await;
-    let resp = fac
+    let resp = h
+        .fac
         .settle(settle_request(payload, requirements_for(&config)))
         .await
         .expect("deposit settle");
     assert_success_hash(resp);
     assert_eq!(
-        first_selector(&sent),
+        first_selector(&h.sent),
         sel(
             "deposit((address,address,address,address,address,uint40,bytes32),uint128,address,bytes)"
         )
@@ -845,7 +850,7 @@ async fn deposit_7702_owner_ecdsa_is_eip1271_not_eoa() {
 
 #[tokio::test]
 async fn permit2_witness_mismatch_is_channel_id_mismatch() {
-    let (fac, _) = recording_fac().await;
+    let h = recording_fac().await;
     let (signer, _) = wallet();
     let config = sample_config(signer.address());
     let channel_id = compute_channel_id(&config, 8453).expect("id");
@@ -879,7 +884,8 @@ async fn permit2_witness_mismatch_is_channel_id_mismatch() {
             },
         }),
     };
-    let err = fac
+    let err = h
+        .fac
         .verify(verify_request(payload, requirements_for(&config)))
         .await
         .expect_err("witness mismatch");
