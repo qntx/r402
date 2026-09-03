@@ -34,6 +34,8 @@ mod refund;
 mod response;
 mod send;
 mod settle_call;
+mod sigcheck;
+mod validate;
 
 /// Facilitator holding a shared channel store, 6492 allowlist, and pending store.
 pub struct Eip155BatchSettlementFacilitator<P> {
@@ -157,7 +159,7 @@ where
                 )
                 .await
             }
-            BatchSettlementPayload::Voucher { .. } | BatchSettlementPayload::Refund { .. } => {
+            BatchSettlementPayload::Voucher { .. } => {
                 let _charge = verify_offchain(
                     &typed.payment_payload,
                     &typed.payment_requirements,
@@ -171,6 +173,15 @@ where
                     .map(|c| c.payer)
                     .unwrap_or_default();
                 Ok(wire::VerifyResponse::valid(format!("{payer:#x}")))
+            }
+            BatchSettlementPayload::Refund { .. } => {
+                refund::verify_refund(
+                    self,
+                    &typed.payment_payload,
+                    &typed.payment_requirements,
+                    chain_id,
+                )
+                .await
             }
             BatchSettlementPayload::Claim { .. } | BatchSettlementPayload::Settle { .. } => {
                 Ok(wire::VerifyResponse::invalid(

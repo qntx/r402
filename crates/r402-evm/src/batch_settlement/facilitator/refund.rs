@@ -4,7 +4,7 @@ use alloy_primitives::Bytes;
 use alloy_provider::Provider;
 use alloy_sol_types::SolCall;
 use compact_str::CompactString;
-use r402_protocol::error::FacilitatorError;
+use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::payment as wire;
 
 use super::Eip155BatchSettlementFacilitator;
@@ -12,15 +12,60 @@ use super::contract::IBatchSettlement;
 use super::encoding::{to_sol_claims, to_sol_config, u128_amount};
 use super::response::{facilitator_err_to_settle, settle_failure};
 use super::send::{Broadcast, simulate_and_broadcast};
+use super::validate::validate_channel_config;
 use crate::batch_settlement::errors::{
-    AUTHORIZER_NOT_CONFIGURED, INVALID_PAYLOAD_TYPE, REFUND_NO_BALANCE, REFUND_SIMULATION_FAILED,
-    REFUND_TRANSACTION_FAILED, RPC_READ_FAILED,
+    AUTHORIZER_NOT_CONFIGURED, CHANNEL_NOT_FOUND, CUMULATIVE_BELOW_CLAIMED,
+    CUMULATIVE_EXCEEDS_BALANCE, INVALID_PAYLOAD_TYPE, INVALID_VOUCHER_SIGNATURE, REFUND_NO_BALANCE,
+    REFUND_SIMULATION_FAILED, REFUND_TRANSACTION_FAILED, RPC_READ_FAILED,
 };
 use crate::batch_settlement::payload::{
     BATCH_SETTLEMENT_ADDRESS, BatchSettlementPayload, ChannelConfig, v2,
 };
+use crate::batch_settlement::voucher::verify_voucher_signature;
 use crate::chain::Eip155MetaTransactionProvider;
 use crate::error::Eip155ExactError;
+
+pub(super) async fn verify_refund<P>(
+    fac: &Eip155BatchSettlementFacilitator<P>,
+    payload: &v2::PaymentPayload,
+    requirements: &v2::PaymentRequirements,
+    chain_id: u64,
+) -> Result<wire::VerifyResponse, FacilitatorError>
+where
+    P: Eip155MetaTransactionProvider + Sync,
+    P::Inner: Provider,
+{
+    let config = payload
+        .payload
+        .channel_config()
+        .ok_or_else(|| VerificationError::from_wire(INVALID_PAYLOAD_TYPE))?;
+    let voucher = payload
+        .payload
+        .voucher()
+        .ok_or_else(|| VerificationError::from_wire(INVALID_PAYLOAD_TYPE))?;
+    validate_channel_config(config, voucher.channel_id, requirements, chain_id)?;
+    verify_voucher_signature(voucher, chain_id, config.payer, config.payer_authorizer)
+        .map_err(|_| VerificationError::from_wire(INVALID_VOUCHER_SIGNATURE))?;
+    let contract = IBatchSettlement::new(BATCH_SETTLEMENT_ADDRESS, fac.provider.inner());
+    let ch = contract
+        .channels(voucher.channel_id)
+        .call()
+        .await
+        .map_err(|_| VerificationError::from_wire(RPC_READ_FAILED))?;
+    if ch.balance == 0 {
+        return Err(VerificationError::from_wire(CHANNEL_NOT_FOUND).into());
+    }
+    let max = voucher.max_claimable_amount.0;
+    let balance = alloy_primitives::U256::from(ch.balance);
+    let claimed = alloy_primitives::U256::from(ch.totalClaimed);
+    if max > balance {
+        return Err(VerificationError::from_wire(CUMULATIVE_EXCEEDS_BALANCE).into());
+    }
+    if max < claimed {
+        return Err(VerificationError::from_wire(CUMULATIVE_BELOW_CLAIMED).into());
+    }
+    Ok(wire::VerifyResponse::valid(config.payer.to_string()))
+}
 
 pub(super) async fn execute_refund<P>(
     fac: &Eip155BatchSettlementFacilitator<P>,

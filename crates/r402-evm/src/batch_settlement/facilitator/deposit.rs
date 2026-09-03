@@ -1,7 +1,10 @@
 //! Deposit verify + on-chain `deposit()` settle (pending store + 6492).
 
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, hex};
-use alloy_provider::Provider;
+use alloy_provider::bindings::IMulticall3;
+use alloy_provider::{MULTICALL3_ADDRESS, Provider};
+use alloy_rpc_types_eth::TransactionRequest;
 use alloy_sol_types::SolCall;
 use compact_str::CompactString;
 use r402_protocol::error::{FacilitatorError, VerificationError};
@@ -15,11 +18,12 @@ use super::deposit_permit2;
 use super::encoding::{to_sol_config, u128_amount};
 use super::response::{facilitator_err_to_settle, settle_failure, verify_err_to_settle};
 use super::send::{Broadcast, simulate_and_broadcast};
+use super::validate::validate_channel_config;
 use crate::asset::AssetTransferMethod;
 use crate::batch_settlement::errors::{
     CUMULATIVE_BELOW_CLAIMED, CUMULATIVE_EXCEEDS_BALANCE, DEPOSIT_SIMULATION_FAILED,
-    DEPOSIT_TRANSACTION_FAILED, INSUFFICIENT_BALANCE, INVALID_PAYLOAD_TYPE, RPC_READ_FAILED,
-    SMART_WALLET_DEPLOYMENT_FAILED,
+    DEPOSIT_TRANSACTION_FAILED, INSUFFICIENT_BALANCE, INVALID_PAYLOAD_TYPE,
+    INVALID_VOUCHER_SIGNATURE, RPC_READ_FAILED, SMART_WALLET_DEPLOYMENT_FAILED,
 };
 use crate::batch_settlement::payload::{
     BatchSettlementPayload, ChannelConfig, DepositAuthorization, DepositBody,
@@ -189,41 +193,29 @@ where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,
 {
-    let extra = requirements
-        .extra
-        .as_ref()
-        .ok_or_else(|| VerificationError::InvalidFormat("missing batch-settlement extra".into()))?;
     let (config, deposit) = deposit_parts(payload)?;
     let voucher = payload
         .payload
         .voucher()
         .ok_or_else(|| VerificationError::from_wire(INVALID_PAYLOAD_TYPE))?;
-    if let Some(err) = crate::batch_settlement::channel::channel_id_binding_error(
-        config,
-        voucher.channel_id,
-        chain_id,
-    ) {
-        return Err(VerificationError::InvalidFormat(err.into()));
-    }
-    if config.receiver != requirements.pay_to.0 {
-        return Err(VerificationError::RecipientMismatch);
-    }
-    if config.token != requirements.asset.0 {
-        return Err(VerificationError::AssetMismatch);
-    }
-    if config.receiver_authorizer != extra.receiver_authorizer.0 {
-        return Err(VerificationError::InvalidFormat(
-            "receiverAuthorizer mismatch".into(),
-        ));
-    }
-    verify_voucher_signature(voucher, chain_id, config.payer, config.payer_authorizer)?;
-    resolve_execution(fac, payload, requirements, chain_id)
-        .await
-        .map_err(|e| match e {
-            FacilitatorError::Verification(v) => v,
-            other => VerificationError::InvalidFormat(other.to_string()),
-        })?;
+    validate_channel_config(config, voucher.channel_id, requirements, chain_id)?;
+    verify_voucher_signature(voucher, chain_id, config.payer, config.payer_authorizer)
+        .map_err(|_| VerificationError::from_wire(INVALID_VOUCHER_SIGNATURE))?;
+    let (collector, collector_data, counterfactual) =
+        resolve_execution(fac, payload, requirements, chain_id)
+            .await
+            .map_err(|e| match e {
+                FacilitatorError::Verification(v) => v,
+                other => VerificationError::InvalidFormat(other.to_string()),
+            })?;
     read_and_check_state(fac, config, voucher, deposit.amount.0, requirements.asset.0).await?;
+    let calldata = deposit_calldata(config, deposit.amount.0, collector, collector_data).map_err(
+        |e| match e {
+            FacilitatorError::Verification(v) => v,
+            _other => VerificationError::from_wire(DEPOSIT_SIMULATION_FAILED),
+        },
+    )?;
+    simulate_deposit(fac.provider.inner(), calldata, counterfactual.as_ref()).await?;
     Ok(config.payer)
 }
 
@@ -254,12 +246,16 @@ where
         });
     match method {
         AssetTransferMethod::Permit2 => {
-            deposit_permit2::verify_permit2_fields(
+            deposit_permit2::verify_permit2_auth(
+                fac.provider.inner(),
                 config,
+                voucher.channel_id,
                 deposit.amount.0,
                 requirements.asset.0,
+                chain_id,
                 &deposit.authorization,
             )
+            .await
             .map_err(FacilitatorError::Verification)?;
             let data = deposit_permit2::collector_data(&deposit.authorization)
                 .map_err(FacilitatorError::Verification)?;
@@ -291,7 +287,6 @@ where
                     ),
                 ));
             };
-            let _ = chain_id;
             Ok((
                 ERC3009_DEPOSIT_COLLECTOR_ADDRESS,
                 deposit_eip3009::collector_data(erc3009_authorization, inner),
@@ -336,6 +331,41 @@ where
     }
     if voucher.max_claimable_amount.0 <= alloy_primitives::U256::from(ch.totalClaimed) {
         return Err(VerificationError::from_wire(CUMULATIVE_BELOW_CLAIMED));
+    }
+    Ok(())
+}
+
+async fn simulate_deposit<P: Provider>(
+    provider: &P,
+    calldata: Bytes,
+    counterfactual: Option<&Counterfactual>,
+) -> Result<(), VerificationError> {
+    let (to, data) = match counterfactual {
+        Some(cf) => {
+            let aggregate = IMulticall3::aggregate3Call {
+                calls: vec![
+                    IMulticall3::Call3 {
+                        allowFailure: true,
+                        target: cf.factory,
+                        callData: cf.factory_calldata.clone(),
+                    },
+                    IMulticall3::Call3 {
+                        allowFailure: false,
+                        target: crate::batch_settlement::payload::BATCH_SETTLEMENT_ADDRESS,
+                        callData: calldata,
+                    },
+                ],
+            };
+            (MULTICALL3_ADDRESS, Bytes::from(aggregate.abi_encode()))
+        }
+        None => (
+            crate::batch_settlement::payload::BATCH_SETTLEMENT_ADDRESS,
+            calldata,
+        ),
+    };
+    let req = TransactionRequest::default().with_to(to).with_input(data);
+    if provider.call(req).await.is_err() {
+        return Err(VerificationError::from_wire(DEPOSIT_SIMULATION_FAILED));
     }
     Ok(())
 }

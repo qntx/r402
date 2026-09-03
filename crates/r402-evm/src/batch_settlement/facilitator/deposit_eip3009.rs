@@ -1,12 +1,13 @@
 //! ERC-3009 deposit authorization, collector data, and EIP-6492 allowlist.
 
-use alloy_primitives::{Address, Bytes, Signature, U256};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::{SolStruct, eip712_domain, sol};
 use r402_protocol::error::VerificationError;
 use r402_protocol::payment::UnixTimestamp;
 
 use super::encoding::{erc3009_collector_data, erc3009_deposit_nonce};
+use super::sigcheck::verify_hash_signature;
 use crate::batch_settlement::errors::{
     EIP6492_FACTORY_NOT_ALLOWED, ERC3009_AUTHORIZATION_REQUIRED,
     INVALID_RECEIVE_AUTHORIZATION_SIGNATURE, MISSING_EIP712_DOMAIN, VALID_AFTER_IN_FUTURE,
@@ -92,6 +93,7 @@ pub(super) async fn verify_eip3009_auth<P: Provider>(
                 ));
             }
             verify_receive_auth(
+                provider,
                 config.payer,
                 asset,
                 extra_name,
@@ -100,12 +102,14 @@ pub(super) async fn verify_eip3009_auth<P: Provider>(
                 deposit_amount,
                 erc3009,
                 voucher_channel_id,
-                &inner,
-            )?;
+                inner.clone(),
+            )
+            .await?;
             Ok((inner, None))
         }
         StructuredSignature::Unclassified(bytes) => {
             verify_receive_auth(
+                provider,
                 config.payer,
                 asset,
                 extra_name,
@@ -114,8 +118,9 @@ pub(super) async fn verify_eip3009_auth<P: Provider>(
                 deposit_amount,
                 erc3009,
                 voucher_channel_id,
-                &bytes,
-            )?;
+                bytes.clone(),
+            )
+            .await?;
             Ok((bytes, None))
         }
     }
@@ -138,7 +143,8 @@ fn check_time_window(valid_after: U256, valid_before: U256) -> Result<(), Verifi
     clippy::too_many_arguments,
     reason = "mirrors official verifyReceiveAuth parameters"
 )]
-fn verify_receive_auth(
+async fn verify_receive_auth<P: Provider>(
+    provider: &P,
     payer: Address,
     asset: Address,
     name: &str,
@@ -147,7 +153,7 @@ fn verify_receive_auth(
     amount: U256,
     auth: &DepositErc3009Authorization,
     channel_id: alloy_primitives::B256,
-    signature: &Bytes,
+    signature: Bytes,
 ) -> Result<(), VerificationError> {
     let domain = eip712_domain! {
         name: name.to_owned(),
@@ -164,15 +170,12 @@ fn verify_receive_auth(
         nonce: erc3009_deposit_nonce(channel_id, auth.salt),
     };
     let hash = typed.eip712_signing_hash(&domain);
-    if let Ok(parsed) = Signature::from_raw(signature.as_ref()) {
-        let recovered = parsed
-            .recover_address_from_prehash(&hash)
-            .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
-        if recovered != payer {
-            return Err(VerificationError::from_wire(
-                INVALID_RECEIVE_AUTHORIZATION_SIGNATURE,
-            ));
-        }
-    }
-    Ok(())
+    verify_hash_signature(
+        provider,
+        payer,
+        hash,
+        signature,
+        INVALID_RECEIVE_AUTHORIZATION_SIGNATURE,
+    )
+    .await
 }

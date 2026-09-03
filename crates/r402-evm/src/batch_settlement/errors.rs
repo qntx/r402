@@ -67,6 +67,30 @@ pub const CUMULATIVE_EXCEEDS_BALANCE: &str =
 pub const CUMULATIVE_BELOW_CLAIMED: &str = "invalid_batch_settlement_evm_cumulative_below_claimed";
 /// Refund available balance is zero.
 pub const REFUND_NO_BALANCE: &str = "invalid_batch_settlement_evm_refund_no_balance";
+/// On-chain channel balance is zero (not opened).
+pub const CHANNEL_NOT_FOUND: &str = "invalid_batch_settlement_evm_channel_not_found";
+/// Claimed `channelId` does not match `channelConfig`.
+pub const CHANNEL_ID_MISMATCH: &str = "invalid_batch_settlement_evm_channel_id_mismatch";
+/// Channel token does not match payment requirements asset.
+pub const TOKEN_MISMATCH: &str = "invalid_batch_settlement_evm_token_mismatch";
+/// Channel receiver does not match `payTo`.
+pub const RECEIVER_MISMATCH: &str = "invalid_batch_settlement_evm_receiver_mismatch";
+/// Channel `receiverAuthorizer` does not match requirements extra.
+pub const RECEIVER_AUTHORIZER_MISMATCH: &str =
+    "invalid_batch_settlement_evm_receiver_authorizer_mismatch";
+/// Channel `withdrawDelay` does not match requirements extra.
+pub const WITHDRAW_DELAY_MISMATCH: &str = "invalid_batch_settlement_evm_withdraw_delay_mismatch";
+/// Channel `withdrawDelay` is outside `[900, 2592000]`.
+pub const WITHDRAW_DELAY_OUT_OF_RANGE: &str =
+    "invalid_batch_settlement_evm_withdraw_delay_out_of_range";
+/// Voucher EIP-712 signature is invalid.
+pub const INVALID_VOUCHER_SIGNATURE: &str = "invalid_batch_settlement_evm_voucher_signature";
+/// Permit2 typed-data signature is invalid or `from` is not the payer.
+pub const PERMIT2_INVALID_SIGNATURE: &str =
+    "invalid_batch_settlement_evm_permit2_invalid_signature";
+/// Permit2 allowance RPC failed or allowance is below the deposit amount.
+pub const PERMIT2_ALLOWANCE_REQUIRED: &str =
+    "invalid_batch_settlement_evm_permit2_allowance_required";
 
 #[cfg(test)]
 mod tests {
