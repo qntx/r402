@@ -54,6 +54,28 @@ fn origin_parses_https_and_strips_path() {
 }
 
 #[test]
+fn origin_strips_default_port_and_lowercases_host() {
+    let origin = SiwxOrigin::parse("HTTPS://API.Example.COM:443/premium-data").unwrap();
+    assert_eq!(origin.as_str(), "https://api.example.com");
+    assert_eq!(origin.domain(), "api.example.com");
+}
+
+#[test]
+fn origin_keeps_non_default_port() {
+    let origin = SiwxOrigin::parse("https://api.example.com:8443").unwrap();
+    assert_eq!(origin.as_str(), "https://api.example.com:8443");
+    assert_eq!(origin.domain(), "api.example.com:8443");
+}
+
+#[test]
+fn origin_rejects_userinfo() {
+    assert!(matches!(
+        SiwxOrigin::parse("https://user@api.example.com"),
+        Err(SiwxOriginError::InvalidAuthority)
+    ));
+}
+
+#[test]
 fn store_key_is_configured_origin_plus_path() {
     let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
     assert_eq!(
@@ -72,6 +94,16 @@ fn paid_store_records_only_success() {
     assert!(store.contains(key, addr));
     assert!(!store.contains(key, "0xother"));
     assert!(!store.contains("https://api.example.com/other", addr));
+}
+
+#[test]
+fn paid_store_clone_shares_records() {
+    let store = InMemoryPaidAddressStore::new();
+    let clone = store.clone();
+    let key = "https://api.example.com/premium-data";
+    let addr = "0x857b06519E91e3A54538791bDbb0E22373e36b66";
+    store.record_success(key, addr);
+    assert!(clone.contains(key, addr));
 }
 
 #[test]

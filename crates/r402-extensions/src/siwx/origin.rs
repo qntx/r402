@@ -4,6 +4,7 @@
 //! HTTP `Host` header.
 
 use compact_str::CompactString;
+use url::Url;
 
 /// Failed to parse a configured public origin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -26,6 +27,9 @@ pub enum SiwxOriginError {
 ///
 /// Constructed from server configuration. There is no constructor that
 /// accepts an HTTP `Host` header.
+///
+/// Host is lowercased. Default ports (`https` 443, `http` 80) are stripped,
+/// matching `URL.origin` / `URL.host`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiwxOrigin {
     origin: CompactString,
@@ -46,26 +50,28 @@ impl SiwxOrigin {
         if trimmed.is_empty() {
             return Err(SiwxOriginError::Missing);
         }
-        let rest = trimmed
-            .strip_prefix("https://")
-            .or_else(|| trimmed.strip_prefix("http://"))
-            .ok_or(SiwxOriginError::NotAbsolute)?;
-        let authority = rest.split_once(['/', '?', '#']).map_or(rest, |(h, _)| h);
-        if authority.is_empty() || authority.contains('@') {
+        let parsed = Url::parse(trimmed).map_err(|_| SiwxOriginError::NotAbsolute)?;
+        if parsed.scheme() != "http" && parsed.scheme() != "https" {
+            return Err(SiwxOriginError::NotAbsolute);
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
             return Err(SiwxOriginError::InvalidAuthority);
         }
-        let scheme_len = trimmed.len() - rest.len();
-        let origin = trimmed
-            .get(..scheme_len + authority.len())
-            .map(CompactString::from)
-            .ok_or(SiwxOriginError::InvalidAuthority)?;
+        if parsed.host_str().is_none_or(str::is_empty) {
+            return Err(SiwxOriginError::InvalidAuthority);
+        }
+        let serialized = parsed.origin().ascii_serialization();
+        let domain = serialized
+            .strip_prefix("https://")
+            .or_else(|| serialized.strip_prefix("http://"))
+            .ok_or(SiwxOriginError::NotAbsolute)?;
         Ok(Self {
-            origin,
-            domain: CompactString::from(authority),
+            origin: CompactString::from(serialized.as_str()),
+            domain: CompactString::from(domain),
         })
     }
 
-    /// Scheme + host + optional port, with no path.
+    /// Scheme + host + optional non-default port, with no path.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.origin

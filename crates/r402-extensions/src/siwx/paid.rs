@@ -5,7 +5,7 @@
 //! recorded. v1 has no Redis and no TTL eviction.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Addresses that completed a successful settlement for a resource key.
 pub trait PaidAddressStore: Send + Sync {
@@ -17,9 +17,12 @@ pub trait PaidAddressStore: Send + Sync {
 }
 
 /// Process-local [`PaidAddressStore`].
-#[derive(Debug, Default)]
+///
+/// [`Clone`] shares the map so the HTTP gate and settle-success path see
+/// the same addresses.
+#[derive(Debug, Clone, Default)]
 pub struct InMemoryPaidAddressStore {
-    inner: Mutex<HashMap<String, HashSet<String>>>,
+    inner: Arc<Mutex<HashMap<String, HashSet<String>>>>,
 }
 
 impl InMemoryPaidAddressStore {
@@ -48,13 +51,5 @@ impl PaidAddressStore for InMemoryPaidAddressStore {
         map.entry(store_key.to_owned())
             .or_default()
             .insert(address.to_owned());
-    }
-}
-
-impl Clone for InMemoryPaidAddressStore {
-    fn clone(&self) -> Self {
-        Self {
-            inner: Mutex::new(self.lock().clone()),
-        }
     }
 }

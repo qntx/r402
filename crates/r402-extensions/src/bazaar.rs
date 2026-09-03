@@ -11,6 +11,48 @@ use serde_json::{Value, json};
 /// Stable extension key on the wire.
 pub const BAZAAR_KEY: &str = "bazaar";
 
+/// HTTP methods that advertise as query-parameter discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BazaarQueryMethod {
+    /// `GET`.
+    Get,
+    /// `HEAD`.
+    Head,
+    /// `DELETE`.
+    Delete,
+}
+
+impl BazaarQueryMethod {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
+/// HTTP methods that advertise as body discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BazaarBodyMethod {
+    /// `POST`.
+    Post,
+    /// `PUT`.
+    Put,
+    /// `PATCH`.
+    Patch,
+}
+
+impl BazaarBodyMethod {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+        }
+    }
+}
+
 /// Request body encoding for HTTP `POST`/`PUT`/`PATCH` discovery info.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BazaarBodyType {
@@ -42,26 +84,28 @@ pub struct BazaarExtension {
 impl BazaarExtension {
     /// HTTP query-parameter discovery (`GET`/`HEAD`/`DELETE`).
     #[must_use]
-    pub fn http_query(query_params: Value) -> Self {
+    pub fn http_query(method: BazaarQueryMethod, query_params: Value) -> Self {
         Self {
             info: wrap_input(http_input([
                 ("type", Value::from("http")),
+                ("method", Value::from(method.as_str())),
                 ("queryParams", query_params),
             ])),
-            schema: query_schema(),
+            schema: query_schema(method),
         }
     }
 
     /// HTTP body discovery (`POST`/`PUT`/`PATCH`).
     #[must_use]
-    pub fn http_body(body_type: BazaarBodyType, body: Value) -> Self {
+    pub fn http_body(method: BazaarBodyMethod, body_type: BazaarBodyType, body: Value) -> Self {
         Self {
             info: wrap_input(http_input([
                 ("type", Value::from("http")),
+                ("method", Value::from(method.as_str())),
                 ("bodyType", Value::from(body_type.as_str())),
                 ("body", body),
             ])),
-            schema: body_schema(),
+            schema: body_schema(method),
         }
     }
 
@@ -113,7 +157,7 @@ impl Extension for BazaarExtension {
     }
 }
 
-fn query_schema() -> Value {
+fn query_schema(method: BazaarQueryMethod) -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -122,7 +166,7 @@ fn query_schema() -> Value {
                 "type": "object",
                 "properties": {
                     "type": { "type": "string", "const": "http" },
-                    "method": { "type": "string", "enum": ["GET", "HEAD", "DELETE"] },
+                    "method": { "type": "string", "enum": [method.as_str()] },
                     "queryParams": { "type": "object" },
                     "headers": { "type": "object", "additionalProperties": { "type": "string" } }
                 },
@@ -142,7 +186,7 @@ fn query_schema() -> Value {
     })
 }
 
-fn body_schema() -> Value {
+fn body_schema(method: BazaarBodyMethod) -> Value {
     json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -151,7 +195,7 @@ fn body_schema() -> Value {
                 "type": "object",
                 "properties": {
                     "type": { "type": "string", "const": "http" },
-                    "method": { "type": "string", "enum": ["POST", "PUT", "PATCH"] },
+                    "method": { "type": "string", "enum": [method.as_str()] },
                     "bodyType": { "type": "string", "enum": ["json", "form-data", "text"] },
                     "body": { "type": "object" },
                     "queryParams": { "type": "object", "additionalProperties": { "type": "string" } },

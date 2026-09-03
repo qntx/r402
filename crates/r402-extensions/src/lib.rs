@@ -27,7 +27,9 @@ pub mod payment_id;
 pub mod siwx;
 
 #[cfg(feature = "ext-bazaar")]
-pub use bazaar::{BAZAAR_KEY, BazaarBodyType, BazaarExtension};
+pub use bazaar::{
+    BAZAAR_KEY, BazaarBodyMethod, BazaarBodyType, BazaarExtension, BazaarQueryMethod,
+};
 #[cfg(feature = "ext-eip2612")]
 pub use eip2612::{
     EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612GasSponsoringExtension,

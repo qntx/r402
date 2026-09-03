@@ -27,7 +27,7 @@ ext-bazaar = []
 ext-payment-id = ["cache", "dep:thiserror"]
 ext-eip2612 = []
 ext-erc20-approval = []
-siwx = ["dep:thiserror"]
+siwx = ["dep:thiserror", "dep:url"]
 all-extensions = [
     "ext-bazaar",
     "ext-payment-id",
@@ -42,6 +42,7 @@ serde_json = { workspace = true }
 
 r402-facilitator = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
