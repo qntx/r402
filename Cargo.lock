@@ -6910,7 +6910,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "r402-solana"
+name = "r402-stellar"
+version = "0.18.0"
+dependencies = [
+ "compact_str",
+ "ed25519-dalek 3.0.0",
+ "r402-client",
+ "r402-facilitator",
+ "r402-protocol",
+ "r402-server",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "stellar-rpc-client",
+ "stellar-strkey 0.0.18",
+ "stellar-xdr",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-core",
+ "wiremock",
+]
+
+[[package]]
+name = "r402-svm"
 version = "0.18.0"
 dependencies = [
  "base64 0.23.1",
@@ -6943,30 +6967,6 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-core",
-]
-
-[[package]]
-name = "r402-stellar"
-version = "0.18.0"
-dependencies = [
- "compact_str",
- "ed25519-dalek 3.0.0",
- "r402-client",
- "r402-facilitator",
- "r402-protocol",
- "r402-server",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "stellar-rpc-client",
- "stellar-strkey 0.0.18",
- "stellar-xdr",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
- "tracing-core",
- "wiremock",
 ]
 
 [[package]]

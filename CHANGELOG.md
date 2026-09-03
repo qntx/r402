@@ -15,6 +15,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+- **`r402-solana` crate** — renamed to **`r402-svm`**. Types `SolanaExact` /
+  `UptoSvmScheme` and CAIP-2 `solana:` are unchanged. crates.io resumes
+  `r402-svm` at 0.18.0; last `r402-solana` remains 0.17.1 (not yanked).
+  No alias crate. No umbrella `svm` feature.
 - `ResourceServer` records `r402_facilitator_verify_total` /
   `r402_facilitator_settle_total` and the matching duration histograms on
   the inner facilitator call when the `metrics` feature is enabled. The

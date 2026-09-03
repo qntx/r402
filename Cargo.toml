@@ -22,7 +22,6 @@ r402-client = { path = "crates/r402-client" }
 r402-facilitator = { path = "crates/r402-facilitator", default-features = false }
 r402-server = { path = "crates/r402-server" }
 r402-http = { path = "crates/r402-http", default-features = false }
-r402-solana = { path = "crates/r402-solana", default-features = false }
 r402-evm = { path = "crates/r402-evm", default-features = false }
 r402-extensions = { path = "crates/r402-extensions", default-features = false }
 # CAIP-122 (SIWX). Pin git rev until v0.5.0 is tagged; crates.io 0.5 is later.

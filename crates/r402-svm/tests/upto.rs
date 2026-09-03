@@ -17,8 +17,8 @@
 //! Offline upto-scheme tests (no RPC).
 
 use r402_protocol::scheme::SchemeId;
-use r402_solana::SolanaUpto;
-use r402_solana::upto::{ASSET_TRANSFER_METHOD_CHANNEL, is_upto_svm_payload};
+use r402_svm::SolanaUpto;
+use r402_svm::upto::{ASSET_TRANSFER_METHOD_CHANNEL, is_upto_svm_payload};
 
 #[test]
 fn solana_upto_scheme_id() {
@@ -51,7 +51,7 @@ fn payload_shape_accepts_channel_fields() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn deposit_pending_key_differs_from_channel_inflight_key() {
-    use r402_solana::exact::facilitator::transaction_message_hash;
+    use r402_svm::exact::facilitator::transaction_message_hash;
     use solana_message::{Message, VersionedMessage};
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
@@ -89,7 +89,7 @@ fn deposit_pending_key_differs_from_channel_inflight_key() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn try_new_is_result_so_question_mark_compiles() {
-    use r402_solana::upto::facilitator::SolanaUptoFacilitator;
+    use r402_svm::upto::facilitator::SolanaUptoFacilitator;
 
     let _fac = SolanaUptoFacilitator::try_new(()).expect("infallible constructor");
 }
@@ -106,7 +106,7 @@ async fn create_payment_required_writes_escrow_payment_flow() {
         SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
     };
     use r402_server::{PaymentRequiredBuildContext, ResourceServer};
-    use r402_solana::{USDC, UptoSvmScheme};
+    use r402_svm::{USDC, UptoSvmScheme};
     use serde_json::Value;
     use solana_keypair::Keypair;
     use solana_signer::Signer;

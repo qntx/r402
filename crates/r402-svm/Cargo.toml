@@ -1,13 +1,13 @@
 [package]
-name = "r402-solana"
+name = "r402-svm"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Solana chain support for the x402 payment protocol."
-keywords = ["x402", "payment", "solana", "spl-token"]
+description = "SVM (Solana) chain support for the x402 payment protocol."
+keywords = ["x402", "payment", "solana", "svm", "spl-token"]
 categories = [
     "api-bindings",
     "cryptography::cryptocurrencies",

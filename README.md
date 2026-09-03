@@ -34,7 +34,7 @@ Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, SVM (
 r402 = { version = "0.18", features = ["evm", "http"] }
 ```
 
-`default = ["evm", "http"]`. Concordium is opt-in (`concordium`).
+`default = ["evm", "http"]`. Concordium is opt-in (`concordium`). SVM (Solana) is crate `r402-svm`.
 
 Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.
 

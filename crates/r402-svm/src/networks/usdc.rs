@@ -54,7 +54,7 @@ pub fn usdc_solana_deployment(
 /// Ergonomic accessors for USDC token deployments on well-known Solana chains.
 ///
 /// ```ignore
-/// use r402_solana::{SolanaExact, USDC};
+/// use r402_svm::{SolanaExact, USDC};
 ///
 /// let tag = SolanaExact::price_tag(pay_to, USDC::solana().amount(1_000_000u64));
 /// ```

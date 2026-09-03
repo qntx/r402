@@ -18,7 +18,7 @@ SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 | **[`r402-facilitator`](r402-facilitator/)** | [![crates.io][r402-facilitator-crate]][r402-facilitator-crate-url] [![docs.rs][r402-facilitator-doc]][r402-facilitator-doc-url] | Facilitator trait, cache, pending settlement, remote HTTP client |
 | **[`r402-extensions`](r402-extensions/)** | [![crates.io][r402-extensions-crate]][r402-extensions-crate-url] [![docs.rs][r402-extensions-doc]][r402-extensions-doc-url] | Protocol extension implementations |
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — `exact` / `upto` / `auth-capture` / `batch-settlement` |
-| **[`r402-solana`](r402-solana/)** | [![crates.io][r402-solana-crate]][r402-solana-crate-url] [![docs.rs][r402-solana-doc]][r402-solana-doc-url] | Solana — SPL Token / Token-2022 exact + upto escrow |
+| **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | SVM (Solana) — SPL Token / Token-2022 exact + upto escrow |
 | **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | **Experimental / not an x402 protocol mechanism.** TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid. Not re-exported from the umbrella |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact (local preflight + remote facilitator) |
 | **[`r402-near`](r402-near/)** | [![crates.io][r402-near-crate]][r402-near-crate-url] [![docs.rs][r402-near-doc]][r402-near-doc-url] | NEAR — NEP-141 / NEP-366 exact transfers |
@@ -41,7 +41,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | Chain crate | CAIP-2 examples | Schemes | Settlement model |
 | --- | --- | --- | --- |
 | [`r402-evm`](r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto`, `auth-capture`, `batch-settlement` | In-process on-chain facilitator |
-| [`r402-solana`](r402-solana/) | `solana:…` | `exact`, `upto` | In-process on-chain facilitator |
+| [`r402-svm`](r402-svm/) | `solana:…` | `exact`, `upto` | In-process on-chain facilitator |
 | [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` (experimental / not protocol) | In-process via TronGrid HTTP |
 | [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator (`R402_CASPER_FACILITATOR_URL`) |
 | [`r402-near`](r402-near/) | `near:mainnet`, `near:testnet` | `exact` | In-process via JSON-RPC (relayer-sponsored) |
@@ -100,8 +100,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-extensions-crate-url]: https://crates.io/crates/r402-extensions
 [r402-evm-crate]: https://img.shields.io/crates/v/r402-evm.svg
 [r402-evm-crate-url]: https://crates.io/crates/r402-evm
-[r402-solana-crate]: https://img.shields.io/crates/v/r402-solana.svg
-[r402-solana-crate-url]: https://crates.io/crates/r402-solana
+[r402-svm-crate]: https://img.shields.io/crates/v/r402-svm.svg
+[r402-svm-crate-url]: https://crates.io/crates/r402-svm
 [r402-tron-crate]: https://img.shields.io/crates/v/r402-tron.svg
 [r402-tron-crate-url]: https://crates.io/crates/r402-tron
 [r402-casper-crate]: https://img.shields.io/crates/v/r402-casper.svg
@@ -142,8 +142,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-extensions-doc-url]: https://docs.rs/r402-extensions
 [r402-evm-doc]: https://img.shields.io/docsrs/r402-evm.svg
 [r402-evm-doc-url]: https://docs.rs/r402-evm
-[r402-solana-doc]: https://img.shields.io/docsrs/r402-solana.svg
-[r402-solana-doc-url]: https://docs.rs/r402-solana
+[r402-svm-doc]: https://img.shields.io/docsrs/r402-svm.svg
+[r402-svm-doc-url]: https://docs.rs/r402-svm
 [r402-tron-doc]: https://img.shields.io/docsrs/r402-tron.svg
 [r402-tron-doc-url]: https://docs.rs/r402-tron
 [r402-casper-doc]: https://img.shields.io/docsrs/r402-casper.svg

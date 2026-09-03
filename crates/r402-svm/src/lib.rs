@@ -11,7 +11,7 @@
     )
 )]
 
-//! Solana chain support for the x402 payment protocol.
+//! SVM (Solana) chain support for the x402 payment protocol.
 //!
 //! Exact-scheme SPL Token `TransferChecked` payments with pre-signed
 //! authorization, and `upto` payment-channel escrow.

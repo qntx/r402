@@ -17,13 +17,13 @@
 //! Offline exact-scheme tests (no RPC).
 
 use r402_protocol::scheme::SchemeId;
-use r402_solana::chain::{Address, SolanaChainReference, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
-use r402_solana::{CASH, PYUSD, SOLANA_NETWORKS, SolanaExact, USDC, USDG, USDT};
+use r402_svm::chain::{Address, SolanaChainReference, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
+use r402_svm::{CASH, PYUSD, SOLANA_NETWORKS, SolanaExact, USDC, USDG, USDT};
 use solana_pubkey::pubkey;
 
 #[test]
 fn crate_name_matches_directory() {
-    assert_eq!(env!("CARGO_PKG_NAME"), "r402-solana");
+    assert_eq!(env!("CARGO_PKG_NAME"), "r402-svm");
 }
 
 #[test]
@@ -58,7 +58,7 @@ fn default_usd_mints_match_oracle() {
 
 #[test]
 fn payload_extra_roundtrip() {
-    use r402_solana::exact::SupportedPaymentKindExtra;
+    use r402_svm::exact::SupportedPaymentKindExtra;
 
     let extra = SupportedPaymentKindExtra {
         fee_payer: Address::new(pubkey!("11111111111111111111111111111111")),
@@ -74,7 +74,7 @@ fn payload_extra_roundtrip() {
     let with_features = SupportedPaymentKindExtra {
         fee_payer: extra.fee_payer,
         memo: None,
-        features: Some(r402_solana::exact::SupportedKindFeatures {
+        features: Some(r402_svm::exact::SupportedKindFeatures {
             smart_wallet_supported: true,
         }),
     };
@@ -92,7 +92,7 @@ fn chain_reference_converts_to_caip2() {
 #[test]
 fn find_default_solana_asset_covers_usdc_and_other_mints() {
     use r402_protocol::ChainId;
-    use r402_solana::find_default_solana_asset;
+    use r402_svm::find_default_solana_asset;
 
     let mainnet: ChainId = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp"
         .parse()
@@ -110,7 +110,7 @@ fn find_default_solana_asset_covers_usdc_and_other_mints() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn try_new_is_result_so_question_mark_compiles() {
-    use r402_solana::exact::facilitator::SolanaExactFacilitator;
+    use r402_svm::exact::facilitator::SolanaExactFacilitator;
 
     let _fac = SolanaExactFacilitator::try_new(()).expect("infallible constructor");
 }
@@ -118,7 +118,7 @@ fn try_new_is_result_so_question_mark_compiles() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn transfer_amount_rule_allows_overpay() {
-    use r402_solana::exact::facilitator::transfer_amount_meets_requirement;
+    use r402_svm::exact::facilitator::transfer_amount_meets_requirement;
 
     assert!(transfer_amount_meets_requirement(1_000_000, 1_000_000));
     assert!(transfer_amount_meets_requirement(1_000_001, 1_000_000));
@@ -152,7 +152,7 @@ fn compiled_tx(
 #[cfg(feature = "facilitator")]
 #[test]
 fn default_max_instruction_count_is_7() {
-    use r402_solana::exact::facilitator::{MAX_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig};
+    use r402_svm::exact::facilitator::{MAX_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig};
 
     assert_eq!(MAX_INSTRUCTION_COUNT, 7);
     assert_eq!(
@@ -164,7 +164,7 @@ fn default_max_instruction_count_is_7() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn slot_zero_signature_does_not_change_message_hash() {
-    use r402_solana::exact::facilitator::transaction_message_hash;
+    use r402_svm::exact::facilitator::transaction_message_hash;
     use solana_pubkey::Pubkey;
     use solana_signature::Signature;
 
@@ -179,8 +179,8 @@ fn slot_zero_signature_does_not_change_message_hash() {
 #[cfg(feature = "facilitator")]
 #[test]
 fn eight_instructions_rejected_even_when_max_set_to_8() {
-    use r402_solana::exact::facilitator::{SolanaExactFacilitatorConfig, validate_instructions};
-    use r402_solana::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM, SolanaExactError};
+    use r402_svm::exact::facilitator::{SolanaExactFacilitatorConfig, validate_instructions};
+    use r402_svm::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM, SolanaExactError};
     use solana_pubkey::pubkey;
 
     const COMPUTE_BUDGET: solana_pubkey::Pubkey =
@@ -210,8 +210,8 @@ fn eight_instructions_rejected_even_when_max_set_to_8() {
 #[cfg(feature = "client")]
 #[test]
 fn with_memo_always_appends_memo() {
-    use r402_solana::exact::SPL_MEMO_PROGRAM;
-    use r402_solana::exact::client::with_memo;
+    use r402_svm::exact::SPL_MEMO_PROGRAM;
+    use r402_svm::exact::client::with_memo;
     use solana_transaction::Instruction;
 
     let transfer = Instruction {
