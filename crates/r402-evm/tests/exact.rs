@@ -24,7 +24,7 @@ use r402_evm::chain::{Eip155ChainProvider, Eip155ChainReference};
 use r402_evm::exact::payload::{ExactPayload, PaymentRequirementsExtra};
 use r402_evm::{AssetTransferMethod, Eip155Exact, Eip155ExactClient, Eip155ExactFacilitator, USDC};
 use r402_facilitator::Facilitator;
-use r402_protocol::error::VerificationError;
+use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::payment::{PaymentRequired, ResourceInfo, VerifyRequest};
 use r402_protocol::scheme::SchemeId;
 use r402_server::{PaymentFlowName, SchemeNetworkServer};
@@ -101,9 +101,19 @@ fn exact_scheme_id_and_payment_flows() {
     assert_eq!(expected.default, PaymentFlowName::Authorization);
 }
 
+fn try_new_question_mark() -> Result<(), FacilitatorError> {
+    let _fac = Eip155ExactFacilitator::try_new(dummy_provider())?;
+    Ok(())
+}
+
+#[test]
+fn try_new_question_mark_compiles() {
+    try_new_question_mark().expect("try_new is currently infallible");
+}
+
 #[tokio::test]
 async fn try_new_supported_is_exact_on_provider_chain() {
-    let fac = Eip155ExactFacilitator::try_new(dummy_provider());
+    let fac = Eip155ExactFacilitator::try_new(dummy_provider()).expect("try_new");
     let supported = fac.supported().await.expect("supported");
     let kind = supported.kinds.first().expect("one kind");
     assert_eq!(kind.scheme, "exact");
@@ -117,7 +127,7 @@ async fn try_new_supported_is_exact_on_provider_chain() {
 
 #[tokio::test]
 async fn verify_malformed_payload_is_invalid_format() {
-    let fac = Eip155ExactFacilitator::try_new(dummy_provider());
+    let fac = Eip155ExactFacilitator::try_new(dummy_provider()).expect("try_new");
     let err = fac
         .verify(VerifyRequest::from(serde_json::json!({})))
         .await
@@ -125,7 +135,7 @@ async fn verify_malformed_payload_is_invalid_format() {
     assert!(
         matches!(
             err,
-            r402_protocol::error::FacilitatorError::Verification(VerificationError::InvalidFormat(
+            FacilitatorError::Verification(VerificationError::InvalidFormat(
                 _
             ))
         ),

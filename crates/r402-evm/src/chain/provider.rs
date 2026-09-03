@@ -24,6 +24,17 @@ use url::Url;
 use crate::chain::account::Eip155ChainReference;
 use crate::chain::nonce::PendingNonceManager;
 
+/// Failure constructing an [`Eip155ChainProvider`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum Eip155ChainProviderError {
+    /// Wallet contained no signers.
+    #[error("at least one signer must be provided")]
+    EmptyWallet,
+    /// No HTTP(S) RPC URL remained after filtering non-HTTP endpoints.
+    #[error("at least one HTTP RPC endpoint is required")]
+    NoHttpEndpoint,
+}
+
 /// Combined filler type for gas, blob gas, nonce, and chain ID.
 pub type InnerFiller = JoinFill<
     GasFiller,
@@ -87,8 +98,9 @@ impl Eip155ChainProvider {
     ///
     /// # Errors
     ///
-    /// Returns an error if the wallet has no signers or no HTTP RPC
-    /// endpoint remains after filtering.
+    /// Returns [`Eip155ChainProviderError::EmptyWallet`] if the wallet has no
+    /// signers, or [`Eip155ChainProviderError::NoHttpEndpoint`] if no HTTP RPC
+    /// URL remains after filtering.
     pub fn new(
         chain: Eip155ChainReference,
         wallet: EthereumWallet,
@@ -96,11 +108,11 @@ impl Eip155ChainProvider {
         eip1559: bool,
         flashblocks: bool,
         receipt_timeout_secs: u64,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, Eip155ChainProviderError> {
         let signer_addresses =
             NetworkWallet::<AlloyEthereum>::signer_addresses(&wallet).collect::<Vec<_>>();
         if signer_addresses.is_empty() {
-            return Err("at least one signer must be provided".into());
+            return Err(Eip155ChainProviderError::EmptyWallet);
         }
         let signer_addresses: Arc<[Address]> = signer_addresses.into();
         let signer_cursor = Arc::new(AtomicUsize::new(0));
@@ -146,11 +158,12 @@ impl Eip155ChainProvider {
     ///
     /// # Errors
     ///
-    /// Returns an error if no HTTP(S) endpoint remains after filtering.
+    /// Returns [`Eip155ChainProviderError::NoHttpEndpoint`] if no HTTP(S)
+    /// endpoint remains after filtering.
     pub fn rpc_client(
         chain_id: &ChainId,
         endpoints: &[(Url, Option<u32>)],
-    ) -> Result<RpcClient, Box<dyn std::error::Error>> {
+    ) -> Result<RpcClient, Eip155ChainProviderError> {
         #[cfg(not(feature = "telemetry"))]
         let _ = chain_id;
         let transports = endpoints
@@ -170,8 +183,8 @@ impl Eip155ChainProvider {
                 Some(service)
             })
             .collect::<Vec<_>>();
-        let count = NonZeroUsize::new(transports.len())
-            .ok_or("at least one HTTP RPC endpoint is required")?;
+        let count =
+            NonZeroUsize::new(transports.len()).ok_or(Eip155ChainProviderError::NoHttpEndpoint)?;
         let fallback = ServiceBuilder::new()
             .layer(FallbackLayer::default().with_active_transport_count(count))
             .service(transports);
@@ -439,20 +452,22 @@ mod tests {
 
     #[test]
     fn rpc_client_rejects_empty_endpoints() {
-        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[]);
-        assert!(
-            err.is_err(),
-            "empty endpoint list must return Err, not panic"
+        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[]).unwrap_err();
+        assert_eq!(
+            err,
+            Eip155ChainProviderError::NoHttpEndpoint,
+            "empty endpoint list must return NoHttpEndpoint, not panic"
         );
     }
 
     #[test]
     fn rpc_client_rejects_non_http_endpoints() {
         let ws = Url::parse("ws://127.0.0.1:8545").expect("fixture ws url");
-        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[(ws, None)]);
-        assert!(
-            err.is_err(),
-            "non-HTTP endpoints must return Err after filtering"
+        let err = Eip155ChainProvider::rpc_client(&chain_id(), &[(ws, None)]).unwrap_err();
+        assert_eq!(
+            err,
+            Eip155ChainProviderError::NoHttpEndpoint,
+            "non-HTTP endpoints must return NoHttpEndpoint after filtering"
         );
     }
 

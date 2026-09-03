@@ -154,9 +154,19 @@ impl<P> Eip155ExactFacilitator<P> {
     /// block, aligned with Go's `Permit2DeadlineBuffer`) for time-window
     /// validation, and a default [`SettlementCache`] with the spec-recommended
     /// 2-minute TTL.
-    #[must_use]
-    pub fn try_new(provider: P) -> Self {
-        Self::with_settlement_cache(provider, SettlementCache::new())
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: P) -> Result<Self, FacilitatorError> {
+        Ok(Self::with_settlement_cache(
+            provider,
+            SettlementCache::new(),
+        ))
     }
 
     /// Creates a facilitator with a caller-supplied [`SettlementCache`].
