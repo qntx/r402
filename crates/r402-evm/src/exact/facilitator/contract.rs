@@ -74,7 +74,24 @@ sol! {
             uint256 validAfter;
         }
 
+        struct EIP2612Permit {
+            uint256 value;
+            uint256 deadline;
+            bytes32 r;
+            bytes32 s;
+            uint8   v;
+        }
+
         function settle(
+            Permit permit,
+            address owner,
+            Witness witness,
+            bytes signature
+        ) external;
+
+        /// Settle while atomically broadcasting an EIP-2612 `permit` first.
+        function settleWithPermit(
+            EIP2612Permit permit2612,
             Permit permit,
             address owner,
             Witness witness,

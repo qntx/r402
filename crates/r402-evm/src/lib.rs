@@ -37,6 +37,7 @@ pub mod auth_capture;
 pub mod batch_settlement;
 pub mod chain;
 pub mod eip2612;
+pub mod erc20_approval;
 #[cfg(feature = "facilitator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
 pub mod error;
@@ -67,6 +68,10 @@ pub use eip2612::{
     EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612ParseError,
     Eip2612SignedPermit,
 };
+pub use erc20_approval::{
+    ERC20_APPROVAL_GAS_SPONSORING_KEY, ERC20_APPROVAL_GAS_SPONSORING_VERSION,
+    Erc20ApprovalGasSponsoringInfo, Erc20ApprovalParseError,
+};
 #[cfg(feature = "facilitator")]
 pub use error::Eip155ExactError;
 pub use exact::Eip155Exact;
@@ -92,7 +97,7 @@ pub use upto::{
 
 #[cfg(test)]
 mod _dev_deps {
-    #[cfg(not(feature = "facilitator"))]
+    #[cfg(not(any(feature = "client", feature = "facilitator")))]
     use alloy_network as _;
     #[cfg(not(any(feature = "client-provider", feature = "facilitator")))]
     use alloy_provider as _;

@@ -11,21 +11,23 @@ use alloy_provider::Provider;
 use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
 use r402_protocol::error::VerificationError;
 use r402_protocol::network::ChainId;
+use r402_protocol::payment::Extensions;
 use r402_protocol::payment::UnixTimestamp;
-use r402_protocol::payment::{ExtensionEntry, Extensions};
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
 use super::contract::{IEIP3009, IX402Permit2Proxy};
 use super::eip6492::{ASSET_NOT_DEPLOYED, FACTORY_NOT_ALLOWED, deny_undeployed_factory};
-use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
+use super::settle::{
+    TransferWithAuthorization0Call, TransferWithAuthorization1Call, build_eip2612_abi,
+};
 use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
 use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::Eip155ChainReference;
-use crate::chain::TokenAmount;
 use crate::chain::contracts::{IERC20, Validator6492};
 use crate::eip2612::Eip2612SignedPermit;
+use crate::erc20_approval::Erc20ApprovalGasSponsoringInfo;
 use crate::error::Eip155ExactError;
 use crate::exact::payload::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
@@ -436,6 +438,13 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         verifying_contract: PERMIT2_ADDRESS,
     };
 
+    let Ok(eip2612) = Eip2612SignedPermit::from_extensions(&payload.extensions) else {
+        return Err(VerificationError::from_wire("invalid_eip2612_extension_format").into());
+    };
+    if let Some(ref info) = eip2612 {
+        validate_eip2612_permit_for_payment(info, auth.from, token_address, clock_skew_tolerance)?;
+    }
+
     let payment = Permit2Payment {
         from: auth.from,
         to: auth.witness.to,
@@ -446,6 +455,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         deadline: auth.deadline.into(),
         valid_after: auth.witness.valid_after.into(),
         signature: permit2.signature.clone(),
+        eip2612,
     };
 
     Ok((erc20, payment, domain))
@@ -509,62 +519,65 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
         return Err(VerificationError::InvalidSignature("invalid Permit2 signature".into()).into());
     }
 
-    // Fix-7: simulate the exact proxy.settle call via eth_call to catch
-    // nonce/allowance/deadline reverts before burning gas.
+    // Simulate the exact proxy call settle would submit: settleWithPermit when
+    // eip2612GasSponsoring is attached, otherwise settle.
     let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider);
-    let settle_call = proxy.settle(
-        IX402Permit2Proxy::Permit {
-            permitted: IX402Permit2Proxy::TokenPermissions {
-                token: payment.token,
-                amount: payment.amount,
-            },
-            nonce: payment.nonce,
-            deadline: payment.deadline,
+    let permit = IX402Permit2Proxy::Permit {
+        permitted: IX402Permit2Proxy::TokenPermissions {
+            token: payment.token,
+            amount: payment.amount,
         },
-        payment.from,
-        IX402Permit2Proxy::Witness {
-            to: payment.to,
-            validAfter: payment.valid_after,
-        },
-        signature_bytes,
-    );
-    let settle_simulation = settle_call.call().into_future();
-    traced!(
-        settle_simulation,
-        tracing::info_span!(
-            "simulate_permit2_settle",
-            from = %payer,
-            to = %payment.to,
-            token = %payment.token,
-            amount = %payment.amount,
-            otel.kind = "client",
+        nonce: payment.nonce,
+        deadline: payment.deadline,
+    };
+    let witness = IX402Permit2Proxy::Witness {
+        to: payment.to,
+        validAfter: payment.valid_after,
+    };
+    if let Some(eip2612) = payment.eip2612.as_ref() {
+        let settle_call = proxy.settleWithPermit(
+            build_eip2612_abi(eip2612)?,
+            permit,
+            payment.from,
+            witness,
+            signature_bytes,
+        );
+        let settle_simulation = settle_call.call().into_future();
+        traced!(
+            settle_simulation,
+            tracing::info_span!(
+                "simulate_permit2_settle_with_permit",
+                from = %payer,
+                to = %payment.to,
+                token = %payment.token,
+                amount = %payment.amount,
+                otel.kind = "client",
+            )
         )
-    )
-    .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+        .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+    } else {
+        let settle_call = proxy.settle(permit, payment.from, witness, signature_bytes);
+        let settle_simulation = settle_call.call().into_future();
+        traced!(
+            settle_simulation,
+            tracing::info_span!(
+                "simulate_permit2_settle",
+                from = %payer,
+                to = %payment.to,
+                token = %payment.token,
+                amount = %payment.amount,
+                otel.kind = "client",
+            )
+        )
+        .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+    }
 
     Ok(payer)
 }
 
-const ERC20_APPROVAL_GAS_SPONSORING_KEY: &str = "erc20ApprovalGasSponsoring";
-
 const APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Erc20ApprovalGasSponsoringInfo {
-    from: Address,
-    asset: Address,
-    spender: Address,
-    #[allow(
-        dead_code,
-        reason = "required wire field; amount is not part of tx checks"
-    )]
-    amount: TokenAmount,
-    signed_transaction: String,
-    version: String,
-}
-
-fn permit2_extension_covers_allowance(
+pub(crate) fn permit2_extension_covers_allowance(
     extensions: &Extensions,
     payer: Address,
     token: Address,
@@ -584,7 +597,7 @@ fn permit2_extension_covers_allowance(
     if !erc20_approval_enabled {
         return Ok(false);
     }
-    match erc20_approval_from_extensions(extensions) {
+    match Erc20ApprovalGasSponsoringInfo::from_extensions(extensions) {
         Ok(Some(info)) => {
             validate_erc20_approval_for_payment(&info, payer, token)?;
             Ok(true)
@@ -594,19 +607,6 @@ fn permit2_extension_covers_allowance(
             Err(VerificationError::from_wire("invalid_erc20_approval_extension_format").into())
         }
     }
-}
-
-fn erc20_approval_from_extensions(
-    extensions: &Extensions,
-) -> Result<Option<Erc20ApprovalGasSponsoringInfo>, serde_json::Error> {
-    let Some(entry) = extensions.get(ERC20_APPROVAL_GAS_SPONSORING_KEY) else {
-        return Ok(None);
-    };
-    let parsed = match entry {
-        ExtensionEntry::Structured { info, .. } => serde_json::from_value(info.clone())?,
-        ExtensionEntry::Raw(value) => serde_json::from_value(value.clone())?,
-    };
-    Ok(Some(parsed))
 }
 
 fn validate_eip2612_permit_for_payment(
@@ -747,8 +747,10 @@ pub(crate) fn permit2_allowance_gate(
 #[cfg(test)]
 mod tests {
     use r402_protocol::error::AsPaymentProblem;
+    use r402_protocol::payment::ExtensionEntry;
 
     use super::*;
+    use crate::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY;
 
     #[test]
     fn assert_exact_value_accepts_equal() {
@@ -892,7 +894,7 @@ mod tests {
             from,
             asset: token,
             spender,
-            amount: TokenAmount::from(U256::from(1_000_000_u64)),
+            amount: "1000000".into(),
             signed_transaction,
             version: "1".into(),
         }

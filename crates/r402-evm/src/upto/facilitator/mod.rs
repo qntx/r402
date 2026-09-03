@@ -51,6 +51,8 @@ pub struct Eip155UptoFacilitator<P> {
     provider: P,
     clock_skew_tolerance: u64,
     settlement_cache: SettlementCache,
+    /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
+    erc20_approval_enabled: bool,
 }
 
 impl<P> Eip155UptoFacilitator<P> {
@@ -76,7 +78,15 @@ impl<P> Eip155UptoFacilitator<P> {
             provider,
             clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
+            erc20_approval_enabled: false,
         }
+    }
+
+    /// Register `erc20ApprovalGasSponsoring` on this facilitator (official `getExtension`).
+    #[must_use]
+    pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
+        self.erc20_approval_enabled = true;
+        self
     }
 
     /// Overrides the clock-skew tolerance (seconds).
@@ -120,6 +130,7 @@ where
             &request.payment_requirements,
             &signer_addresses,
             self.clock_skew_tolerance,
+            self.erc20_approval_enabled,
         )
         .await?;
         Ok(wire::VerifyResponse::valid(payer.to_string()))

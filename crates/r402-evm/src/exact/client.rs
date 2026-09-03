@@ -34,7 +34,9 @@ use alloy_sol_types::{SolStruct, eip712_domain};
 use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
 use r402_protocol::error::ClientError;
 use r402_protocol::network::ChainId;
-use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo, UnixTimestamp};
+use r402_protocol::payment::{
+    Base64Bytes, Extensions, PaymentRequired, ResourceInfo, UnixTimestamp,
+};
 use r402_protocol::scheme::SchemeId;
 use rand::{RngExt, rng};
 
@@ -380,6 +382,7 @@ where
                         requirements,
                         approver: self.approver.clone(),
                         auto_approve: self.auto_approve,
+                        advertised: payment_required.extensions.clone(),
                     }),
                 };
                 Some(candidate)
@@ -399,6 +402,40 @@ struct V2PayloadSigner<S> {
     requirements: payload::v2::PaymentRequirements,
     approver: Option<Arc<dyn Permit2Approver>>,
     auto_approve: bool,
+    advertised: Extensions,
+}
+
+impl<S> V2PayloadSigner<S>
+where
+    S: Sync + SignerLike,
+{
+    async fn ensure_permit2_allowance(
+        signer: &S,
+        approver: Option<&Arc<dyn Permit2Approver>>,
+        auto_approve: bool,
+        token: Address,
+        required: U256,
+    ) -> Result<(), ClientError> {
+        let Some(approver) = approver else {
+            return Ok(());
+        };
+        let owner = signer.address();
+        let allowance = approver.check_permit2_allowance(token, owner).await?;
+        if allowance >= required {
+            return Ok(());
+        }
+        if auto_approve {
+            approver.approve_permit2(token, owner).await?;
+            Ok(())
+        } else {
+            Err(ClientError::PreConditionFailed(format!(
+                "Permit2 allowance insufficient for token {token}: \
+                 have {allowance}, need {required}. \
+                 Call approve({PERMIT2_ADDRESS}, MAX) on the token contract, \
+                 or enable auto_approve in the client builder."
+            )))
+        }
+    }
 }
 
 impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
@@ -421,29 +458,6 @@ where
                 == Some(AssetTransferMethod::Permit2);
 
             let exact_payload = if use_permit2 {
-                // Auto-approve: ensure Permit2 has sufficient ERC-20 allowance
-                // before signing, if a Permit2Approver was provided.
-                if let Some(approver) = &self.approver {
-                    let token = self.requirements.asset.0;
-                    let owner = self.signer.address();
-                    let required: U256 = self.requirements.amount.into();
-
-                    let allowance = approver.check_permit2_allowance(token, owner).await?;
-
-                    if allowance < required {
-                        if self.auto_approve {
-                            approver.approve_permit2(token, owner).await?;
-                        } else {
-                            return Err(ClientError::PreConditionFailed(format!(
-                                "Permit2 allowance insufficient for token {token}: \
-                                 have {allowance}, need {required}. \
-                                 Call approve({PERMIT2_ADDRESS}, MAX) on the token contract, \
-                                 or enable auto_approve in the client builder."
-                            )));
-                        }
-                    }
-                }
-
                 let params = Permit2SigningParams {
                     chain_id: self.chain_reference.inner(),
                     asset_address: self.requirements.asset.0,
@@ -452,7 +466,67 @@ where
                     max_timeout_seconds: self.requirements.max_timeout_seconds,
                 };
                 let permit2_payload = sign_permit2_authorization(&self.signer, &params).await?;
-                ExactPayload::Permit2(permit2_payload)
+                let extra = self.requirements.extra.as_ref();
+                let name = extra.map_or("", |e| e.name.as_str());
+                let version = extra.map_or("", |e| e.version.as_str());
+                let required: U256 = permit2_payload
+                    .permit2_authorization
+                    .permitted
+                    .amount
+                    .into();
+                let deadline: U256 = permit2_payload.permit2_authorization.deadline.into();
+                let mut payload = payload::v2::PaymentPayload::new(
+                    self.requirements.clone(),
+                    ExactPayload::Permit2(permit2_payload),
+                )
+                .with_optional_resource(self.resource_info.clone());
+                if let Some(permit) =
+                    crate::upto::client::eip2612::try_sign_eip2612_permit_extension(
+                        &self.signer,
+                        self.approver.as_ref(),
+                        &self.advertised,
+                        name,
+                        version,
+                        self.chain_reference.inner(),
+                        self.requirements.asset.0,
+                        required,
+                        deadline,
+                    )
+                    .await?
+                {
+                    payload.extensions.insert(
+                        crate::eip2612::EIP2612_GAS_SPONSORING_KEY,
+                        permit.to_extension_entry()?,
+                    );
+                } else if let Some(info) =
+                    crate::upto::client::eip2612::try_sign_erc20_approval_extension(
+                        &self.signer,
+                        self.approver.as_ref(),
+                        &self.advertised,
+                        self.chain_reference.inner(),
+                        self.requirements.asset.0,
+                        required,
+                    )
+                    .await?
+                {
+                    payload.extensions.insert(
+                        crate::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY,
+                        info.to_extension_entry()?,
+                    );
+                }
+                if payload.extensions.is_empty() {
+                    Self::ensure_permit2_allowance(
+                        &self.signer,
+                        self.approver.as_ref(),
+                        self.auto_approve,
+                        self.requirements.asset.0,
+                        required,
+                    )
+                    .await?;
+                }
+                let json = serde_json::to_vec(&payload)?;
+                let b64 = Base64Bytes::encode(&json);
+                return Ok(b64.to_string());
             } else {
                 let extra = self.requirements.extra.clone().ok_or_else(|| {
                     ClientError::Signing(

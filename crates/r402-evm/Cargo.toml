@@ -22,7 +22,15 @@ rustdoc-args = ["--cfg", "docsrs"]
 [features]
 default = []
 telemetry = ["dep:tracing", "dep:tracing-core"]
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
+client = [
+    "dep:alloy-consensus",
+    "dep:alloy-eips",
+    "dep:alloy-network",
+    "dep:alloy-signer",
+    "dep:alloy-signer-local",
+    "dep:alloy-sol-types",
+    "dep:rand",
+]
 client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
 server = ["dep:r402-server"]
 facilitator = [

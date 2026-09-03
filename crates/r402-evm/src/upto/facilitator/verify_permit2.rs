@@ -16,9 +16,11 @@ use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::contracts::{IERC20, Validator6492};
 use crate::eip2612::Eip2612SignedPermit;
 use crate::error::Eip155ExactError;
+use crate::exact::facilitator::{permit2_allowance_gate, permit2_extension_covers_allowance};
 use crate::permit2::PERMIT2_ADDRESS;
 use crate::signature::{ClassifiedSignature, classify_with_code};
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
+use r402_protocol::payment::Extensions;
 
 /// Maps a proxy revert payload onto a [`VerificationError`].
 ///
@@ -121,8 +123,8 @@ const fn permit_and_witness(
 
 /// On-chain preconditions: Permit2 allowance, balance, and `eth_call` of `proxy.settle`.
 ///
-/// Allowance is skipped when an EIP-2612 sponsorship is attached (granted in-line).
-/// Insufficient allowance is [`VerificationError::Permit2AllowanceRequired`] (HTTP 412).
+/// Allowance RPC failure and insufficient allowance are fail-closed (412) unless a
+/// valid `eip2612GasSponsoring` or registered `erc20ApprovalGasSponsoring` covers them.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 #[allow(
     clippy::cognitive_complexity,
@@ -133,6 +135,9 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     provider: &P,
     prepared: &PreparedUptoPermit2,
     required_amount: U256,
+    extensions: &Extensions,
+    clock_skew_tolerance: u64,
+    erc20_approval_enabled: bool,
 ) -> Result<Address, Eip155ExactError> {
     let classified = classify_with_code(
         provider,
@@ -149,11 +154,26 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     let (allowance_result, balance_result) =
         tokio::join!(allowance_call.call(), balance_call.call());
 
-    if prepared.eip2612.is_none()
-        && let Ok(allowance) = allowance_result
-        && allowance < required_amount
-    {
-        return Err(VerificationError::Permit2AllowanceRequired.into());
+    let allowance_rpc_failed = allowance_result.is_err();
+    let allowance_for_gate = allowance_result.as_ref().copied().map_err(|_| ());
+    match permit2_allowance_gate(allowance_for_gate, required_amount, false, false) {
+        Ok(()) => {}
+        Err(VerificationError::Permit2AllowanceRequired) => {
+            if !permit2_extension_covers_allowance(
+                extensions,
+                prepared.from,
+                prepared.token,
+                clock_skew_tolerance,
+                erc20_approval_enabled,
+            )? {
+                if allowance_rpc_failed {
+                    #[cfg(feature = "telemetry")]
+                    tracing::warn!("permit2_allowance_rpc_failed");
+                }
+                return Err(VerificationError::Permit2AllowanceRequired.into());
+            }
+        }
+        Err(e) => return Err(e.into()),
     }
     if let Ok(balance) = balance_result
         && balance < required_amount

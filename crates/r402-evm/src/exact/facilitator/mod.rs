@@ -88,6 +88,8 @@ use eip6492::TRANSFER_EVENT_MISMATCH;
 use settle::{ExpectedTransfer, reconcile_pending_receipt, settle_payment, settle_permit2_payment};
 use verify::{verify_payment, verify_permit2_payment};
 
+pub(crate) use verify::{permit2_allowance_gate, permit2_extension_covers_allowance};
+
 use crate::error::Eip155ExactError;
 
 /// A fully specified ERC-3009 authorization payload for EVM settlement.
@@ -130,6 +132,8 @@ pub struct Permit2Payment {
     pub valid_after: U256,
     /// EIP-712 signature bytes.
     pub signature: Bytes,
+    /// Buyer-signed EIP-2612 permit when `eip2612GasSponsoring` is attached.
+    pub eip2612: Option<crate::eip2612::Eip2612SignedPermit>,
 }
 
 /// Facilitator for EIP-155 exact scheme payments.

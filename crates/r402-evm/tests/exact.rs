@@ -7,7 +7,9 @@
 )]
 #![allow(
     clippy::doc_markdown,
+    clippy::excessive_nesting,
     clippy::expect_used,
+    clippy::indexing_slicing,
     clippy::panic,
     clippy::unwrap_used,
     reason = "idiomatic test-code patterns"
@@ -450,6 +452,179 @@ async fn client_accepts_and_signs_permit2_locally() {
     let payload: r402_evm::exact::payload::v2::PaymentPayload =
         serde_json::from_slice(&json).expect("payload");
     assert!(matches!(payload.payload, ExactPayload::Permit2(_)));
+    assert!(
+        payload.extensions.is_empty(),
+        "undeclared eip2612/erc20 must not be attached"
+    );
+}
+
+#[tokio::test]
+async fn client_attaches_eip2612_when_advertised_and_allowance_low() {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use r402_evm::Permit2Approver;
+    use r402_evm::eip2612::EIP2612_GAS_SPONSORING_KEY;
+    use r402_protocol::error::ClientError;
+    use r402_protocol::payment::{ExtensionEntry, Extensions};
+
+    struct LowAllowance;
+    impl Permit2Approver for LowAllowance {
+        fn check_permit2_allowance(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(U256::ZERO) })
+        }
+        fn approve_permit2(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn supports_gas_sponsoring_rpc(&self) -> bool {
+            true
+        }
+        fn eip2612_nonce(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(U256::from(1u64)) })
+        }
+        fn transaction_count(
+            &self,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(0) })
+        }
+        fn estimate_fees_per_gas(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<(u128, u128), ClientError>> + Send + '_>> {
+            Box::pin(async { Ok((1_000_000_000, 100_000_000)) })
+        }
+    }
+
+    let (signer, _) = wallet();
+    let client = Eip155ExactClient::builder(signer)
+        .approver(LowAllowance)
+        .auto_approve(false)
+        .build();
+    let tag = Eip155Exact::price_tag(
+        pay_to(),
+        USDC::base().amount(1_000_000u64),
+        Some(AssetTransferMethod::Permit2),
+    );
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        EIP2612_GAS_SPONSORING_KEY,
+        ExtensionEntry::info(serde_json::json!({"version": "1"})),
+    );
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()])
+        .with_extensions(advertised);
+    let b64 = client
+        .accept(&required)
+        .first()
+        .expect("candidate")
+        .sign()
+        .await
+        .expect("sign");
+    let json = r402_protocol::payment::Base64Bytes(b64.into_bytes())
+        .decode()
+        .expect("b64");
+    let payload: r402_evm::exact::payload::v2::PaymentPayload =
+        serde_json::from_slice(&json).expect("payload");
+    assert!(payload.extensions.get(EIP2612_GAS_SPONSORING_KEY).is_some());
+}
+
+#[tokio::test]
+async fn client_attaches_erc20_when_2612_absent_and_erc20_advertised() {
+    use std::future::Future;
+    use std::pin::Pin;
+
+    use r402_evm::Permit2Approver;
+    use r402_evm::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY;
+    use r402_protocol::error::ClientError;
+    use r402_protocol::payment::{ExtensionEntry, Extensions};
+
+    struct LowAllowance;
+    impl Permit2Approver for LowAllowance {
+        fn check_permit2_allowance(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(U256::ZERO) })
+        }
+        fn approve_permit2(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn supports_gas_sponsoring_rpc(&self) -> bool {
+            true
+        }
+        fn eip2612_nonce(
+            &self,
+            _token: Address,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(U256::ZERO) })
+        }
+        fn transaction_count(
+            &self,
+            _owner: Address,
+        ) -> Pin<Box<dyn Future<Output = Result<u64, ClientError>> + Send + '_>> {
+            Box::pin(async { Ok(0) })
+        }
+        fn estimate_fees_per_gas(
+            &self,
+        ) -> Pin<Box<dyn Future<Output = Result<(u128, u128), ClientError>> + Send + '_>> {
+            Box::pin(async { Ok((1_000_000_000, 100_000_000)) })
+        }
+    }
+
+    let (signer, _) = wallet();
+    let client = Eip155ExactClient::builder(signer)
+        .approver(LowAllowance)
+        .auto_approve(false)
+        .build();
+    let tag = Eip155Exact::price_tag(
+        pay_to(),
+        USDC::base().amount(1_000_000u64),
+        Some(AssetTransferMethod::Permit2),
+    );
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        ERC20_APPROVAL_GAS_SPONSORING_KEY,
+        ExtensionEntry::info(serde_json::json!({"version": "1"})),
+    );
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()])
+        .with_extensions(advertised);
+    let b64 = client
+        .accept(&required)
+        .first()
+        .expect("candidate")
+        .sign()
+        .await
+        .expect("sign");
+    let json = r402_protocol::payment::Base64Bytes(b64.into_bytes())
+        .decode()
+        .expect("b64");
+    let payload: r402_evm::exact::payload::v2::PaymentPayload =
+        serde_json::from_slice(&json).expect("payload");
+    assert!(
+        payload
+            .extensions
+            .get(ERC20_APPROVAL_GAS_SPONSORING_KEY)
+            .is_some()
+    );
 }
 
 #[test]

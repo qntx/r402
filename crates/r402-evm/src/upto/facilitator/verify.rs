@@ -167,6 +167,7 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
     requirements: &payload::v2::PaymentRequirements,
     facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
+    erc20_approval_enabled: bool,
 ) -> Result<Address, Eip155ExactError> {
     let chain_id: ChainId = chain.into();
     if payload.accepted.network != chain_id {
@@ -179,7 +180,15 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
         clock_skew_tolerance,
     )?;
     let prepared = PreparedUptoPermit2::try_new(chain, &payload.payload, &payload.extensions)?;
-    assert_onchain_valid(provider, &prepared, max_amount).await
+    assert_onchain_valid(
+        provider,
+        &prepared,
+        max_amount,
+        &payload.extensions,
+        clock_skew_tolerance,
+        erc20_approval_enabled,
+    )
+    .await
 }
 
 #[cfg(test)]

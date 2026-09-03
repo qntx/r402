@@ -19,6 +19,7 @@ use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::contracts::IERC20;
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+use crate::eip2612::Eip2612SignedPermit;
 use crate::error::Eip155ExactError;
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 use crate::signature::{ClassifiedSignature, classify_with_code};
@@ -308,7 +309,28 @@ where
     check_receipt(&receipt, "transferWithAuthorization", Some(expected))
 }
 
-/// Settles a verified Permit2 payment by calling `x402ExactPermit2Proxy.settle()`.
+/// Lowers a wire [`Eip2612SignedPermit`] into the ABI struct for `settleWithPermit`.
+pub(super) fn build_eip2612_abi(
+    eip2612: &Eip2612SignedPermit,
+) -> Result<IX402Permit2Proxy::EIP2612Permit, VerificationError> {
+    let (r, s, v) = eip2612.split_signature().ok_or_else(|| {
+        VerificationError::InvalidFormat(
+            "eip2612GasSponsoring signature is not the canonical 65-byte (r,s,v) form".into(),
+        )
+    })?;
+    Ok(IX402Permit2Proxy::EIP2612Permit {
+        value: eip2612.amount.into(),
+        deadline: eip2612.deadline.into(),
+        r,
+        s,
+        v,
+    })
+}
+
+/// Settles a verified Permit2 payment via `settle` or `settleWithPermit`.
+///
+/// When `eip2612GasSponsoring` is attached, the proxy atomically calls
+/// `token.permit` then Permit2 transfer.
 ///
 /// # Errors
 ///
@@ -341,8 +363,22 @@ where
         validAfter: payment.valid_after,
     };
 
-    let settle_call = proxy.settle(permit, payment.from, witness, payment.signature.clone());
-    let calldata = settle_call.calldata().clone();
+    let calldata = match payment.eip2612.as_ref() {
+        Some(eip2612) => proxy
+            .settleWithPermit(
+                build_eip2612_abi(eip2612)?,
+                permit,
+                payment.from,
+                witness,
+                payment.signature.clone(),
+            )
+            .calldata()
+            .clone(),
+        None => proxy
+            .settle(permit, payment.from, witness, payment.signature.clone())
+            .calldata()
+            .clone(),
+    };
 
     let tx_fut = Eip155MetaTransactionProvider::send_transaction(
         provider,
@@ -518,6 +554,15 @@ mod tests {
             value,
         };
         assert!(transfer_event_matches(&logs, expected));
+    }
+
+    #[test]
+    fn settle_with_permit_selector_differs_from_settle() {
+        use alloy_sol_types::SolCall;
+        assert_ne!(
+            IX402Permit2Proxy::settleCall::SELECTOR,
+            IX402Permit2Proxy::settleWithPermitCall::SELECTOR
+        );
     }
 
     #[test]
