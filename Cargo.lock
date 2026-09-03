@@ -2698,6 +2698,17 @@ version = "0.18.0"
 [[package]]
 name = "r402-mcp"
 version = "0.18.0"
+dependencies = [
+ "r402-client",
+ "r402-facilitator",
+ "r402-protocol",
+ "r402-server",
+ "rmcp",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "r402-near"
@@ -3090,6 +3101,25 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "rmcp"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42b6914fac0be956fe704a38239c3f44a9f841d1b06a5713d2f638065593f5b5"
+dependencies = [
+ "chrono",
+ "futures",
+ "indexmap 2.14.1",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]
