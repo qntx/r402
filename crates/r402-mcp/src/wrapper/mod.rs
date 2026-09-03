@@ -13,8 +13,8 @@ use r402_protocol::payment::{
     Extensions, PaymentRequired, PaymentRequirements, ResourceInfo, SettleResponse,
 };
 use r402_server::{
-    PaymentFlowError, PaymentFlowName, PaymentRequiredBuildContext, ResourceServer,
-    SkipHandlerDirective,
+    FacilitatorSupportError, PaymentFlowError, PaymentFlowName, PaymentRequiredBuildContext,
+    ResourceServer, SkipHandlerDirective, validate_accepts_against_supported,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::Value;
@@ -48,6 +48,15 @@ pub enum PaymentWrapperConfigError {
         /// Wire scheme name.
         scheme: String,
     },
+    /// Facilitator `GET /supported` failed as transport.
+    #[error("facilitator /supported transport: {kind}")]
+    SupportedTransport {
+        /// Transport failure kind.
+        kind: FacilitatorTransportKind,
+    },
+    /// Accept kind missing or advertised extra unusable.
+    #[error(transparent)]
+    FacilitatorSupport(#[from] FacilitatorSupportError),
 }
 
 fn settle_failure_reason(settle: &SettleResponse) -> String {
@@ -213,12 +222,13 @@ impl PaymentWrapper {
     /// Go `NewPaymentWrapper`.
     ///
     /// Requires a registered scheme and a resolvable payment flow per accept.
-    /// Escrow additionally requires `settle_on_cancel`.
+    /// Escrow additionally requires `settle_on_cancel`. Fetches `/supported`
+    /// and fails closed when a kind is missing or extra is unusable.
     ///
     /// # Errors
     ///
-    /// Empty accepts, missing scheme, unresolved flow, or escrow without
-    /// `settle_on_cancel`.
+    /// Empty accepts, missing scheme, unresolved flow, escrow without
+    /// `settle_on_cancel`, `/supported` transport, or facilitator support.
     pub async fn try_new(
         server: ResourceServer,
         config: PaymentWrapperConfig,
@@ -243,6 +253,15 @@ impl PaymentWrapper {
                 });
             }
         }
+        let supported = DynFacilitator::supported(server.facilitator().as_ref())
+            .await
+            .map_err(|err| PaymentWrapperConfigError::SupportedTransport {
+                kind: match err {
+                    FacilitatorError::Transport { kind } => kind,
+                    _ => FacilitatorTransportKind::Io,
+                },
+            })?;
+        validate_accepts_against_supported(&server, &config.accepts, &supported)?;
         Ok(Self { server, config })
     }
 
@@ -317,11 +336,8 @@ impl PaymentWrapper {
         payload: Option<&McpPaymentPayload>,
     ) -> Result<PaymentRequired, FacilitatorError> {
         let supported = DynFacilitator::supported(self.server.facilitator().as_ref()).await?;
-        if supported.kinds.is_empty() {
-            return Err(FacilitatorError::transport(
-                FacilitatorTransportKind::MalformedSuccessBody,
-            ));
-        }
+        validate_accepts_against_supported(&self.server, &self.config.accepts, &supported)
+            .map_err(FacilitatorError::internal)?;
         self.server
             .create_payment_required_response(
                 self.config.accepts.clone(),

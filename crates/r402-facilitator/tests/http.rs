@@ -114,12 +114,12 @@ fn try_from_str_rejects_invalid_url() {
 }
 
 #[test]
-fn try_new_supported_cache_is_none() {
+fn try_new_supported_cache_is_some() {
     let client = FacilitatorClient::try_from("https://facilitator.example.com")
         .expect("valid facilitator URL");
     assert!(
-        client.supported_cache().is_none(),
-        "try_new must not install a /supported cache"
+        client.supported_cache().is_some(),
+        "try_new installs a /supported cache"
     );
 }
 
@@ -131,16 +131,21 @@ fn without_supported_cache_clears_opt_in_cache() {
     assert!(client.supported_cache().is_some());
     let client = client.without_supported_cache();
     assert!(client.supported_cache().is_none());
+
+    let client = FacilitatorClient::try_from("https://facilitator.example.com")
+        .expect("valid facilitator URL")
+        .without_supported_cache();
+    assert!(client.supported_cache().is_none());
 }
 
 #[tokio::test]
-async fn try_new_does_not_cache_supported() {
+async fn try_new_caches_supported() {
     let mock_server = MockServer::start().await;
     let test_response = supported_body();
     Mock::given(method("GET"))
         .and(path("/supported"))
         .respond_with(ResponseTemplate::new(200).set_body_json(&test_response))
-        .expect(2)
+        .expect(1)
         .mount(&mock_server)
         .await;
 
@@ -186,41 +191,76 @@ async fn supported_cache_shared_across_clones() {
     assert_eq!(result1.kinds[0].scheme, result2.kinds[0].scheme);
 }
 
-#[tokio::test]
-async fn supported_2xx_empty_kinds_is_malformed() {
-    let mock_server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/supported"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "kinds": [],
-            "extensions": [],
-            "signers": {}
-        })))
-        .mount(&mock_server)
-        .await;
-
-    let err = test_client(&mock_server.uri())
-        .supported()
-        .await
-        .unwrap_err();
-    assert_transport(&err, FacilitatorTransportKind::MalformedSuccessBody);
+fn empty_kinds_body() -> serde_json::Value {
+    serde_json::json!({
+        "kinds": [],
+        "extensions": [],
+        "signers": {}
+    })
 }
 
 #[tokio::test]
-async fn supported_empty_kinds_are_not_cached() {
+async fn supported_2xx_empty_kinds_is_ok() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/supported"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "kinds": [],
-            "extensions": [],
-            "signers": {}
-        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_kinds_body()))
+        .mount(&mock_server)
+        .await;
+
+    let kinds = test_client(&mock_server.uri())
+        .supported()
+        .await
+        .unwrap()
+        .kinds;
+    assert!(kinds.is_empty());
+}
+
+#[tokio::test]
+async fn supported_empty_kinds_are_cached() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/supported"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_kinds_body()))
+        .expect(1)
+        .mount(&mock_server)
+        .await;
+
+    let client = test_client(&mock_server.uri());
+    let first = client.supported().await.unwrap();
+    let second = client.supported().await.unwrap();
+    assert!(first.kinds.is_empty());
+    assert!(second.kinds.is_empty());
+}
+
+#[tokio::test]
+async fn without_supported_cache_empty_kinds_hits_twice() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/supported"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(empty_kinds_body()))
         .expect(2)
         .mount(&mock_server)
         .await;
 
-    let client = test_client(&mock_server.uri()).with_supported_cache_ttl(Duration::from_mins(10));
+    let client = test_client(&mock_server.uri()).without_supported_cache();
+    let first = client.supported().await.unwrap();
+    let second = client.supported().await.unwrap();
+    assert!(first.kinds.is_empty());
+    assert!(second.kinds.is_empty());
+}
+
+#[tokio::test]
+async fn supported_2xx_malformed_json_is_transport() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/supported"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not-json"))
+        .expect(2)
+        .mount(&mock_server)
+        .await;
+
+    let client = test_client(&mock_server.uri());
     let err1 = client.supported().await.unwrap_err();
     let err2 = client.supported().await.unwrap_err();
     assert_transport(&err1, FacilitatorTransportKind::MalformedSuccessBody);

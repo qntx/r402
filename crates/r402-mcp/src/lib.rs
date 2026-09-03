@@ -46,6 +46,8 @@ pub use buyer::{
 #[cfg(feature = "server")]
 mod wrapper;
 #[cfg(test)]
+use compact_str as _;
+#[cfg(test)]
 use tokio as _;
 #[cfg(feature = "telemetry")]
 use tracing as _;

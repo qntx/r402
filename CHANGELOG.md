@@ -6,10 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-04
+
 ### Breaking
 
 - Workspace version **0.19.0**. GitHub `0.18.0` at `6363c18` was never
-  tagged; crates.io remains 0.17.1 until humans publish 0.19.
+  tagged; crates.io remains 0.17.1 until this 0.19 publish.
 - `BuildError` expanded (`MissingScheme`, `PaymentFlow`, `Mode`,
   `EmptyPriceTags`, `MissingSettleOnCancel`); no longer `Copy`.
 - `X402Layer::with_price_tag` and `with_settlement_mode` return
@@ -17,6 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Empty static price tags fail unless `with_auth_only` was already set.
 - `SchemeNetworkServer::settles_on_cancel` /
   `validate_facilitator_support` (defaulted).
+- `FacilitatorClient::try_new` enables `SupportedCache` (10 min).
+  `without_supported_cache` still disables it.
+- Empty `/supported.kinds` is `KindMissing` (HTTP 500 / MCP construct),
+  not 502.
+- `GateError::FacilitatorSupport`.
+- `PaymentWrapperConfigError::{SupportedTransport, FacilitatorSupport}`.
+  `PaymentWrapper::try_new` fetches `/supported`.
 
 ### Added
 
@@ -31,6 +40,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `ext-builder-code` depends on `r402-client`. Enrich merges payload `s[]`
   and copies advertised `builder-code.a` when payload `a` is absent. Never
   invents `a` when undeclared. Never overwrites existing payload `a`.
+- `validate_accepts_against_supported` for this accept list.
+- EVM `batch-settlement` advertised `receiverAuthorizer` and SVM `upto`
+  advertised `feePayer` `validate_facilitator_support`.
 
 ### Changed
 

@@ -6,11 +6,14 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse, V2};
+use compact_str::CompactString;
+use r402_protocol::payment::{
+    PaymentRequirements, PriceTag, SupportedPaymentKind, SupportedResponse, V2,
+};
 use r402_protocol::{ChainId, DeployedTokenAmount, FacilitatorError};
 use r402_server::{
-    PaymentFlowConfig, PaymentFlowName, SchemeNetworkServer, SchemePaymentRequiredContext,
-    SettleContext, VerifiedPaymentCanceledContext,
+    FacilitatorSupportError, PaymentFlowConfig, PaymentFlowName, SchemeNetworkServer,
+    SchemePaymentRequiredContext, SettleContext, VerifiedPaymentCanceledContext,
 };
 use serde_json::{Map, Value};
 use solana_signer::Signer;
@@ -136,6 +139,34 @@ impl<S: Signer + Send + Sync> SchemeNetworkServer for UptoSvmScheme<S> {
     fn settles_on_cancel(&self) -> bool {
         let _ = self;
         true
+    }
+
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        let _ = (self, facilitator_extensions);
+        let scheme = CompactString::from(UptoScheme::VALUE);
+        let Some(fee_payer) = kind
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get(extra_keys::FEE_PAYER))
+            .and_then(Value::as_str)
+        else {
+            return Err(FacilitatorSupportError::MissingFeePayer {
+                scheme,
+                network: network.clone(),
+            });
+        };
+        if fee_payer.parse::<solana_pubkey::Pubkey>().is_err() {
+            return Err(FacilitatorSupportError::InvalidFeePayer {
+                scheme,
+                network: network.clone(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -275,7 +306,7 @@ async fn fetch_blockhash_hints(rpc_url: &str) -> Result<(String, u64, u64), Faci
 #[cfg(test)]
 mod tests {
     use r402_protocol::payment::{PaymentRequired, ResourceInfo, SupportedPaymentKind};
-    use r402_server::SchemePaymentRequiredContext;
+    use r402_server::{FacilitatorSupportError, SchemePaymentRequiredContext};
     use solana_keypair::Keypair;
     use solana_signer::Signer;
 
@@ -383,6 +414,75 @@ mod tests {
             Some(crate::chain::TOKEN_PROGRAM_ID.to_string().as_str())
         );
         assert!(!extra.contains_key(extra_keys::RECENT_BLOCKHASH));
+    }
+
+    fn upto_network() -> ChainId {
+        "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1"
+            .parse()
+            .expect("devnet")
+    }
+
+    fn upto_kind(extra: Option<Value>) -> SupportedPaymentKind {
+        SupportedPaymentKind::new(2, "upto", "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1")
+            .with_optional_extra(extra)
+    }
+
+    fn support_fee_payer(
+        scheme: &UptoSvmScheme<Keypair>,
+        extra: Option<Value>,
+    ) -> Result<(), FacilitatorSupportError> {
+        scheme.validate_facilitator_support(&upto_network(), &upto_kind(extra), &[])
+    }
+
+    #[test]
+    fn validate_facilitator_support_missing_fee_payer() {
+        let (scheme, _) = scheme();
+        assert!(matches!(
+            support_fee_payer(&scheme, None),
+            Err(FacilitatorSupportError::MissingFeePayer { .. })
+        ));
+        assert!(matches!(
+            support_fee_payer(&scheme, Some(serde_json::json!({}))),
+            Err(FacilitatorSupportError::MissingFeePayer { .. })
+        ));
+        assert!(matches!(
+            support_fee_payer(
+                &scheme,
+                Some(serde_json::json!({ extra_keys::FEE_PAYER: null }))
+            ),
+            Err(FacilitatorSupportError::MissingFeePayer { .. })
+        ));
+        assert!(matches!(
+            support_fee_payer(
+                &scheme,
+                Some(serde_json::json!({ extra_keys::FEE_PAYER: 1 }))
+            ),
+            Err(FacilitatorSupportError::MissingFeePayer { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_facilitator_support_invalid_fee_payer() {
+        let (scheme, _) = scheme();
+        assert!(matches!(
+            support_fee_payer(
+                &scheme,
+                Some(serde_json::json!({ extra_keys::FEE_PAYER: "not-a-pubkey" }))
+            ),
+            Err(FacilitatorSupportError::InvalidFeePayer { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_facilitator_support_valid_fee_payer() {
+        let (scheme, _) = scheme();
+        support_fee_payer(
+            &scheme,
+            Some(serde_json::json!({
+                extra_keys::FEE_PAYER: "SysvarRent111111111111111111111111111111111"
+            })),
+        )
+        .expect("base58 pubkey");
     }
 
     #[test]

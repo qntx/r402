@@ -1,13 +1,15 @@
 //! Server price tags for EVM `batch-settlement`.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::LazyLock;
 
 use alloy_primitives::U256;
+use compact_str::CompactString;
 use r402_protocol::network::{ChainId, DeployedTokenAmount};
-use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedPaymentKind};
 use r402_protocol::scheme::BatchSettlementScheme;
-use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
+use r402_server::{FacilitatorSupportError, PaymentFlowConfig, SchemeNetworkServer};
 
 use super::Eip155BatchSettlement;
 use super::payload::BatchSettlementExtra;
@@ -36,6 +38,40 @@ impl SchemeNetworkServer for Eip155BatchSettlement {
 
     fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
         eip155_batch_settlement_payment_flows()
+    }
+
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        let _ = (self, facilitator_extensions);
+        let scheme = CompactString::from(BatchSettlementScheme::VALUE);
+        let Some(raw) = kind
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("receiverAuthorizer"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            return Err(FacilitatorSupportError::MissingReceiverAuthorizer {
+                scheme,
+                network: network.clone(),
+            });
+        };
+        let parsed = ChecksummedAddress::from_str(raw).map_err(|_| {
+            FacilitatorSupportError::InvalidReceiverAuthorizer {
+                scheme: scheme.clone(),
+                network: network.clone(),
+            }
+        })?;
+        if parsed.0.is_zero() {
+            return Err(FacilitatorSupportError::ZeroReceiverAuthorizer {
+                scheme,
+                network: network.clone(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -96,6 +132,18 @@ mod tests {
 
     use super::*;
 
+    fn network() -> ChainId {
+        "eip155:1".parse().expect("eip155:1")
+    }
+
+    fn kind(extra: Option<serde_json::Value>) -> SupportedPaymentKind {
+        SupportedPaymentKind::new(2, "batch-settlement", "eip155:1").with_optional_extra(extra)
+    }
+
+    fn support(extra: Option<serde_json::Value>) -> Result<(), FacilitatorSupportError> {
+        Eip155BatchSettlement.validate_facilitator_support(&network(), &kind(extra), &[])
+    }
+
     #[test]
     fn payment_flows_are_authorization_only() {
         let scheme = Eip155BatchSettlement;
@@ -106,5 +154,53 @@ mod tests {
         assert_eq!(flows.get("eip3009"), Some(&expected));
         assert_eq!(flows.get("permit2"), Some(&expected));
         assert_eq!(expected.default, PaymentFlowName::Authorization);
+    }
+
+    #[test]
+    fn validate_facilitator_support_missing_receiver_authorizer() {
+        assert!(matches!(
+            support(None),
+            Err(FacilitatorSupportError::MissingReceiverAuthorizer { .. })
+        ));
+        assert!(matches!(
+            support(Some(serde_json::json!({}))),
+            Err(FacilitatorSupportError::MissingReceiverAuthorizer { .. })
+        ));
+        assert!(matches!(
+            support(Some(serde_json::json!({ "receiverAuthorizer": null }))),
+            Err(FacilitatorSupportError::MissingReceiverAuthorizer { .. })
+        ));
+        assert!(matches!(
+            support(Some(serde_json::json!({ "receiverAuthorizer": 1 }))),
+            Err(FacilitatorSupportError::MissingReceiverAuthorizer { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_facilitator_support_invalid_receiver_authorizer() {
+        assert!(matches!(
+            support(Some(
+                serde_json::json!({ "receiverAuthorizer": "not-an-address" })
+            )),
+            Err(FacilitatorSupportError::InvalidReceiverAuthorizer { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_facilitator_support_zero_receiver_authorizer() {
+        assert!(matches!(
+            support(Some(serde_json::json!({
+                "receiverAuthorizer": "0x0000000000000000000000000000000000000000"
+            }))),
+            Err(FacilitatorSupportError::ZeroReceiverAuthorizer { .. })
+        ));
+    }
+
+    #[test]
+    fn validate_facilitator_support_nonzero_receiver_authorizer() {
+        support(Some(serde_json::json!({
+            "receiverAuthorizer": "0x1111111111111111111111111111111111111111"
+        })))
+        .expect("non-zero checksummed address");
     }
 }

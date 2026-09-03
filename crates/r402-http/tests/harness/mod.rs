@@ -106,6 +106,7 @@ pub enum SupportedScript {
     Ok,
     Empty,
     Transport,
+    Mismatch,
 }
 
 pub struct FakeFacilitator {
@@ -226,6 +227,15 @@ impl Facilitator for FakeFacilitator {
             SupportedScript::Transport => Err(FacilitatorError::transport(
                 FacilitatorTransportKind::Timeout,
             )),
+            SupportedScript::Mismatch => {
+                Ok(
+                    SupportedResponse::new().with_kinds(vec![SupportedPaymentKind::new(
+                        2,
+                        "upto",
+                        "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1",
+                    )]),
+                )
+            }
         };
         std::future::ready(out)
     }

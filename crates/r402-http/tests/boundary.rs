@@ -16,20 +16,62 @@
 
 mod harness;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
 use r402_http::server::{
     BuildError, PAYMENT_REQUIRED, PAYMENT_SIGNATURE, SettlementMode, X402Middleware,
 };
 use r402_protocol::error::ErrorReason;
-use r402_protocol::network::ChainIdPattern;
+use r402_protocol::network::{ChainId, ChainIdPattern};
+use r402_protocol::payment::SupportedPaymentKind;
+use r402_server::{FacilitatorSupportError, PaymentFlowConfig, SchemeNetworkServer};
 
 use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, SettleScript, SupportedScript, VerifyScript, call_layer,
     eip155_requirements, eip155_tag, escrow_tag, json_body, middleware, payment_request,
     unpaid_request, upfront_tag,
 };
+
+struct FeePayerScheme(FlowScheme);
+
+impl SchemeNetworkServer for FeePayerScheme {
+    fn scheme(&self) -> &str {
+        self.0.scheme()
+    }
+
+    fn default_asset_transfer_method(&self) -> &str {
+        self.0.default_asset_transfer_method()
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        self.0.payment_flows()
+    }
+
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        _facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        let has_fee_payer = kind
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("feePayer"))
+            .and_then(serde_json::Value::as_str)
+            .is_some();
+        if has_fee_payer {
+            Ok(())
+        } else {
+            Err(FacilitatorSupportError::MissingFeePayer {
+                scheme: self.scheme().into(),
+                network: network.clone(),
+            })
+        }
+    }
+}
 
 #[tokio::test]
 async fn transport_is_502() {
@@ -130,15 +172,58 @@ fn background_upfront_is_build_error() {
 }
 
 #[tokio::test]
-async fn supported_empty_kinds_is_502_without_payment_required() {
+async fn supported_empty_kinds_is_500_without_payment_required() {
     let fac = Arc::new(FakeFacilitator::new());
     *fac.supported.lock().unwrap() = SupportedScript::Empty;
     let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
         .with_price_tag(eip155_tag())
         .unwrap();
     let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "facilitator support");
+    assert_eq!(body["reason"], "kind_missing");
+    assert_eq!(body["scheme"], "exact");
+    assert_eq!(body["network"], "eip155:1");
+}
+
+#[tokio::test]
+async fn supported_kind_missing_for_accept_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    *fac.supported.lock().unwrap() = SupportedScript::Mismatch;
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "facilitator support");
+    assert_eq!(body["reason"], "kind_missing");
+    assert_eq!(body["scheme"], "exact");
+    assert_eq!(body["network"], "eip155:1");
+}
+
+#[tokio::test]
+async fn supported_missing_fee_payer_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = X402Middleware::from_facilitator(Arc::clone(&fac))
+        .with_base_url(harness::base_url())
+        .with_scheme(
+            ChainIdPattern::wildcard("eip155"),
+            FeePayerScheme(FlowScheme::authorization()),
+        )
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "facilitator support");
+    assert_eq!(body["reason"], "missing_fee_payer");
+    assert_eq!(body["scheme"], "exact");
+    assert_eq!(body["network"], "eip155:1");
 }
 
 #[tokio::test]
