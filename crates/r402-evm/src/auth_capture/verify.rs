@@ -101,10 +101,6 @@ fn validate_extra(extra: &AuthCaptureExtra) -> Result<(), VerificationError> {
             "maxFeeBps must be >= minFeeBps".into(),
         ));
     }
-    // Spec @ 0344bdf: autoCapture is an unsupported payment flow. The v1.0
-    // escrow `charge` ABI is 6-arg (feeBps, feeReceiver), not the 4-arg
-    // authorize shape; taking that branch would send a selector that cannot
-    // succeed.
     if extra.auto_capture() {
         return Err(VerificationError::InvalidFormat(
             "autoCapture is not supported".into(),

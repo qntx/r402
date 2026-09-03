@@ -79,7 +79,6 @@ impl Eip155AuthCapture {
         min_fee_bps: u16,
         max_fee_bps: u16,
         transfer_method: Option<AssetTransferMethod>,
-        auto_capture: bool,
     ) -> wire::PriceTag {
         let (name, version) = asset.token.eip712.as_ref().map_or_else(
             || (String::new(), String::new()),
@@ -94,7 +93,7 @@ impl Eip155AuthCapture {
             fee_recipient,
             min_fee_bps,
             max_fee_bps,
-            auto_capture: Some(auto_capture),
+            auto_capture: None,
             asset_transfer_method: transfer_method,
         };
         Self::price_tag(pay_to, asset, extra)

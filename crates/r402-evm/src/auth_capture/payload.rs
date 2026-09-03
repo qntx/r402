@@ -46,7 +46,7 @@ pub struct AuthCaptureExtra {
     pub min_fee_bps: u16,
     /// Maximum fee in basis points.
     pub max_fee_bps: u16,
-    /// When `true`, facilitator calls `charge()`; otherwise `authorize()`.
+    /// `true` is rejected at verify (`autoCapture` is unsupported).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_capture: Option<bool>,
     /// Transfer method; default eip3009 when absent.
@@ -64,7 +64,7 @@ impl AuthCaptureExtra {
         }
     }
 
-    /// `extra.autoCapture == true`. Verify rejects this: v1.0 `charge` is 6-arg.
+    /// Whether `extra.autoCapture` is `true` (rejected at verify).
     #[must_use]
     pub const fn auto_capture(&self) -> bool {
         matches!(self.auto_capture, Some(true))

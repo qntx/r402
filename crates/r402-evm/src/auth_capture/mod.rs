@@ -3,7 +3,7 @@
 //! Client signs ERC-3009 `ReceiveWithAuthorization` or Permit2
 //! `PermitTransferFrom` with a nonce derived from the payer-agnostic
 //! `PaymentInfo` hash. The facilitator verifies off-chain then calls
-//! `AuthCaptureEscrow.authorize` or `.charge`.
+//! `AuthCaptureEscrow.authorize`.
 //!
 //! Spec: `specs/schemes/auth-capture/scheme_auth_capture_evm.md`.
 

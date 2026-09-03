@@ -1,4 +1,4 @@
-//! Facilitator for EVM `auth-capture` (off-chain verify + on-chain authorize/charge).
+//! Facilitator for EVM `auth-capture` (off-chain verify + on-chain authorize).
 
 use std::collections::HashMap;
 use std::future::Future;
