@@ -28,5 +28,9 @@ http = ["dep:r402-http", "r402-http/client", "r402-http/server"]
 r402-evm = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }
 
+[dev-dependencies]
+alloy-primitives = { workspace = true }
+axum = "0.8"
+
 [lints]
 workspace = true
