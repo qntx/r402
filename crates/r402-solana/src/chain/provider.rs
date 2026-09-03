@@ -20,14 +20,8 @@ use solana_signature::Signature;
 use solana_signer::SignerError;
 use solana_transaction::versioned::VersionedTransaction;
 
+use crate::chain::SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS;
 use crate::chain::account::{Address, SolanaChainReference};
-
-/// Recommended hard cap / default for `max_compute_unit_price` (micro-lamports).
-///
-/// Aligned with the Go reference SDK
-/// (`mechanisms/svm/exact/facilitator/scheme.go: maxComputeUnitPriceMicroLamports`).
-/// 5 000 000 µLAM/CU is roughly 0.005 SOL per million CU.
-pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
 
 /// Errors that can occur when interacting with a Solana chain provider.
 #[derive(thiserror::Error, Debug)]
@@ -488,7 +482,7 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS;
+    use crate::chain::SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS;
 
     #[test]
     fn recommended_cu_price_matches_go_cap() {

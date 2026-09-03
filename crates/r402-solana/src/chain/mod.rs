@@ -17,6 +17,13 @@
 pub mod account;
 pub use account::*;
 
+/// Recommended hard cap for `max_compute_unit_price` (micro-lamports).
+///
+/// Aligned with the Go reference SDK
+/// (`mechanisms/svm/exact/facilitator/scheme.go: maxComputeUnitPriceMicroLamports`).
+/// 5 000 000 µLAM/CU is roughly 0.005 SOL per million CU.
+pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
+
 /// Solana chain provider implementation.
 #[cfg(feature = "facilitator")]
 pub mod provider;

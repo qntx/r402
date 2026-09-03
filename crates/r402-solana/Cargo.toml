@@ -26,6 +26,7 @@ telemetry = ["dep:tracing", "dep:tracing-core"]
 client = [
     "dep:bincode",
     "dep:r402-client",
+    "dep:rand",
     "dep:solana-account",
     "dep:solana-client",
     "dep:solana-commitment-config",
@@ -37,11 +38,21 @@ client = [
     "dep:spl-token",
     "dep:spl-token-2022-interface",
 ]
-server = ["dep:r402-server"]
+server = [
+    "dep:r402-server",
+    "dep:solana-client",
+    "dep:solana-commitment-config",
+    "dep:solana-keypair",
+    "dep:solana-signature",
+    "dep:solana-signer",
+    "dep:tokio",
+]
 facilitator = [
     "dep:bincode",
     "dep:futures-util",
     "dep:r402-facilitator",
+    "dep:rand",
+    "dep:sha2",
     "dep:solana-account",
     "dep:solana-client",
     "dep:solana-commitment-config",
@@ -70,6 +81,8 @@ futures-util = { workspace = true, optional = true }
 r402-client = { workspace = true, optional = true }
 r402-facilitator = { workspace = true, optional = true }
 r402-server = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
 solana-account = { workspace = true, optional = true }
 solana-client = { workspace = true, optional = true }
 solana-commitment-config = { workspace = true, optional = true }
@@ -86,9 +99,15 @@ tracing = { workspace = true, optional = true }
 tracing-core = { workspace = true, optional = true }
 
 [dev-dependencies]
+hex = { workspace = true }
+r402-facilitator = { workspace = true }
 r402-protocol = { workspace = true }
+r402-server = { workspace = true }
 serde_json = { workspace = true }
+solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
+solana-signature = { workspace = true }
+solana-signer = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
