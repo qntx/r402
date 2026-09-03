@@ -112,6 +112,7 @@ impl X402Middleware {
             base_url: Arc::new(self.base_url.clone().ok_or(BuildError::MissingBaseUrl)?),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
+            settlement_tracker: None,
             hooks: None,
         })
     }
@@ -135,6 +136,7 @@ impl X402Middleware {
             base_url: Arc::new(self.base_url.clone().ok_or(BuildError::MissingBaseUrl)?),
             resource: Arc::new(ResourceTemplate::default()),
             settlement_mode: SettlementMode::default(),
+            settlement_tracker: None,
             hooks: None,
         })
     }

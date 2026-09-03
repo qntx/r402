@@ -1,4 +1,4 @@
-//! Axum/Tower Sequential payment gate.
+//! Axum/Tower payment gate (Sequential / Concurrent / Background).
 
 mod builder;
 mod fail;
@@ -19,11 +19,14 @@ pub use overrides::{
     SETTLEMENT_OVERRIDES_HEADER, SettlementOverrideError, SettlementOverrides, UptoActualAmount,
     marshal_settlement_overrides, resolve_response_settlement_amount, set_settlement_overrides,
     set_settlement_overrides_on_response, settlement_overrides_header_name,
-    take_settlement_overrides_header,
+    strip_response_settlement_overrides, take_settlement_overrides_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 pub use r402_facilitator::{Facilitator, FacilitatorClient, FacilitatorClientError};
-pub use r402_server::{ResourceServer, SchemeNetworkServer, SettlementMode, SkipHandlerDirective};
+pub use r402_server::{
+    BackgroundSettlementTracker, ResourceServer, SchemeNetworkServer, SettlementMode,
+    SkipHandlerDirective,
+};
 pub use receipt::settlement_to_header;
 
 pub use crate::headers::{

@@ -67,7 +67,6 @@ mod _dev_deps {
     use tower as _;
     #[cfg(not(feature = "server"))]
     use url as _;
-    #[cfg(not(feature = "client"))]
     use wiremock as _;
 }
 

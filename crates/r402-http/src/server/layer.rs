@@ -10,13 +10,13 @@ use axum_core::extract::Request;
 use axum_core::response::Response;
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{PriceTag, ResourceInfo};
-use r402_server::{ResourceServer, SchemeNetworkServer};
+use r402_server::{BackgroundSettlementTracker, ResourceServer, SchemeNetworkServer};
 use tower::util::BoxCloneSyncService;
 use tower::{Layer, Service};
 use url::Url;
 
 use super::SettlementMode;
-use super::fail::{GateError, abort_response};
+use super::fail::abort_response;
 use super::gate::Gate;
 use super::hooks::{DynGateHooks, GateHooks, ProtectedRequestOutcome};
 use super::pricing::{PriceTagSource, StaticPriceTags};
@@ -72,6 +72,7 @@ pub struct X402Layer<TSource> {
     pub(crate) price_source: TSource,
     pub(crate) resource: Arc<ResourceTemplate>,
     pub(crate) settlement_mode: SettlementMode,
+    pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
     pub(crate) hooks: Option<Arc<dyn DynGateHooks>>,
 }
 
@@ -133,10 +134,17 @@ impl<TSource> X402Layer<TSource> {
         self
     }
 
-    /// Settlement scheduler. Only [`SettlementMode::Sequential`] is served.
+    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
     #[must_use]
     pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
         self.settlement_mode = mode;
+        self
+    }
+
+    /// In-flight counter for [`SettlementMode::Background`] settle tasks.
+    #[must_use]
+    pub fn with_settlement_tracker(mut self, tracker: BackgroundSettlementTracker) -> Self {
+        self.settlement_tracker = Some(tracker);
         self
     }
 
@@ -166,6 +174,7 @@ where
             price_source: self.price_source.clone(),
             resource: Arc::clone(&self.resource),
             settlement_mode: self.settlement_mode,
+            settlement_tracker: self.settlement_tracker.clone(),
             hooks: self.hooks.clone(),
             inner: BoxCloneSyncService::new(inner),
         }
@@ -184,6 +193,7 @@ pub struct X402MiddlewareService<TSource> {
     price_source: TSource,
     resource: Arc<ResourceTemplate>,
     settlement_mode: SettlementMode,
+    settlement_tracker: Option<BackgroundSettlementTracker>,
     hooks: Option<Arc<dyn DynGateHooks>>,
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
@@ -207,6 +217,7 @@ where
             Arc::clone(&self.base_url),
             Arc::clone(&self.resource),
             self.settlement_mode,
+            self.settlement_tracker.clone(),
             self.hooks.clone(),
             self.inner.clone(),
             req,
@@ -225,6 +236,7 @@ async fn enforce<TSource: PriceTagSource>(
     base_url: Arc<Url>,
     resource_builder: Arc<ResourceTemplate>,
     settlement_mode: SettlementMode,
+    settlement_tracker: Option<BackgroundSettlementTracker>,
     hooks: Option<Arc<dyn DynGateHooks>>,
     mut inner: BoxCloneSyncService<Request, Response, Infallible>,
     req: Request,
@@ -247,7 +259,14 @@ async fn enforce<TSource: PriceTagSource>(
     }
 
     let resource = resource_builder.resolve(base_url.as_ref(), &req);
-    let mut gate = Gate::from_parts(server, accepts, resource, settlement_mode, hooks);
+    let mut gate = Gate::from_parts(
+        server,
+        accepts,
+        resource,
+        settlement_mode,
+        settlement_tracker,
+        hooks,
+    );
     if let Err(err) = gate.require_schemes().await {
         return Ok(gate.error_response(err));
     }
@@ -260,11 +279,8 @@ async fn enforce<TSource: PriceTagSource>(
 
     let result = match settlement_mode {
         SettlementMode::Sequential => gate.handle_request(inner, req).await,
-        SettlementMode::Concurrent | SettlementMode::Background => {
-            Err(GateError::UnsupportedSettlementMode {
-                mode: settlement_mode,
-            })
-        }
+        SettlementMode::Concurrent => gate.handle_request_concurrent(inner, req).await,
+        SettlementMode::Background => gate.handle_request_background(inner, req).await,
     };
     Ok(result.unwrap_or_else(|err| gate.error_response(err)))
 }

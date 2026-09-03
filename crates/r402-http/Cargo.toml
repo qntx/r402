@@ -70,7 +70,7 @@ r402-server = { workspace = true }
 reqwest = { workspace = true }
 reqwest-middleware = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 tower = { workspace = true }
 url = { workspace = true }
 wiremock = { workspace = true }
@@ -81,6 +81,14 @@ required-features = ["client"]
 
 [[test]]
 name = "sequential"
+required-features = ["server"]
+
+[[test]]
+name = "concurrent"
+required-features = ["server"]
+
+[[test]]
+name = "background"
 required-features = ["server"]
 
 [[test]]

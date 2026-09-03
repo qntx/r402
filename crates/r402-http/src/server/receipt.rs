@@ -2,7 +2,8 @@
 
 use axum_core::body::Body;
 use axum_core::response::Response;
-use http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
+use http::header::CONTENT_TYPE;
+use http::{HeaderValue, StatusCode};
 use r402_protocol::payment::SettleResponse;
 use r402_server::{
     CompletedSettlement, SkipHandlerDirective, WirePaymentPayload,

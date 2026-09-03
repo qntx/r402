@@ -18,7 +18,7 @@ use super::gate::Gate;
 use crate::headers::PAYMENT_SIGNATURE;
 
 /// Verified payment ready for settle. Consumed by after-handler settle.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VerifiedPayment {
     pub(crate) payload: WirePaymentPayload,
     pub(crate) requirements: PaymentRequirements,

@@ -127,52 +127,6 @@ async fn background_upfront_is_500() {
 }
 
 #[tokio::test]
-async fn concurrent_authorization_is_500() {
-    let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
-        .with_price_tag(eip155_tag())
-        .unwrap()
-        .with_settlement_mode(SettlementMode::Concurrent);
-    let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(
-        response
-            .headers()
-            .get(r402_http::server::PAYMENT_RESPONSE)
-            .is_none(),
-        "unwired Concurrent must not Sequential-settle or attach Payment-Response"
-    );
-    assert_eq!(
-        fac.settle_count(),
-        0,
-        "Concurrent must not Sequential-fallback"
-    );
-}
-
-#[tokio::test]
-async fn background_authorization_is_500() {
-    let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
-        .with_price_tag(eip155_tag())
-        .unwrap()
-        .with_settlement_mode(SettlementMode::Background);
-    let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    assert!(
-        response
-            .headers()
-            .get(r402_http::server::PAYMENT_RESPONSE)
-            .is_none(),
-        "unwired Background must not Sequential-settle or attach Payment-Response"
-    );
-    assert_eq!(
-        fac.settle_count(),
-        0,
-        "Background must not Sequential-fallback"
-    );
-}
-
-#[tokio::test]
 async fn settle_failure_is_402() {
     let fac = Arc::new(FakeFacilitator::new());
     *fac.settle.lock().unwrap() = SettleScript::Fail;

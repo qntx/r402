@@ -41,6 +41,15 @@ pub fn take_settlement_overrides_header(headers: &mut HeaderMap) -> Option<Settl
     serde_json::from_str(s).ok()
 }
 
+/// Drops `Settlement-Overrides` / [`UptoActualAmount`] so billing signals never reach the client.
+///
+/// Returns whether either signal was present (Concurrent treats that as abort).
+pub fn strip_response_settlement_overrides(response: &mut axum_core::response::Response) -> bool {
+    let header = take_settlement_overrides_header(response.headers_mut());
+    let ext = response.extensions_mut().remove::<UptoActualAmount>();
+    header.is_some() || ext.is_some()
+}
+
 /// Resolves handler-declared actual amount (atomic units).
 ///
 /// Precedence: [`UptoActualAmount`] extension, then `Settlement-Overrides`.
@@ -169,6 +178,33 @@ mod tests {
                 .headers()
                 .contains_key(settlement_overrides_header_name()),
             "Settlement-Overrides must be stripped even when the extension wins"
+        );
+    }
+
+    #[test]
+    fn strip_reports_presence_and_clears_both() {
+        let mut response = axum_core::response::Response::new(axum_core::body::Body::empty());
+        set_settlement_overrides_on_response(&mut response, &SettlementOverrides::amount("50%"));
+        response
+            .extensions_mut()
+            .insert(UptoActualAmount::new("42"));
+        assert!(
+            strip_response_settlement_overrides(&mut response),
+            "either billing signal must count as present"
+        );
+        assert!(
+            !response
+                .headers()
+                .contains_key(settlement_overrides_header_name()),
+            "strip must remove Settlement-Overrides"
+        );
+        assert!(
+            response.extensions().get::<UptoActualAmount>().is_none(),
+            "strip must remove UptoActualAmount"
+        );
+        assert!(
+            !strip_response_settlement_overrides(&mut response),
+            "second strip must report absence"
         );
     }
 }

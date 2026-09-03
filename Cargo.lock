@@ -2650,7 +2650,7 @@ dependencies = [
  "r402-facilitator",
  "r402-protocol",
  "serde_json",
- "thiserror",
+ "thiserror 2.0.20",
  "url",
 ]
 

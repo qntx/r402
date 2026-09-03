@@ -3,7 +3,8 @@
 use axum_core::body::Body;
 use axum_core::response::Response;
 use compact_str::CompactString;
-use http::{HeaderValue, StatusCode, header::CONTENT_TYPE};
+use http::header::CONTENT_TYPE;
+use http::{HeaderValue, StatusCode};
 use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::network::ChainId;
 use r402_protocol::payment::{Base64Bytes, SettleResponse};
@@ -49,12 +50,6 @@ pub enum GateError {
         mode: super::SettlementMode,
         /// Offending payment flow.
         flow: PaymentFlowName,
-    },
-    /// Concurrent/Background requested; only Sequential is implemented.
-    #[error("unsupported settlement mode {mode}")]
-    UnsupportedSettlementMode {
-        /// Requested settlement mode.
-        mode: super::SettlementMode,
     },
     /// No scheme registered for this accept.
     #[error("missing scheme {scheme} on {network}")]
@@ -159,13 +154,6 @@ impl Gate {
                     "error": "incompatible settlement mode",
                     "mode": mode.as_str(),
                     "flow": flow.as_str(),
-                }),
-            ),
-            GateError::UnsupportedSettlementMode { mode } => json_status_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &json!({
-                    "error": "unsupported settlement mode",
-                    "mode": mode.as_str(),
                 }),
             ),
             GateError::MissingScheme {

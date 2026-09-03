@@ -17,9 +17,8 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use axum_core::body::Body;
@@ -108,6 +107,7 @@ pub struct FakeFacilitator {
     pub last_settle_amount: Mutex<Option<String>>,
     pub verify: Mutex<VerifyScript>,
     pub settle: Mutex<SettleScript>,
+    pub settle_hold: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 impl FakeFacilitator {
@@ -118,7 +118,14 @@ impl FakeFacilitator {
             last_settle_amount: Mutex::new(None),
             verify: Mutex::new(VerifyScript::Valid),
             settle: Mutex::new(SettleScript::Ok),
+            settle_hold: Mutex::new(None),
         }
+    }
+
+    pub fn hold_settle(&self) -> tokio::sync::oneshot::Sender<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        *self.settle_hold.lock().unwrap() = Some(rx);
+        tx
     }
 
     pub fn settle_count(&self) -> usize {
@@ -186,7 +193,13 @@ impl Facilitator for FakeFacilitator {
                 FacilitatorTransportKind::Timeout,
             )),
         };
-        std::future::ready(out)
+        let hold = self.settle_hold.lock().unwrap().take();
+        async move {
+            if let Some(rx) = hold {
+                drop(rx.await);
+            }
+            out
+        }
     }
 
     fn supported(
@@ -213,6 +226,16 @@ impl FlowScheme {
     pub fn escrow() -> Self {
         Self::from_config(
             PaymentFlowConfig::new(vec![PaymentFlowName::Escrow], PaymentFlowName::Escrow),
+            true,
+        )
+    }
+
+    pub fn auth_and_escrow() -> Self {
+        Self::from_config(
+            PaymentFlowConfig::new(
+                vec![PaymentFlowName::Authorization, PaymentFlowName::Escrow],
+                PaymentFlowName::Authorization,
+            ),
             true,
         )
     }
