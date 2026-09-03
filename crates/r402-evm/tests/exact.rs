@@ -17,15 +17,29 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use alloy_network::EthereumWallet;
-use alloy_primitives::{Address, address};
+use alloy_primitives::{Address, Bytes, U256, address, hex};
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::{SolValue, sol};
+
+sol! {
+    struct TestSig6492 {
+        address factory;
+        bytes factoryCalldata;
+        bytes innerSig;
+    }
+}
 use r402_client::SchemeClient;
 use r402_evm::chain::{Eip155ChainProvider, Eip155ChainReference};
 use r402_evm::exact::payload::{ExactPayload, PaymentRequirementsExtra};
-use r402_evm::{AssetTransferMethod, Eip155Exact, Eip155ExactClient, Eip155ExactFacilitator, USDC};
+use r402_evm::{
+    AssetTransferMethod, Eip155Exact, Eip155ExactClient, Eip155ExactFacilitator, PERMIT2_ADDRESS,
+    USDC,
+};
 use r402_facilitator::Facilitator;
-use r402_protocol::error::{FacilitatorError, VerificationError};
-use r402_protocol::payment::{PaymentRequired, ResourceInfo, VerifyRequest};
+use r402_protocol::error::{AsPaymentProblem, FacilitatorError, VerificationError};
+use r402_protocol::payment::{
+    PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest,
+};
 use r402_protocol::scheme::SchemeId;
 use r402_server::{PaymentFlowName, SchemeNetworkServer};
 use url::Url;
@@ -124,15 +138,237 @@ fn polygon_and_arbitrum_sepolia_eip712_name_is_usd_coin() {
     assert_eq!(arb.version, "2");
 }
 
-#[test]
-fn exact_facilitator_builders_default_empty_6492_allowlist() {
-    let fac = Eip155ExactFacilitator::try_new(dummy_provider())
-        .expect("try_new")
-        .with_eip6492_allowed_factories(vec![Address::repeat_byte(0xF1)])
-        .with_pending_store(Arc::new(
-            r402_facilitator::InMemoryPendingSettlementStore::new(),
-        ));
-    let _ = fac;
+fn provider_at(rpc: &str) -> Eip155ChainProvider {
+    let (_signer, wallet) = wallet();
+    let url = Url::parse(rpc).expect("url");
+    Eip155ChainProvider::new(
+        Eip155ChainReference::new(8453),
+        wallet,
+        &[(url, None)],
+        true,
+        false,
+        1,
+    )
+    .expect("provider")
+}
+
+const EIP6492_MAGIC: [u8; 32] =
+    hex!("6492649264926492649264926492649264926492649264926492649264926492");
+
+fn wrap_6492(factory: Address, inner: Bytes) -> Bytes {
+    let encoded = TestSig6492 {
+        factory,
+        factoryCalldata: Bytes::from(vec![0xde, 0xad]),
+        innerSig: inner,
+    }
+    .abi_encode_params();
+    let mut out = encoded;
+    out.extend_from_slice(&EIP6492_MAGIC);
+    Bytes::from(out)
+}
+
+fn checksum(addr: Address) -> String {
+    addr.to_checksum(None)
+}
+
+fn eip3009_request(payer: Address, asset: Address, signature: &Bytes) -> serde_json::Value {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let pay_to = pay_to();
+    serde_json::json!({
+        "x402Version": 2,
+        "paymentPayload": {
+            "x402Version": 2,
+            "accepted": {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "1000000",
+                "payTo": checksum(pay_to),
+                "maxTimeoutSeconds": 300,
+                "asset": checksum(asset),
+                "extra": { "name": "USD Coin", "version": "2" }
+            },
+            "payload": {
+                "signature": signature,
+                "authorization": {
+                    "from": checksum(payer),
+                    "to": checksum(pay_to),
+                    "value": "1000000",
+                    "validAfter": "0",
+                    "validBefore": (now + 3600).to_string(),
+                    "nonce": "0x1111111111111111111111111111111111111111111111111111111111111111"
+                }
+            }
+        },
+        "paymentRequirements": {
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "amount": "1000000",
+            "payTo": checksum(pay_to),
+            "maxTimeoutSeconds": 300,
+            "asset": checksum(asset),
+            "extra": { "name": "USD Coin", "version": "2" }
+        }
+    })
+}
+
+fn permit2_request(
+    payer: Address,
+    asset: Address,
+    extensions: &serde_json::Value,
+) -> serde_json::Value {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let pay_to = pay_to();
+    let proxy = r402_evm::exact::X402_EXACT_PERMIT2_PROXY;
+    serde_json::json!({
+        "x402Version": 2,
+        "paymentPayload": {
+            "x402Version": 2,
+            "accepted": {
+                "scheme": "exact",
+                "network": "eip155:8453",
+                "amount": "1000000",
+                "payTo": checksum(pay_to),
+                "maxTimeoutSeconds": 300,
+                "asset": checksum(asset),
+                "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "permit2" }
+            },
+            "payload": {
+                "signature": "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+                "permit2Authorization": {
+                    "from": checksum(payer),
+                    "permitted": { "token": checksum(asset), "amount": "1000000" },
+                    "spender": checksum(proxy),
+                    "nonce": "1",
+                    "deadline": (now + 3600).to_string(),
+                    "witness": { "to": checksum(pay_to), "validAfter": "0" }
+                }
+            },
+            "extensions": extensions
+        },
+        "paymentRequirements": {
+            "scheme": "exact",
+            "network": "eip155:8453",
+            "amount": "1000000",
+            "payTo": checksum(pay_to),
+            "maxTimeoutSeconds": 300,
+            "asset": checksum(asset),
+            "extra": { "name": "USD Coin", "version": "2", "assetTransferMethod": "permit2" }
+        }
+    })
+}
+
+#[derive(Clone)]
+struct RpcScript {
+    asset: Address,
+    payer: Address,
+    asset_deployed: bool,
+    payer_code: Vec<u8>,
+    allowance: Option<U256>,
+    balance: U256,
+}
+
+#[allow(
+    clippy::excessive_nesting,
+    clippy::get_first,
+    clippy::option_if_let_else,
+    reason = "JSON-RPC dispatch on method and selector"
+)]
+impl wiremock::Respond for RpcScript {
+    fn respond(&self, request: &wiremock::Request) -> wiremock::ResponseTemplate {
+        let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
+        let id = body
+            .get("id")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(1));
+        let method = body
+            .get("method")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let ok = |result: serde_json::Value| {
+            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": result
+            }))
+        };
+        match method {
+            "eth_getCode" => {
+                let addr = body
+                    .get("params")
+                    .and_then(|p| p.get(0))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|s| s.parse::<Address>().ok())
+                    .unwrap_or(Address::ZERO);
+                let code = if addr == self.asset {
+                    if self.asset_deployed {
+                        "0x6080604052"
+                    } else {
+                        "0x"
+                    }
+                } else if addr == self.payer {
+                    if self.payer_code.is_empty() {
+                        "0x"
+                    } else {
+                        return ok(serde_json::json!(format!(
+                            "0x{}",
+                            hex::encode(&self.payer_code)
+                        )));
+                    }
+                } else {
+                    "0x"
+                };
+                ok(serde_json::json!(code))
+            }
+            "eth_call" => {
+                let call = body.get("params").and_then(|p| p.get(0));
+                let data = call
+                    .and_then(|c| c.get("data").or_else(|| c.get("input")))
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("0x");
+                let selector = data.get(2..10).unwrap_or("").to_ascii_lowercase();
+                if selector == "dd62ed3e" {
+                    return match self.allowance {
+                        Some(value) => ok(serde_json::json!(format!("0x{value:064x}"))),
+                        None => {
+                            wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": id,
+                                "error": { "code": -32000, "message": "allowance rpc failed" }
+                            }))
+                        }
+                    };
+                }
+                if selector == "70a08231" {
+                    return ok(serde_json::json!(format!("0x{:064x}", self.balance)));
+                }
+                ok(serde_json::json!(
+                    "0x0000000000000000000000000000000000000000000000000000000000000000"
+                ))
+            }
+            _ => ok(serde_json::json!("0x")),
+        }
+    }
+}
+
+async fn mount_rpc(server: &wiremock::MockServer, script: RpcScript) {
+    use wiremock::matchers::method;
+    wiremock::Mock::given(method("POST"))
+        .respond_with(script)
+        .mount(server)
+        .await;
+}
+
+fn verify_reason(err: FacilitatorError) -> String {
+    match err {
+        FacilitatorError::Verification(e) => e.as_payment_problem().reason().as_str().to_owned(),
+        other => other.to_string(),
+    }
 }
 
 #[tokio::test]
@@ -226,4 +462,359 @@ fn find_default_asset_base_usdc() {
     .expect("base usdc");
     assert_eq!(info.symbol, "USDC");
     assert_eq!(info.decimals, 6);
+}
+
+#[tokio::test]
+async fn verify_6492_empty_allowlist_is_factory_not_allowed() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    let factory = Address::repeat_byte(0xF1);
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: Some(U256::from(1_000_000_u64)),
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let sig = wrap_6492(factory, Bytes::from(vec![0u8; 65]));
+    let err = fac
+        .verify(VerifyRequest::from(eip3009_request(payer, asset, &sig)))
+        .await
+        .expect_err("empty allowlist denies 6492");
+    assert_eq!(verify_reason(err), "eip6492_factory_not_allowed");
+}
+
+#[tokio::test]
+async fn settle_6492_empty_allowlist_is_failure_with_empty_tx() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    let factory = Address::repeat_byte(0xF1);
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: Some(U256::from(1_000_000_u64)),
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let sig = wrap_6492(factory, Bytes::from(vec![0u8; 65]));
+    let resp = fac
+        .settle(SettleRequest::from(eip3009_request(payer, asset, &sig)))
+        .await
+        .expect("settle returns structured failure");
+    match resp {
+        SettleResponse::Failure {
+            reason,
+            transaction,
+            ..
+        } => {
+            assert_eq!(reason.as_str(), "eip6492_factory_not_allowed");
+            assert!(transaction.is_empty());
+        }
+        other => panic!("expected Failure, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn verify_6492_allowlisted_factory_is_not_factory_not_allowed() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    let factory = Address::repeat_byte(0xF1);
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: Some(U256::from(1_000_000_u64)),
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri()))
+        .expect("try_new")
+        .with_eip6492_allowed_factories(vec![factory]);
+    let sig = wrap_6492(factory, Bytes::from(vec![0u8; 65]));
+    let err = fac
+        .verify(VerifyRequest::from(eip3009_request(payer, asset, &sig)))
+        .await
+        .expect_err("simulation still fails after allowlist");
+    assert_ne!(verify_reason(err), "eip6492_factory_not_allowed");
+}
+
+#[tokio::test]
+async fn settle_6492_allowlisted_factory_is_not_factory_not_allowed() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    let factory = Address::repeat_byte(0xF1);
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: Some(U256::from(1_000_000_u64)),
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri()))
+        .expect("try_new")
+        .with_eip6492_allowed_factories(vec![factory]);
+    let sig = wrap_6492(factory, Bytes::from(vec![0u8; 65]));
+    let outcome = fac
+        .settle(SettleRequest::from(eip3009_request(payer, asset, &sig)))
+        .await;
+    match outcome {
+        Ok(SettleResponse::Failure { reason, .. }) => {
+            assert_ne!(reason.as_str(), "eip6492_factory_not_allowed");
+        }
+        Err(err) => assert_ne!(verify_reason(err), "eip6492_factory_not_allowed"),
+        Ok(other) => panic!("unexpected success {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn undeployed_asset_is_asset_not_deployed_contract() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: false,
+            payer_code: vec![],
+            allowance: Some(U256::from(1_000_000_u64)),
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let sig = Bytes::from(vec![0u8; 65]);
+    let err = fac
+        .verify(VerifyRequest::from(eip3009_request(payer, asset, &sig)))
+        .await
+        .expect_err("undeployed asset");
+    assert_eq!(verify_reason(err), "asset_not_deployed_contract");
+}
+
+#[tokio::test]
+async fn permit2_allowance_rpc_err_without_extensions_is_412() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: None,
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &serde_json::json!({}),
+        )))
+        .await
+        .expect_err("allowance rpc fail-closed");
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+    ));
+}
+
+#[tokio::test]
+async fn permit2_allowance_rpc_err_with_eip2612_continues() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: None,
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &serde_json::json!({
+                "eip2612GasSponsoring": {
+                    "info": {
+                        "from": checksum(payer),
+                        "asset": checksum(asset),
+                        "spender": checksum(PERMIT2_ADDRESS),
+                        "amount": "1000000",
+                        "nonce": "0",
+                        "deadline": (now + 3600).to_string(),
+                        "signature": format!("0x{}", "11".repeat(65)),
+                        "version": "1"
+                    }
+                }
+            }),
+        )))
+        .await
+        .expect_err("simulation after eip2612 catch");
+    assert!(
+        !matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+        ),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn permit2_erc20_payload_stub_does_not_cover_without_facilitator_extension() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: None,
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &serde_json::json!({
+                "erc20ApprovalGasSponsoring": {
+                    "info": {
+                        "from": checksum(payer),
+                        "asset": checksum(asset),
+                        "spender": checksum(PERMIT2_ADDRESS),
+                        "amount": "1000000",
+                        "signedTransaction": "0xdead",
+                        "version": "1"
+                    }
+                }
+            }),
+        )))
+        .await
+        .expect_err("payload-only erc20 does not cover");
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+    ));
+}
+
+#[tokio::test]
+async fn permit2_allowance_rpc_err_with_facilitator_erc20_and_valid_tx_continues() {
+    use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_eips::eip2930::AccessList;
+    use alloy_network::TxSignerSync;
+    use alloy_primitives::TxKind;
+
+    let server = wiremock::MockServer::start().await;
+    let (signer, _) = wallet();
+    let payer = signer.address();
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            asset,
+            payer,
+            asset_deployed: true,
+            payer_code: vec![],
+            allowance: None,
+            balance: U256::from(1_000_000_u64),
+        },
+    )
+    .await;
+    let mut calldata = vec![0x09, 0x5e, 0xa7, 0xb3];
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(PERMIT2_ADDRESS.as_slice());
+    calldata.extend_from_slice(&[0u8; 32]);
+    let mut tx = TxEip1559 {
+        chain_id: 8453,
+        nonce: 0,
+        gas_limit: 80_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: TxKind::Call(asset),
+        value: U256::ZERO,
+        access_list: AccessList::default(),
+        input: calldata.into(),
+    };
+    let sig = signer.sign_transaction_sync(&mut tx).expect("sign");
+    let signed = format!(
+        "0x{}",
+        hex::encode(TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718())
+    );
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri()))
+        .expect("try_new")
+        .with_erc20_approval_gas_sponsoring();
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &serde_json::json!({
+                "erc20ApprovalGasSponsoring": {
+                    "info": {
+                        "from": checksum(payer),
+                        "asset": checksum(asset),
+                        "spender": checksum(PERMIT2_ADDRESS),
+                        "amount": "1000000",
+                        "signedTransaction": signed,
+                        "version": "1"
+                    }
+                }
+            }),
+        )))
+        .await
+        .expect_err("simulation after erc20 catch");
+    assert!(
+        !matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+        ),
+        "got {err:?}"
+    );
 }

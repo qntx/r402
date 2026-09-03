@@ -21,7 +21,7 @@ use compact_str::CompactString;
 use r402_facilitator::{
     Duplicate, Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
 };
-use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
+use r402_protocol::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment as wire;
 use r402_protocol::payment::UnixTimestamp;
@@ -155,6 +155,8 @@ pub struct Eip155ExactFacilitator<P> {
     eip6492_allowed_factories: Vec<Address>,
     /// Broadcast-but-unconfirmed settlement hashes keyed by signature hex.
     pending: Arc<dyn PendingSettlementStore>,
+    /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
+    erc20_approval_enabled: bool,
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -192,6 +194,7 @@ impl<P> Eip155ExactFacilitator<P> {
             settlement_cache,
             eip6492_allowed_factories: Vec::new(),
             pending: Arc::new(InMemoryPendingSettlementStore::new()),
+            erc20_approval_enabled: false,
         }
     }
 
@@ -206,6 +209,13 @@ impl<P> Eip155ExactFacilitator<P> {
     #[must_use]
     pub fn with_pending_store(mut self, store: Arc<dyn PendingSettlementStore>) -> Self {
         self.pending = store;
+        self
+    }
+
+    /// Register `erc20ApprovalGasSponsoring` on this facilitator (official `getExtension`).
+    #[must_use]
+    pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
+        self.erc20_approval_enabled = true;
         self
     }
 
@@ -281,7 +291,7 @@ where
     ) -> Result<wire::SettleResponse, FacilitatorError> {
         match &payload.payload {
             ExactPayload::Eip3009(eip3009) => {
-                let (contract, payment, eip712_domain) = verify::assert_valid_payment(
+                let (contract, payment, eip712_domain) = match verify::assert_valid_payment(
                     self.provider.inner(),
                     self.provider.chain(),
                     eip3009,
@@ -289,7 +299,18 @@ where
                     requirements,
                     self.clock_skew_tolerance,
                 )
-                .await?;
+                .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(err) => {
+                        return self.map_settle_error(
+                            err,
+                            pending_key,
+                            payload.payload.sender(),
+                            network,
+                        );
+                    }
+                };
                 let payer = payment.from;
                 match settle_payment(
                     &self.provider,
@@ -308,15 +329,27 @@ where
                 }
             }
             ExactPayload::Permit2(permit2) => {
-                let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
+                let (_erc20, payment, _eip712_domain) = match verify::assert_valid_permit2_payment(
                     self.provider.inner(),
                     self.provider.chain(),
                     permit2,
                     payload,
                     requirements,
                     self.clock_skew_tolerance,
+                    self.erc20_approval_enabled,
                 )
-                .await?;
+                .await
+                {
+                    Ok(prepared) => prepared,
+                    Err(err) => {
+                        return self.map_settle_error(
+                            err,
+                            pending_key,
+                            payload.payload.sender(),
+                            network,
+                        );
+                    }
+                };
                 let payer = payment.from;
                 match settle_permit2_payment(&self.provider, &payment).await {
                     Ok(tx_hash) => {
@@ -365,6 +398,12 @@ where
                     network,
                 ))
             }
+            Eip155ExactError::PaymentVerification(e) => Ok(settle_failure(
+                e.as_payment_problem().reason(),
+                Some(payer),
+                "",
+                network,
+            )),
             other => Err(other.into()),
         }
     }
@@ -479,6 +518,7 @@ where
                     payload,
                     requirements,
                     self.clock_skew_tolerance,
+                    self.erc20_approval_enabled,
                 )
                 .await?;
                 let payer =

@@ -9,6 +9,7 @@ use alloy_provider::bindings::IMulticall3;
 use alloy_provider::{MULTICALL3_ADDRESS, MulticallItem, Provider};
 use alloy_sol_types::{Eip712Domain, SolCall, SolEvent};
 use alloy_transport::TransportError;
+use r402_protocol::error::VerificationError;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
@@ -21,7 +22,6 @@ use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::error::Eip155ExactError;
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 use crate::signature::{ClassifiedSignature, classify_with_code};
-use r402_protocol::error::VerificationError;
 
 /// Prepared `transferWithAuthorization` call using a raw bytes signature.
 pub(super) struct TransferWithAuthorization0Call<P>(
@@ -462,8 +462,9 @@ async fn is_contract_deployed<P: Provider>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloy_primitives::{B256, Log as PrimLog, LogData};
+
+    use super::*;
 
     fn transfer_log(
         token: Address,

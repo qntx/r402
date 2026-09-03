@@ -26,7 +26,9 @@ client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "
 client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
 server = ["dep:r402-server"]
 facilitator = [
+    "dep:alloy-consensus",
     "dep:alloy-contract",
+    "dep:alloy-eips",
     "dep:alloy-network",
     "dep:alloy-provider",
     "dep:alloy-rpc-client",
@@ -55,7 +57,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+alloy-consensus = { workspace = true, optional = true }
 alloy-contract = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-provider = { workspace = true, optional = true }
 alloy-rpc-client = { workspace = true, optional = true }
@@ -76,12 +80,16 @@ tracing-core = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-consensus = { workspace = true }
+alloy-eips = { workspace = true }
 alloy-network = { workspace = true }
 alloy-provider = { workspace = true }
 alloy-signer-local = { workspace = true }
+alloy-sol-types = { workspace = true }
 alloy-transport-http = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
 url = { workspace = true }
+wiremock = { workspace = true }
 
 [[test]]
 name = "exact"

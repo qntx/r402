@@ -103,6 +103,7 @@ mod _dev_deps {
     use tokio as _;
     #[cfg(not(feature = "facilitator"))]
     use url as _;
+    use wiremock as _;
 }
 
 #[cfg(test)]

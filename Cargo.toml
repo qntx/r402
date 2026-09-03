@@ -82,7 +82,9 @@ wiremock = "0.6"
 # alloy-core (primitives, sol-types) is on its own 1.x release train.
 # The upper alloy stack (network, provider, transport, signer, rpc-*)
 # is on the 2.x line as of the Glamsterdam-hardfork preparation release.
+alloy-consensus = { version = "2.1", default-features = false, features = ["std", "k256"] }
 alloy-contract = "2.1"
+alloy-eips = { version = "2.1", default-features = false, features = ["std"] }
 alloy-network = "2.1"
 alloy-primitives = { version = "1.6", features = ["k256", "serde"] }
 alloy-provider = "2.1"

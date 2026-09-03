@@ -281,6 +281,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "borsh",
+ "k256",
  "serde",
  "thiserror 2.0.20",
 ]
@@ -6282,7 +6283,9 @@ dependencies = [
 name = "r402-evm"
 version = "0.18.0"
 dependencies = [
+ "alloy-consensus",
  "alloy-contract",
+ "alloy-eips",
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
@@ -6309,6 +6312,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "url",
+ "wiremock",
 ]
 
 [[package]]
