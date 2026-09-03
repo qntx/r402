@@ -132,6 +132,11 @@ impl<S: Signer + Send + Sync> SchemeNetworkServer for UptoSvmScheme<S> {
     ) -> impl Future<Output = Option<PaymentRequirements>> + Send + 'a {
         std::future::ready(escrow::zero_amount_refund(ctx))
     }
+
+    fn settles_on_cancel(&self) -> bool {
+        let _ = self;
+        true
+    }
 }
 
 impl<S: Signer + Send + Sync> UptoSvmScheme<S> {

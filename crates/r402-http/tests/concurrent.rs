@@ -26,7 +26,7 @@ use axum_core::extract::Request;
 use axum_core::response::Response;
 use http::StatusCode;
 use r402_http::server::{
-    PAYMENT_RESPONSE, SettlementMode, SettlementOverrides, UptoActualAmount,
+    BuildError, PAYMENT_RESPONSE, SettlementMode, SettlementOverrides, UptoActualAmount,
     set_settlement_overrides, settlement_overrides_header_name,
 };
 use tokio::sync::Notify;
@@ -34,7 +34,7 @@ use tower::Service;
 
 use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, SettleScript, StatusInner, call_layer,
-    eip155_requirements, eip155_tag, escrow_tag, middleware, payment_request, unpaid_request,
+    eip155_requirements, eip155_tag, escrow_tag, middleware, payment_request,
 };
 
 #[derive(Clone)]
@@ -105,6 +105,7 @@ fn concurrent_layer(
         .with_price_tag(eip155_tag())
         .unwrap()
         .with_settlement_mode(SettlementMode::Concurrent)
+        .expect("compatible settlement mode")
 }
 
 #[tokio::test]
@@ -223,14 +224,14 @@ async fn settle_failure_is_402() {
     assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
 }
 
-#[tokio::test]
-async fn mixed_auth_and_escrow_is_500() {
+#[test]
+fn mixed_auth_and_escrow_is_build_error() {
     let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_escrow())
+    let err = middleware(Arc::clone(&fac), FlowScheme::auth_and_escrow())
         .with_price_tags(vec![eip155_tag(), escrow_tag()])
         .unwrap()
-        .with_settlement_mode(SettlementMode::Concurrent);
-    let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        .with_settlement_mode(SettlementMode::Concurrent)
+        .expect_err("mixed authorization+escrow cannot use Concurrent");
+    assert!(matches!(err, BuildError::Mode(_)));
     assert_eq!(fac.settle_count(), 0);
 }

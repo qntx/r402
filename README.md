@@ -31,7 +31,7 @@ Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, SVM (
 
 ```toml
 [dependencies]
-r402 = { version = "0.18", features = ["evm", "http"] }
+r402 = { version = "0.19", features = ["evm", "http"] }
 ```
 
 `default = ["evm", "http"]`. Concordium is opt-in (`concordium`). SVM (Solana) is crate `r402-svm`. AVM (Algorand) is crate `r402-avm`.

@@ -6,6 +6,7 @@
 #![allow(
     clippy::doc_markdown,
     clippy::expect_used,
+    clippy::indexing_slicing,
     clippy::panic,
     clippy::unwrap_used,
     reason = "idiomatic test-code patterns"
@@ -18,13 +19,16 @@ mod harness;
 use std::sync::Arc;
 
 use http::{HeaderValue, StatusCode};
-use r402_http::server::{PAYMENT_REQUIRED, PAYMENT_SIGNATURE, SettlementMode, X402Middleware};
+use r402_http::server::{
+    BuildError, PAYMENT_REQUIRED, PAYMENT_SIGNATURE, SettlementMode, X402Middleware,
+};
 use r402_protocol::error::ErrorReason;
 use r402_protocol::network::ChainIdPattern;
 
 use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, SettleScript, SupportedScript, VerifyScript, call_layer,
-    eip155_requirements, eip155_tag, middleware, payment_request, unpaid_request, upfront_tag,
+    eip155_requirements, eip155_tag, escrow_tag, json_body, middleware, payment_request,
+    unpaid_request, upfront_tag,
 };
 
 #[tokio::test]
@@ -89,41 +93,40 @@ async fn permit2_is_412() {
     assert_eq!(response.status(), StatusCode::PRECONDITION_FAILED);
 }
 
-#[tokio::test]
-async fn missing_scheme_is_500() {
+#[test]
+fn missing_scheme_is_build_error() {
     let fac = Arc::new(FakeFacilitator::new());
-    let layer = X402Middleware::from_facilitator(Arc::clone(&fac))
+    let err = X402Middleware::from_facilitator(Arc::clone(&fac))
         .with_base_url(harness::base_url())
         .with_price_tag(eip155_tag())
-        .unwrap();
-    let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        .expect_err("unregistered scheme must fail at construct");
+    assert!(matches!(err, BuildError::MissingScheme { .. }));
 }
 
-#[tokio::test]
-async fn concurrent_upfront_is_500() {
+#[test]
+fn concurrent_upfront_is_build_error() {
     let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
+    let err = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
         .with_price_tag(upfront_tag())
         .unwrap()
-        .with_settlement_mode(SettlementMode::Concurrent);
-    let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        .with_settlement_mode(SettlementMode::Concurrent)
+        .expect_err("Concurrent upfront must fail at construct");
+    assert!(matches!(err, BuildError::Mode(_)));
 }
 
-#[tokio::test]
-async fn background_upfront_is_500() {
+#[test]
+fn background_upfront_is_build_error() {
     let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
+    let err = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
         .with_scheme(
             ChainIdPattern::wildcard("eip155"),
             FlowScheme::auth_and_upfront(),
         )
         .with_price_tag(upfront_tag())
         .unwrap()
-        .with_settlement_mode(SettlementMode::Background);
-    let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        .with_settlement_mode(SettlementMode::Background)
+        .expect_err("Background upfront must fail at construct");
+    assert!(matches!(err, BuildError::Mode(_)));
 }
 
 #[tokio::test]
@@ -159,4 +162,85 @@ async fn settle_failure_is_402() {
         .unwrap();
     let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
     assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+}
+
+#[tokio::test]
+async fn dynamic_missing_scheme_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = X402Middleware::from_facilitator(Arc::clone(&fac))
+        .with_base_url(harness::base_url())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![eip155_tag()]))
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "missing scheme");
+    assert_eq!(body["scheme"], "exact");
+    assert_eq!(body["network"], "eip155:1");
+}
+
+#[tokio::test]
+async fn dynamic_concurrent_upfront_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![upfront_tag()]))
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Concurrent)
+        .expect("dynamic mode is stored without static validation");
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "incompatible settlement mode");
+    assert_eq!(body["mode"], "concurrent");
+    assert_eq!(body["flow"], "upfront");
+}
+
+#[tokio::test]
+async fn dynamic_background_upfront_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_upfront())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![upfront_tag()]))
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Background)
+        .expect("dynamic mode is stored without static validation");
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "incompatible settlement mode");
+    assert_eq!(body["mode"], "background");
+    assert_eq!(body["flow"], "upfront");
+}
+
+#[tokio::test]
+async fn dynamic_concurrent_escrow_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = middleware(Arc::clone(&fac), FlowScheme::auth_and_escrow())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![eip155_tag(), escrow_tag()]))
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Concurrent)
+        .expect("dynamic mode is stored without static validation");
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "incompatible settlement mode");
+    assert_eq!(body["mode"], "concurrent");
+    assert_eq!(body["flow"], "escrow");
+}
+
+#[tokio::test]
+async fn dynamic_escrow_without_cancel_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = middleware(Arc::clone(&fac), FlowScheme::escrow_without_cancel())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![escrow_tag()]))
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "missing settle_on_cancel");
+    assert_eq!(body["scheme"], "exact");
 }

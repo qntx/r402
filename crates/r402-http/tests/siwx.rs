@@ -29,9 +29,9 @@ use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
 use r402_client::ClientExtension;
 use r402_http::server::{
-    BackgroundSettlementTracker, InMemoryPaidAddressStore, PAYMENT_REQUIRED, PAYMENT_RESPONSE,
-    PaidAddressStore, SIGN_IN_WITH_X, SIWX_KEY, SettlementMode, SiwxChain, SiwxClientExtension,
-    SiwxError, SiwxGate, SiwxOrigin, SiwxProof, SiwxSigner,
+    BackgroundSettlementTracker, BuildError, InMemoryPaidAddressStore, PAYMENT_REQUIRED,
+    PAYMENT_RESPONSE, PaidAddressStore, SIGN_IN_WITH_X, SIWX_KEY, SettlementMode, SiwxChain,
+    SiwxClientExtension, SiwxError, SiwxGate, SiwxOrigin, SiwxProof, SiwxSigner,
 };
 use r402_protocol::payment::{Base64Bytes, PaymentRequired};
 use serde_json::Value;
@@ -92,7 +92,8 @@ async fn unpaid_402_carries_challenge_from_configured_origin() {
         .with_siwx(gate(store))
         .with_price_tag(eip155_tag())
         .unwrap()
-        .with_settlement_mode(SettlementMode::Sequential);
+        .with_settlement_mode(SettlementMode::Sequential)
+        .expect("compatible settlement mode");
     let mut req = unpaid_request();
     let _ = req
         .headers_mut()
@@ -197,6 +198,45 @@ async fn auth_only_empty_tags_unpaid_is_402() {
     let body = decode_required(&response);
     assert!(body["extensions"].get(SIWX_KEY).is_some());
     assert_eq!(fac.verify_count(), 0);
+}
+
+#[test]
+fn empty_tags_before_auth_only_is_err() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let err = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_price_tags(vec![])
+        .expect_err("empty tags without auth_only");
+    assert_eq!(err, BuildError::EmptyPriceTags);
+}
+
+#[test]
+fn empty_tags_then_layer_with_siwx_clears_auth_only_is_err() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_auth_only(gate(store.clone()))
+        .with_price_tags(vec![])
+        .unwrap();
+    let err = layer
+        .with_siwx(gate(store))
+        .expect_err("replacing SIWX without auth_only on empty tags");
+    assert_eq!(err, BuildError::EmptyPriceTags);
+}
+
+#[tokio::test]
+async fn empty_tags_layer_with_auth_only_stays_ok() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_auth_only(gate(store.clone()))
+        .with_price_tags(vec![])
+        .unwrap()
+        .with_auth_only(gate(store))
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+    let body = decode_required(&response);
+    assert!(body["extensions"].get(SIWX_KEY).is_some());
 }
 
 #[tokio::test]
@@ -325,6 +365,7 @@ async fn background_settle_success_records_payer() {
         .with_price_tag(eip155_tag())
         .unwrap()
         .with_settlement_mode(SettlementMode::Background)
+        .expect("compatible settlement mode")
         .with_settlement_tracker(tracker.clone());
     let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -353,6 +394,7 @@ async fn background_settle_failure_does_not_record() {
         .with_price_tag(eip155_tag())
         .unwrap()
         .with_settlement_mode(SettlementMode::Background)
+        .expect("compatible settlement mode")
         .with_settlement_tracker(tracker.clone());
     let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
     assert_eq!(response.status(), StatusCode::OK);

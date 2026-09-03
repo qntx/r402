@@ -16,10 +16,11 @@ use tower::{Layer, Service};
 use url::Url;
 
 use super::SettlementMode;
+use super::builder::{BuildError, validate_static_layer};
 use super::fail::abort_response;
 use super::gate::Gate;
 use super::hooks::{DynGateHooks, GateHooks, ProtectedRequestOutcome};
-use super::pricing::{PriceTagSource, StaticPriceTags};
+use super::pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 
 /// Route-level resource metadata. `url` pins `ResourceInfo.url`; it does not waive `base_url`.
 #[derive(Debug, Clone)]
@@ -80,10 +81,102 @@ pub struct X402Layer<TSource> {
 
 impl X402Layer<StaticPriceTags> {
     /// Adds another static payment option.
-    #[must_use]
-    pub fn with_price_tag(mut self, price_tag: PriceTag) -> Self {
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError`] when the appended tag (or the existing list with the
+    /// current settlement mode) is invalid.
+    pub fn with_price_tag(mut self, price_tag: PriceTag) -> Result<Self, BuildError> {
         self.price_source = self.price_source.with_price_tag(price_tag);
+        self.validate_static()?;
+        Ok(self)
+    }
+
+    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError::Mode`] when `mode` is incompatible with a static tag's flow.
+    pub fn with_settlement_mode(mut self, mode: SettlementMode) -> Result<Self, BuildError> {
+        self.settlement_mode = mode;
+        self.validate_static()?;
+        Ok(self)
+    }
+
+    /// Enables SIWX access-grant and 402 challenges on this route.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError::EmptyPriceTags`] when this replacement is not auth-only
+    /// and the static tag list is empty.
+    #[cfg(feature = "siwx")]
+    pub fn with_siwx(mut self, gate: super::SiwxGate) -> Result<Self, BuildError> {
+        self.siwx = Some(Arc::new(gate));
+        self.validate_static()?;
+        Ok(self)
+    }
+
+    /// Enables SIWX with auth-only access-grant on this route.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError`] from static re-validation after the replacement.
+    #[cfg(feature = "siwx")]
+    pub fn with_auth_only(self, gate: super::SiwxGate) -> Result<Self, BuildError> {
+        self.with_siwx(gate.with_auth_only())
+    }
+
+    fn validate_static(&self) -> Result<(), BuildError> {
+        validate_static_layer(
+            &self.server,
+            self.price_source.tags(),
+            self.settlement_mode,
+            self.static_auth_only(),
+        )
+    }
+
+    fn static_auth_only(&self) -> bool {
+        #[cfg(feature = "siwx")]
+        {
+            self.siwx.as_ref().is_some_and(|g| g.is_auth_only())
+        }
+        #[cfg(not(feature = "siwx"))]
+        {
+            let _ = self;
+            false
+        }
+    }
+}
+
+impl X402Layer<DynamicPriceTags> {
+    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
+    ///
+    /// # Errors
+    ///
+    /// Always `Ok` after storing `mode`.
+    #[allow(
+        clippy::unnecessary_wraps,
+        clippy::missing_const_for_fn,
+        reason = "same Result signature as Static"
+    )]
+    pub fn with_settlement_mode(mut self, mode: SettlementMode) -> Result<Self, BuildError> {
+        self.settlement_mode = mode;
+        Ok(self)
+    }
+
+    /// Enables SIWX access-grant and 402 challenges on this route.
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_siwx(mut self, gate: super::SiwxGate) -> Self {
+        self.siwx = Some(Arc::new(gate));
         self
+    }
+
+    /// Enables SIWX with auth-only access-grant on this route.
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_auth_only(self, gate: super::SiwxGate) -> Self {
+        self.with_siwx(gate.with_auth_only())
     }
 }
 
@@ -136,13 +229,6 @@ impl<TSource> X402Layer<TSource> {
         self
     }
 
-    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
-    #[must_use]
-    pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
-        self.settlement_mode = mode;
-        self
-    }
-
     /// In-flight counter for [`SettlementMode::Background`] settle tasks.
     #[must_use]
     pub fn with_settlement_tracker(mut self, tracker: BackgroundSettlementTracker) -> Self {
@@ -158,21 +244,6 @@ impl<TSource> X402Layer<TSource> {
     {
         self.hooks = Some(Arc::new(hooks));
         self
-    }
-
-    /// Enables SIWX access-grant and 402 challenges on this route.
-    #[cfg(feature = "siwx")]
-    #[must_use]
-    pub fn with_siwx(mut self, gate: super::SiwxGate) -> Self {
-        self.siwx = Some(Arc::new(gate));
-        self
-    }
-
-    /// Enables SIWX with auth-only access-grant on this route.
-    #[cfg(feature = "siwx")]
-    #[must_use]
-    pub fn with_auth_only(self, gate: super::SiwxGate) -> Self {
-        self.with_siwx(gate.with_auth_only())
     }
 }
 

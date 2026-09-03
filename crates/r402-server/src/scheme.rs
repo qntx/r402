@@ -3,10 +3,12 @@
 use std::collections::HashMap;
 use std::future::Future;
 
+use compact_str::CompactString;
 use r402_facilitator::BoxFuture;
 use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainId;
 use r402_protocol::payment::{
-    PaymentRequired, PaymentRequirements, ResourceInfo, SupportedResponse,
+    PaymentRequired, PaymentRequirements, ResourceInfo, SupportedPaymentKind, SupportedResponse,
 };
 use serde_json::{Map, Value};
 
@@ -108,6 +110,96 @@ pub trait SchemeNetworkServer: Send + Sync {
     ) -> impl Future<Output = Option<PaymentRequirements>> + Send + 'a {
         async { None }
     }
+
+    /// `true` iff [`Self::settle_on_cancel`] can return `Some`.
+    ///
+    /// HTTP construct cannot await [`Self::settle_on_cancel`]. Default `false`.
+    fn settles_on_cancel(&self) -> bool {
+        false
+    }
+
+    /// Advertised `/supported` kind extra for this scheme. Default `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// [`FacilitatorSupportError`] when the advertised kind cannot serve this scheme.
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        let _ = (network, kind, facilitator_extensions);
+        Ok(())
+    }
+}
+
+/// Facilitator `/supported` kind is missing or its extra is unusable.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum FacilitatorSupportError {
+    /// No matching kind for this accept.
+    #[error("{scheme} on {network}: facilitator does not advertise this kind")]
+    KindMissing {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Advertised extra omits `feePayer`.
+    #[error("{scheme} on {network}: missing extra.feePayer")]
+    MissingFeePayer {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Advertised `feePayer` is not a valid address.
+    #[error("{scheme} on {network}: invalid extra.feePayer")]
+    InvalidFeePayer {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Advertised extra omits `receiverAuthorizer`.
+    #[error("{scheme} on {network}: missing extra.receiverAuthorizer")]
+    MissingReceiverAuthorizer {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Advertised `receiverAuthorizer` is the zero address.
+    #[error("{scheme} on {network}: extra.receiverAuthorizer is the zero address")]
+    ZeroReceiverAuthorizer {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+    /// Advertised `receiverAuthorizer` is not a usable address.
+    #[error("{scheme} on {network}: invalid extra.receiverAuthorizer")]
+    InvalidReceiverAuthorizer {
+        /// Wire scheme name.
+        scheme: CompactString,
+        /// Accept network.
+        network: ChainId,
+    },
+}
+
+impl FacilitatorSupportError {
+    /// Stable machine reason for HTTP/MCP mapping.
+    #[must_use]
+    pub const fn reason(&self) -> &'static str {
+        match self {
+            Self::KindMissing { .. } => "kind_missing",
+            Self::MissingFeePayer { .. } => "missing_fee_payer",
+            Self::InvalidFeePayer { .. } => "invalid_fee_payer",
+            Self::MissingReceiverAuthorizer { .. } => "missing_receiver_authorizer",
+            Self::ZeroReceiverAuthorizer { .. } => "zero_receiver_authorizer",
+            Self::InvalidReceiverAuthorizer { .. } => "invalid_receiver_authorizer",
+        }
+    }
 }
 
 /// Object-safe erasure of [`SchemeNetworkServer`].
@@ -147,6 +239,21 @@ pub trait DynSchemeNetworkServer: Send + Sync {
         &'a self,
         ctx: &'a VerifiedPaymentCanceledContext,
     ) -> BoxFuture<'a, Option<PaymentRequirements>>;
+
+    /// See [`SchemeNetworkServer::settles_on_cancel`].
+    fn settles_on_cancel(&self) -> bool;
+
+    /// See [`SchemeNetworkServer::validate_facilitator_support`].
+    ///
+    /// # Errors
+    ///
+    /// [`FacilitatorSupportError`] when the advertised kind cannot serve this scheme.
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError>;
 }
 
 impl<T: SchemeNetworkServer + ?Sized> DynSchemeNetworkServer for T {
@@ -196,5 +303,23 @@ impl<T: SchemeNetworkServer + ?Sized> DynSchemeNetworkServer for T {
         ctx: &'a VerifiedPaymentCanceledContext,
     ) -> BoxFuture<'a, Option<PaymentRequirements>> {
         Box::pin(<Self as SchemeNetworkServer>::settle_on_cancel(self, ctx))
+    }
+
+    fn settles_on_cancel(&self) -> bool {
+        <Self as SchemeNetworkServer>::settles_on_cancel(self)
+    }
+
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        <Self as SchemeNetworkServer>::validate_facilitator_support(
+            self,
+            network,
+            kind,
+            facilitator_extensions,
+        )
     }
 }

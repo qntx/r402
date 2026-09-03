@@ -41,7 +41,10 @@ pub use payment_flow::{
 };
 pub use required::PaymentRequiredBuildContext;
 pub use resource::ResourceServer;
-pub use scheme::{DynSchemeNetworkServer, SchemeNetworkServer, SchemePaymentRequiredContext};
+pub use scheme::{
+    DynSchemeNetworkServer, FacilitatorSupportError, SchemeNetworkServer,
+    SchemePaymentRequiredContext,
+};
 pub use settle::CompletedSettlement;
 pub use settlement::{
     AfterHandler, BackgroundSettlementTracker, IncompatibleSettlementMode, ScheduledSettlement,

@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use http::StatusCode;
 use r402_http::server::{
-    GateHooks, PAYMENT_REQUIRED, PAYMENT_RESPONSE, ProtectedRequestOutcome, ResourceServer,
-    SettlementMode,
+    BuildError, GateHooks, PAYMENT_REQUIRED, PAYMENT_RESPONSE, ProtectedRequestOutcome,
+    ResourceServer, SettlementMode,
 };
 use r402_http::{ensure_expose_headers, merge_private};
 use r402_protocol::network::ChainIdPattern;
@@ -50,7 +50,8 @@ async fn unpaid_is_402_with_payment_required() {
     let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
         .with_price_tag(eip155_tag())
         .unwrap()
-        .with_settlement_mode(SettlementMode::Sequential);
+        .with_settlement_mode(SettlementMode::Sequential)
+        .expect("compatible settlement mode");
     let response = call_layer(layer, OkInner, unpaid_request()).await;
     assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
     assert!(
@@ -172,14 +173,13 @@ async fn grant_access_bypasses_payment() {
     assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
 }
 
-#[tokio::test]
-async fn empty_tags_bypass() {
+#[test]
+fn empty_tags_are_build_error() {
     let fac = Arc::new(FakeFacilitator::new());
-    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+    let err = middleware(Arc::clone(&fac), FlowScheme::authorization())
         .with_price_tags(vec![])
-        .unwrap();
-    let response = call_layer(layer, OkInner, unpaid_request()).await;
-    assert_eq!(response.status(), StatusCode::OK);
+        .expect_err("empty static tags are not a layer bypass");
+    assert_eq!(err, BuildError::EmptyPriceTags);
     assert_eq!(fac.settle_count(), 0);
 }
 

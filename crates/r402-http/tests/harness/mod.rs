@@ -1,4 +1,4 @@
-//! Shared Sequential HTTP test helpers.
+//! Shared HTTP test helpers.
 
 #![allow(
     dead_code,
@@ -27,7 +27,7 @@ use axum_core::response::Response;
 use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
 use r402_facilitator::Facilitator;
-use r402_http::server::{PAYMENT_SIGNATURE, StaticPriceTags, X402Layer, X402Middleware};
+use r402_http::server::{PAYMENT_SIGNATURE, PriceTagSource, X402Layer, X402Middleware};
 use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{
@@ -262,6 +262,13 @@ impl FlowScheme {
         )
     }
 
+    pub fn escrow_without_cancel() -> Self {
+        Self::from_config(
+            PaymentFlowConfig::new(vec![PaymentFlowName::Escrow], PaymentFlowName::Escrow),
+            false,
+        )
+    }
+
     fn from_config(config: PaymentFlowConfig, settle_on_cancel: bool) -> Self {
         let mut flows = HashMap::new();
         flows.insert(SDK_DEFAULT_ASSET_TRANSFER_METHOD.into(), config);
@@ -283,6 +290,10 @@ impl SchemeNetworkServer for FlowScheme {
 
     fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
         &self.flows
+    }
+
+    fn settles_on_cancel(&self) -> bool {
+        self.settle_on_cancel
     }
 
     fn settle_on_cancel<'a>(
@@ -377,11 +388,23 @@ impl ResourceServerHooks for SkipVerifyThenHandler {
     }
 }
 
-pub async fn call_layer<S>(layer: X402Layer<StaticPriceTags>, inner: S, req: Request) -> Response
+pub async fn call_layer<S, TSource>(layer: X402Layer<TSource>, inner: S, req: Request) -> Response
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
+    TSource: PriceTagSource,
 {
     let mut svc = layer.layer(inner);
     svc.call(req).await.expect("infallible")
+}
+
+pub async fn json_body(response: Response) -> serde_json::Value {
+    use http_body_util::BodyExt;
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    serde_json::from_slice(&bytes).expect("json")
 }

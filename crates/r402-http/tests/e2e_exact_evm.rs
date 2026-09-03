@@ -176,7 +176,8 @@ async fn serve_paid(fac_uri: &str, tag: r402_protocol::payment::PriceTag) -> Url
         .with_scheme(ChainIdPattern::wildcard("eip155"), Eip155Exact)
         .with_price_tag(tag)
         .expect("price tag")
-        .with_settlement_mode(SettlementMode::Sequential);
+        .with_settlement_mode(SettlementMode::Sequential)
+        .expect("compatible settlement mode");
     let app = Router::new().route("/paid", get(ok_handler).layer(layer));
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -196,7 +197,8 @@ async fn serve_paid_in_process(
         .with_scheme(ChainIdPattern::wildcard("eip155"), Eip155Exact)
         .with_price_tag(tag)
         .expect("price tag")
-        .with_settlement_mode(SettlementMode::Sequential);
+        .with_settlement_mode(SettlementMode::Sequential)
+        .expect("compatible settlement mode");
     let app = Router::new().route("/paid", get(ok_handler).layer(layer));
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");

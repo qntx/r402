@@ -3,7 +3,7 @@
 //! # Feature Flags
 //!
 //! - `client` — reqwest-middleware buyer: 402 → `Payment-Signature` retry
-//! - `server` — Axum layer / Sequential resource-server gate
+//! - `server` — Axum layer / Sequential / Concurrent / Background resource-server gate
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
@@ -52,6 +52,7 @@ mod _dev_deps {
     use compact_str as _;
     #[cfg(not(any(feature = "client", feature = "server")))]
     use http as _;
+    use http_body_util as _;
     #[cfg(not(feature = "client"))]
     use r402_client as _;
     use r402_evm as _;

@@ -246,6 +246,10 @@ impl SchemeNetworkServer for FlowScheme {
         &self.flows
     }
 
+    fn settles_on_cancel(&self) -> bool {
+        self.cancel.is_some()
+    }
+
     fn settle_on_cancel<'a>(
         &'a self,
         _: &'a VerifiedPaymentCanceledContext,

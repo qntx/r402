@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Breaking
+
+- Workspace version **0.19.0**. GitHub `0.18.0` at `6363c18` was never
+  tagged; crates.io remains 0.17.1 until humans publish 0.19.
+- `BuildError` expanded (`MissingScheme`, `PaymentFlow`, `Mode`,
+  `EmptyPriceTags`, `MissingSettleOnCancel`); no longer `Copy`.
+- `X402Layer::with_price_tag` and `with_settlement_mode` return
+  `Result`. Static `with_siwx` / `with_auth_only` return `Result`.
+- Empty static price tags fail unless `with_auth_only` was already set.
+- `SchemeNetworkServer::settles_on_cancel` /
+  `validate_facilitator_support` (defaulted).
+
 ### Added
 
 - `SECURITY.md` — private disclosure via GitHub security advisories for
@@ -19,14 +31,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 - **`r402-algorand` crate** — renamed to **`r402-avm`**. Types `AlgorandExact` /
   `ExactAvmPayload` and CAIP-2 `algorand:` are unchanged. crates.io first
-  publish is `r402-avm` 0.18.0; last `r402-algorand` remains 0.17.1 (not yanked).
+  publish is `r402-avm` 0.19.0; last `r402-algorand` remains 0.17.1 (not yanked).
   No alias crate. No umbrella `avm` feature.
 - **`r402-solana` crate** — renamed to **`r402-svm`**. Types `SolanaExact` /
   `UptoSvmScheme` and CAIP-2 `solana:` are unchanged. crates.io resumes
-  `r402-svm` at 0.18.0; last `r402-solana` remains 0.17.1 (not yanked).
+  `r402-svm` at 0.19.0; last `r402-solana` remains 0.17.1 (not yanked).
   No alias crate. No umbrella `svm` feature.
-- Product README restored for 0.18 (badges, facilitator quote, mermaid,
-  QuantX footer). Install/API stay `features = ["evm","http"]`, three-arg
+- Product README restored for 0.19 (unpublished 0.18 crate split, shipping
+  as 0.19). Install/API stay `features = ["evm","http"]`, three-arg
   `price_tag`, required `with_base_url`. Concordium is listed; Tron is
   experimental; Casper is extra — neither is an x402 protocol mechanism.
 - Module roots are `foo.rs` XOR `foo/mod.rs`. `scripts/check-layout.sh`

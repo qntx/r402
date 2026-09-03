@@ -32,9 +32,11 @@ CI builds on stable; match that locally with `rustup`.
 `apt-get install protobuf-compiler libssl-dev pkg-config`). The Hiero SDK
 compiles `hedera-proto` at build time; there is no vendored `protoc`.
 
-The quality bar in [`Justfile`](Justfile) uses `cargo +nightly` for
-`fmt`, `clippy`, and rustdoc. Install nightly once (`rustup toolchain
-install nightly`) if you run those recipes.
+CI clippy is **stable** `-D warnings` via `qntx/workflows`
+`ci-rust.yml@v2` (GitHub currently rustc 1.98). Do not add
+`-A unknown-lints` to CI. Justfile `fmt` / `clippy` / `doc` stay
+`cargo +nightly` and are **local-only**. Install nightly once
+(`rustup toolchain install nightly`) if you run those recipes.
 
 ### Quality Gates (run before pushing)
 
@@ -44,13 +46,20 @@ just all
 just test
 ```
 
-Equivalent cargo invocations:
+CI-equivalent cargo invocations:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+```
+
+Local Justfile equivalents (`+nightly`, not CI):
 
 ```bash
 cargo +nightly fmt --all --check
 cargo +nightly clippy --workspace --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo +nightly doc --workspace --all-features --no-deps
-cargo test --workspace --all-features
 ```
 
 For dependency hygiene:
