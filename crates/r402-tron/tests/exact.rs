@@ -72,14 +72,15 @@ fn price_tag_is_three_arg_eip3009_default() {
 
 #[test]
 fn price_tag_third_arg_selects_permit2() {
-    let deployment = USDT::nile().clone().with_tip712("Tether USD", "1");
     let tag = TronExact::price_tag(
         pay_to(),
-        &deployment.amount(U256::from(1_000_000u64)),
+        &USDT::nile().amount(U256::from(1_000_000u64)),
         Some(AssetTransferMethod::Permit2),
     );
     let extra: PaymentRequirementsExtra =
         serde_json::from_value(tag.requirements.extra.unwrap()).unwrap();
+    assert!(extra.name.is_empty());
+    assert!(extra.version.is_empty());
     assert_eq!(
         extra.asset_transfer_method,
         Some(AssetTransferMethod::Permit2)
@@ -165,10 +166,9 @@ async fn client_accepts_and_signs_eip3009_locally() {
 #[tokio::test]
 async fn client_accepts_and_signs_permit2_locally() {
     let client = TronExactClient::new(Arc::new(signer()));
-    let deployment = USDT::nile().clone().with_tip712("Tether USD", "1");
     let tag = TronExact::price_tag(
         pay_to(),
-        &deployment.amount(U256::from(1_000_000u64)),
+        &USDT::nile().amount(U256::from(1_000_000u64)),
         Some(AssetTransferMethod::Permit2),
     );
     let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))

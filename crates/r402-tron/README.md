@@ -29,9 +29,14 @@ Tron chain support for the [x402 payment protocol][x402], part of the
 ## Quick Start (server price tag)
 
 ```rust,ignore
-use r402_tron::{TronExact, USDT};
+use alloy_primitives::U256;
+use r402_tron::{AssetTransferMethod, TronExact, USDT};
 
-let tag = TronExact::price_tag(pay_to, &USDT::nile().amount(1_000_000u64), None);
+let tag = TronExact::price_tag(
+    pay_to,
+    &USDT::nile().amount(U256::from(1_000_000u64)),
+    Some(AssetTransferMethod::Permit2),
+);
 ```
 
 ## License

@@ -4,7 +4,7 @@
 //! composite [`verify_payment`] / [`verify_permit2_payment`] functions.
 
 use alloy_primitives::{Address as EvmAddress, U256};
-use alloy_sol_types::{Eip712Domain, SolCall, SolStruct, eip712_domain};
+use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
 use r402_protocol::error::VerificationError;
 use r402_protocol::network::ChainId;
 use r402_protocol::payment::UnixTimestamp;
@@ -154,14 +154,9 @@ async fn assert_nonce_unused(
     nonce: alloy_primitives::B256,
 ) -> Result<(), TronExactError> {
     let call = eip3009::authorizationStateCall { authorizer, nonce };
-    let calldata = eip3009::authorizationStateCall::abi_encode(&call);
     let result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            token,
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), token, &call)
         .await?;
     let padded: [u8; 32] = result
         .get(..32)
@@ -213,18 +208,13 @@ pub(super) async fn verify_payment(
         nonce: payment.nonce,
         signature: payment.signature.clone(),
     };
-    let calldata = eip3009::transferWithAuthorizationCall::abi_encode(&call);
     let token = eip712_domain
         .verifying_contract
         .ok_or(TronExactError::MissingTip712Domain)?;
 
     let _result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            token,
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), token, &call)
         .await
         .map_err(|e| {
             TronExactError::TronGrid(format!("transferWithAuthorization simulation failed: {e}"))
@@ -384,14 +374,9 @@ pub(super) async fn verify_permit2_payment(
         },
         signature: payment.signature.clone(),
     };
-    let calldata = crate::chain::contracts::x402_exact_permit2_proxy::settleCall::abi_encode(&call);
     let _result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            proxy_addr.as_evm(),
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), proxy_addr.as_evm(), &call)
         .await
         .map_err(|e| TronExactError::TronGrid(format!("permit2 settle simulation failed: {e}")))?;
 

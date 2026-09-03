@@ -69,6 +69,7 @@ url = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 url = { workspace = true }
+wiremock = { workspace = true }
 
 [[test]]
 name = "exact"

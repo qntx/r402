@@ -56,13 +56,8 @@ impl TronExact {
         transfer_method: Option<AssetTransferMethod>,
     ) -> wire::PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let extra = asset.token.tip712.as_ref().map(|tip712| {
-            PaymentRequirementsExtra::new(
-                tip712.name.clone(),
-                tip712.version.clone(),
-                transfer_method,
-            )
-        });
+        let extra =
+            PaymentRequirementsExtra::from_deployment(asset.token.tip712.clone(), transfer_method);
         let requirements = wire::PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
@@ -71,7 +66,7 @@ impl TronExact {
             asset.token.address.to_string().into(),
             300,
         )
-        .with_optional_extra(extra.and_then(|e| serde_json::to_value(e).ok()));
+        .with_optional_extra(extra);
         wire::PriceTag::new(requirements)
     }
 }
@@ -98,6 +93,37 @@ mod tests {
         let extra = tag.requirements.extra.unwrap();
         assert_eq!(extra.get("name"), Some(&serde_json::json!("Tether USD")));
         assert_eq!(extra.get("version"), Some(&serde_json::json!("1")));
+    }
+
+    #[test]
+    fn price_tag_permit2_without_tip712_emits_method() {
+        let deployment =
+            TronTokenDeployment::new(TronChainReference::NILE, Address::from_bytes([0u8; 20]), 6);
+        let pay_to = Address::from_bytes([1u8; 20]);
+        let tag = TronExact::price_tag(
+            pay_to,
+            &deployment.amount(U256::from(1_000_000u64)),
+            Some(AssetTransferMethod::Permit2),
+        );
+        let extra = tag.requirements.extra.expect("permit2 extra");
+        assert_eq!(extra.get("name"), Some(&serde_json::json!("")));
+        assert_eq!(extra.get("version"), Some(&serde_json::json!("")));
+        assert_eq!(
+            extra.get("assetTransferMethod"),
+            Some(&serde_json::json!("permit2"))
+        );
+    }
+
+    #[test]
+    fn price_tag_without_tip712_or_method_omits_extra() {
+        let deployment = TronTokenDeployment::new(
+            TronChainReference::MAINNET,
+            Address::from_bytes([0u8; 20]),
+            6,
+        );
+        let pay_to = Address::from_bytes([1u8; 20]);
+        let tag = TronExact::price_tag(pay_to, &deployment.amount(U256::from(1_000_000u64)), None);
+        assert!(tag.requirements.extra.is_none());
     }
 
     #[test]

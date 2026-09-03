@@ -3,8 +3,7 @@
 //! Builds, signs, broadcasts, and confirms `transferWithAuthorization` and
 //! `x402ExactPermit2Proxy.settle` transactions via the `TronGrid` HTTP API.
 
-use alloy_primitives::{Bytes, U256};
-use alloy_sol_types::SolCall;
+use alloy_primitives::U256;
 
 use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
@@ -35,14 +34,11 @@ pub(super) async fn settle_payment(
         nonce: payment.nonce,
         signature: payment.signature.clone(),
     };
-    let calldata = eip3009::transferWithAuthorizationCall::abi_encode(&call);
     let token = eip712_domain
         .verifying_contract
         .ok_or(TronExactError::MissingTip712Domain)?;
 
-    let tx_id = provider
-        .send_contract_call(token, Bytes::from(calldata))
-        .await?;
+    let tx_id = provider.send_contract_call(token, &call).await?;
     Ok(tx_id)
 }
 
@@ -73,10 +69,8 @@ pub(super) async fn settle_permit2_payment(
         },
         signature: payment.signature.clone(),
     };
-    let calldata = x402_exact_permit2_proxy::settleCall::abi_encode(&call);
-
     let tx_id = provider
-        .send_contract_call(proxy_addr.as_evm(), Bytes::from(calldata))
+        .send_contract_call(proxy_addr.as_evm(), &call)
         .await?;
     Ok(tx_id)
 }

@@ -26,8 +26,6 @@
 
 #[cfg(not(feature = "facilitator"))]
 use compact_str as _;
-#[cfg(not(any(feature = "server", feature = "facilitator")))]
-use serde_json as _;
 #[cfg(feature = "telemetry")]
 use tracing_core as _;
 
@@ -39,6 +37,8 @@ mod unused_dev_deps {
     use tokio as _;
     #[cfg(not(feature = "facilitator"))]
     use url as _;
+    #[cfg(not(feature = "facilitator"))]
+    use wiremock as _;
 }
 
 pub mod chain;

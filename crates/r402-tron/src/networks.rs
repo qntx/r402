@@ -168,9 +168,14 @@ pub fn find_default_tron_asset(asset: &str, network: &ChainId) -> Option<Default
 /// [`TronTokenDeployment::amount`] for a fluent pricing API:
 ///
 /// ```ignore
-/// use r402_tron::{TronExact, USDT};
+/// use alloy_primitives::U256;
+/// use r402_tron::{AssetTransferMethod, TronExact, USDT};
 ///
-/// let tag = TronExact::price_tag(pay_to, &USDT::mainnet().amount(1_000_000u64), None);
+/// let tag = TronExact::price_tag(
+///     pay_to,
+///     &USDT::mainnet().amount(U256::from(1_000_000u64)),
+///     Some(AssetTransferMethod::Permit2),
+/// );
 /// ```
 #[derive(Debug, Clone, Copy)]
 #[allow(

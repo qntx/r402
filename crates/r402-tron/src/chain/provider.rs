@@ -21,6 +21,7 @@ use std::time::Duration;
 use alloy_primitives::{Address as EvmAddress, Bytes, U256, hex};
 use alloy_signer::Signer;
 use alloy_signer_local::PrivateKeySigner;
+use alloy_sol_types::SolCall;
 use r402_protocol::network::{ChainId, ChainProvider};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -94,15 +95,22 @@ impl Debug for TronGridClient {
     }
 }
 
+fn is_loopback(url: &Url) -> bool {
+    url.host_str()
+        .is_some_and(|host| host == "127.0.0.1" || host == "localhost" || host == "::1")
+}
+
 impl TronGridClient {
     /// Creates a new client pointed at the given `TronGrid`-compatible base URL
     /// (e.g. `https://api.trongrid.io`).
     #[must_use]
     pub fn new(base_url: Url) -> Self {
-        Self {
-            base_url,
-            http: reqwest::Client::new(),
+        let mut builder = reqwest::Client::builder();
+        if is_loopback(&base_url) {
+            builder = builder.no_proxy();
         }
+        let http = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        Self { base_url, http }
     }
 
     /// Creates a client with a caller-supplied `reqwest::Client` (for
@@ -143,17 +151,17 @@ impl TronGridClient {
     ///
     /// Returns [`TronExactError::TronGrid`] on transport failure or if the
     /// node reports the call did not succeed.
-    pub async fn trigger_constant_contract(
+    pub async fn trigger_constant_contract<C: SolCall + Sync>(
         &self,
         owner: EvmAddress,
         contract: EvmAddress,
-        calldata: &Bytes,
+        call: &C,
     ) -> Result<Bytes, TronExactError> {
-        let (selector, parameter) = split_calldata(calldata);
+        let (function_selector, parameter) = encode_trigger(call);
         let body = json!({
             "owner_address": format!("41{}", hex::encode(owner)),
             "contract_address": format!("41{}", hex::encode(contract)),
-            "function_selector": selector,
+            "function_selector": function_selector,
             "parameter": parameter,
             "visible": false,
         });
@@ -192,18 +200,18 @@ impl TronGridClient {
     ///
     /// Returns [`TronExactError::TronGrid`] on transport failure or if the
     /// node rejects the call (e.g. insufficient energy/bandwidth estimate).
-    pub async fn trigger_smart_contract(
+    pub async fn trigger_smart_contract<C: SolCall + Sync>(
         &self,
         owner: EvmAddress,
         contract: EvmAddress,
-        calldata: &Bytes,
+        call: &C,
         fee_limit: u64,
     ) -> Result<UnsignedTransaction, TronExactError> {
-        let (selector, parameter) = split_calldata(calldata);
+        let (function_selector, parameter) = encode_trigger(call);
         let body = json!({
             "owner_address": format!("41{}", hex::encode(owner)),
             "contract_address": format!("41{}", hex::encode(contract)),
-            "function_selector": selector,
+            "function_selector": function_selector,
             "parameter": parameter,
             "fee_limit": fee_limit,
             "call_value": 0,
@@ -343,17 +351,13 @@ impl TronGridClient {
     }
 }
 
-/// Splits full ABI calldata (4-byte selector + arguments) into the
-/// `(function_selector, parameter)` shape `TronGrid`'s trigger endpoints
-/// expect: a human-readable signature is NOT required by `TronGrid` for the
-/// `parameter` field — only the hex-encoded argument words are needed,
-/// while `function_selector` here is passed as the raw 4-byte selector hex
-/// so nodes that require a textual signature should instead be configured
-/// with `contracts::*::SIGNATURE` constants at the call site.
-fn split_calldata(calldata: &Bytes) -> (String, String) {
-    let selector = hex::encode(calldata.get(..4).unwrap_or_default());
-    let parameter = hex::encode(calldata.get(4..).unwrap_or_default());
-    (selector, parameter)
+/// java-tron `parseMethod` keccak256s `function_selector` as UTF-8 and takes
+/// the first 4 bytes. The textual ABI signature (`balanceOf(address)`) hashes
+/// to the real selector; hex of the 4-byte selector does not.
+fn encode_trigger<C: SolCall>(call: &C) -> (&'static str, String) {
+    let mut parameter = Vec::new();
+    call.abi_encode_raw(&mut parameter);
+    (C::SIGNATURE, hex::encode(parameter))
 }
 
 /// Configuration for constructing a [`TronChainProvider`].
@@ -447,13 +451,9 @@ impl TronChainProvider {
         account: EvmAddress,
     ) -> Result<U256, TronExactError> {
         let call = crate::chain::contracts::trc20::balanceOfCall { account };
-        let calldata =
-            <crate::chain::contracts::trc20::balanceOfCall as alloy_sol_types::SolCall>::abi_encode(
-                &call,
-            );
         let result = self
             .grid
-            .trigger_constant_contract(self.signer_address(), token, &Bytes::from(calldata))
+            .trigger_constant_contract(self.signer_address(), token, &call)
             .await?;
         let padded: [u8; 32] = result
             .get(..32)
@@ -468,14 +468,14 @@ impl TronChainProvider {
     ///
     /// Returns a [`TronExactError`] variant on any step failure (request
     /// construction, signing, broadcast, or confirmation timeout/failure).
-    pub async fn send_contract_call(
+    pub async fn send_contract_call<C: SolCall + Sync>(
         &self,
         contract: EvmAddress,
-        calldata: Bytes,
+        call: &C,
     ) -> Result<String, TronExactError> {
         let unsigned = self
             .grid
-            .trigger_smart_contract(self.signer_address(), contract, &calldata, self.fee_limit)
+            .trigger_smart_contract(self.signer_address(), contract, call, self.fee_limit)
             .await?;
         let signature = self
             .signer
@@ -511,12 +511,70 @@ impl ChainProvider for TronChainProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain::contracts::trc20::balanceOfCall;
 
     #[test]
-    fn split_calldata_extracts_selector_and_parameter() {
-        let calldata = Bytes::from(vec![0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04]);
-        let (selector, parameter) = split_calldata(&calldata);
-        assert_eq!(selector, "deadbeef");
-        assert_eq!(parameter, "01020304");
+    fn encode_trigger_uses_textual_abi_signature() {
+        let call = balanceOfCall {
+            account: EvmAddress::ZERO,
+        };
+        let (selector, parameter) = encode_trigger(&call);
+        assert_eq!(selector, "balanceOf(address)");
+        assert_ne!(selector, hex::encode(balanceOfCall::SELECTOR));
+        let mut raw = Vec::new();
+        call.abi_encode_raw(&mut raw);
+        assert_eq!(parameter, hex::encode(raw));
+        assert!(!parameter.starts_with(&hex::encode(balanceOfCall::SELECTOR)));
+    }
+
+    #[tokio::test]
+    async fn trigger_constant_contract_sends_textual_function_selector() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/wallet/triggerconstantcontract"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "result": { "result": true },
+                "constant_result": [
+                    "00000000000000000000000000000000000000000000000000000000000f4240"
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let client = TronGridClient::new(Url::parse(&server.uri()).expect("mock url"));
+        let call = balanceOfCall {
+            account: EvmAddress::ZERO,
+        };
+        let result = client
+            .trigger_constant_contract(EvmAddress::ZERO, EvmAddress::ZERO, &call)
+            .await
+            .expect("mock trigger");
+        assert_eq!(result.len(), 32);
+
+        let requests = server.received_requests().await.expect("recorded");
+        let body: Value = serde_json::from_slice(
+            &requests
+                .first()
+                .expect("one triggerconstantcontract request")
+                .body,
+        )
+        .expect("json body");
+        let sent_selector = body
+            .get("function_selector")
+            .and_then(Value::as_str)
+            .expect("function_selector");
+        assert_eq!(sent_selector, "balanceOf(address)");
+        let selector_hex = hex::encode(balanceOfCall::SELECTOR);
+        assert_ne!(sent_selector, selector_hex);
+        let mut raw = Vec::new();
+        call.abi_encode_raw(&mut raw);
+        let parameter_hex = hex::encode(raw);
+        assert_eq!(
+            body.get("parameter").and_then(Value::as_str),
+            Some(parameter_hex.as_str())
+        );
     }
 }

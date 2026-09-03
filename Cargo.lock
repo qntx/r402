@@ -6436,6 +6436,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "url",
+ "wiremock",
 ]
 
 [[package]]

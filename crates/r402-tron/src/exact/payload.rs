@@ -187,6 +187,45 @@ impl PaymentRequirementsExtra {
             asset_transfer_method,
         }
     }
+
+    /// Builds serialized `extra` from TIP-712 domain data and an optional method.
+    ///
+    /// Returns `None` when both `tip712` and `method` are absent. Permit2-only
+    /// tokens (canonical USDT) have no TIP-712 domain; `Some(Permit2)` still
+    /// emits `assetTransferMethod` with empty `name`/`version`.
+    #[must_use]
+    pub fn from_deployment(
+        tip712: Option<crate::chain::TokenDeploymentTip712>,
+        method: Option<AssetTransferMethod>,
+    ) -> Option<serde_json::Value> {
+        let extra = match (tip712, method) {
+            (Some(tip712), method) => Self::from(tip712).with_transfer_method(method),
+            (None, Some(method)) => Self {
+                name: String::new(),
+                version: String::new(),
+                asset_transfer_method: Some(method),
+            },
+            (None, None) => return None,
+        };
+        serde_json::to_value(extra).ok()
+    }
+
+    /// Sets the asset transfer method, consuming and returning `self`.
+    #[must_use]
+    pub const fn with_transfer_method(mut self, method: Option<AssetTransferMethod>) -> Self {
+        self.asset_transfer_method = method;
+        self
+    }
+}
+
+impl From<crate::chain::TokenDeploymentTip712> for PaymentRequirementsExtra {
+    fn from(tip712: crate::chain::TokenDeploymentTip712) -> Self {
+        Self {
+            name: tip712.name,
+            version: tip712.version,
+            asset_transfer_method: None,
+        }
+    }
 }
 
 #[cfg(any(feature = "facilitator", feature = "client"))]
