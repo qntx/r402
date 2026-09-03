@@ -100,6 +100,17 @@ pub enum VerificationError {
     /// On-chain proxy reverted with `AmountExceedsPermitted`.
     #[error("on-chain proxy rejected settle: amount exceeds permitted maximum")]
     UptoAmountExceedsPermitted,
+    /// Official scheme wire reason not represented by a dedicated variant.
+    #[error("{0}")]
+    Wire(ErrorReason),
+}
+
+impl VerificationError {
+    /// Wraps an official scheme wire code (known variant or [`ErrorReason::Custom`]).
+    #[must_use]
+    pub fn from_wire(code: &str) -> Self {
+        Self::Wire(ErrorReason::from_wire(code))
+    }
 }
 
 impl From<serde_json::Error> for VerificationError {
@@ -135,6 +146,7 @@ impl AsPaymentProblem for VerificationError {
             Self::UptoFacilitatorMismatch { .. } => ErrorReason::UptoFacilitatorMismatch,
             Self::UptoUnauthorizedFacilitator => ErrorReason::UptoUnauthorizedFacilitator,
             Self::UptoAmountExceedsPermitted => ErrorReason::UptoAmountExceedsPermitted,
+            Self::Wire(reason) => reason.clone(),
         };
         PaymentProblem::new(reason, self.to_string())
     }
@@ -350,6 +362,25 @@ mod tests {
         assert!(
             err.as_payment_problem().is_none(),
             "I/O transport is HTTP 502, not a 402 payment problem"
+        );
+    }
+
+    #[test]
+    fn from_wire_preserves_official_exact_codes() {
+        let err = VerificationError::from_wire("eip6492_factory_not_allowed");
+        assert_eq!(
+            err.as_payment_problem().reason().as_str(),
+            "eip6492_factory_not_allowed"
+        );
+        let deployed = VerificationError::from_wire("asset_not_deployed_contract");
+        assert_eq!(
+            deployed.as_payment_problem().reason().as_str(),
+            "asset_not_deployed_contract"
+        );
+        let mismatch = VerificationError::from_wire("invalid_exact_evm_transfer_event_mismatch");
+        assert_eq!(
+            mismatch.as_payment_problem().reason().as_str(),
+            "invalid_exact_evm_transfer_event_mismatch"
         );
     }
 }

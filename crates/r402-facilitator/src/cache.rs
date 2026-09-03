@@ -69,6 +69,11 @@ impl TtlSet {
     pub fn entry_count(&self) -> u64 {
         self.inner.entry_count()
     }
+
+    /// Drops `key` so a later [`Self::reserve`] can succeed.
+    pub fn release(&self, key: &str) {
+        self.inner.invalidate(key);
+    }
 }
 
 impl Debug for TtlSet {
@@ -135,6 +140,16 @@ impl SettlementCache {
     pub fn entry_count(&self) -> u64 {
         self.inner.entry_count()
     }
+
+    /// Drops a previously reserved key (terminal failure with no broadcast hash).
+    pub fn release(&self, key: &str) {
+        self.inner.release(key);
+        #[cfg(feature = "metrics")]
+        {
+            ::metrics::counter!(r402_protocol::metrics::SETTLEMENT_CACHE_RELEASE_TOTAL)
+                .increment(1);
+        }
+    }
 }
 
 impl Default for SettlementCache {
@@ -194,5 +209,21 @@ mod tests {
         assert_eq!(cache.reserve("eip155:8453:0xnonce_b"), Duplicate::No);
         assert_eq!(cache.reserve("eip155:8453:0xnonce_a"), Duplicate::Yes);
         assert_eq!(cache.reserve("eip155:8453:0xnonce_b"), Duplicate::Yes);
+    }
+
+    #[test]
+    fn settlement_cache_release_allows_reserve_again() {
+        let cache = SettlementCache::new();
+        assert_eq!(cache.reserve("k"), Duplicate::No);
+        assert_eq!(cache.reserve("k"), Duplicate::Yes);
+        cache.release("k");
+        assert_eq!(cache.reserve("k"), Duplicate::No);
+    }
+
+    #[test]
+    fn settlement_cache_release_missing_is_noop() {
+        let cache = SettlementCache::new();
+        cache.release("missing");
+        assert_eq!(cache.reserve("missing"), Duplicate::No);
     }
 }

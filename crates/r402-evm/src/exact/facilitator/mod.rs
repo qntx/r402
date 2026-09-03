@@ -13,11 +13,15 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 
-use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_primitives::{Address, B256, Bytes, TxHash, U256, hex};
 use alloy_provider::Provider;
-use r402_facilitator::{Duplicate, Facilitator, SettlementCache};
-use r402_protocol::error::{FacilitatorError, VerificationError};
+use compact_str::CompactString;
+use r402_facilitator::{
+    Duplicate, Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
+};
+use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment as wire;
 use r402_protocol::payment::UnixTimestamp;
@@ -75,11 +79,13 @@ macro_rules! transfer_span {
 }
 
 pub(crate) mod contract;
+mod eip6492;
 mod settle;
 pub(crate) mod signature;
 mod verify;
 
-use settle::{settle_payment, settle_permit2_payment};
+use eip6492::TRANSFER_EVENT_MISMATCH;
+use settle::{ExpectedTransfer, reconcile_pending_receipt, settle_payment, settle_permit2_payment};
 use verify::{verify_payment, verify_permit2_payment};
 
 use crate::error::Eip155ExactError;
@@ -145,6 +151,10 @@ pub struct Eip155ExactFacilitator<P> {
     clock_skew_tolerance: u64,
     /// Settle-time deduplication cache (see struct-level docs).
     settlement_cache: SettlementCache,
+    /// Factories the facilitator will call for undeployed EIP-6492 wallets.
+    eip6492_allowed_factories: Vec<Address>,
+    /// Broadcast-but-unconfirmed settlement hashes keyed by signature hex.
+    pending: Arc<dyn PendingSettlementStore>,
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -175,12 +185,28 @@ impl<P> Eip155ExactFacilitator<P> {
     /// behind a load-balancer that pins by buyer address) or to plug in a
     /// custom backend (Redis, etc.) by wrapping its primitives in the same
     /// shape.
-    pub const fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
+    pub fn with_settlement_cache(provider: P, settlement_cache: SettlementCache) -> Self {
         Self {
             provider,
             clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
+            eip6492_allowed_factories: Vec::new(),
+            pending: Arc::new(InMemoryPendingSettlementStore::new()),
         }
+    }
+
+    /// Allowlist of EIP-6492 factories. Default empty (fail-closed).
+    #[must_use]
+    pub fn with_eip6492_allowed_factories(mut self, factories: Vec<Address>) -> Self {
+        self.eip6492_allowed_factories = factories;
+        self
+    }
+
+    /// Override the pending-settlement store (retry reconcile).
+    #[must_use]
+    pub fn with_pending_store(mut self, store: Arc<dyn PendingSettlementStore>) -> Self {
+        self.pending = store;
+        self
     }
 
     /// Sets a custom clock-skew tolerance (in seconds) for time-window checks.
@@ -217,6 +243,193 @@ impl<P> Eip155ExactFacilitator<P> {
     }
 }
 
+impl<P> Eip155ExactFacilitator<P>
+where
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
+    P::Inner: Provider,
+    Eip155ExactError: From<P::Error>,
+{
+    async fn reconcile_pending(
+        &self,
+        payload: &payload::v2::PaymentPayload,
+        pending_key: &str,
+        cached: CompactString,
+        network: CompactString,
+        amount: CompactString,
+    ) -> Result<wire::SettleResponse, FacilitatorError> {
+        let hash: TxHash = cached.parse().map_err(|e| {
+            FacilitatorError::Onchain(format!("invalid pending settlement hash: {e}"))
+        })?;
+        let expected = expected_transfer(payload);
+        let payer = payload.payload.sender();
+        match reconcile_pending_receipt(self.provider.inner(), hash, expected).await {
+            Ok(confirmed) => {
+                self.pending.delete(pending_key);
+                Ok(settle_success(payer, confirmed, network, amount))
+            }
+            Err(err) => self.map_settle_error(err, pending_key, payer, network),
+        }
+    }
+
+    async fn broadcast_and_confirm(
+        &self,
+        payload: &payload::v2::PaymentPayload,
+        requirements: &payload::v2::PaymentRequirements,
+        pending_key: &str,
+        network: CompactString,
+        amount: CompactString,
+    ) -> Result<wire::SettleResponse, FacilitatorError> {
+        match &payload.payload {
+            ExactPayload::Eip3009(eip3009) => {
+                let (contract, payment, eip712_domain) = verify::assert_valid_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    eip3009,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let payer = payment.from;
+                match settle_payment(
+                    &self.provider,
+                    &contract,
+                    &payment,
+                    &eip712_domain,
+                    &self.eip6492_allowed_factories,
+                )
+                .await
+                {
+                    Ok(tx_hash) => {
+                        self.pending.delete(pending_key);
+                        Ok(settle_success(payer, tx_hash, network, amount))
+                    }
+                    Err(err) => self.map_settle_error(err, pending_key, payer, network),
+                }
+            }
+            ExactPayload::Permit2(permit2) => {
+                let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
+                    self.provider.inner(),
+                    self.provider.chain(),
+                    permit2,
+                    payload,
+                    requirements,
+                    self.clock_skew_tolerance,
+                )
+                .await?;
+                let payer = payment.from;
+                match settle_permit2_payment(&self.provider, &payment).await {
+                    Ok(tx_hash) => {
+                        self.pending.delete(pending_key);
+                        Ok(settle_success(payer, tx_hash, network, amount))
+                    }
+                    Err(err) => self.map_settle_error(err, pending_key, payer, network),
+                }
+            }
+        }
+    }
+
+    fn map_settle_error(
+        &self,
+        err: Eip155ExactError,
+        pending_key: &str,
+        payer: Address,
+        network: CompactString,
+    ) -> Result<wire::SettleResponse, FacilitatorError> {
+        match err {
+            Eip155ExactError::ReceiptWait { hash, .. } => {
+                self.pending
+                    .set(pending_key, CompactString::from(hash.to_string()));
+                Ok(settle_failure(
+                    ErrorReason::SettlementPending,
+                    Some(payer),
+                    hash.to_string(),
+                    network,
+                ))
+            }
+            Eip155ExactError::TransferEventMismatch(hash) => {
+                self.pending.delete(pending_key);
+                Ok(settle_failure(
+                    ErrorReason::from_wire(TRANSFER_EVENT_MISMATCH),
+                    Some(payer),
+                    hash.to_string(),
+                    network,
+                ))
+            }
+            Eip155ExactError::TransactionReverted(hash) => {
+                self.pending.delete(pending_key);
+                Ok(settle_failure(
+                    ErrorReason::from_wire("invalid_exact_evm_transaction_failed"),
+                    Some(payer),
+                    hash.to_string(),
+                    network,
+                ))
+            }
+            other => Err(other.into()),
+        }
+    }
+}
+
+fn expected_transfer(payload: &payload::v2::PaymentPayload) -> ExpectedTransfer {
+    match &payload.payload {
+        ExactPayload::Eip3009(eip3009) => ExpectedTransfer {
+            token: payload.accepted.asset.into(),
+            from: eip3009.authorization.from,
+            to: eip3009.authorization.to,
+            value: eip3009.authorization.value.into(),
+        },
+        ExactPayload::Permit2(permit2) => ExpectedTransfer {
+            token: permit2.permit2_authorization.permitted.token,
+            from: permit2.permit2_authorization.from,
+            to: permit2.permit2_authorization.witness.to,
+            value: permit2.permit2_authorization.permitted.amount.into(),
+        },
+    }
+}
+
+fn settle_success(
+    payer: Address,
+    hash: TxHash,
+    network: CompactString,
+    amount: CompactString,
+) -> wire::SettleResponse {
+    wire::SettleResponse::Success {
+        payer: Some(payer.to_string().into()),
+        transaction: hash.to_string().into(),
+        network,
+        amount: Some(amount),
+        extensions: wire::Extensions::new(),
+        extension_responses: wire::Extensions::new(),
+        extra: None,
+    }
+}
+
+fn settle_failure(
+    reason: ErrorReason,
+    payer: Option<Address>,
+    transaction: impl Into<CompactString>,
+    network: CompactString,
+) -> wire::SettleResponse {
+    wire::SettleResponse::Failure {
+        reason,
+        message: None,
+        payer: payer.map(|p| p.to_string().into()),
+        transaction: transaction.into(),
+        network,
+        extensions: wire::Extensions::new(),
+        extension_responses: wire::Extensions::new(),
+        extra: None,
+    }
+}
+
+fn should_release_cache(outcome: &Result<wire::SettleResponse, FacilitatorError>) -> bool {
+    match outcome {
+        Ok(wire::SettleResponse::Success { .. }) => false,
+        Ok(wire::SettleResponse::Failure { transaction, .. }) => transaction.is_empty(),
+        Ok(_) | Err(_) => true,
+    }
+}
+
 impl<P> std::fmt::Debug for Eip155ExactFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Eip155ExactFacilitator")
@@ -248,9 +461,14 @@ where
                     self.clock_skew_tolerance,
                 )
                 .await?;
-                let payer =
-                    verify_payment(self.provider.inner(), &contract, &payment, &eip712_domain)
-                        .await?;
+                let payer = verify_payment(
+                    self.provider.inner(),
+                    &contract,
+                    &payment,
+                    &eip712_domain,
+                    &self.eip6492_allowed_factories,
+                )
+                .await?;
                 Ok(wire::VerifyResponse::valid(payer.to_string()))
             }
             ExactPayload::Permit2(permit2) => {
@@ -277,66 +495,34 @@ where
         let request = payload::v2::SettleRequest::from_settle(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
-        // F-073: deduplicate concurrent / replayed settle attempts before
-        // any verification or RPC work. EIP-3009 nonces and Permit2 nonces
-        // are already unique per buyer + token + chain on-chain, but
-        // checking the cache up-front protects against double broadcast
-        // during the confirmation window where the chain has not yet
-        // observed the first transaction.
+        let pending_key = hex::encode_prefixed(payload.payload.signature());
+        let network: CompactString = payload.accepted.network.to_string().into();
+        let amount: CompactString = requirements.amount.0.to_string().into();
+
+        if let Some(cached) = self.pending.get(&pending_key) {
+            self.pending.delete(&pending_key);
+            return self
+                .reconcile_pending(payload, &pending_key, cached, network, amount)
+                .await;
+        }
+
         let cache_key = match &payload.payload {
             ExactPayload::Eip3009(eip3009) => self.eip3009_cache_key(eip3009.authorization.nonce),
             ExactPayload::Permit2(permit2) => {
                 self.permit2_cache_key(permit2.permit2_authorization.nonce.into())
             }
         };
-        if self.settlement_cache.reserve(cache_key) == Duplicate::Yes {
+        if self.settlement_cache.reserve(cache_key.clone()) == Duplicate::Yes {
             return Err(VerificationError::DuplicateSettlement.into());
         }
-        match &payload.payload {
-            ExactPayload::Eip3009(eip3009) => {
-                let (contract, payment, eip712_domain) = verify::assert_valid_payment(
-                    self.provider.inner(),
-                    self.provider.chain(),
-                    eip3009,
-                    payload,
-                    requirements,
-                    self.clock_skew_tolerance,
-                )
-                .await?;
-                let tx_hash =
-                    settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
-                Ok(wire::SettleResponse::Success {
-                    payer: Some(payment.from.to_string().into()),
-                    transaction: tx_hash.to_string().into(),
-                    network: payload.accepted.network.to_string().into(),
-                    amount: Some(requirements.amount.0.to_string().into()),
-                    extensions: wire::Extensions::new(),
-                    extension_responses: wire::Extensions::new(),
-                    extra: None,
-                })
-            }
-            ExactPayload::Permit2(permit2) => {
-                let (_erc20, payment, _eip712_domain) = verify::assert_valid_permit2_payment(
-                    self.provider.inner(),
-                    self.provider.chain(),
-                    permit2,
-                    payload,
-                    requirements,
-                    self.clock_skew_tolerance,
-                )
-                .await?;
-                let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
-                Ok(wire::SettleResponse::Success {
-                    payer: Some(payment.from.to_string().into()),
-                    transaction: tx_hash.to_string().into(),
-                    network: payload.accepted.network.to_string().into(),
-                    amount: Some(requirements.amount.0.to_string().into()),
-                    extensions: wire::Extensions::new(),
-                    extension_responses: wire::Extensions::new(),
-                    extra: None,
-                })
-            }
+
+        let outcome = self
+            .broadcast_and_confirm(payload, requirements, &pending_key, network, amount)
+            .await;
+        if should_release_cache(&outcome) {
+            self.settlement_cache.release(&cache_key);
         }
+        outcome
     }
 
     fn supported(

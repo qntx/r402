@@ -241,6 +241,164 @@ mod tests {
     }
 
     #[test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "snapshot of official overlapping defaultAssets rows"
+    )]
+    fn official_overlapping_caip2_rows_match_name_version_asset() {
+        assert_default_row(
+            1,
+            address!("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            8453,
+            address!("0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            84532,
+            address!("0x036CbD53842c5426634e7929541eC2318f3dCF7e"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            43114,
+            address!("0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            137,
+            address!("0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            42161,
+            address!("0xaf88d065e77c8cC2239327C5EDb3A432268e5831"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            421_614,
+            address!("0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d"),
+            6,
+            "USDC",
+            "USD Coin",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            143,
+            address!("0x754704Bc059F8C67012fEd69BC8A327a5aafb603"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            50,
+            address!("0xfA2958CB79b0491CC627c1557F441eF849Ca8eb1"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            51,
+            address!("0xb5AB69F7bBada22B28e79C8FFAECe55eF1c771D4"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            42220,
+            address!("0xcebA9300f2b948710d2653dD7B07f33A8B32118C"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            11_142_220,
+            address!("0x01C5C0122039549AD1493B8220cABEdD739BC44E"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            1329,
+            address!("0xe15fC38F6D8c56aF07bbCBe3BAf5708A2Bf42392"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            1328,
+            address!("0x4fCF1784B31630811181f670Aea7A7bEF803eaED"),
+            6,
+            "USDC",
+            "USDC",
+            "2",
+            None,
+            false,
+        );
+        assert_default_row(
+            4326,
+            address!("0xFAfDdbb3FC7688494971a79cc65DCa3EF82079E7"),
+            18,
+            "MegaUSD",
+            "MegaUSD",
+            "1",
+            Some(AssetTransferMethod::Permit2),
+            true,
+        );
+    }
+
+    #[test]
     fn extra_circle_usdc_stays_in_union() {
         let optimism = address!("0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85");
         let found = find_default_evm_asset(optimism, chain(10));

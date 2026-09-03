@@ -111,6 +111,30 @@ fn try_new_question_mark_compiles() {
     try_new_question_mark().expect("try_new is currently infallible");
 }
 
+#[test]
+fn polygon_and_arbitrum_sepolia_eip712_name_is_usd_coin() {
+    let polygon = USDC::polygon().eip712.as_ref().expect("polygon eip712");
+    assert_eq!(polygon.name, "USD Coin");
+    assert_eq!(polygon.version, "2");
+    let arb = USDC::arbitrum_sepolia()
+        .eip712
+        .as_ref()
+        .expect("arb sepolia eip712");
+    assert_eq!(arb.name, "USD Coin");
+    assert_eq!(arb.version, "2");
+}
+
+#[test]
+fn exact_facilitator_builders_default_empty_6492_allowlist() {
+    let fac = Eip155ExactFacilitator::try_new(dummy_provider())
+        .expect("try_new")
+        .with_eip6492_allowed_factories(vec![Address::repeat_byte(0xF1)])
+        .with_pending_store(Arc::new(
+            r402_facilitator::InMemoryPendingSettlementStore::new(),
+        ));
+    let _ = fac;
+}
+
 #[tokio::test]
 async fn try_new_supported_is_exact_on_provider_chain() {
     let fac = Eip155ExactFacilitator::try_new(dummy_provider()).expect("try_new");

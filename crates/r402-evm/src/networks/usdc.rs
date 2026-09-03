@@ -70,7 +70,7 @@ pub(crate) static USDC_DEPLOYMENTS: LazyLock<Vec<Eip155TokenDeployment>> = LazyL
         evm_token_deployment!(42161, "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", 6, eip712: "USD Coin" / "2"),
         // Arbitrum Sepolia — native Circle USDC testnet
         // Verify: https://sepolia.arbiscan.io/address/0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d
-        evm_token_deployment!(421_614, "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", 6, eip712: "USDC" / "2"),
+        evm_token_deployment!(421_614, "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d", 6, eip712: "USD Coin" / "2"),
         // OP Mainnet — native Circle USDC
         // Verify: https://optimistic.etherscan.io/token/0x0b2c639c533813f4aa9d7837caf62653d097ff85
         evm_token_deployment!(10, "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", 6, eip712: "USD Coin" / "2"),
@@ -79,7 +79,7 @@ pub(crate) static USDC_DEPLOYMENTS: LazyLock<Vec<Eip155TokenDeployment>> = LazyL
         evm_token_deployment!(11_155_420, "0x5fd84259d66Cd46123540766Be93DFE6D43130D7", 6, eip712: "USDC" / "2"),
         // Polygon PoS — native Circle USDC (not the old bridged USDC.e at 0x2791...)
         // Verify: https://polygonscan.com/token/0x3c499c542cef5e3811e1192ce70d8cc03d5c3359
-        evm_token_deployment!(137, "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", 6, eip712: "USDC" / "2"),
+        evm_token_deployment!(137, "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", 6, eip712: "USD Coin" / "2"),
         // Polygon Amoy — native Circle USDC testnet
         // Verify: https://amoy.polygonscan.com/address/0x41e94eb019c0762f9bfcf9fb1e58725bfb0e7582
         evm_token_deployment!(80002, "0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582", 6, eip712: "USDC" / "2"),
@@ -371,5 +371,27 @@ impl USDM {
         token: USDM, lookup: usdm_evm_deployment;
         /// USDM (MegaUSD) on MegaETH (eip155:4326).
         megaeth => 4326, "MegaETH";
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polygon_eip712_name_is_usd_coin() {
+        let eip712 = USDC::polygon().eip712.as_ref().expect("polygon eip712");
+        assert_eq!(eip712.name.as_str(), "USD Coin");
+        assert_eq!(eip712.version.as_str(), "2");
+    }
+
+    #[test]
+    fn arbitrum_sepolia_eip712_name_is_usd_coin() {
+        let eip712 = USDC::arbitrum_sepolia()
+            .eip712
+            .as_ref()
+            .expect("arb sepolia eip712");
+        assert_eq!(eip712.name.as_str(), "USD Coin");
+        assert_eq!(eip712.version.as_str(), "2");
     }
 }

@@ -19,6 +19,18 @@ pub enum Eip155ExactError {
     /// On-chain transaction was reverted.
     #[error("Transaction {0} reverted")]
     TransactionReverted(TxHash),
+    /// Receipt status was success but logs did not contain the expected ERC-20 Transfer.
+    #[error("Transaction {0} missing matching Transfer event")]
+    TransferEventMismatch(TxHash),
+    /// Broadcast succeeded; waiting for the receipt failed.
+    #[error("receipt wait failed for {hash}")]
+    ReceiptWait {
+        /// Broadcast transaction hash.
+        hash: TxHash,
+        /// Underlying receipt-wait error.
+        #[source]
+        source: alloy_provider::PendingTransactionError,
+    },
     /// Contract call failed.
     #[error("Contract call failed: {0}")]
     ContractCall(String),
@@ -33,6 +45,8 @@ impl From<Eip155ExactError> for FacilitatorError {
             Eip155ExactError::Transport(_)
             | Eip155ExactError::PendingTransaction(_)
             | Eip155ExactError::TransactionReverted(_)
+            | Eip155ExactError::TransferEventMismatch(_)
+            | Eip155ExactError::ReceiptWait { .. }
             | Eip155ExactError::ContractCall(_) => Self::Onchain(value.to_string()),
             Eip155ExactError::PaymentVerification(e) => Self::Verification(e),
         }
@@ -50,6 +64,9 @@ impl From<MetaTransactionSendError> for Eip155ExactError {
         match e {
             MetaTransactionSendError::Transport(e) => Self::Transport(e),
             MetaTransactionSendError::PendingTransaction(e) => Self::PendingTransaction(e),
+            MetaTransactionSendError::ReceiptWait { hash, source } => {
+                Self::ReceiptWait { hash, source }
+            }
             MetaTransactionSendError::Custom(e) => Self::ContractCall(e),
         }
     }

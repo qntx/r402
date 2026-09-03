@@ -25,6 +25,9 @@ pub const FACILITATOR_SETTLE_DURATION_SECONDS: &str = "r402_facilitator_settle_d
 /// Labels: `outcome` = `inserted` | `duplicate`.
 pub const SETTLEMENT_CACHE_RESERVE_TOTAL: &str = "r402_settlement_cache_reserve_total";
 
+/// Settlement-dedup cache releases (terminal failure without a broadcast hash).
+pub const SETTLEMENT_CACHE_RELEASE_TOTAL: &str = "r402_settlement_cache_release_total";
+
 /// Background settlement supervisor outcomes.
 ///
 /// Labels: `result` = `ok` | `error` | `panic` | `cancelled`.
@@ -49,6 +52,10 @@ mod tests {
         assert_eq!(
             SETTLEMENT_CACHE_RESERVE_TOTAL,
             "r402_settlement_cache_reserve_total"
+        );
+        assert_eq!(
+            SETTLEMENT_CACHE_RELEASE_TOTAL,
+            "r402_settlement_cache_release_total"
         );
         assert_eq!(BACKGROUND_SETTLE_TOTAL, "r402_background_settle_total");
         assert!(

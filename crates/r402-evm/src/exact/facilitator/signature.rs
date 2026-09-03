@@ -36,11 +36,8 @@ impl SignedMessage {
             nonce: payment.nonce,
         };
         let eip712_hash = transfer_with_authorization.eip712_signing_hash(domain);
-        let structured_signature: StructuredSignature = StructuredSignature::try_from_bytes(
-            payment.signature.clone(),
-            payment.from,
-            &eip712_hash,
-        )?;
+        let structured_signature: StructuredSignature =
+            StructuredSignature::try_from_bytes(payment.signature.clone())?;
         Ok(Self {
             address: payment.from,
             hash: eip712_hash,

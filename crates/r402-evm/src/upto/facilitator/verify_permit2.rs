@@ -17,7 +17,7 @@ use crate::chain::contracts::{IERC20, Validator6492};
 use crate::eip2612::Eip2612SignedPermit;
 use crate::error::Eip155ExactError;
 use crate::permit2::PERMIT2_ADDRESS;
-use crate::signature::StructuredSignature;
+use crate::signature::{ClassifiedSignature, classify_with_code};
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
 
 /// Maps a proxy revert payload onto a [`VerificationError`].
@@ -85,11 +85,10 @@ pub(super) fn build_eip2612_abi(
 
 /// EIP-2612 permits require an ECDSA signature the token can `ecrecover`.
 pub(super) fn assert_eip2612_supported_signature_kind(
-    prepared: &PreparedUptoPermit2,
+    classified: &ClassifiedSignature,
+    has_eip2612: bool,
 ) -> Result<(), VerificationError> {
-    if prepared.eip2612.is_some()
-        && !matches!(prepared.structured_signature, StructuredSignature::Eoa(_))
-    {
+    if has_eip2612 && !matches!(classified, ClassifiedSignature::Eoa(_)) {
         return Err(VerificationError::InvalidFormat(
             "eip2612GasSponsoring requires an EOA Permit2 signature".into(),
         ));
@@ -135,7 +134,14 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     prepared: &PreparedUptoPermit2,
     required_amount: U256,
 ) -> Result<Address, Eip155ExactError> {
-    assert_eip2612_supported_signature_kind(prepared)?;
+    let classified = classify_with_code(
+        provider,
+        prepared.from,
+        prepared.structured_signature.clone(),
+        &prepared.eip712_hash,
+    )
+    .await?;
+    assert_eip2612_supported_signature_kind(&classified, prepared.eip2612.is_some())?;
 
     let erc20 = IERC20::new(prepared.token, provider);
     let allowance_call = erc20.allowance(prepared.from, PERMIT2_ADDRESS);
@@ -158,8 +164,8 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     let proxy = IX402UptoPermit2Proxy::new(X402_UPTO_PERMIT2_PROXY, provider);
     let (permit, witness) = permit_and_witness(prepared);
 
-    match &prepared.structured_signature {
-        StructuredSignature::EIP6492 {
+    match &classified {
+        ClassifiedSignature::EIP6492 {
             factory: _,
             factory_calldata: _,
             inner,
@@ -201,7 +207,7 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
             }
             settle_result.map_err(classify_settle_multicall_failure)?;
         }
-        StructuredSignature::Eoa(signature) => {
+        ClassifiedSignature::Eoa(signature) => {
             let sig_bytes: Bytes = signature.as_bytes().into();
             if let Some(eip2612) = &prepared.eip2612 {
                 let eip2612_abi = build_eip2612_abi(eip2612)?;
@@ -252,7 +258,7 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
                 .map_err(classify_settle_call_error)?;
             }
         }
-        StructuredSignature::EIP1271(signature) => {
+        ClassifiedSignature::EIP1271(signature) => {
             let settle_call = proxy.settle(
                 permit,
                 prepared.max_amount,

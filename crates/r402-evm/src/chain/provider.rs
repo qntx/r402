@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alloy_network::{Ethereum as AlloyEthereum, EthereumWallet, NetworkWallet, TransactionBuilder};
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, TxHash};
 use alloy_provider::fillers::{
     BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller, WalletFiller,
 };
@@ -220,6 +220,15 @@ pub enum MetaTransactionSendError {
     /// Pending transaction error.
     #[error(transparent)]
     PendingTransaction(#[from] PendingTransactionError),
+    /// Broadcast succeeded; waiting for the receipt failed.
+    #[error("receipt wait failed for {hash}")]
+    ReceiptWait {
+        /// Broadcast transaction hash.
+        hash: TxHash,
+        /// Underlying receipt-wait error.
+        #[source]
+        source: PendingTransactionError,
+    },
     /// Custom error message.
     #[error("{0}")]
     Custom(String),
@@ -422,6 +431,7 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         // Default timeout of 30 seconds is reasonable for most EVM chains
         let timeout = std::time::Duration::from_secs(self.receipt_timeout_secs);
 
+        let tx_hash = *pending_tx.tx_hash();
         let watcher = pending_tx
             .with_required_confirmations(tx.confirmations)
             .with_timeout(Some(timeout));
@@ -429,9 +439,11 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         match watcher.get_receipt().await {
             Ok(receipt) => Ok(receipt),
             Err(e) => {
-                // Receipt fetch failed (timeout or other error) - reset nonce to force requery
                 self.nonce_manager.reset_nonce(from_address).await;
-                Err(MetaTransactionSendError::PendingTransaction(e))
+                Err(MetaTransactionSendError::ReceiptWait {
+                    hash: tx_hash,
+                    source: e,
+                })
             }
         }
     }

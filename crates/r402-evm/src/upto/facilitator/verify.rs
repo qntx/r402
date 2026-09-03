@@ -74,11 +74,7 @@ impl PreparedUptoPermit2 {
             },
         };
         let eip712_hash = permit_witness.eip712_signing_hash(&domain);
-        let structured_signature = StructuredSignature::try_from_bytes(
-            payload.signature.clone(),
-            auth.from,
-            &eip712_hash,
-        )?;
+        let structured_signature = StructuredSignature::try_from_bytes(payload.signature.clone())?;
         let eip2612 = Eip2612SignedPermit::from_extensions(extensions)
             .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
 

@@ -16,12 +16,15 @@ use r402_protocol::payment::UnixTimestamp;
 use tracing::instrument;
 
 use super::contract::{IEIP3009, IX402Permit2Proxy};
+use super::eip6492::{ASSET_NOT_DEPLOYED, FACTORY_NOT_ALLOWED, deny_undeployed_factory};
 use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
 use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
 use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::Eip155ChainReference;
+use crate::chain::TokenAmount;
 use crate::chain::contracts::{IERC20, Validator6492};
+use crate::eip2612::Eip2612SignedPermit;
 use crate::error::Eip155ExactError;
 use crate::exact::payload::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
@@ -29,7 +32,8 @@ use crate::exact::{
     payload,
 };
 use crate::permit2::PERMIT2_ADDRESS;
-use crate::signature::{StructuredSignature, assert_time};
+use crate::signature::{ClassifiedSignature, assert_time, classify_with_code};
+use r402_protocol::payment::{ExtensionEntry, Extensions};
 
 /// Runs all preconditions needed for a successful EIP-3009 payment.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
@@ -61,13 +65,22 @@ pub(super) async fn assert_valid_payment<P: Provider>(
 
     let amount_required = accepted.amount;
 
-    // Run independent RPC checks in parallel to reduce latency from ~3 RTTs to ~1 RTT.
     let asset_addr: Address = asset_address.into();
-    let (domain, (), ()) = tokio::try_join!(
+    let (domain, (), (), code) = tokio::try_join!(
         assert_domain(chain, &contract, &asset_addr, accepted.extra.as_ref()),
         assert_nonce_unused(&contract, &authorization.from, &authorization.nonce),
         assert_enough_balance(&contract, &authorization.from, amount_required.into()),
+        async {
+            contract
+                .provider()
+                .get_code_at(asset_addr)
+                .await
+                .map_err(Eip155ExactError::from)
+        },
     )?;
+    if code.is_empty() {
+        return Err(VerificationError::from_wire(ASSET_NOT_DEPLOYED).into());
+    }
     assert_exact_value(&authorization.value.into(), &amount_required.into())?;
 
     let payment = Eip3009Payment {
@@ -242,18 +255,29 @@ pub(super) async fn verify_payment<P: Provider>(
     contract: &IEIP3009::IEIP3009Instance<&P>,
     payment: &Eip3009Payment,
     eip712_domain: &Eip712Domain,
+    eip6492_allowed_factories: &[Address],
 ) -> Result<Address, Eip155ExactError> {
     let signed_message = SignedMessage::extract(payment, eip712_domain)?;
 
     let payer = signed_message.address;
     let hash = signed_message.hash;
-    match signed_message.signature {
-        StructuredSignature::EIP6492 {
-            factory: _,
+    let classified = classify_with_code(provider, payer, signed_message.signature, &hash).await?;
+    match classified {
+        ClassifiedSignature::EIP6492 {
+            factory,
             factory_calldata: _,
             inner,
             original,
         } => {
+            let payer_code = provider
+                .get_code_at(payer)
+                .await
+                .unwrap_or_else(|_| alloy_primitives::Bytes::new());
+            if deny_undeployed_factory(factory, payer_code.as_ref(), eip6492_allowed_factories) {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!(factory = %factory, "eip6492_factory_not_allowed");
+                return Err(VerificationError::from_wire(FACTORY_NOT_ALLOWED).into());
+            }
             let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, &provider);
             let is_valid_signature_call =
                 validator6492.isValidSigWithSideEffects(payer, hash, original);
@@ -278,7 +302,7 @@ pub(super) async fn verify_payment<P: Provider>(
             }
             transfer_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
         }
-        StructuredSignature::EIP1271(signature) => {
+        ClassifiedSignature::EIP1271(signature) => {
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
@@ -287,7 +311,7 @@ pub(super) async fn verify_payment<P: Provider>(
                 transfer_span!("call_transferWithAuthorization_0", transfer_call)
             )?;
         }
-        StructuredSignature::Eoa(signature) => {
+        ClassifiedSignature::Eoa(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let transfer_call_fut = transfer_call.tx.call().into_future();
@@ -365,20 +389,40 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     let token_address: Address = accepted.asset.into();
     let erc20 = IERC20::new(token_address, provider);
 
-    // Run independent RPC checks in parallel to reduce latency from ~2 RTTs to ~1 RTT.
     let allowance_call = erc20.allowance(auth.from, PERMIT2_ADDRESS);
     let balance_call = erc20.balanceOf(auth.from);
-    let (allowance_result, balance_result) =
-        tokio::join!(allowance_call.call(), balance_call.call(),);
+    let (allowance_result, balance_result, code_result) = tokio::join!(
+        allowance_call.call(),
+        balance_call.call(),
+        erc20.provider().get_code_at(token_address),
+    );
 
-    // Check Permit2 allowance (non-fatal if RPC fails, matching Go SDK behavior)
-    if let Ok(allowance) = allowance_result
-        && allowance < required_amount
-    {
-        return Err(VerificationError::Permit2AllowanceRequired.into());
+    let code = code_result.map_err(Eip155ExactError::from)?;
+    if code.is_empty() {
+        return Err(VerificationError::from_wire(ASSET_NOT_DEPLOYED).into());
     }
 
-    // Check balance
+    let allowance_rpc_failed = allowance_result.is_err();
+    let allowance_for_gate = allowance_result.as_ref().map(|v| *v).map_err(|_| ());
+    match permit2_allowance_gate(allowance_for_gate, required_amount, false, false) {
+        Ok(()) => {}
+        Err(VerificationError::Permit2AllowanceRequired) => {
+            if !permit2_extension_covers_allowance(
+                &payload.extensions,
+                auth.from,
+                token_address,
+                clock_skew_tolerance,
+            )? {
+                if allowance_rpc_failed {
+                    #[cfg(feature = "telemetry")]
+                    tracing::warn!("permit2_allowance_rpc_failed");
+                }
+                return Err(VerificationError::Permit2AllowanceRequired.into());
+            }
+        }
+        Err(e) => return Err(e.into()),
+    }
+
     if let Ok(balance) = balance_result
         && balance < required_amount
     {
@@ -501,6 +545,123 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
     Ok(payer)
 }
 
+const ERC20_APPROVAL_GAS_SPONSORING_KEY: &str = "erc20ApprovalGasSponsoring";
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Erc20ApprovalGasSponsoringInfo {
+    from: Address,
+    asset: Address,
+    spender: Address,
+    #[allow(dead_code, reason = "wire field required for schema")]
+    amount: TokenAmount,
+    #[allow(dead_code, reason = "wire field required for schema")]
+    signed_transaction: String,
+    #[allow(dead_code, reason = "wire field required for schema")]
+    version: String,
+}
+
+fn permit2_extension_covers_allowance(
+    extensions: &Extensions,
+    payer: Address,
+    token: Address,
+    clock_skew_tolerance: u64,
+) -> Result<bool, Eip155ExactError> {
+    match Eip2612SignedPermit::from_extensions(extensions) {
+        Ok(Some(info)) => {
+            validate_eip2612_permit_for_payment(&info, payer, token, clock_skew_tolerance)?;
+            return Ok(true);
+        }
+        Ok(None) => {}
+        Err(_) => {
+            return Err(VerificationError::from_wire("invalid_eip2612_extension_format").into());
+        }
+    }
+    match erc20_approval_from_extensions(extensions) {
+        Ok(Some(info)) => {
+            validate_erc20_approval_for_payment(&info, payer, token)?;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(_) => {
+            Err(VerificationError::from_wire("invalid_erc20_approval_extension_format").into())
+        }
+    }
+}
+
+fn erc20_approval_from_extensions(
+    extensions: &Extensions,
+) -> Result<Option<Erc20ApprovalGasSponsoringInfo>, serde_json::Error> {
+    let Some(entry) = extensions.get(ERC20_APPROVAL_GAS_SPONSORING_KEY) else {
+        return Ok(None);
+    };
+    let parsed = match entry {
+        ExtensionEntry::Structured { info, .. } => serde_json::from_value(info.clone())?,
+        ExtensionEntry::Raw(value) => serde_json::from_value(value.clone())?,
+    };
+    Ok(Some(parsed))
+}
+
+fn validate_eip2612_permit_for_payment(
+    info: &Eip2612SignedPermit,
+    payer: Address,
+    token: Address,
+    clock_skew_tolerance: u64,
+) -> Result<(), VerificationError> {
+    if info.from != payer {
+        return Err(VerificationError::from_wire("eip2612_from_mismatch"));
+    }
+    if info.asset != token {
+        return Err(VerificationError::from_wire("eip2612_asset_mismatch"));
+    }
+    if info.spender != PERMIT2_ADDRESS {
+        return Err(VerificationError::from_wire("eip2612_spender_not_permit2"));
+    }
+    let deadline: u64 = info.deadline.0.try_into().unwrap_or(0);
+    let threshold = UnixTimestamp::now()
+        .as_secs()
+        .saturating_add(clock_skew_tolerance);
+    if deadline < threshold {
+        return Err(VerificationError::from_wire("eip2612_deadline_expired"));
+    }
+    Ok(())
+}
+
+fn validate_erc20_approval_for_payment(
+    info: &Erc20ApprovalGasSponsoringInfo,
+    payer: Address,
+    token: Address,
+) -> Result<(), VerificationError> {
+    if info.from != payer {
+        return Err(VerificationError::from_wire("erc20_approval_from_mismatch"));
+    }
+    if info.asset != token {
+        return Err(VerificationError::from_wire(
+            "erc20_approval_asset_mismatch",
+        ));
+    }
+    if info.spender != PERMIT2_ADDRESS {
+        return Err(VerificationError::from_wire(
+            "erc20_approval_spender_not_permit2",
+        ));
+    }
+    Ok(())
+}
+
+/// Fail-closed Permit2 allowance decision used by verify (and unit tests).
+pub(crate) fn permit2_allowance_gate(
+    allowance: Result<U256, ()>,
+    required: U256,
+    eip2612_ok: bool,
+    erc20_ok: bool,
+) -> Result<(), VerificationError> {
+    match allowance {
+        Ok(value) if value >= required => Ok(()),
+        Ok(_) | Err(()) if eip2612_ok || erc20_ok => Ok(()),
+        Ok(_) | Err(()) => Err(VerificationError::Permit2AllowanceRequired),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,5 +729,41 @@ mod tests {
             assert_requirements_match(&accepted, &requirements),
             Err(VerificationError::AcceptedRequirementsMismatch),
         ));
+    }
+
+    #[test]
+    fn permit2_allowance_rpc_err_without_extension_is_412() {
+        let required = U256::from(1_000_000_u64);
+        assert!(matches!(
+            permit2_allowance_gate(Err(()), required, false, false),
+            Err(VerificationError::Permit2AllowanceRequired),
+        ));
+    }
+
+    #[test]
+    fn permit2_allowance_rpc_err_with_eip2612_continues() {
+        let required = U256::from(1_000_000_u64);
+        assert!(permit2_allowance_gate(Err(()), required, true, false).is_ok());
+    }
+
+    #[test]
+    fn permit2_allowance_rpc_err_with_erc20_approval_continues() {
+        let required = U256::from(1_000_000_u64);
+        assert!(permit2_allowance_gate(Err(()), required, false, true).is_ok());
+    }
+
+    #[test]
+    fn permit2_allowance_low_is_412() {
+        let required = U256::from(1_000_000_u64);
+        assert!(matches!(
+            permit2_allowance_gate(Ok(U256::from(1_u64)), required, false, false),
+            Err(VerificationError::Permit2AllowanceRequired),
+        ));
+    }
+
+    #[test]
+    fn permit2_allowance_sufficient_skips_extensions() {
+        let required = U256::from(1_000_000_u64);
+        assert!(permit2_allowance_gate(Ok(required), required, false, false).is_ok());
     }
 }

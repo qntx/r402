@@ -11,7 +11,7 @@ use super::verify::PreparedUptoPermit2;
 use super::verify_permit2::{assert_eip2612_supported_signature_kind, build_eip2612_abi};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::error::Eip155ExactError;
-use crate::signature::StructuredSignature;
+use crate::signature::{ClassifiedSignature, classify_with_code};
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
 
 /// Outcome of a settle call.
@@ -45,7 +45,14 @@ where
         return Ok(UptoSettleOutcome::ZeroSettle);
     }
 
-    assert_eip2612_supported_signature_kind(prepared)?;
+    let classified = classify_with_code(
+        provider.inner(),
+        prepared.from,
+        prepared.structured_signature.clone(),
+        &prepared.eip712_hash,
+    )
+    .await?;
+    assert_eip2612_supported_signature_kind(&classified, prepared.eip2612.is_some())?;
 
     let inner = provider.inner();
     let proxy = IX402UptoPermit2Proxy::new(X402_UPTO_PERMIT2_PROXY, inner);
@@ -63,10 +70,10 @@ where
         validAfter: prepared.valid_after,
     };
 
-    let sig_bytes: Bytes = match &prepared.structured_signature {
-        StructuredSignature::EIP6492 { original, .. } => original.clone(),
-        StructuredSignature::Eoa(sig) => sig.as_bytes().into(),
-        StructuredSignature::EIP1271(bytes) => bytes.clone(),
+    let sig_bytes: Bytes = match &classified {
+        ClassifiedSignature::EIP6492 { original, .. } => original.clone(),
+        ClassifiedSignature::Eoa(sig) => sig.as_bytes().into(),
+        ClassifiedSignature::EIP1271(bytes) => bytes.clone(),
     };
 
     let calldata = match prepared.eip2612.as_ref() {
