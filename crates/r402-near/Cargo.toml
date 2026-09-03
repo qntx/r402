@@ -19,5 +19,53 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = [
+    "dep:borsh",
+    "dep:near-crypto",
+    "dep:near-jsonrpc-client",
+    "dep:near-jsonrpc-primitives",
+    "dep:near-primitives",
+    "dep:r402-client",
+]
+server = ["dep:r402-server"]
+facilitator = [
+    "dep:borsh",
+    "dep:near-crypto",
+    "dep:near-jsonrpc-client",
+    "dep:near-jsonrpc-primitives",
+    "dep:near-primitives",
+    "dep:r402-facilitator",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+base64 = { workspace = true }
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+borsh = { workspace = true, optional = true }
+near-crypto = { workspace = true, optional = true }
+near-jsonrpc-client = { workspace = true, optional = true }
+near-jsonrpc-primitives = { workspace = true, optional = true }
+near-primitives = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+near-crypto = { workspace = true, features = ["rand"] }
+near-primitives = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock = { workspace = true }
+
 [lints]
 workspace = true

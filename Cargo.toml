@@ -31,6 +31,7 @@ siwx-evm = { version = "0.5.0", path = "/Users/xu/Desktop/qntx/siwx/siwx-evm" }
 siwx-svm = { version = "0.5.0", path = "/Users/xu/Desktop/qntx/siwx/siwx-svm" }
 time = { version = "0.3", features = ["parsing", "formatting"] }
 bs58 = "0.5"
+r402-near = { path = "crates/r402-near", default-features = false }
 
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy
