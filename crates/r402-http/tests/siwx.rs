@@ -138,6 +138,30 @@ async fn valid_proof_without_payment_history_is_402() {
 }
 
 #[tokio::test]
+async fn unpaid_valid_proof_retries_after_store_hit() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store.clone()))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let challenge = call_layer(layer.clone(), OkInner, unpaid_request()).await;
+    let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
+    let (address, header) = sign_challenge(&info).await;
+    let miss = call_layer(
+        layer.clone(),
+        OkInner,
+        siwx_request(header.clone(), "api.example.com"),
+    )
+    .await;
+    assert_eq!(miss.status(), StatusCode::PAYMENT_REQUIRED);
+    store.record_success(origin().store_key("/paid").as_str(), &address);
+    let retry = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
+    assert_eq!(retry.status(), StatusCode::OK);
+    assert_eq!(fac.verify_count(), 0);
+}
+
+#[tokio::test]
 async fn auth_only_grants_without_store() {
     let fac = Arc::new(FakeFacilitator::new());
     let store = InMemoryPaidAddressStore::new();
@@ -214,7 +238,7 @@ async fn invalid_signature_is_402_zero_verify() {
 }
 
 #[tokio::test]
-async fn failed_verify_does_not_restore_nonce() {
+async fn invalid_proof_does_not_burn_nonce() {
     let fac = Arc::new(FakeFacilitator::new());
     let store = InMemoryPaidAddressStore::new();
     let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
@@ -231,16 +255,16 @@ async fn failed_verify_does_not_restore_nonce() {
     let bad_header =
         HeaderValue::from_bytes(Base64Bytes::encode(serde_json::to_vec(&bad).unwrap()).as_ref())
             .unwrap();
-    let burned = call_layer(
+    let dummy = call_layer(
         layer.clone(),
         OkInner,
         siwx_request(bad_header, "api.example.com"),
     )
     .await;
-    assert_eq!(burned.status(), StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(dummy.status(), StatusCode::PAYMENT_REQUIRED);
     let (_, good_header) = sign_challenge(&info).await;
     let retry = call_layer(layer, OkInner, siwx_request(good_header, "api.example.com")).await;
-    assert_eq!(retry.status(), StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(retry.status(), StatusCode::OK);
     assert_eq!(fac.verify_count(), 0);
 }
 

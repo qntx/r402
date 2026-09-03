@@ -120,16 +120,16 @@ impl SiwxGate {
         let Ok(proof) = SiwxProof::parse_header(header) else {
             return false;
         };
-        // Consume before verify so concurrent replay cannot both grant.
-        // Failed verify / unpaid miss leave the nonce consumed.
-        if !self.store.consume_nonce(&proof.nonce) {
-            return false;
-        }
         if proof.verify(self.extension.origin(), path).await.is_err() {
             return false;
         }
         let key = self.extension.origin().store_key(path);
-        self.auth_only || self.store.contains(&key, &proof.address)
+        if !(self.auth_only || self.store.contains(&key, &proof.address)) {
+            return false;
+        }
+        // After verify: dummy proofs never insert. Concurrent valid
+        // replays: one insert-if-absent wins; the loser is a replay.
+        self.store.consume_nonce(&proof.nonce)
     }
 }
 

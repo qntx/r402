@@ -5,8 +5,9 @@
 //! recorded. v1 has no Redis and no TTL eviction.
 //!
 //! [`PaidAddressStore::consume_nonce`] is insert-if-absent under one lock.
-//! HTTP consumes before CAIP-122 verify. A failed verify does not restore
-//! the nonce.
+//! HTTP verifies first, then consumes. Invalid proofs never insert. A
+//! failed consume after a successful verify is treated as replay and is
+//! not undone.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -27,7 +28,8 @@ pub trait PaidAddressStore: Send + Sync {
 
     /// Inserts `nonce` if absent. `true` means this caller consumed it.
     ///
-    /// Must be atomic. A later failed verify must not restore the nonce.
+    /// Must be atomic. Callers must not delete a nonce after a failed
+    /// consume (replay) or a later failure.
     #[must_use]
     fn consume_nonce(&self, nonce: &str) -> bool;
 }
