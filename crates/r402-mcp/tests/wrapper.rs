@@ -355,7 +355,10 @@ async fn facilitator_transport_verify_is_tool_is_error() {
         Some(true),
         "Transport maps to tool isError, not HTTP 502"
     );
-    assert!(extract_payment_required(&result).is_some() || result.structured_content.is_some());
+    assert!(
+        extract_payment_required(&result).is_none(),
+        "Transport must not be a 402 PaymentRequired the buyer would auto-pay"
+    );
 }
 
 #[tokio::test]
@@ -397,6 +400,10 @@ async fn facilitator_transport_settle_is_tool_is_error() {
         result.is_error,
         Some(true),
         "settle Transport is tool isError"
+    );
+    assert!(
+        extract_payment_required(&result).is_none(),
+        "Transport must not be a 402 PaymentRequired the buyer would auto-pay"
     );
 }
 

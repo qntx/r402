@@ -1,7 +1,7 @@
 //! paymentFlow pipeline for [`super::PaymentWrapper`].
 //!
-//! Facilitator [`r402_protocol::FacilitatorError::Transport`] becomes a tool
-//! `isError` dual-format result (MCP never emits HTTP 502).
+//! Facilitator [`r402_protocol::FacilitatorError::Transport`] is tool `isError`
+//! without a `PaymentRequired` body (HTTP 502 analog). Buyer must not auto-pay it.
 
 use std::future::Future;
 
@@ -104,6 +104,7 @@ impl PaymentWrapper {
                     )
                     .await)
             }
+            Err(err) if err.is_transport() => Err(internal_server_error_result(None)),
             Err(err) => Err(self
                 .payment_required_result_for(
                     tool_name,
@@ -173,6 +174,9 @@ impl PaymentWrapper {
                             format!("Settlement failed: {}", settle_failure_reason(&result)),
                         )
                         .await;
+                }
+                Err(err) if err.is_transport() => {
+                    return internal_server_error_result(None);
                 }
                 Err(_) => {
                     return self
@@ -321,6 +325,9 @@ impl PaymentWrapper {
                         format!("Settlement failed: {}", settle_failure_reason(&settle)),
                     )
                     .await;
+            }
+            Err(err) if err.is_transport() => {
+                return internal_server_error_result(None);
             }
             Err(_) => {
                 return self
