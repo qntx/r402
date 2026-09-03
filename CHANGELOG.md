@@ -28,8 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `@x402/concordium` 2.24.0).
 - `BuilderCodeClient` implements `ClientExtension`. Register with
   `PaymentClient::with_extension` / `X402Client::with_extension`. Feature
-  `ext-builder-code` depends on `r402-client`. Enrich writes payload `s[]`
-  only (never `a`).
+  `ext-builder-code` depends on `r402-client`. Enrich merges payload `s[]`
+  and copies advertised `builder-code.a` when payload `a` is absent. Never
+  invents `a` when undeclared. Never overwrites existing payload `a`.
 
 ### Changed
 

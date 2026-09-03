@@ -70,7 +70,7 @@ impl BuilderCodeClient {
             advertised_s(payment_required),
             payload_s(obj),
         );
-        write_builder_code_s(obj, &merged);
+        write_builder_code(obj, &merged, advertised_a(payment_required));
         Ok(Base64Bytes::encode(serde_json::to_vec(&value)?).to_string())
     }
 }
@@ -89,18 +89,22 @@ impl ClientExtension for BuilderCodeClient {
     }
 }
 
+fn advertised_info(payment_required: &PaymentRequired) -> Option<&Value> {
+    let entry = payment_required.extensions.get(BUILDER_CODE)?;
+    match entry {
+        ExtensionEntry::Structured { info, .. } => Some(info),
+        ExtensionEntry::Raw(value) => value.get("info"),
+    }
+}
+
 fn advertised_s(payment_required: &PaymentRequired) -> Vec<CompactString> {
-    let Some(entry) = payment_required.extensions.get(BUILDER_CODE) else {
-        return Vec::new();
-    };
-    let info = match entry {
-        ExtensionEntry::Structured { info, .. } => info,
-        ExtensionEntry::Raw(value) => match value.get("info") {
-            Some(info) => info,
-            None => return Vec::new(),
-        },
-    };
-    s_codes(info)
+    advertised_info(payment_required).map_or_else(Vec::new, s_codes)
+}
+
+fn advertised_a(payment_required: &PaymentRequired) -> Option<&str> {
+    advertised_info(payment_required)?
+        .get("a")
+        .and_then(Value::as_str)
 }
 
 fn payload_s(payload: &Map<String, Value>) -> Vec<CompactString> {
@@ -136,7 +140,11 @@ fn merge_service_codes(
     out
 }
 
-fn write_builder_code_s(payload: &mut Map<String, Value>, merged: &[CompactString]) {
+fn write_builder_code(
+    payload: &mut Map<String, Value>,
+    merged: &[CompactString],
+    advertised_a: Option<&str>,
+) {
     let mut extensions = match payload.remove("extensions") {
         Some(Value::Object(map)) => map,
         _ => Map::new(),
@@ -145,14 +153,26 @@ fn write_builder_code_s(payload: &mut Map<String, Value>, merged: &[CompactStrin
         Some(Value::Object(map)) => map,
         _ => Map::new(),
     };
-    match entry.get_mut("info") {
-        Some(Value::Object(info)) => {
-            let _ = info.insert("s".to_owned(), json!(merged));
-        }
-        _ => {
-            let _ = entry.insert("info".to_owned(), json!({ "s": merged }));
-        }
+    if let Some(Value::Object(info)) = entry.get_mut("info") {
+        insert_s_and_echo_a(info, merged, advertised_a);
+    } else {
+        let mut info = Map::new();
+        insert_s_and_echo_a(&mut info, merged, advertised_a);
+        let _ = entry.insert("info".to_owned(), Value::Object(info));
     }
     let _ = extensions.insert(BUILDER_CODE.to_owned(), Value::Object(entry));
     let _ = payload.insert("extensions".to_owned(), Value::Object(extensions));
+}
+
+fn insert_s_and_echo_a(
+    info: &mut Map<String, Value>,
+    merged: &[CompactString],
+    advertised_a: Option<&str>,
+) {
+    let _ = info.insert("s".to_owned(), json!(merged));
+    if !info.contains_key("a")
+        && let Some(a) = advertised_a
+    {
+        let _ = info.insert("a".to_owned(), Value::String(a.to_owned()));
+    }
 }

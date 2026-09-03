@@ -31,7 +31,7 @@ use r402_protocol::extension::{AdvertiseContext, Extension};
 use r402_protocol::payment::{
     Base64Bytes, Extensions, PaymentRequired, PaymentRequirements, ResourceInfo,
 };
-use r402_protocol::{ChainId, ClientError, SchemeId};
+use r402_protocol::{ChainId, ClientError, SchemeId, validate_extension_echoes};
 use serde_json::{Value, json};
 
 const APP: &str = "bc_my_app";
@@ -48,6 +48,10 @@ fn b64_json(value: &Value) -> String {
 
 fn json_from_b64(b64: &str) -> Value {
     serde_json::from_slice(&Base64Bytes::from(b64.as_bytes()).decode().unwrap()).unwrap()
+}
+
+fn payload_extensions(b64: &str) -> Extensions {
+    serde_json::from_value(json_from_b64(b64)["extensions"].clone()).unwrap()
 }
 
 fn required_bare() -> PaymentRequired {
@@ -213,7 +217,7 @@ async fn client_enrich_merges_advertised_s() {
     let decoded = json_from_b64(&encoded);
     let info = builder_code_info(&decoded);
     assert_eq!(info["s"], json!([SERVICE, "bc_server"]));
-    assert!(info.get("a").is_none());
+    assert_eq!(info["a"], APP);
 }
 
 #[tokio::test]
@@ -227,6 +231,32 @@ async fn client_enrich_does_not_insert_a_when_undeclared() {
     let info = builder_code_info(&decoded);
     assert_eq!(info["s"], json!([SERVICE]));
     assert!(info.get("a").is_none());
+}
+
+#[tokio::test]
+async fn client_enrich_echoes_pass_validate_extension_echoes() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        BUILDER_CODE,
+        declare_builder_code_extension(APP, &["bc_server"]).unwrap(),
+    );
+    let required = required_bare().with_extensions(advertised.clone());
+    let declared = client
+        .enrich_payment_payload(&b64_json(&json!({})), &required)
+        .await
+        .unwrap();
+    assert!(
+        validate_extension_echoes(Some(&advertised), &payload_extensions(&declared), |_| &[])
+            .is_ok()
+    );
+
+    let undeclared = client
+        .enrich_payment_payload(&b64_json(&json!({})), &required_bare())
+        .await
+        .unwrap();
+    assert!(validate_extension_echoes(None, &payload_extensions(&undeclared), |_| &[]).is_ok());
 }
 
 #[tokio::test]
