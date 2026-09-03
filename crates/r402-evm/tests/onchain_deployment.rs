@@ -49,7 +49,9 @@ use alloy_primitives::Address;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_signer_local::PrivateKeySigner;
 use r402_client::SchemeClient;
-use r402_evm::chain::{Eip155ChainProvider, Eip155ChainReference, Eip155MetaTransactionProvider};
+use r402_evm::chain::{
+    Eip155ChainProvider, Eip155ChainReference, Eip155MetaTransactionProvider, Eip155TokenDeployment,
+};
 use r402_evm::exact::X402_EXACT_PERMIT2_PROXY;
 use r402_evm::{
     EVM_NETWORKS, Eip155Exact, Eip155ExactClient, Eip155ExactFacilitator, PERMIT2_ADDRESS, USDC,
@@ -58,7 +60,8 @@ use r402_evm::{
 use r402_facilitator::Facilitator;
 use r402_protocol::error::{AsPaymentProblem, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
-    Base64Bytes, PaymentRequired, ResourceInfo, SettleRequest, VerifyRequest,
+    Base64Bytes, PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest,
+    VerifyResponse,
 };
 use url::Url;
 
@@ -271,8 +274,23 @@ fn verify_targets() -> Vec<(u64, Url)> {
     urls
 }
 
+const ASSET_NOT_DEPLOYED: &str = "asset_not_deployed_contract";
+
+fn token_for(chain_id: u64) -> &'static Eip155TokenDeployment {
+    USDC::on(Eip155ChainReference::new(chain_id)).unwrap_or_else(USDC::base)
+}
+
+async fn asset_code_present(provider: &Eip155ChainProvider, asset: Address) -> bool {
+    let inner = Eip155MetaTransactionProvider::inner(provider);
+    let code = tokio::time::timeout(PER_CALL_TIMEOUT, inner.get_code_at(asset))
+        .await
+        .expect("eth_getCode(asset) timed out")
+        .expect("eth_getCode(asset)");
+    !code.is_empty()
+}
+
 async fn signed_eip3009(chain_id: u64) -> (serde_json::Value, serde_json::Value) {
-    let token = USDC::on(Eip155ChainReference::new(chain_id)).unwrap_or_else(USDC::base);
+    let token = token_for(chain_id);
     let tag = Eip155Exact::price_tag(pay_to(), token.amount(1_000_000u64), None);
     let signer = PrivateKeySigner::from_str(ANVIL_KEY).expect("anvil key");
     let client = Eip155ExactClient::new(signer);
@@ -302,22 +320,65 @@ fn as_verify_request(
     }))
 }
 
-fn assert_structured_verify(
-    result: Result<r402_protocol::payment::VerifyResponse, FacilitatorError>,
-) {
+fn verify_wire_reason(result: &Result<VerifyResponse, FacilitatorError>) -> Option<String> {
     match result {
-        Ok(
-            r402_protocol::payment::VerifyResponse::Valid { .. }
-            | r402_protocol::payment::VerifyResponse::Invalid { .. },
-        )
+        Ok(VerifyResponse::Invalid { reason, .. }) => {
+            reason.as_ref().map(|r| r.as_str().to_owned())
+        }
+        Err(FacilitatorError::Verification(err)) => {
+            Some(err.as_payment_problem().reason().as_str().to_owned())
+        }
+        _ => None,
+    }
+}
+
+fn assert_undeployed_verify(result: &Result<VerifyResponse, FacilitatorError>) {
+    assert!(
+        !matches!(result, Ok(VerifyResponse::Valid { .. })),
+        "undeployed asset must not verify Valid"
+    );
+    let reason = verify_wire_reason(result).unwrap_or_default();
+    assert_eq!(
+        reason, ASSET_NOT_DEPLOYED,
+        "undeployed asset must be {ASSET_NOT_DEPLOYED}, got {result:?}"
+    );
+}
+
+fn assert_structured_verify(result: Result<VerifyResponse, FacilitatorError>) {
+    match result {
+        Ok(VerifyResponse::Valid { .. } | VerifyResponse::Invalid { .. })
         | Err(FacilitatorError::Verification(_)) => {}
         other => panic!("expected structured EIP-3009 verify outcome, got {other:?}"),
     }
 }
 
-fn assert_structured_settle(
-    result: Result<r402_protocol::payment::SettleResponse, FacilitatorError>,
-) {
+fn assert_undeployed_settle(result: Result<SettleResponse, FacilitatorError>) {
+    match result {
+        Ok(SettleResponse::Success { .. }) => {
+            panic!("undeployed asset must not settle Success")
+        }
+        Ok(SettleResponse::Failure { reason, .. }) => {
+            assert_eq!(reason.as_str(), ASSET_NOT_DEPLOYED, "got {reason}");
+        }
+        Err(FacilitatorError::Verification(err)) => {
+            assert_eq!(
+                err.as_payment_problem().reason().as_str(),
+                ASSET_NOT_DEPLOYED,
+                "got {err}"
+            );
+        }
+        Err(FacilitatorError::Settlement(err)) => {
+            assert_eq!(
+                err.as_payment_problem().reason().as_str(),
+                ASSET_NOT_DEPLOYED,
+                "got {err}"
+            );
+        }
+        other => panic!("expected {ASSET_NOT_DEPLOYED} settle, got {other:?}"),
+    }
+}
+
+fn assert_structured_settle(result: Result<SettleResponse, FacilitatorError>) {
     match result {
         Ok(_) | Err(FacilitatorError::Verification(_) | FacilitatorError::Settlement(_)) => {}
         other => panic!("expected structured EIP-3009 settle outcome, got {other:?}"),
@@ -350,6 +411,8 @@ async fn verify_and_settle_eip3009_when_rpc_configured() {
         );
         let provider = chain_provider(chain_id, &url);
         probe_rpc(&provider).await;
+        let token = token_for(chain_id);
+        let asset_deployed = asset_code_present(&provider, token.address).await;
         let fac = Eip155ExactFacilitator::try_new(provider).expect("try_new");
 
         let supported = fac.supported().await.expect("supported");
@@ -379,7 +442,11 @@ async fn verify_and_settle_eip3009_when_rpc_configured() {
                 err.as_payment_problem().reason().as_str()
             );
         }
-        assert_structured_verify(verify_result);
+        if asset_deployed {
+            assert_structured_verify(verify_result);
+        } else {
+            assert_undeployed_verify(&verify_result);
+        }
 
         if !is_loopback(&url) {
             eprintln!("[onchain] skipping settle on non-loopback RPC {url}");
@@ -390,6 +457,10 @@ async fn verify_and_settle_eip3009_when_rpc_configured() {
         if let Err(err) = &settle_result {
             eprintln!("[onchain] settle error={err}");
         }
-        assert_structured_settle(settle_result);
+        if asset_deployed {
+            assert_structured_settle(settle_result);
+        } else {
+            assert_undeployed_settle(settle_result);
+        }
     }
 }

@@ -147,6 +147,18 @@ async fn mock_facilitator_supported_transport() -> MockServer {
         .respond_with(ResponseTemplate::new(500))
         .mount(&server)
         .await;
+    Mock::given(method("POST"))
+        .and(path("/verify"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/settle"))
+        .respond_with(ResponseTemplate::new(404))
+        .expect(0)
+        .mount(&server)
+        .await;
     server
 }
 
@@ -197,6 +209,18 @@ fn paid_url(origin: &Url) -> String {
 }
 
 #[tokio::test]
+async fn unpaid_without_header_is_402_with_payment_required() {
+    let fac = mock_facilitator_ok().await;
+    let origin = serve_paid(&fac.uri(), eip3009_tag()).await;
+    let response = http_client().get(paid_url(&origin)).send().await.unwrap();
+    assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+    assert!(
+        response.headers().get(PAYMENT_REQUIRED).is_some(),
+        "unpaid Sequential with_price_tag must emit Payment-Required before the buyer retries"
+    );
+}
+
+#[tokio::test]
 async fn unpaid_then_pay_is_200_with_payment_response() {
     let fac = mock_facilitator_ok().await;
     let origin = serve_paid(&fac.uri(), eip3009_tag()).await;
@@ -227,12 +251,11 @@ async fn permit2_allowance_required_is_412() {
 async fn facilitator_transport_is_502() {
     let fac = mock_facilitator_supported_transport().await;
     let origin = serve_paid(&fac.uri(), eip3009_tag()).await;
-    let client = http_client().with_payments(paid_buyer());
-    let response = client.get(paid_url(&origin)).send().await.unwrap();
+    let response = http_client().get(paid_url(&origin)).send().await.unwrap();
     assert_eq!(
         response.status(),
         StatusCode::BAD_GATEWAY,
-        "502 transport must be returned without a paid retry"
+        "supported transport must 502 on the first unpaid response"
     );
     assert!(
         response.headers().get(PAYMENT_REQUIRED).is_none(),
