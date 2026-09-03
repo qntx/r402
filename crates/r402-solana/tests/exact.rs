@@ -113,3 +113,109 @@ fn transfer_amount_rule_allows_overpay() {
     assert!(transfer_amount_meets_requirement(1_000_001, 1_000_000));
     assert!(!transfer_amount_meets_requirement(999_999, 1_000_000));
 }
+
+#[cfg(feature = "facilitator")]
+fn compiled_tx(
+    programs: &[solana_pubkey::Pubkey],
+) -> solana_transaction::versioned::VersionedTransaction {
+    use solana_message::{Message, VersionedMessage};
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction::Instruction;
+
+    let payer = Pubkey::new_from_array([1u8; 32]);
+    let ixs: Vec<Instruction> = programs
+        .iter()
+        .map(|program_id| Instruction {
+            program_id: *program_id,
+            accounts: Vec::new(),
+            data: vec![0],
+        })
+        .collect();
+    solana_transaction::versioned::VersionedTransaction {
+        signatures: vec![Signature::default()],
+        message: VersionedMessage::Legacy(Message::new(&ixs, Some(&payer))),
+    }
+}
+
+#[cfg(feature = "facilitator")]
+#[test]
+fn default_max_instruction_count_is_7() {
+    use r402_solana::exact::facilitator::{MAX_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig};
+
+    assert_eq!(MAX_INSTRUCTION_COUNT, 7);
+    assert_eq!(
+        SolanaExactFacilitatorConfig::default().max_instruction_count,
+        7
+    );
+}
+
+#[cfg(feature = "facilitator")]
+#[test]
+fn slot_zero_signature_does_not_change_message_hash() {
+    use r402_solana::exact::facilitator::transaction_message_hash;
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+
+    let a = compiled_tx(&[Pubkey::new_from_array([2u8; 32])]);
+    let mut b = a.clone();
+    b.signatures[0] = Signature::from([9u8; 64]);
+    assert_eq!(transaction_message_hash(&a), transaction_message_hash(&b));
+    let c = compiled_tx(&[Pubkey::new_from_array([3u8; 32])]);
+    assert_ne!(transaction_message_hash(&a), transaction_message_hash(&c));
+}
+
+#[cfg(feature = "facilitator")]
+#[test]
+fn eight_instructions_rejected_even_when_max_set_to_8() {
+    use r402_solana::exact::facilitator::{SolanaExactFacilitatorConfig, validate_instructions};
+    use r402_solana::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM, SolanaExactError};
+    use solana_pubkey::pubkey;
+
+    const COMPUTE_BUDGET: solana_pubkey::Pubkey =
+        pubkey!("ComputeBudget111111111111111111111111111111");
+    let config = SolanaExactFacilitatorConfig {
+        max_instruction_count: 8,
+        ..SolanaExactFacilitatorConfig::default()
+    };
+    let seven = [
+        COMPUTE_BUDGET,
+        COMPUTE_BUDGET,
+        TOKEN_PROGRAM_ID,
+        *PHANTOM_LIGHTHOUSE_PROGRAM,
+        *PHANTOM_LIGHTHOUSE_PROGRAM,
+        *PHANTOM_LIGHTHOUSE_PROGRAM,
+        SPL_MEMO_PROGRAM,
+    ];
+    assert!(validate_instructions(&compiled_tx(&seven), &config).is_ok());
+    let mut eight = seven.to_vec();
+    eight.push(*PHANTOM_LIGHTHOUSE_PROGRAM);
+    assert!(matches!(
+        validate_instructions(&compiled_tx(&eight), &config),
+        Err(SolanaExactError::InstructionCountExceedsMax(7)),
+    ));
+}
+
+#[cfg(feature = "client")]
+#[test]
+fn with_memo_always_appends_memo() {
+    use r402_solana::exact::SPL_MEMO_PROGRAM;
+    use r402_solana::exact::client::with_memo;
+    use solana_transaction::Instruction;
+
+    let transfer = Instruction {
+        program_id: TOKEN_PROGRAM_ID,
+        accounts: Vec::new(),
+        data: vec![12],
+    };
+    let declared = with_memo(transfer.clone(), Some("order-123")).expect("declared");
+    assert_eq!(declared.len(), 2);
+    assert_eq!(declared[1].program_id, SPL_MEMO_PROGRAM);
+    assert_eq!(declared[1].data, b"order-123");
+
+    let random = with_memo(transfer, None).expect("random");
+    assert_eq!(random.len(), 2);
+    assert_eq!(random[1].program_id, SPL_MEMO_PROGRAM);
+    assert_eq!(random[1].data.len(), 32);
+    assert!(random[1].data.iter().all(u8::is_ascii_hexdigit));
+}

@@ -64,8 +64,8 @@ pub struct ExactSolanaPayload {
 /// Per x402 v2 spec §SVM exact scheme the seller MAY declare:
 ///
 /// - `fee_payer`: the facilitator address that will submit the transaction
-/// - `memo`: arbitrary UTF-8 (≤ 256 bytes) that the buyer MUST include via
-///   a single SPL Memo instruction — facilitators enforce this on verify.
+/// - `memo`: optional UTF-8 (≤ 256 bytes). Clients always append a Memo
+///   instruction; when this is set the facilitator requires an exact match.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportedPaymentKindExtra {

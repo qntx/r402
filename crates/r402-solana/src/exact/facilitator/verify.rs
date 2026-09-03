@@ -148,10 +148,9 @@ pub fn validate_instructions(
         return Err(SolanaExactError::TooFewInstructions);
     }
 
-    if instructions.len() > config.max_instruction_count {
-        return Err(SolanaExactError::InstructionCountExceedsMax(
-            config.max_instruction_count,
-        ));
+    let max = config.effective_max_instruction_count();
+    if instructions.len() > max {
+        return Err(SolanaExactError::InstructionCountExceedsMax(max));
     }
 
     let ix2_program = get_program_id(transaction, 2);
@@ -514,7 +513,73 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
 
 #[cfg(test)]
 mod tests {
-    use super::transfer_amount_meets_requirement;
+    use solana_compute_budget_interface::ID as COMPUTE_BUDGET;
+    use solana_message::{Message, VersionedMessage};
+    use solana_signature::Signature;
+    use solana_transaction::Instruction;
+
+    use super::*;
+    use crate::chain::TOKEN_PROGRAM_ID;
+    use crate::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM, SolanaExactError};
+
+    fn compiled_tx(programs: &[Pubkey]) -> VersionedTransaction {
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        let ixs: Vec<Instruction> = programs
+            .iter()
+            .map(|program_id| Instruction {
+                program_id: *program_id,
+                accounts: Vec::new(),
+                data: vec![0],
+            })
+            .collect();
+        VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::Legacy(Message::new(&ixs, Some(&payer))),
+        }
+    }
+
+    fn seven_ix_layout() -> VersionedTransaction {
+        compiled_tx(&[
+            COMPUTE_BUDGET,
+            COMPUTE_BUDGET,
+            TOKEN_PROGRAM_ID,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            SPL_MEMO_PROGRAM,
+        ])
+    }
+
+    #[test]
+    fn seven_instruction_layout_accepted() {
+        let config = SolanaExactFacilitatorConfig::default();
+        assert!(validate_instructions(&seven_ix_layout(), &config).is_ok());
+    }
+
+    #[test]
+    fn eight_instructions_rejected_even_when_max_set_to_8() {
+        let config = SolanaExactFacilitatorConfig {
+            max_instruction_count: 8,
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let mut programs = vec![
+            COMPUTE_BUDGET,
+            COMPUTE_BUDGET,
+            TOKEN_PROGRAM_ID,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+            SPL_MEMO_PROGRAM,
+            *PHANTOM_LIGHTHOUSE_PROGRAM,
+        ];
+        let tx = compiled_tx(&programs);
+        assert!(matches!(
+            validate_instructions(&tx, &config),
+            Err(SolanaExactError::InstructionCountExceedsMax(7)),
+        ));
+        programs.pop();
+        assert!(validate_instructions(&compiled_tx(&programs), &config).is_ok());
+    }
 
     #[test]
     fn exact_amount_meets_requirement() {

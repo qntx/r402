@@ -6500,6 +6500,7 @@ dependencies = [
 name = "r402-solana"
 version = "0.18.0"
 dependencies = [
+ "base64 0.23.1",
  "bincode",
  "compact_str",
  "futures-util",

@@ -8,16 +8,22 @@ mod verify;
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::Arc;
 
 use compact_str::CompactString;
-pub use config::SolanaExactFacilitatorConfig;
-use r402_facilitator::{Facilitator, SettlementCache};
+pub use config::{
+    MAX_INSTRUCTION_COUNT, MIN_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig,
+    clamp_max_instruction_count,
+};
+use r402_facilitator::{
+    Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
+};
 use r402_protocol::payment::{
     SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, VerifyRequest,
     VerifyResponse,
 };
 use r402_protocol::{ChainProvider, FacilitatorError, SchemeId, VerificationError};
-pub use settle::settle_transaction;
+pub use settle::{settle_transaction, transaction_message_hash};
 pub use smart_wallet::{
     ObservedTransfer, extract_top_level_transfers, is_path1_layout_recoverable,
     match_required_transfer, parse_transfer_checked, smart_wallet_enabled,
@@ -37,6 +43,7 @@ pub struct SolanaExactFacilitator<P> {
     pub(super) provider: P,
     pub(super) config: SolanaExactFacilitatorConfig,
     pub(super) settlement_cache: SettlementCache,
+    pub(super) pending: Arc<dyn PendingSettlementStore>,
 }
 
 impl<P> SolanaExactFacilitator<P> {
@@ -62,16 +69,25 @@ impl<P> SolanaExactFacilitator<P> {
 
     /// Creates a facilitator with a shared [`SettlementCache`].
     #[must_use]
-    pub const fn with_settlement_cache(
+    pub fn with_settlement_cache(
         provider: P,
-        config: SolanaExactFacilitatorConfig,
+        mut config: SolanaExactFacilitatorConfig,
         settlement_cache: SettlementCache,
     ) -> Self {
+        config.max_instruction_count = config.effective_max_instruction_count();
         Self {
             provider,
             config,
             settlement_cache,
+            pending: Arc::new(InMemoryPendingSettlementStore::new()),
         }
+    }
+
+    /// Override the pending-settlement store (retry reconcile).
+    #[must_use]
+    pub fn with_pending_store(mut self, store: Arc<dyn PendingSettlementStore>) -> Self {
+        self.pending = store;
+        self
     }
 }
 

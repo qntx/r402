@@ -8,7 +8,7 @@
 //! - Index 0: `SetComputeUnitLimit`
 //! - Index 1: `SetComputeUnitPrice`
 //! - Index 2: `TransferChecked` (SPL Token or Token-2022)
-//! - Index 3+: Additional instructions (if allowed by configuration)
+//! - Index 3+: Memo (always, spec §3.1) and optional Lighthouse (cap 3–7)
 
 use r402_protocol::scheme::SchemeId;
 

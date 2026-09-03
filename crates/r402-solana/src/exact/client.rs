@@ -217,21 +217,31 @@ pub fn memo_instruction(memo: &str) -> Result<Instruction, ClientError> {
     })
 }
 
-/// Transfer instruction, plus a memo instruction when `memo` is declared.
+/// Transfer instruction plus a Memo instruction (spec §3.1).
+///
+/// Uses `extra.memo` when set (≤256 bytes). Otherwise a 16-byte random nonce
+/// encoded as 32 lowercase hex characters so two identical transfers still
+/// produce distinct messages.
 ///
 /// # Errors
 ///
-/// Returns [`ClientError::Signing`] when a declared memo is invalid.
-pub fn with_declared_memo(
+/// Returns [`ClientError::Signing`] when a declared memo exceeds 256 bytes.
+pub fn with_memo(
     transfer: Instruction,
-    memo: Option<&str>,
+    extra_memo: Option<&str>,
 ) -> Result<Vec<Instruction>, ClientError> {
-    let mut ixs = Vec::with_capacity(1 + usize::from(memo.is_some()));
-    ixs.push(transfer);
-    if let Some(memo) = memo {
-        ixs.push(memo_instruction(memo)?);
-    }
-    Ok(ixs)
+    let memo_ix = if let Some(memo) = extra_memo {
+        memo_instruction(memo)?
+    } else {
+        let mut nonce = [0u8; 16];
+        rand::fill(&mut nonce);
+        Instruction {
+            program_id: SPL_MEMO_PROGRAM,
+            accounts: Vec::new(),
+            data: hex::encode(nonce).into_bytes(),
+        }
+    };
+    Ok(vec![transfer, memo_ix])
 }
 
 /// Update the first `set_compute_unit_limit` ix if it exists, else append a new one.
@@ -328,7 +338,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
         get_priority_fee_micro_lamports(rpc_client, &[*fee_payer, destination_ata, source_ata])
             .await?;
 
-    let transfer_instructions = with_declared_memo(transfer_instruction, memo)?;
+    let transfer_instructions = with_memo(transfer_instruction, memo)?;
     let (msg_to_sim, instructions) =
         build_message_to_simulate(*fee_payer, &transfer_instructions, fee, recent_blockhash)?;
 
@@ -510,7 +520,7 @@ mod tests {
 
     #[test]
     fn declared_memo_is_appended_after_transfer() {
-        let ixs = with_declared_memo(dummy_transfer(), Some("order-123")).expect("ixs");
+        let ixs = with_memo(dummy_transfer(), Some("order-123")).expect("ixs");
         assert_eq!(ixs.len(), 2);
         assert_eq!(ixs[0].program_id, spl_token::id());
         assert_eq!(ixs[1].program_id, SPL_MEMO_PROGRAM);
@@ -518,9 +528,20 @@ mod tests {
     }
 
     #[test]
-    fn absent_memo_leaves_transfer_only() {
-        let ixs = with_declared_memo(dummy_transfer(), None).expect("ixs");
-        assert_eq!(ixs.len(), 1);
+    fn absent_memo_appends_32_byte_hex_nonce() {
+        let ixs = with_memo(dummy_transfer(), None).expect("ixs");
+        assert_eq!(ixs.len(), 2);
         assert_eq!(ixs[0].program_id, spl_token::id());
+        assert_eq!(ixs[1].program_id, SPL_MEMO_PROGRAM);
+        assert_eq!(ixs[1].data.len(), 32);
+        assert!(ixs[1].data.iter().all(u8::is_ascii_hexdigit));
+        let again = with_memo(dummy_transfer(), None).expect("ixs");
+        assert_ne!(ixs[1].data, again[1].data);
+    }
+
+    #[test]
+    fn with_memo_rejects_over_256_bytes() {
+        assert!(with_memo(dummy_transfer(), Some(&"a".repeat(257))).is_err());
+        assert!(with_memo(dummy_transfer(), Some(&"a".repeat(256))).is_ok());
     }
 }
