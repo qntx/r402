@@ -252,7 +252,7 @@ mod client_verify_tests {
         let signer = PrivateKeySigner::random();
         let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
         let mut extra = extra(now);
-        extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+        extra.auth_capture_escrow = Some(Address::repeat_byte(0x99).to_checksum(None));
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);
@@ -273,7 +273,7 @@ mod client_verify_tests {
         let payer = signer.address();
         let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
         let mut extra = extra(now);
-        extra.auth_capture_escrow = Some(ChecksummedAddress(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS));
+        extra.auth_capture_escrow = Some(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS.to_checksum(None));
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);

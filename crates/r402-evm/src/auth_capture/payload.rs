@@ -4,6 +4,8 @@
 //! `specs/schemes/auth-capture/scheme_auth_capture_evm.md` and official
 //! `auth-capture/constants.ts`. Default aliases are commerce-payments **v1.1**.
 
+use std::str::FromStr;
+
 use alloy_primitives::{Address, B256, Bytes, U256, address};
 use r402_protocol::error::VerificationError;
 use r402_protocol::payment::UnixTimestamp;
@@ -118,22 +120,24 @@ impl AuthCaptureDeployment {
 
 /// Resolve the commerce-payments deployment from optional `extra.authCaptureEscrow`.
 ///
-/// Absent → v1.1. The v1.1 escrow → v1.1. The v1.0 escrow → v1.0.
-/// Any other address → `None` (caller rejects; no v1.0-as-default fallback).
+/// Official `resolveAuthCaptureDeployment`: absent or `""` → v1.1; not an
+/// address or unknown address → `None`; v1.1 escrow → v1.1; v1.0 escrow → v1.0.
+/// No v1.0-as-default fallback.
 #[must_use]
-pub fn resolve_auth_capture_deployment(escrow: Option<Address>) -> Option<AuthCaptureDeployment> {
-    match escrow {
-        None => Some(AUTH_CAPTURE_DEPLOYMENT_V1_1),
-        Some(addr)
-            if addr == AUTH_CAPTURE_ESCROW_V1_1_ADDRESS || addr == AUTH_CAPTURE_ESCROW_ADDRESS =>
-        {
-            Some(AUTH_CAPTURE_DEPLOYMENT_V1_1)
-        }
-        Some(addr) if addr == AUTH_CAPTURE_ESCROW_V1_0_ADDRESS => {
-            Some(AUTH_CAPTURE_DEPLOYMENT_V1_0)
-        }
-        Some(_) => None,
+pub fn resolve_auth_capture_deployment(escrow: Option<&str>) -> Option<AuthCaptureDeployment> {
+    let Some(escrow) = escrow.filter(|s| !s.is_empty()) else {
+        return Some(AUTH_CAPTURE_DEPLOYMENT_V1_1);
+    };
+    let Ok(addr) = Address::from_str(escrow) else {
+        return None;
+    };
+    if addr == AUTH_CAPTURE_ESCROW_V1_1_ADDRESS || addr == AUTH_CAPTURE_ESCROW_ADDRESS {
+        return Some(AUTH_CAPTURE_DEPLOYMENT_V1_1);
     }
+    if addr == AUTH_CAPTURE_ESCROW_V1_0_ADDRESS {
+        return Some(AUTH_CAPTURE_DEPLOYMENT_V1_0);
+    }
+    None
 }
 
 /// Integer fee from amount and bps (same division the escrow uses).
@@ -223,10 +227,11 @@ pub struct AuthCaptureExtra {
     /// Transfer method; default eip3009 when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset_transfer_method: Option<AssetTransferMethod>,
-    /// Selects the commerce-payments deployment. Absent → v1.1. Collectors are
+    /// Selects the commerce-payments deployment. Absent or `""` → v1.1.
+    /// Not-an-address and unknown address reject at resolve. Collectors are
     /// never carried here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_capture_escrow: Option<ChecksummedAddress>,
+    pub auth_capture_escrow: Option<String>,
 }
 
 impl AuthCaptureExtra {
@@ -245,10 +250,11 @@ impl AuthCaptureExtra {
         matches!(self.auto_capture, Some(true))
     }
 
-    /// Resolved deployment from `authCaptureEscrow`. `None` when the address is unknown.
+    /// Resolved deployment from `authCaptureEscrow`. `None` when empty is not
+    /// the case and the value is not a known escrow.
     #[must_use]
     pub fn deployment(&self) -> Option<AuthCaptureDeployment> {
-        resolve_auth_capture_deployment(self.auth_capture_escrow.map(|a| a.0))
+        resolve_auth_capture_deployment(self.auth_capture_escrow.as_deref())
     }
 
     /// Resolved deployment, or the official extra-reject reason.
@@ -462,54 +468,68 @@ sol! {
         uint256 nonce;
         uint256 deadline;
     }
+}
 
-    /// v1.0 operator Charge (feeBps).
-    struct ChargeV1_0 {
-        bytes32 paymentInfoHash;
-        uint256 amount;
-        address tokenCollector;
-        bytes32 collectorDataHash;
-        uint16 feeBps;
-        address feeReceiver;
-    }
+/// v1.0 operator Charge/Capture EIP-712 types (`feeBps`). Primary type names
+/// are `Charge` / `Capture`.
+#[cfg(any(feature = "client", feature = "facilitator"))]
+pub mod v1_0 {
+    use alloy_sol_types::sol;
 
-    /// v1.1 operator Charge (feeAmount). Default Charge type.
-    struct ChargeV1_1 {
-        bytes32 paymentInfoHash;
-        uint256 amount;
-        address tokenCollector;
-        bytes32 collectorDataHash;
-        uint256 feeAmount;
-        address feeReceiver;
-    }
+    sol! {
+        struct Charge {
+            bytes32 paymentInfoHash;
+            uint256 amount;
+            address tokenCollector;
+            bytes32 collectorDataHash;
+            uint16 feeBps;
+            address feeReceiver;
+        }
 
-    /// v1.0 operator Capture (feeBps).
-    struct CaptureV1_0 {
-        bytes32 paymentInfoHash;
-        uint256 amount;
-        uint16 feeBps;
-        address feeReceiver;
-        uint256 expectedCapturableAmount;
-        uint256 expectedRefundableAmount;
-    }
-
-    /// v1.1 operator Capture (feeAmount). Default Capture type.
-    struct CaptureV1_1 {
-        bytes32 paymentInfoHash;
-        uint256 amount;
-        uint256 feeAmount;
-        address feeReceiver;
-        uint256 expectedCapturableAmount;
-        uint256 expectedRefundableAmount;
+        struct Capture {
+            bytes32 paymentInfoHash;
+            uint256 amount;
+            uint16 feeBps;
+            address feeReceiver;
+            uint256 expectedCapturableAmount;
+            uint256 expectedRefundableAmount;
+        }
     }
 }
 
-/// Default v1.1 Charge EIP-712 type.
+/// v1.1 operator Charge/Capture EIP-712 types (`feeAmount`). Primary type
+/// names are `Charge` / `Capture`.
 #[cfg(any(feature = "client", feature = "facilitator"))]
-pub type Charge = ChargeV1_1;
-/// Default v1.1 Capture EIP-712 type.
+pub mod v1_1 {
+    use alloy_sol_types::sol;
+
+    sol! {
+        struct Charge {
+            bytes32 paymentInfoHash;
+            uint256 amount;
+            address tokenCollector;
+            bytes32 collectorDataHash;
+            uint256 feeAmount;
+            address feeReceiver;
+        }
+
+        struct Capture {
+            bytes32 paymentInfoHash;
+            uint256 amount;
+            uint256 feeAmount;
+            address feeReceiver;
+            uint256 expectedCapturableAmount;
+            uint256 expectedRefundableAmount;
+        }
+    }
+}
+
+/// Default v1.1 Capture EIP-712 type (`NAME` is `"Capture"`).
 #[cfg(any(feature = "client", feature = "facilitator"))]
-pub type Capture = CaptureV1_1;
+pub use v1_1::Capture;
+/// Default v1.1 Charge EIP-712 type (`NAME` is `"Charge"`).
+#[cfg(any(feature = "client", feature = "facilitator"))]
+pub use v1_1::Charge;
 
 /// Wire aliases for typed verify/settle.
 pub mod v2 {
@@ -606,26 +626,86 @@ mod tests {
 
     #[test]
     fn resolve_v1_1_escrow_is_v1_1() {
-        let d = resolve_auth_capture_deployment(Some(AUTH_CAPTURE_ESCROW_V1_1_ADDRESS))
-            .expect("v1.1 escrow");
+        let s = AUTH_CAPTURE_ESCROW_V1_1_ADDRESS.to_checksum(None);
+        let d = resolve_auth_capture_deployment(Some(s.as_str())).expect("v1.1 escrow");
         assert_eq!(d, AUTH_CAPTURE_DEPLOYMENT_V1_1);
     }
 
     #[test]
     fn resolve_v1_0_escrow_is_v1_0() {
-        let d = resolve_auth_capture_deployment(Some(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS))
-            .expect("v1.0 escrow");
+        let s = AUTH_CAPTURE_ESCROW_V1_0_ADDRESS.to_checksum(None);
+        let d = resolve_auth_capture_deployment(Some(s.as_str())).expect("v1.0 escrow");
         assert_eq!(d, AUTH_CAPTURE_DEPLOYMENT_V1_0);
         assert_eq!(d.eip3009_collector, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS);
         assert_eq!(d.permit2_collector, PERMIT2_TOKEN_COLLECTOR_V1_0_ADDRESS);
     }
 
     #[test]
-    fn resolve_unknown_escrow_is_none() {
+    fn resolve_empty_string_is_v1_1() {
         assert_eq!(
-            resolve_auth_capture_deployment(Some(Address::repeat_byte(0x99))),
+            resolve_auth_capture_deployment(Some("")),
+            Some(AUTH_CAPTURE_DEPLOYMENT_V1_1)
+        );
+    }
+
+    #[test]
+    fn resolve_not_an_address_is_none() {
+        assert_eq!(
+            resolve_auth_capture_deployment(Some("not-an-address")),
+            None,
+            "not-an-address must not fall back to v1.0 or v1.1"
+        );
+    }
+
+    #[test]
+    fn resolve_unknown_escrow_is_none() {
+        let s = Address::repeat_byte(0x99).to_checksum(None);
+        assert_eq!(
+            resolve_auth_capture_deployment(Some(s.as_str())),
             None,
             "unknown escrow must not fall back to v1.0 or v1.1"
+        );
+    }
+
+    #[test]
+    fn extra_empty_escrow_deserializes_as_v1_1() {
+        let extra: AuthCaptureExtra = serde_json::from_value(serde_json::json!({
+            "name": "USD Coin",
+            "version": "2",
+            "captureAuthorizer": "0x1111111111111111111111111111111111111111",
+            "captureDeadline": 1,
+            "refundDeadline": 2,
+            "feeRecipient": "0x2222222222222222222222222222222222222222",
+            "minFeeBps": 0,
+            "maxFeeBps": 0,
+            "authCaptureEscrow": ""
+        }))
+        .expect("empty escrow is valid extra");
+        assert_eq!(extra.auth_capture_escrow.as_deref(), Some(""));
+        assert_eq!(
+            extra.deployment(),
+            Some(AUTH_CAPTURE_DEPLOYMENT_V1_1),
+            "empty string selects v1.1"
+        );
+    }
+
+    #[test]
+    fn extra_not_an_address_deserializes_and_rejects_at_resolve() {
+        let extra: AuthCaptureExtra = serde_json::from_value(serde_json::json!({
+            "name": "USD Coin",
+            "version": "2",
+            "captureAuthorizer": "0x1111111111111111111111111111111111111111",
+            "captureDeadline": 1,
+            "refundDeadline": 2,
+            "feeRecipient": "0x2222222222222222222222222222222222222222",
+            "minFeeBps": 0,
+            "maxFeeBps": 0,
+            "authCaptureEscrow": "not-an-address"
+        }))
+        .expect("not-an-address must not fail extra deserialize");
+        assert_eq!(
+            extra.require_deployment().expect_err("reject").to_string(),
+            "invalid_auth_capture_evm_extra"
         );
     }
 
@@ -710,5 +790,32 @@ mod tests {
         assert_eq!(d.eip3009_collector, EIP3009_TOKEN_COLLECTOR_V1_1_ADDRESS);
         assert_eq!(d.permit2_collector, PERMIT2_TOKEN_COLLECTOR_V1_1_ADDRESS);
         assert_eq!(d.escrow, AUTH_CAPTURE_ESCROW_V1_1_ADDRESS);
+    }
+
+    #[cfg(any(feature = "client", feature = "facilitator"))]
+    #[test]
+    fn charge_capture_eip712_encode_type_is_official_primary_type() {
+        use alloy_sol_types::SolStruct;
+
+        assert_eq!(
+            Charge::eip712_encode_type(),
+            "Charge(bytes32 paymentInfoHash,uint256 amount,address tokenCollector,bytes32 collectorDataHash,uint256 feeAmount,address feeReceiver)"
+        );
+        assert_eq!(
+            Capture::eip712_encode_type(),
+            "Capture(bytes32 paymentInfoHash,uint256 amount,uint256 feeAmount,address feeReceiver,uint256 expectedCapturableAmount,uint256 expectedRefundableAmount)"
+        );
+        assert_eq!(
+            v1_0::Charge::eip712_encode_type(),
+            "Charge(bytes32 paymentInfoHash,uint256 amount,address tokenCollector,bytes32 collectorDataHash,uint16 feeBps,address feeReceiver)"
+        );
+        assert_eq!(
+            v1_0::Capture::eip712_encode_type(),
+            "Capture(bytes32 paymentInfoHash,uint256 amount,uint16 feeBps,address feeReceiver,uint256 expectedCapturableAmount,uint256 expectedRefundableAmount)"
+        );
+        assert_eq!(Charge::NAME, "Charge");
+        assert_eq!(v1_0::Charge::NAME, "Charge");
+        assert_eq!(Capture::NAME, "Capture");
+        assert_eq!(v1_0::Capture::NAME, "Capture");
     }
 }

@@ -246,7 +246,7 @@ async fn default_client_eip3009_to_is_v1_1_collector() {
 #[tokio::test]
 async fn v1_0_escrow_extra_selects_v1_0_collector() {
     let mut extra = sample_extra();
-    extra.auth_capture_escrow = Some(ChecksummedAddress(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS));
+    extra.auth_capture_escrow = Some(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS.to_checksum(None));
     let payload = signed_eip3009(extra).await;
     let AuthCapturePayload::Eip3009(p) = payload.payload else {
         panic!("eip3009");
@@ -262,7 +262,7 @@ async fn v1_0_escrow_extra_selects_v1_0_collector() {
 async fn unknown_escrow_verify_is_invalid_auth_capture_evm_extra() {
     let payload = signed_eip3009(sample_extra()).await;
     let mut extra = sample_extra();
-    extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+    extra.auth_capture_escrow = Some(Address::repeat_byte(0x99).to_checksum(None));
     let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
     let typed = r402_evm::auth_capture::payload::v2::VerifyRequest {
         x402_version: r402_protocol::payment::V2,
@@ -340,7 +340,7 @@ async fn unknown_escrow_client_refuses_to_sign() {
     let (signer, _) = wallet();
     let client = Eip155AuthCaptureClient::new(Arc::new(signer));
     let mut extra = sample_extra();
-    extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+    extra.auth_capture_escrow = Some(Address::repeat_byte(0x99).to_checksum(None));
     let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
     let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
         .with_accepts(vec![tag.requirements.clone()]);
@@ -351,5 +351,63 @@ async fn unknown_escrow_client_refuses_to_sign() {
         .sign()
         .await
         .expect_err("unknown escrow");
+    assert!(err.to_string().contains("authCaptureEscrow"), "got {err}");
+}
+
+#[tokio::test]
+async fn empty_escrow_extra_signs_v1_1_collector() {
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some(String::new());
+    let payload = signed_eip3009(extra).await;
+    let AuthCapturePayload::Eip3009(p) = payload.payload else {
+        panic!("default extra is eip3009");
+    };
+    assert_eq!(p.authorization.to, EIP3009_TOKEN_COLLECTOR_ADDRESS);
+}
+
+#[tokio::test]
+async fn not_an_address_escrow_verify_is_invalid_auth_capture_evm_extra() {
+    let payload = signed_eip3009(sample_extra()).await;
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some("not-an-address".into());
+    let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
+    let typed = r402_evm::auth_capture::payload::v2::VerifyRequest {
+        x402_version: r402_protocol::payment::V2,
+        payment_payload: payload,
+        payment_requirements: serde_json::from_value(
+            serde_json::to_value(&tag.requirements).unwrap(),
+        )
+        .unwrap(),
+    };
+    let request = VerifyRequest::try_from(typed).expect("typed verify");
+    let fac = Eip155AuthCaptureFacilitator::try_new(dummy_provider()).expect("try_new");
+    let err = fac
+        .verify(request)
+        .await
+        .expect_err("not-an-address escrow");
+    assert_eq!(verify_reason(err), "invalid_auth_capture_evm_extra");
+}
+
+#[tokio::test]
+async fn not_an_address_escrow_is_accepted_then_sign_fails() {
+    let (signer, _) = wallet();
+    let client = Eip155AuthCaptureClient::new(Arc::new(signer));
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some("not-an-address".into());
+    let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()]);
+    let candidates = client.accept(&required);
+    assert_eq!(
+        candidates.len(),
+        1,
+        "invalid escrow must not drop extra in as_concrete"
+    );
+    let err = candidates
+        .first()
+        .expect("one accept")
+        .sign()
+        .await
+        .expect_err("not-an-address");
     assert!(err.to_string().contains("authCaptureEscrow"), "got {err}");
 }
