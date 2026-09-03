@@ -91,5 +91,13 @@ required-features = ["client", "server", "facilitator"]
 name = "upto"
 required-features = ["client", "server", "facilitator"]
 
+[[test]]
+name = "auth_capture"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "batch_settlement"
+required-features = ["client", "server", "facilitator"]
+
 [lints]
 workspace = true

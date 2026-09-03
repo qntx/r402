@@ -1,0 +1,187 @@
+//! In-process batch-settlement tests. No live RPC. No HTTP E2E.
+
+#![allow(unused_crate_dependencies, reason = "sibling tests consume them")]
+#![allow(
+    clippy::tests_outside_test_module,
+    reason = "integration test binaries put #[test] fns at file scope"
+)]
+#![allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unwrap_used,
+    reason = "idiomatic test-code patterns"
+)]
+
+use std::str::FromStr;
+use std::sync::Arc;
+
+use alloy_network::EthereumWallet;
+use alloy_primitives::U256;
+use alloy_primitives::{Address, address};
+use alloy_signer_local::PrivateKeySigner;
+use r402_client::SchemeClient;
+use r402_evm::batch_settlement::payload::{BatchSettlementExtra, BatchSettlementPayload};
+use r402_evm::chain::{ChecksummedAddress, Eip155ChainProvider, Eip155ChainReference};
+use r402_evm::{
+    Eip155BatchSettlement, Eip155BatchSettlementClient, Eip155BatchSettlementFacilitator, USDC,
+};
+use r402_facilitator::Facilitator;
+use r402_protocol::error::{FacilitatorError, VerificationError};
+use r402_protocol::payment::{
+    PaymentRequired, ResourceInfo, SettleRequest, VerifyRequest, VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
+use r402_server::{PaymentFlowName, SchemeNetworkServer};
+use url::Url;
+
+/// Anvil account 0. Local signing only; never sent to a live chain.
+const ANVIL_KEY: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+fn wallet() -> (PrivateKeySigner, EthereumWallet) {
+    let signer = PrivateKeySigner::from_str(ANVIL_KEY).expect("anvil key");
+    let wallet = EthereumWallet::from(signer.clone());
+    (signer, wallet)
+}
+
+fn dummy_provider() -> Eip155ChainProvider {
+    let (_signer, wallet) = wallet();
+    let url = Url::parse("https://example.invalid").expect("url");
+    Eip155ChainProvider::new(
+        Eip155ChainReference::new(8453),
+        wallet,
+        &[(url, None)],
+        true,
+        false,
+        1,
+    )
+    .expect("provider constructs without connecting")
+}
+
+const fn pay_to() -> Address {
+    address!("0x1111111111111111111111111111111111111111")
+}
+
+fn sample_extra() -> BatchSettlementExtra {
+    BatchSettlementExtra {
+        receiver_authorizer: ChecksummedAddress(Address::repeat_byte(0x33)),
+        withdraw_delay: 900,
+        name: "USD Coin".into(),
+        version: "2".into(),
+        asset_transfer_method: None,
+    }
+}
+
+#[test]
+fn price_tag_embeds_batch_settlement_extra() {
+    let extra = sample_extra();
+    let tag = Eip155BatchSettlement::price_tag(pay_to(), USDC::base().amount(50u64), extra.clone());
+    assert_eq!(tag.requirements.scheme, "batch-settlement");
+    assert_eq!(tag.requirements.network.to_string(), "eip155:8453");
+    let decoded: BatchSettlementExtra =
+        serde_json::from_value(tag.requirements.extra.unwrap()).unwrap();
+    assert_eq!(decoded.withdraw_delay, 900);
+    assert_eq!(decoded.receiver_authorizer, extra.receiver_authorizer);
+}
+
+#[test]
+fn batch_settlement_scheme_id_and_payment_flows() {
+    let scheme = Eip155BatchSettlement;
+    assert_eq!(scheme.namespace(), "eip155");
+    assert_eq!(SchemeNetworkServer::scheme(&scheme), "batch-settlement");
+    assert_eq!(scheme.default_asset_transfer_method(), "eip3009");
+    let expected = r402_server::PaymentFlowConfig::authorization_only();
+    assert_eq!(scheme.payment_flows().get("eip3009"), Some(&expected));
+    assert_eq!(scheme.payment_flows().get("permit2"), Some(&expected));
+    assert_eq!(expected.default, PaymentFlowName::Authorization);
+}
+
+fn try_new_question_mark() -> Result<(), FacilitatorError> {
+    let _fac = Eip155BatchSettlementFacilitator::try_new(dummy_provider())?;
+    Ok(())
+}
+
+#[test]
+fn try_new_question_mark_compiles() {
+    try_new_question_mark().expect("try_new is currently infallible");
+}
+
+#[tokio::test]
+async fn try_new_supported_is_batch_settlement_on_provider_chain() {
+    let fac = Eip155BatchSettlementFacilitator::try_new(dummy_provider()).expect("try_new");
+    let supported = fac.supported().await.expect("supported");
+    let kind = supported.kinds.first().expect("one kind");
+    assert_eq!(kind.scheme, "batch-settlement");
+    assert_eq!(kind.network, "eip155:8453");
+    assert_eq!(kind.x402_version, 2);
+    assert!(
+        !supported.signers.is_empty(),
+        "try_new provider must advertise signers"
+    );
+}
+
+#[tokio::test]
+async fn verify_malformed_payload_is_invalid_format() {
+    let fac = Eip155BatchSettlementFacilitator::try_new(dummy_provider()).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(serde_json::json!({})))
+        .await
+        .expect_err("empty JSON is not a verify request");
+    assert!(
+        matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::InvalidFormat(_))
+        ),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn client_signs_and_facilitator_settles_voucher_offchain() {
+    let (signer, _) = wallet();
+    let client = Eip155BatchSettlementClient::new(Arc::new(signer));
+    let tag =
+        Eip155BatchSettlement::price_tag(pay_to(), USDC::base().amount(50u64), sample_extra());
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()]);
+    let candidates = client.accept(&required);
+    assert_eq!(candidates.len(), 1, "one batch-settlement accept");
+    let b64 = candidates
+        .first()
+        .expect("one accept")
+        .sign()
+        .await
+        .expect("local voucher sign");
+    let json = r402_protocol::payment::Base64Bytes(b64.into_bytes())
+        .decode()
+        .expect("b64");
+    let payload: r402_evm::batch_settlement::payload::v2::PaymentPayload =
+        serde_json::from_slice(&json).expect("payload");
+    assert!(matches!(
+        payload.payload,
+        BatchSettlementPayload::Voucher { .. }
+    ));
+    let channel_id = payload.payload.voucher().channel_id;
+
+    let requirements: r402_evm::batch_settlement::payload::v2::PaymentRequirements =
+        serde_json::from_value(serde_json::to_value(&tag.requirements).unwrap()).unwrap();
+    let typed = r402_evm::batch_settlement::payload::v2::VerifyRequest {
+        x402_version: r402_protocol::payment::V2,
+        payment_payload: payload,
+        payment_requirements: requirements,
+    };
+    let request = VerifyRequest::try_from(typed).expect("typed verify");
+    let fac = Eip155BatchSettlementFacilitator::try_new(dummy_provider()).expect("try_new");
+    let response = fac.verify(request.clone()).await.expect("verify");
+    assert!(matches!(response, VerifyResponse::Valid { .. }));
+
+    let settled = fac
+        .settle(SettleRequest::from(request))
+        .await
+        .expect("settle");
+    assert!(settled.is_success());
+    assert_eq!(
+        fac.store().get(&channel_id).charged_cumulative.0,
+        U256::from(50u64)
+    );
+}

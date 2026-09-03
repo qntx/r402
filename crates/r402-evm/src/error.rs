@@ -1,4 +1,4 @@
-//! Shared EVM facilitator errors (`exact` and `upto`).
+//! Shared EVM facilitator errors.
 
 use alloy_primitives::TxHash;
 use alloy_transport::TransportError;

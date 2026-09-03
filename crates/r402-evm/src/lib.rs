@@ -6,7 +6,7 @@
 //! EIP-1271 / EIP-6492 smart-wallet signatures are accepted on verify
 //! and settle. Insufficient Permit2 allowance is
 //! [`r402_protocol::error::VerificationError::Permit2AllowanceRequired`]
-//! (HTTP 412).
+//! (HTTP 412). Also implements `auth-capture` and `batch-settlement`.
 //!
 //! # Features
 //!
@@ -19,8 +19,10 @@
 #![cfg_attr(
     test,
     allow(
+        clippy::expect_used,
         clippy::indexing_slicing,
         clippy::panic,
+        clippy::unwrap_used,
         reason = "unit tests panic on assertion failure"
     )
 )]
@@ -31,6 +33,8 @@
 use compact_str as _;
 
 pub mod asset;
+pub mod auth_capture;
+pub mod batch_settlement;
 pub mod chain;
 pub mod eip2612;
 #[cfg(feature = "facilitator")]
@@ -48,6 +52,16 @@ pub mod signer;
 pub mod upto;
 
 pub use asset::{AssetTransferMethod, VALIDATOR_ADDRESS};
+pub use auth_capture::Eip155AuthCapture;
+#[cfg(feature = "client")]
+pub use auth_capture::Eip155AuthCaptureClient;
+#[cfg(feature = "facilitator")]
+pub use auth_capture::Eip155AuthCaptureFacilitator;
+pub use batch_settlement::Eip155BatchSettlement;
+#[cfg(feature = "client")]
+pub use batch_settlement::Eip155BatchSettlementClient;
+#[cfg(feature = "facilitator")]
+pub use batch_settlement::Eip155BatchSettlementFacilitator;
 pub use chain::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
 pub use eip2612::{
     EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612ParseError,
