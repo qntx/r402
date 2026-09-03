@@ -526,7 +526,7 @@ async fn map_concurrent_outcome(
 ) -> Result<Response, GateError> {
     match outcome {
         ScheduledSettlement::HandlerOkSettleOk { mut value, receipt } => {
-            let settlement = map_settle(Ok(receipt))?;
+            let settlement = map_settle(Ok(*receipt))?;
             gate.record_siwx_success(path, &settlement);
             attach_payment_response(&mut value, &settlement)?;
             Ok(value)

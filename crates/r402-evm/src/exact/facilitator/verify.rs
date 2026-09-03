@@ -6,7 +6,7 @@
 
 use std::future::IntoFuture;
 
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
 use r402_protocol::error::VerificationError;
@@ -269,38 +269,20 @@ pub(super) async fn verify_payment<P: Provider>(
             inner,
             original,
         } => {
-            let payer_code = provider
-                .get_code_at(payer)
-                .await
-                .unwrap_or_else(|_| alloy_primitives::Bytes::new());
-            if deny_undeployed_factory(factory, payer_code.as_ref(), eip6492_allowed_factories) {
-                #[cfg(feature = "telemetry")]
-                tracing::warn!(factory = %factory, "eip6492_factory_not_allowed");
-                return Err(VerificationError::from_wire(FACTORY_NOT_ALLOWED).into());
-            }
-            let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, &provider);
-            let is_valid_signature_call =
-                validator6492.isValidSigWithSideEffects(payer, hash, original);
-            let transfer_call = TransferWithAuthorization0Call::new(contract, payment, inner);
-            let transfer_call = transfer_call.0;
-            let aggregate3 = provider
-                .multicall()
-                .add(is_valid_signature_call)
-                .add(transfer_call.tx);
-            let aggregate3_call = aggregate3.aggregate3();
-            let (is_valid_signature_result, transfer_result) = traced!(
-                aggregate3_call,
-                transfer_span!("call_transferWithAuthorization_0", transfer_call)
-            )?;
-            let is_valid_signature_result = is_valid_signature_result
-                .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
-            if !is_valid_signature_result {
-                return Err(VerificationError::InvalidSignature(
-                    "Chain reported signature to be invalid".to_owned(),
-                )
-                .into());
-            }
-            transfer_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+            simulate_eip6492_transfer(
+                provider,
+                contract,
+                payment,
+                payer,
+                hash,
+                Eip6492Call {
+                    factory,
+                    inner,
+                    original,
+                },
+                eip6492_allowed_factories,
+            )
+            .await?;
         }
         ClassifiedSignature::EIP1271(signature) => {
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
@@ -323,6 +305,56 @@ pub(super) async fn verify_payment<P: Provider>(
     }
 
     Ok(payer)
+}
+
+struct Eip6492Call {
+    factory: Address,
+    inner: Bytes,
+    original: Bytes,
+}
+
+async fn simulate_eip6492_transfer<P: Provider>(
+    provider: &P,
+    contract: &IEIP3009::IEIP3009Instance<&P>,
+    payment: &Eip3009Payment,
+    payer: Address,
+    hash: B256,
+    call: Eip6492Call,
+    eip6492_allowed_factories: &[Address],
+) -> Result<(), Eip155ExactError> {
+    let payer_code = provider
+        .get_code_at(payer)
+        .await
+        .unwrap_or_else(|_| Bytes::new());
+    if deny_undeployed_factory(call.factory, payer_code.as_ref(), eip6492_allowed_factories) {
+        #[cfg(feature = "telemetry")]
+        tracing::warn!(factory = %call.factory, "eip6492_factory_not_allowed");
+        return Err(VerificationError::from_wire(FACTORY_NOT_ALLOWED).into());
+    }
+    let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, &provider);
+    let is_valid_signature_call =
+        validator6492.isValidSigWithSideEffects(payer, hash, call.original);
+    let transfer_call = TransferWithAuthorization0Call::new(contract, payment, call.inner);
+    let transfer_call = transfer_call.0;
+    let aggregate3 = provider
+        .multicall()
+        .add(is_valid_signature_call)
+        .add(transfer_call.tx);
+    let aggregate3_call = aggregate3.aggregate3();
+    let (is_valid_signature_result, transfer_result) = traced!(
+        aggregate3_call,
+        transfer_span!("call_transferWithAuthorization_0", transfer_call)
+    )?;
+    let is_valid_signature_result = is_valid_signature_result
+        .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
+    if !is_valid_signature_result {
+        return Err(VerificationError::InvalidSignature(
+            "Chain reported signature to be invalid".to_owned(),
+        )
+        .into());
+    }
+    transfer_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+    Ok(())
 }
 
 /// Runs all preconditions needed for a successful Permit2 payment.

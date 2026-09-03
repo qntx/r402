@@ -68,7 +68,7 @@ impl PaymentWrapper {
             )
             .await
         {
-            Err(result) => result,
+            Err(result) => *result,
             Ok(verify_out) => {
                 self.after_verify(
                     params,
@@ -91,7 +91,7 @@ impl PaymentWrapper {
         payload: &McpPaymentPayload,
         requirements: &PaymentRequirements,
         advertised: Option<&Extensions>,
-    ) -> Result<VerifyPaymentOutcome, CallToolResult> {
+    ) -> Result<VerifyPaymentOutcome, Box<CallToolResult>> {
         match self
             .server
             .verify_payment(payload, requirements, advertised)
@@ -113,22 +113,24 @@ impl PaymentWrapper {
                     ),
                     _ => "Payment verification failed".into(),
                 };
-                Err(self
-                    .payment_required_result_for(
+                Err(Box::new(
+                    self.payment_required_result_for(
                         tool_name,
                         format!("Payment verification failed: {reason}"),
                         Some(payload),
                     )
-                    .await)
+                    .await,
+                ))
             }
-            Err(err) if err.is_transport() => Err(internal_server_error_result(None)),
-            Err(err) => Err(self
-                .payment_required_result_for(
+            Err(err) if err.is_transport() => Err(Box::new(internal_server_error_result(None))),
+            Err(err) => Err(Box::new(
+                self.payment_required_result_for(
                     tool_name,
                     format!("Payment verification error: {err}"),
                     Some(payload),
                 )
-                .await),
+                .await,
+            )),
         }
     }
 

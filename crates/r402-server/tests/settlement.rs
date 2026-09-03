@@ -311,7 +311,7 @@ async fn run_join_settle_ok() {
         ScheduledSettlement::HandlerOkSettleOk { value, receipt } => {
             assert_eq!(value, 7);
             assert!(matches!(
-                receipt,
+                *receipt,
                 SettleResponse::Success { ref transaction, .. } if transaction == "0xjoin"
             ));
         }

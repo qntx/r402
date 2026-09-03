@@ -202,13 +202,13 @@ where
 
     fn estimate_fees_per_gas(&self) -> GasSponsoringFeeFut<'_> {
         Box::pin(async move {
-            match self.provider.estimate_eip1559_fees().await {
-                Ok(fees) => Ok((fees.max_fee_per_gas, fees.max_priority_fee_per_gas)),
-                Err(_) => Ok((
+            Ok(self.provider.estimate_eip1559_fees().await.map_or(
+                (
                     crate::erc20_approval::DEFAULT_MAX_FEE_PER_GAS,
                     crate::erc20_approval::DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
-                )),
-            }
+                ),
+                |fees| (fees.max_fee_per_gas, fees.max_priority_fee_per_gas),
+            ))
         })
     }
 }

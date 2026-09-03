@@ -457,7 +457,7 @@ mod verify_settle {
         assert!(resp.is_valid(), "expected valid, got {resp:?}");
         match resp {
             VerifyResponse::Valid { payer: p, .. } => {
-                assert_eq!(p.as_deref(), Some(payer.as_str()))
+                assert_eq!(p.as_deref(), Some(payer.as_str()));
             }
             _ => panic!("expected valid"),
         }

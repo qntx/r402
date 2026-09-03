@@ -22,6 +22,7 @@
     reason = "idiomatic test-code patterns"
 )]
 
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -362,18 +363,18 @@ impl Eip155MetaTransactionProvider for RecordingProvider {
         Eip155MetaTransactionProvider::chain(&self.inner)
     }
 
-    async fn send_transaction(
+    fn send_transaction(
         &self,
         tx: MetaTransaction,
-    ) -> Result<TransactionReceipt, Self::Error> {
+    ) -> impl Future<Output = Result<TransactionReceipt, Self::Error>> + Send {
         self.sent.lock().unwrap().push(tx.calldata);
-        match *self.send_mode.lock().unwrap() {
+        std::future::ready(match *self.send_mode.lock().unwrap() {
             SendMode::Success => Ok(success_receipt(FIXED_HASH)),
             SendMode::ReceiptWait => Err(MetaTransactionSendError::ReceiptWait {
                 hash: FIXED_HASH,
                 source: alloy_provider::PendingTransactionError::FailedToRegister,
             }),
-        }
+        })
     }
 }
 

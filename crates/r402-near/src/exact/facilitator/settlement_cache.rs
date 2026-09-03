@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 
 /// Safety-net TTL when neither [`SettlementCache::release`] nor
 /// [`SettlementCache::evict_expired`] fires.
-const DEFAULT_SETTLEMENT_TTL: Duration = Duration::from_millis(120_000);
+const DEFAULT_SETTLEMENT_TTL: Duration = Duration::from_mins(2);
 
 #[derive(Debug)]
 struct Entry {
