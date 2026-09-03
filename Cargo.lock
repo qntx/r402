@@ -6415,6 +6415,28 @@ dependencies = [
 [[package]]
 name = "r402-tron"
 version = "0.18.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-signer",
+ "alloy-signer-local",
+ "alloy-sol-types",
+ "bs58",
+ "compact_str",
+ "r402-client",
+ "r402-facilitator",
+ "r402-protocol",
+ "r402-server",
+ "rand 0.10.2",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-core",
+ "url",
+]
 
 [[package]]
 name = "r402-tvm"

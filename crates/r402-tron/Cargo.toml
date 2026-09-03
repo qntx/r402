@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "Tron chain support for the x402 payment protocol."
+readme = "README.md"
 keywords = ["x402", "payment", "tron", "trc20", "usdc"]
 categories = [
     "api-bindings",
@@ -18,6 +19,60 @@ categories = [
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = [
+    "dep:alloy-signer",
+    "dep:alloy-signer-local",
+    "dep:alloy-sol-types",
+    "dep:r402-client",
+    "dep:rand",
+]
+server = ["dep:r402-server"]
+facilitator = [
+    "dep:alloy-signer",
+    "dep:alloy-signer-local",
+    "dep:alloy-sol-types",
+    "dep:r402-facilitator",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:url",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+alloy-primitives = { workspace = true }
+alloy-sol-types = { workspace = true, optional = true }
+bs58 = "0.5"
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+
+alloy-signer = { workspace = true, optional = true }
+alloy-signer-local = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["time"] }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+alloy-signer-local = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+url = { workspace = true }
+
+[[test]]
+name = "exact"
+required-features = ["client", "server", "facilitator"]
 
 [lints]
 workspace = true
