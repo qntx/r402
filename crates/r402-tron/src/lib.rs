@@ -1,8 +1,9 @@
-//! Tron chain support for the x402 payment protocol.
+//! Tron chain support. **Experimental / not an x402 protocol mechanism.**
 //!
 //! Exact scheme: EIP-3009 `transferWithAuthorization` and SUN.io Permit2 via
 //! `x402ExactPermit2Proxy`. Signatures are EOA-only (no EIP-1271 / EIP-6492).
 //! Wire addresses are `Base58Check`; TIP-712 uses the raw 20-byte EVM form.
+//! Not re-exported from umbrella `r402` (no `tron` feature).
 //!
 //! # Features
 //!

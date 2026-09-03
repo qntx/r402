@@ -1,9 +1,12 @@
 //! Casper chain support for the x402 payment protocol.
 //!
+//! **Remote-facilitator client.** Local `validate_request` is shape and
+//! timing preflight only. Cryptographic verification and on-chain
+//! settlement stay on the remote facilitator (`R402_CASPER_FACILITATOR_URL`,
+//! default `https://x402-facilitator.cspr.cloud`).
+//!
 //! Exact scheme: CEP-18 `transfer_with_authorization` via a pre-signed
-//! EIP-712 authorization. Cryptographic verification and on-chain
-//! settlement are performed by a remote facilitator (default
-//! `https://x402-facilitator.cspr.cloud`).
+//! EIP-712 authorization.
 //!
 //! # Features
 //!

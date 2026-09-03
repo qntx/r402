@@ -25,10 +25,11 @@ r402-http = { path = "crates/r402-http", default-features = false }
 r402-solana = { path = "crates/r402-solana", default-features = false }
 r402-evm = { path = "crates/r402-evm", default-features = false }
 r402-extensions = { path = "crates/r402-extensions", default-features = false }
-# CAIP-122 (SIWX). 0.5 is the in-org crate at /Users/xu/Desktop/qntx/siwx.
-siwx = { version = "0.5.0", path = "/Users/xu/Desktop/qntx/siwx/siwx" }
-siwx-evm = { version = "0.5.0", path = "/Users/xu/Desktop/qntx/siwx/siwx-evm" }
-siwx-svm = { version = "0.5.0", path = "/Users/xu/Desktop/qntx/siwx/siwx-svm" }
+# CAIP-122 (SIWX). Pin git rev until v0.5.0 is tagged; crates.io 0.5 is later.
+# Never restore an absolute path.
+siwx = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-evm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-svm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
 time = { version = "0.3", features = ["parsing", "formatting"] }
 bs58 = "0.5"
 r402-near = { path = "crates/r402-near", default-features = false }

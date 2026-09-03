@@ -7952,6 +7952,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 [[package]]
 name = "siwx"
 version = "0.5.0"
+source = "git+https://github.com/qntx/siwx?rev=85cf7bf0e9b867088813781b5cd03a640441c583#85cf7bf0e9b867088813781b5cd03a640441c583"
 dependencies = [
  "iri-string",
  "rand 0.10.2",
@@ -7962,6 +7963,7 @@ dependencies = [
 [[package]]
 name = "siwx-evm"
 version = "0.5.0"
+source = "git+https://github.com/qntx/siwx?rev=85cf7bf0e9b867088813781b5cd03a640441c583#85cf7bf0e9b867088813781b5cd03a640441c583"
 dependencies = [
  "alloy",
  "siwx",
@@ -7970,6 +7972,7 @@ dependencies = [
 [[package]]
 name = "siwx-svm"
 version = "0.5.0"
+source = "git+https://github.com/qntx/siwx?rev=85cf7bf0e9b867088813781b5cd03a640441c583#85cf7bf0e9b867088813781b5cd03a640441c583"
 dependencies = [
  "bs58 0.5.1",
  "ed25519-dalek 3.0.0",

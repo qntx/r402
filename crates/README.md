@@ -1,8 +1,12 @@
 # Crates
 
-Workspace **0.18.0**. Each crate is an empty library (`src/lib.rs` only). No path dependencies between r402 crates. Umbrella `default = []`.
+Workspace **0.18.0**. Path dependencies match the graph below. Umbrella
+`default = ["evm", "http"]`. **[`r402-contract`](r402-contract/)** is an
+unpublished workspace member — not on crates.io, not in `publish.yml`.
+crates.io **`r402-core` 0.17.1** is not yanked.
 
-crates.io **`r402-core` 0.17.1** is not yanked. **[`r402-contract`](r402-contract/)** is an unpublished workspace member — not on crates.io, not in `publish.yml`.
+SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
+`https://github.com/qntx/siwx` at rev `85cf7bf0e9b867088813781b5cd03a640441c583`.
 
 | Crate | | Description |
 | --- | --- | --- |
@@ -14,8 +18,8 @@ crates.io **`r402-core` 0.17.1** is not yanked. **[`r402-contract`](r402-contrac
 | **[`r402-extensions`](r402-extensions/)** | [![crates.io][r402-extensions-crate]][r402-extensions-crate-url] [![docs.rs][r402-extensions-doc]][r402-extensions-doc-url] | Protocol extension implementations |
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — `exact` / `upto` / `auth-capture` / `batch-settlement` |
 | **[`r402-solana`](r402-solana/)** | [![crates.io][r402-solana-crate]][r402-solana-crate-url] [![docs.rs][r402-solana-doc]][r402-solana-doc-url] | Solana — SPL Token / Token-2022 exact + upto escrow |
-| **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | Tron — TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid |
-| **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact scheme (local preflight + remote facilitator) |
+| **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | **Experimental / not an x402 protocol mechanism.** TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid. Not re-exported from the umbrella |
+| **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact (local preflight + remote facilitator) |
 | **[`r402-near`](r402-near/)** | [![crates.io][r402-near-crate]][r402-near-crate-url] [![docs.rs][r402-near-doc]][r402-near-doc-url] | NEAR — NEP-141 / NEP-366 exact transfers |
 | **[`r402-xrpl`](r402-xrpl/)** | [![crates.io][r402-xrpl-crate]][r402-xrpl-crate-url] [![docs.rs][r402-xrpl-doc]][r402-xrpl-doc-url] | XRPL — XRP / RLUSD exact transfers |
 | **[`r402-hedera`](r402-hedera/)** | [![crates.io][r402-hedera-crate]][r402-hedera-crate-url] [![docs.rs][r402-hedera-doc]][r402-hedera-doc-url] | Hedera — HBAR / HTS exact transfers |
@@ -36,8 +40,8 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | --- | --- | --- | --- |
 | [`r402-evm`](r402-evm/) | `eip155:8453`, `eip155:84532` | `exact`, `upto`, `auth-capture`, `batch-settlement` | In-process on-chain facilitator |
 | [`r402-solana`](r402-solana/) | `solana:…` | `exact`, `upto` | In-process on-chain facilitator |
-| [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` | In-process via TronGrid HTTP |
-| [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator |
+| [`r402-tron`](r402-tron/) | `tron:0x2b6653dc` (mainnet), `tron:0xcd8690dc` (Nile) | `exact` (experimental / not protocol) | In-process via TronGrid HTTP |
+| [`r402-casper`](r402-casper/) | `casper:casper`, `casper:casper-test` | `exact` | Local preflight + **remote** facilitator (`R402_CASPER_FACILITATOR_URL`) |
 | [`r402-near`](r402-near/) | `near:mainnet`, `near:testnet` | `exact` | In-process via JSON-RPC (relayer-sponsored) |
 | [`r402-xrpl`](r402-xrpl/) | `xrpl:0`, `xrpl:1`, `xrpl:2` | `exact` | In-process via JSON-RPC (payer-signed blob) |
 | [`r402-hedera`](r402-hedera/) | `hedera:mainnet`, `hedera:testnet` | `exact` | In-process via Mirror REST + Hiero SDK (fee-payer-sponsored) |
@@ -49,8 +53,6 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 
 ## Dependency graph
 
-Crates currently have no path dependencies. Intended direction:
-
 ```text
 client        → protocol
 facilitator   → protocol
@@ -59,7 +61,7 @@ extensions    → protocol, facilitator
 http          → protocol, client, server, facilitator, extensions
 mcp           → protocol, client, server, facilitator
 chain crates  → protocol, client, server, facilitator
-umbrella      → enabled members
+umbrella      → r402-evm, r402-http (feature-gated)
 contract      → (no r402 path dependency)
 ```
 
@@ -67,7 +69,19 @@ Publish order (crates.io): `r402-protocol` → `r402-client` → `r402-facilitat
 
 ## Feature flags
 
-Umbrella `default = []`. No optional member features.
+Umbrella `default = ["evm", "http"]` opens each of those crates' `client` and
+`server` features. There is no `tron` umbrella feature.
+
+Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
+(default empty).
+
+| Crate | Features |
+| --- | --- |
+| `r402-http` | `client`, `server`, `siwx` |
+| `r402-extensions` | default `ext-bazaar` / `ext-payment-id` / `ext-eip2612` / `ext-erc20-approval`; optional `siwx`, `cache`, `all-extensions` |
+| `r402-facilitator` | default `http-client`; `telemetry`, `metrics` |
+| `r402-mcp` | default `client` + `server`; `facilitator`, `telemetry`, `cache`, `metrics` |
+| `r402-server` | `telemetry`, `metrics` |
 
 [r402-crate]: https://img.shields.io/crates/v/r402.svg
 [r402-crate-url]: https://crates.io/crates/r402
