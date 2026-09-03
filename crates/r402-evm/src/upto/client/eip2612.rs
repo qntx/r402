@@ -22,9 +22,10 @@ use crate::permit2::{PERMIT2_ADDRESS, Permit2Approver, permit2_approval_calldata
 use crate::signer::SignerLike;
 
 sol! {
-    /// EIP-2612 typed-data layout (`Permit(...)`).
+    /// EIP-2612 typed-data layout. Identifier MUST be `Permit` so alloy
+    /// `SolStruct::NAME` matches the token's on-chain typehash.
     #[derive(Debug)]
-    struct Eip2612TypedData {
+    struct Permit {
         address owner;
         address spender;
         uint256 value;
@@ -66,7 +67,7 @@ pub async fn sign_eip2612_permit<S: SignerLike + Sync>(
     params: &Eip2612SigningParams,
 ) -> Result<Eip2612SignedPermit, ClientError> {
     let domain = build_token_domain(params);
-    let typed = Eip2612TypedData {
+    let typed = Permit {
         owner: params.owner,
         spender: PERMIT2_ADDRESS,
         value: params.value,
@@ -217,10 +218,31 @@ fn build_token_domain(params: &Eip2612SigningParams) -> Eip712Domain {
 mod tests {
     use std::future::Future;
 
-    use alloy_primitives::address;
+    use alloy_primitives::{address, keccak256};
     use alloy_signer_local::PrivateKeySigner;
 
     use super::*;
+
+    #[test]
+    fn eip2612_encode_type_is_official_permit() {
+        let typed = Permit {
+            owner: Address::ZERO,
+            spender: Address::ZERO,
+            value: U256::ZERO,
+            nonce: U256::ZERO,
+            deadline: U256::ZERO,
+        };
+        assert_eq!(
+            Permit::eip712_encode_type(),
+            "Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+        );
+        assert_eq!(
+            typed.eip712_type_hash(),
+            keccak256(
+                b"Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)"
+            )
+        );
+    }
 
     fn fixture() -> Eip2612SigningParams {
         Eip2612SigningParams {
