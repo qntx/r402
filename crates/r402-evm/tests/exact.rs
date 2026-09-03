@@ -1,4 +1,11 @@
 //! In-process exact-scheme tests. No live RPC. No HTTP E2E.
+//!
+//! Live RPC and HTTP×EVM Sequential E2E live in sibling integration tests:
+//!
+//! - `R402_RPC_URLS` — comma-separated `chain_id=url` pairs for
+//!   `tests/onchain_deployment.rs`. Unset skips those tests (no `#[ignore]`).
+//! - `R402_ANVIL=1` — opt into Anvil at `http://127.0.0.1:8545` for
+//!   on-chain EIP-3009 verify/settle and `r402-http` `e2e_exact_evm`.
 
 #![allow(unused_crate_dependencies, reason = "sibling tests consume them")]
 #![allow(

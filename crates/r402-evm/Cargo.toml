@@ -100,7 +100,7 @@ alloy-rpc-types-eth = { workspace = true }
 alloy-signer-local = { workspace = true }
 alloy-sol-types = { workspace = true }
 alloy-transport-http = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
 url = { workspace = true }
 wiremock = { workspace = true }
 
@@ -118,6 +118,10 @@ required-features = ["client", "server", "facilitator"]
 
 [[test]]
 name = "batch_settlement"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "onchain_deployment"
 required-features = ["client", "server", "facilitator"]
 
 [lints]

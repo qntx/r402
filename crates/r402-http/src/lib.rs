@@ -40,8 +40,12 @@ pub use server::{SettlementMode, X402Middleware};
 
 #[cfg(test)]
 mod _dev_deps {
+    use alloy_network as _;
+    use alloy_primitives as _;
+    use alloy_provider as _;
     use alloy_signer as _;
     use alloy_signer_local as _;
+    use axum as _;
     #[cfg(not(feature = "server"))]
     use axum_core as _;
     #[cfg(not(feature = "server"))]
@@ -50,6 +54,7 @@ mod _dev_deps {
     use http as _;
     #[cfg(not(feature = "client"))]
     use r402_client as _;
+    use r402_evm as _;
     #[cfg(not(feature = "server"))]
     use r402_facilitator as _;
     #[cfg(not(any(feature = "client", feature = "server")))]
