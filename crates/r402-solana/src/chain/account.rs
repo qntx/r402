@@ -1,0 +1,405 @@
+//! Solana addresses, chain references, and token deployments.
+//!
+//! This module provides types that handle serialization and deserialization
+//! of Solana-specific values in the x402 protocol wire format.
+
+use std::fmt::{Debug, Display, Formatter};
+use std::str::FromStr;
+
+use r402_protocol::{ChainId, DeployedTokenAmount, MoneyAmount, MoneyAmountParseError};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use solana_pubkey::{Pubkey, pubkey};
+
+/// The CAIP-2 namespace for Solana chains.
+pub const SOLANA_NAMESPACE: &str = "solana";
+
+/// Legacy SPL Token program. Same address on every Solana cluster.
+pub const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
+/// Token-2022 program. Same address on every Solana cluster.
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+
+/// A Solana chain reference consisting of 32 ASCII characters.
+///
+/// The reference is the first 32 characters of the base58-encoded genesis block hash,
+/// which uniquely identifies a Solana network. This follows the CAIP-2 standard for
+/// Solana chain identification.
+///
+/// # Well-Known References
+///
+/// - Mainnet: `5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`
+/// - Devnet: `EtWTRABZaYq6iMfeYKouRu166VU2xqa1`
+/// - Testnet: `4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SolanaChainReference([u8; 32]);
+
+impl SolanaChainReference {
+    /// Solana mainnet (`solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp`).
+    pub const SOLANA: Self = Self::new(*b"5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp");
+
+    /// Solana devnet (`solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1`).
+    pub const SOLANA_DEVNET: Self = Self::new(*b"EtWTRABZaYq6iMfeYKouRu166VU2xqa1");
+
+    /// Solana testnet (`solana:4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z`).
+    pub const SOLANA_TESTNET: Self = Self::new(*b"4uhcVJyU9pJkvQyS88uRDiswHXSCkY3z");
+
+    /// Creates a new [`SolanaChainReference`] from a 32-byte ASCII array.
+    ///
+    /// # Panics
+    ///
+    /// This function does not validate that the bytes are valid ASCII.
+    /// Use [`FromStr`] for validated parsing.
+    #[must_use]
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Returns the underlying bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+
+    /// Returns the chain reference as a string.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the internal bytes are not valid UTF-8 (should never happen
+    /// since construction validates ASCII).
+    #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "construction validates ASCII, UTF-8 conversion is infallible"
+    )]
+    pub fn as_str(&self) -> &str {
+        // Safe because we validate ASCII on construction
+        std::str::from_utf8(&self.0).expect("SolanaChainReference contains valid ASCII")
+    }
+}
+
+impl Debug for SolanaChainReference {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SolanaChainReference(")?;
+        f.write_str(self.as_str())?;
+        f.write_str(")")
+    }
+}
+
+impl FromStr for SolanaChainReference {
+    type Err = SolanaChainReferenceFormatError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if !(s.is_ascii() && s.len() == 32) {
+            return Err(SolanaChainReferenceFormatError::InvalidReference(
+                s.to_owned(),
+            ));
+        }
+        let mut bytes = [0u8; 32];
+        bytes.copy_from_slice(s.as_bytes());
+        Ok(Self(bytes))
+    }
+}
+
+impl Display for SolanaChainReference {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Serialize for SolanaChainReference {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for SolanaChainReference {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<SolanaChainReference> for ChainId {
+    fn from(value: SolanaChainReference) -> Self {
+        Self::new(SOLANA_NAMESPACE, value.as_str())
+    }
+}
+
+impl TryFrom<ChainId> for SolanaChainReference {
+    type Error = SolanaChainReferenceFormatError;
+
+    fn try_from(value: ChainId) -> Result<Self, Self::Error> {
+        let (namespace, reference) = value.into_parts();
+        if namespace != SOLANA_NAMESPACE {
+            return Err(SolanaChainReferenceFormatError::InvalidNamespace(namespace));
+        }
+        let solana_chain_reference = Self::from_str(&reference)
+            .map_err(|_| SolanaChainReferenceFormatError::InvalidReference(reference))?;
+        Ok(solana_chain_reference)
+    }
+}
+
+/// Error type for parsing Solana chain references.
+#[derive(Debug, thiserror::Error)]
+pub enum SolanaChainReferenceFormatError {
+    /// The namespace was not "solana".
+    #[error("Invalid namespace {0}, expected solana")]
+    InvalidNamespace(String),
+    /// The reference was not a valid 32-character ASCII string.
+    #[error("Invalid solana chain reference {0}")]
+    InvalidReference(String),
+}
+
+/// Information about a token deployment on a Solana network.
+///
+/// This type contains all the information needed to interact with a specific
+/// token on a specific Solana network, including the mint address, decimal
+/// precision, and owning token program.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct SolanaTokenDeployment {
+    /// The Solana network where this token is deployed.
+    pub chain_reference: SolanaChainReference,
+    /// The mint address.
+    pub address: Address,
+    /// The number of decimal places for this token.
+    pub decimals: u8,
+    /// Mint owner program (legacy SPL Token or Token-2022).
+    pub token_program: Pubkey,
+}
+
+impl SolanaTokenDeployment {
+    /// Creates a new token deployment.
+    #[must_use]
+    pub const fn new(
+        chain_reference: SolanaChainReference,
+        address: Address,
+        decimals: u8,
+        token_program: Pubkey,
+    ) -> Self {
+        Self {
+            chain_reference,
+            address,
+            decimals,
+            token_program,
+        }
+    }
+
+    /// Creates a deployed token amount with the given raw value.
+    #[must_use]
+    pub const fn amount(&self, v: u64) -> DeployedTokenAmount<u64, Self> {
+        DeployedTokenAmount {
+            amount: v,
+            token: *self,
+        }
+    }
+
+    /// Parses a human-readable amount into a deployed token amount.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MoneyAmountParseError`] if the value cannot be parsed, exceeds precision,
+    /// or overflows `u64`.
+    pub fn parse<V>(&self, v: V) -> Result<DeployedTokenAmount<u64, Self>, MoneyAmountParseError>
+    where
+        V: TryInto<MoneyAmount>,
+        MoneyAmountParseError: From<<V as TryInto<MoneyAmount>>::Error>,
+    {
+        let amount = v.try_into()?.to_token_amount(self.decimals)?;
+        Ok(DeployedTokenAmount {
+            amount,
+            token: *self,
+        })
+    }
+}
+
+/// A Solana public key address.
+///
+/// This is a wrapper around [`Pubkey`] that provides serialization as a
+/// base58-encoded string, suitable for use in x402 protocol messages.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub struct Address(Pubkey);
+
+impl Address {
+    /// Creates a new address from a [`Pubkey`].
+    #[must_use]
+    pub const fn new(pubkey: Pubkey) -> Self {
+        Self(pubkey)
+    }
+
+    /// Returns a reference to the inner [`Pubkey`].
+    #[must_use]
+    pub const fn pubkey(&self) -> &Pubkey {
+        &self.0
+    }
+}
+
+impl From<Pubkey> for Address {
+    fn from(pubkey: Pubkey) -> Self {
+        Self(pubkey)
+    }
+}
+
+impl From<Address> for Pubkey {
+    fn from(address: Address) -> Self {
+        address.0
+    }
+}
+
+impl AsRef<[u8]> for Address {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl Serialize for Address {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let base58_string = self.0.to_string();
+        serializer.serialize_str(&base58_string)
+    }
+}
+
+impl<'de> Deserialize<'de> for Address {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let pubkey = Pubkey::from_str(&s)
+            .map_err(|_| serde::de::Error::custom("Failed to decode Solana address"))?;
+        Ok(Self(pubkey))
+    }
+}
+
+impl Display for Address {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for Address {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let pubkey =
+            Pubkey::from_str(s).map_err(|_| format!("Failed to decode Solana address: {s}"))?;
+        Ok(Self(pubkey))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_deployment(decimals: u8) -> SolanaTokenDeployment {
+        let chain_ref = SolanaChainReference::SOLANA;
+        // Use a well-known test address (USDC on Solana devnet)
+        let address = Address::from_str("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZ5nc4pb").unwrap();
+        SolanaTokenDeployment::new(chain_ref, address, decimals, TOKEN_PROGRAM_ID)
+    }
+
+    #[test]
+    fn parse_preserves_token_program() {
+        let chain_ref = SolanaChainReference::SOLANA;
+        let address = Address::from_str("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZ5nc4pb").unwrap();
+        let deployment = SolanaTokenDeployment::new(chain_ref, address, 6, TOKEN_2022_PROGRAM_ID);
+        let result = deployment.parse("$10.50").unwrap();
+        assert_eq!(result.amount, 10_500_000);
+        assert_eq!(result.token.token_program, TOKEN_2022_PROGRAM_ID);
+    }
+
+    #[test]
+    fn test_parse_whole_number() {
+        let deployment = create_test_deployment(6); // 6 decimals like USDC
+        let result = deployment.parse("100");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 100_000_000); // 100 * 10^6
+    }
+
+    #[test]
+    fn test_parse_with_decimals() {
+        let deployment = create_test_deployment(6);
+        let result = deployment.parse("1.50");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 1_500_000); // 1.50 * 10^6
+    }
+
+    #[test]
+    fn test_parse_zero_decimals() {
+        let deployment = create_test_deployment(0);
+        let result = deployment.parse("42");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 42);
+    }
+
+    #[test]
+    fn test_parse_precision_too_high() {
+        let deployment = create_test_deployment(2); // Only 2 decimals
+        let result = deployment.parse("1.234"); // 3 decimals - should fail
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, MoneyAmountParseError::WrongPrecision { .. }));
+    }
+
+    #[test]
+    fn test_parse_exact_precision() {
+        let deployment = create_test_deployment(9); // 9 decimals
+        let result = deployment.parse("0.123456789");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 123_456_789);
+    }
+
+    #[test]
+    fn test_parse_smallest_amount() {
+        let deployment = create_test_deployment(6);
+        let result = deployment.parse("0.000001");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 1);
+    }
+
+    #[test]
+    fn test_parse_with_currency_symbol() {
+        let deployment = create_test_deployment(6);
+        let result = deployment.parse("$10.50");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 10_500_000);
+    }
+
+    #[test]
+    fn test_parse_with_commas() {
+        let deployment = create_test_deployment(6);
+        let result = deployment.parse("1,000");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().amount, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_parse_large_amount() {
+        let deployment = create_test_deployment(6);
+        let result = deployment.parse("999999999");
+        assert!(result.is_ok());
+        // 999999999 * 10^6 = 999999999000000
+        assert_eq!(result.unwrap().amount, 999_999_999_000_000);
+    }
+
+    #[test]
+    fn test_parse_overflow_returns_error() {
+        // Create a deployment with 19 decimals (beyond what u64 can handle)
+        let deployment = create_test_deployment(19);
+        // 999999999 with 19 decimals = 999999999 * 10^19, which overflows u64
+        let result = deployment.parse("999999999");
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            MoneyAmountParseError::OutOfRange
+        ));
+    }
+}
