@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use alloy_primitives::U256;
 use r402_protocol::network::{ChainId, DeployedTokenAmount};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
 use r402_protocol::scheme::BatchSettlementScheme;
 use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
 
@@ -49,9 +49,9 @@ impl Eip155BatchSettlement {
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         extra: BatchSettlementExtra,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             BatchSettlementScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -60,7 +60,7 @@ impl Eip155BatchSettlement {
             3600,
         )
         .with_optional_extra(serde_json::to_value(extra).ok());
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 
     /// Convenience constructor from deployment EIP-712 metadata.
@@ -74,7 +74,7 @@ impl Eip155BatchSettlement {
         receiver_authorizer: ChecksummedAddress,
         withdraw_delay: u64,
         transfer_method: Option<AssetTransferMethod>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let (name, version) = asset.token.eip712.as_ref().map_or_else(
             || (String::new(), String::new()),
             |e| (e.name.clone(), e.version.clone()),

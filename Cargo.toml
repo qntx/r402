@@ -5,9 +5,8 @@ resolver = "3"
 
 [workspace.package]
 # Fields below are shared across every member crate via `field.workspace =
-# true`. `keywords` and `categories` are deliberately *per-crate* (each
-# crate's audience is different — solana people don't search for
-# "ethereum") and so live in the individual `Cargo.toml` files.
+# true`. `keywords` and `categories` stay per-crate so crates.io search
+# matches each crate's audience.
 version = "0.18.0"
 edition = "2024"
 rust-version = "1.95"

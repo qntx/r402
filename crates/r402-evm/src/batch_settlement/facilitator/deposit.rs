@@ -9,7 +9,7 @@ use alloy_sol_types::SolCall;
 use compact_str::CompactString;
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{SettleResponse, VerifyResponse};
 
 use super::Eip155BatchSettlementFacilitator;
 use super::contract::IBatchSettlement;
@@ -39,20 +39,20 @@ pub(super) async fn verify_deposit<P>(
     payload: &v2::PaymentPayload,
     requirements: &v2::PaymentRequirements,
     chain_id: u64,
-) -> Result<wire::VerifyResponse, FacilitatorError>
+) -> Result<VerifyResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Sync,
     P::Inner: Provider,
 {
     let payer = prepare_deposit(fac, payload, requirements, chain_id).await?;
-    Ok(wire::VerifyResponse::valid(payer.to_string()))
+    Ok(VerifyResponse::valid(payer.to_string()))
 }
 
 pub(super) async fn settle_deposit<P>(
     fac: &Eip155BatchSettlementFacilitator<P>,
     payload: &v2::PaymentPayload,
     requirements: &v2::PaymentRequirements,
-) -> Result<wire::SettleResponse, FacilitatorError>
+) -> Result<SettleResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
     P::Inner: Provider,
@@ -144,7 +144,7 @@ async fn reconcile<P>(
     payer: Option<Address>,
     network: CompactString,
     amount: String,
-) -> Result<wire::SettleResponse, FacilitatorError>
+) -> Result<SettleResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,
@@ -393,7 +393,7 @@ async fn deploy_counterfactual<P>(
     cf: &Counterfactual,
     payer: Option<Address>,
     network: CompactString,
-) -> Result<Option<wire::SettleResponse>, FacilitatorError>
+) -> Result<Option<SettleResponse>, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,

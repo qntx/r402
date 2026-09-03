@@ -5,7 +5,7 @@ use alloy_provider::Provider;
 use alloy_sol_types::SolCall;
 use compact_str::CompactString;
 use r402_protocol::error::FacilitatorError;
-use r402_protocol::payment as wire;
+use r402_protocol::payment::SettleResponse;
 
 use super::Eip155BatchSettlementFacilitator;
 use super::contract::IBatchSettlement;
@@ -23,7 +23,7 @@ pub(super) async fn execute_settle<P>(
     fac: &Eip155BatchSettlementFacilitator<P>,
     payload: &v2::PaymentPayload,
     requirements: &v2::PaymentRequirements,
-) -> Result<wire::SettleResponse, FacilitatorError>
+) -> Result<SettleResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,

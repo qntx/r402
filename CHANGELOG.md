@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `qntx/r402`.
 - Explicit `cargo deny check` job in `.github/workflows/ci.yml`.
 - `deny.toml` exception: `nacl` may use `LGPL-3.0-or-later` (`tonlib-core`).
+- `r402-concordium` in `.github/workflows/publish.yml` (official
+  `@x402/concordium` 2.24.0).
 
 ### Changed
 
@@ -23,10 +25,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `UptoSvmScheme` and CAIP-2 `solana:` are unchanged. crates.io resumes
   `r402-svm` at 0.18.0; last `r402-solana` remains 0.17.1 (not yanked).
   No alias crate. No umbrella `svm` feature.
+- Product README restored for 0.18 (badges, facilitator quote, mermaid,
+  QuantX footer). Install/API stay `features = ["evm","http"]`, three-arg
+  `price_tag`, required `with_base_url`. Concordium is listed; Tron is
+  experimental; Casper is extra — neither is an x402 protocol mechanism.
+- Module roots are `foo.rs` XOR `foo/mod.rs`. `scripts/check-layout.sh`
+  fails on dual roots and on leftover `r402-solana` / `r402-algorand` in
+  product paths.
+- `r402-evm` and `r402-tron` import `r402_protocol::payment` directly
+  (no `use r402_protocol::payment as wire`).
+- `r402-casper` crate description and README: extra Casper chain support
+  (not an x402 protocol mechanism). `R402_CASPER_FACILITATOR_URL` unchanged.
 - `ResourceServer` records `r402_facilitator_verify_total` /
   `r402_facilitator_settle_total` and the matching duration histograms on
   the inner facilitator call when the `metrics` feature is enabled. The
   default HTTP/MCP path emits without wrapping in `HookedFacilitator`.
+
+### Removed
+
+- Tracked `docs/` construction notes. `.gitignore` ignores `docs/`.
 
 ## [0.17.1] — 2026-08-20
 

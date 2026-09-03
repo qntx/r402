@@ -1,11 +1,11 @@
 # r402-casper
 
+**Extra Casper chain support (not an x402 protocol mechanism).**
+
 **Remote-facilitator client.** Local `validate_request` is shape and timing
 preflight only. Cryptographic verification and on-chain settlement stay on
 the remote facilitator (`R402_CASPER_FACILITATOR_URL`, default
 `https://x402-facilitator.cspr.cloud`).
-
-Casper chain support, part of the [`r402`](../r402) workspace.
 
 ## Highlights
 

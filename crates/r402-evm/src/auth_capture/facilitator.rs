@@ -10,7 +10,10 @@ use compact_str::CompactString;
 use r402_facilitator::Facilitator;
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{
+    Extensions, SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2,
+    VerifyRequest, VerifyResponse,
+};
 use r402_protocol::scheme::{AuthCaptureScheme, SchemeId};
 
 use super::Eip155AuthCapture;
@@ -84,10 +87,7 @@ where
             })
     }
 
-    fn verify_sync(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    fn verify_sync(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let typed = v2::VerifyRequest::from_verify(request)?;
         let chain_id = self.parse_chain_id()?;
         let payer = verify_offchain(
@@ -95,13 +95,13 @@ where
             &typed.payment_requirements,
             chain_id,
         )?;
-        Ok(wire::VerifyResponse::valid(format!("{payer:#x}")))
+        Ok(VerifyResponse::valid(format!("{payer:#x}")))
     }
 
-    fn supported_sync(&self) -> wire::SupportedResponse {
+    fn supported_sync(&self) -> SupportedResponse {
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             AuthCaptureScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -114,7 +114,7 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        wire::SupportedResponse::new()
+        SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)
     }
@@ -148,15 +148,12 @@ where
 {
     fn verify(
         &self,
-        request: wire::VerifyRequest,
-    ) -> impl Future<Output = Result<wire::VerifyResponse, FacilitatorError>> + Send {
+        request: VerifyRequest,
+    ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
         std::future::ready(self.verify_sync(request))
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let typed = v2::SettleRequest::from_settle(request)?;
         let chain_id = self.parse_chain_id()?;
         let payload = &typed.payment_payload;
@@ -226,20 +223,20 @@ where
         }
 
         let tx_hash = receipt.transaction_hash;
-        Ok(wire::SettleResponse::Success {
+        Ok(SettleResponse::Success {
             payer: Some(format!("{payer:#x}").into()),
             transaction: format!("{tx_hash:#x}").into(),
             network: requirements.network.to_string().into(),
             amount: Some(requirements.amount.0.to_string().into()),
-            extensions: wire::Extensions::new(),
-            extension_responses: wire::Extensions::new(),
+            extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         })
     }
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         std::future::ready(Ok(self.supported_sync()))
     }
 }

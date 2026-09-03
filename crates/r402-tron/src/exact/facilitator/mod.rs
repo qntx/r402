@@ -15,8 +15,10 @@ use alloy_primitives::{Address as EvmAddress, B256, Bytes, U256};
 use r402_facilitator::{Duplicate, Facilitator, SettlementCache};
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
-use r402_protocol::payment::UnixTimestamp;
+use r402_protocol::payment::{
+    Extensions, SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse,
+    UnixTimestamp, V2, VerifyRequest, VerifyResponse,
+};
 use r402_protocol::scheme::{ExactScheme, SchemeId};
 
 use crate::chain::TronChainProvider;
@@ -172,10 +174,7 @@ impl From<TronExactError> for FacilitatorError {
 }
 
 impl Facilitator for TronExactFacilitator {
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let request = payload::v2::VerifyRequest::from_verify(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
@@ -192,7 +191,7 @@ impl Facilitator for TronExactFacilitator {
                 )
                 .await?;
                 let payer = verify_payment(&self.provider, &payment, &eip712_domain).await?;
-                Ok(wire::VerifyResponse::valid(
+                Ok(VerifyResponse::valid(
                     crate::chain::Address::from_evm(payer).to_string(),
                 ))
             }
@@ -209,17 +208,14 @@ impl Facilitator for TronExactFacilitator {
                 let payer =
                     verify_permit2_payment(&self.provider, &chain, &payment, &eip712_domain)
                         .await?;
-                Ok(wire::VerifyResponse::valid(
+                Ok(VerifyResponse::valid(
                     crate::chain::Address::from_evm(payer).to_string(),
                 ))
             }
         }
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let request = payload::v2::SettleRequest::from_settle(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
@@ -247,7 +243,7 @@ impl Facilitator for TronExactFacilitator {
                 )
                 .await?;
                 let tx_hash = settle_payment(&self.provider, &payment, &eip712_domain).await?;
-                Ok(wire::SettleResponse::Success {
+                Ok(SettleResponse::Success {
                     payer: Some(
                         crate::chain::Address::from_evm(payment.from)
                             .to_string()
@@ -256,8 +252,8 @@ impl Facilitator for TronExactFacilitator {
                     transaction: tx_hash.into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
-                    extensions: wire::Extensions::new(),
-                    extension_responses: wire::Extensions::new(),
+                    extensions: Extensions::new(),
+                    extension_responses: Extensions::new(),
                     extra: None,
                 })
             }
@@ -272,7 +268,7 @@ impl Facilitator for TronExactFacilitator {
                 )
                 .await?;
                 let tx_hash = settle_permit2_payment(&self.provider, &chain, &payment).await?;
-                Ok(wire::SettleResponse::Success {
+                Ok(SettleResponse::Success {
                     payer: Some(
                         crate::chain::Address::from_evm(payment.from)
                             .to_string()
@@ -281,8 +277,8 @@ impl Facilitator for TronExactFacilitator {
                     transaction: tx_hash.into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
-                    extensions: wire::Extensions::new(),
-                    extension_responses: wire::Extensions::new(),
+                    extensions: Extensions::new(),
+                    extension_responses: Extensions::new(),
                     extra: None,
                 })
             }
@@ -291,12 +287,12 @@ impl Facilitator for TronExactFacilitator {
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         use compact_str::CompactString;
 
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             ExactScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -309,7 +305,7 @@ impl Facilitator for TronExactFacilitator {
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

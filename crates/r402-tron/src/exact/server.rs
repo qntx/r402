@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use alloy_primitives::U256;
 use r402_protocol::network::{ChainId, DeployedTokenAmount};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
 use r402_protocol::scheme::ExactScheme;
 use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
 
@@ -54,11 +54,11 @@ impl TronExact {
         pay_to: A,
         asset: &DeployedTokenAmount<U256, TronTokenDeployment>,
         transfer_method: Option<AssetTransferMethod>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let extra =
             PaymentRequirementsExtra::from_deployment(asset.token.tip712.clone(), transfer_method);
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -67,7 +67,7 @@ impl TronExact {
             300,
         )
         .with_optional_extra(extra);
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 

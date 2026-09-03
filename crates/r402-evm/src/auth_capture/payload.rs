@@ -533,24 +533,22 @@ pub use v1_1::Charge;
 
 /// Wire aliases for typed verify/settle.
 pub mod v2 {
-    use r402_protocol::payment as wire;
+    use r402_protocol::payment::{
+        PaymentPayload as WirePayload, PaymentRequirements as WireReqs, TypedVerifyRequest,
+    };
 
     use super::{AuthCaptureExtra, AuthCapturePayload, AuthCaptureScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request.
-    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
     /// Typed settle request.
     pub type SettleRequest = VerifyRequest;
     /// Payment payload.
-    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, AuthCapturePayload>;
+    pub type PaymentPayload = WirePayload<PaymentRequirements, AuthCapturePayload>;
     /// Payment requirements.
-    pub type PaymentRequirements = wire::PaymentRequirements<
-        AuthCaptureScheme,
-        TokenAmount,
-        ChecksummedAddress,
-        AuthCaptureExtra,
-    >;
+    pub type PaymentRequirements =
+        WireReqs<AuthCaptureScheme, TokenAmount, ChecksummedAddress, AuthCaptureExtra>;
 }
 
 #[cfg(test)]

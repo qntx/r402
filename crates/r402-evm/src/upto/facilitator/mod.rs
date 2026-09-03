@@ -36,7 +36,10 @@ use r402_extensions::BuilderCodeFacilitatorExtension;
 use r402_facilitator::{Duplicate, Facilitator, SettlementCache};
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{
+    Extensions, SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2,
+    VerifyRequest, VerifyResponse,
+};
 use r402_protocol::scheme::{SchemeId, UptoScheme};
 
 use self::settle::{UptoSettleOutcome, settle_permit2_upto};
@@ -99,7 +102,7 @@ impl<P> Eip155UptoFacilitator<P> {
         self
     }
 
-    fn data_suffix(&self, extensions: &wire::Extensions) -> Vec<u8> {
+    fn data_suffix(&self, extensions: &Extensions) -> Vec<u8> {
         self.builder_code
             .as_ref()
             .and_then(|ext| ext.build_data_suffix(extensions, 2))
@@ -134,10 +137,7 @@ where
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let request = payload::v2::VerifyRequest::from_verify(request)?;
         let signer_addresses = self.signer_addresses_typed();
         let payer = verify_permit2_upto_payment(
@@ -150,13 +150,10 @@ where
             self.erc20_approval_enabled,
         )
         .await?;
-        Ok(wire::VerifyResponse::valid(payer.to_string()))
+        Ok(VerifyResponse::valid(payer.to_string()))
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let request = payload::v2::SettleRequest::from_settle(request)?;
         let signer_addresses = self.signer_addresses_typed();
         let nonce: U256 = request
@@ -193,20 +190,20 @@ where
             UptoSettleOutcome::OnChain(hash) => hash.to_string().into(),
         };
 
-        Ok(wire::SettleResponse::Success {
+        Ok(SettleResponse::Success {
             payer: Some(payer.to_string().into()),
             transaction,
             network: network.into(),
             amount: Some(actual_amount.to_string().into()),
-            extensions: wire::Extensions::new(),
-            extension_responses: wire::Extensions::new(),
+            extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         })
     }
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let signer_strings: Vec<CompactString> = self
             .provider
@@ -221,16 +218,12 @@ where
             })
         });
         let kinds = vec![
-            wire::SupportedPaymentKind::new(
-                wire::V2.into(),
-                UptoScheme.to_string(),
-                chain_id.to_string(),
-            )
-            .with_optional_extra(extra),
+            SupportedPaymentKind::new(V2.into(), UptoScheme.to_string(), chain_id.to_string())
+                .with_optional_extra(extra),
         ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(Eip155Upto.caip_family().into(), signer_strings);
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

@@ -207,8 +207,7 @@ mod tests {
 
     mod eip2612_extension {
         use alloy_primitives::{Address, Bytes, U256};
-        use r402_protocol::payment as wire;
-        use r402_protocol::payment::UnixTimestamp;
+        use r402_protocol::payment::{ExtensionEntry, UnixTimestamp};
 
         use super::*;
         use crate::chain::TokenAmount;
@@ -296,7 +295,7 @@ mod tests {
             let (mut payload, reqs) = base_payload(U256::from(5_000_000_u64));
             payload.extensions.insert(
                 EIP2612_GAS_SPONSORING_KEY,
-                wire::ExtensionEntry::raw(serde_json::json!({"from": "not-an-address"})),
+                ExtensionEntry::raw(serde_json::json!({"from": "not-an-address"})),
             );
             let err = assert_offchain_valid_shared(&payload, &reqs, &signers(), 30).unwrap_err();
             assert!(matches!(err, VerificationError::InvalidFormat(_)));

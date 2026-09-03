@@ -138,27 +138,25 @@ sol!(
 
 /// Wire format type aliases for the EIP-155 upto scheme.
 pub mod v2 {
-    use r402_protocol::payment as wire;
+    use r402_protocol::payment::{
+        PaymentPayload as WirePayload, PaymentRequirements as WireReqs, TypedVerifyRequest,
+    };
 
     use super::{UptoPaymentRequirementsExtra, UptoPermit2Payload, UptoScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request for the upto EVM scheme.
-    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
 
     /// Typed settle request (same structure as [`VerifyRequest`]).
     pub type SettleRequest = VerifyRequest;
 
     /// Payment payload with embedded requirements and upto Permit2 data.
-    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, UptoPermit2Payload>;
+    pub type PaymentPayload = WirePayload<PaymentRequirements, UptoPermit2Payload>;
 
     /// Payment requirements for the upto scheme.
-    pub type PaymentRequirements = wire::PaymentRequirements<
-        UptoScheme,
-        TokenAmount,
-        ChecksummedAddress,
-        UptoPaymentRequirementsExtra,
-    >;
+    pub type PaymentRequirements =
+        WireReqs<UptoScheme, TokenAmount, ChecksummedAddress, UptoPaymentRequirementsExtra>;
 }
 
 #[cfg(test)]

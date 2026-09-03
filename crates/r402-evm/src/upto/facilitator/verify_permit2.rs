@@ -6,6 +6,7 @@ use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_sol_types::SolInterface;
 use r402_protocol::error::VerificationError;
+use r402_protocol::payment::Extensions;
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 
@@ -20,7 +21,6 @@ use crate::exact::facilitator::{permit2_allowance_gate, permit2_extension_covers
 use crate::permit2::PERMIT2_ADDRESS;
 use crate::signature::{ClassifiedSignature, classify_with_code};
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
-use r402_protocol::payment::Extensions;
 
 /// Maps a proxy revert payload onto a [`VerificationError`].
 ///

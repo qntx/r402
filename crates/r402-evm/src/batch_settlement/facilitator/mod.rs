@@ -13,7 +13,10 @@ use compact_str::CompactString;
 use r402_facilitator::{Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore};
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
 use r402_protocol::scheme::{BatchSettlementScheme, SchemeId};
 
 use super::Eip155BatchSettlement;
@@ -115,10 +118,10 @@ where
             })
     }
 
-    fn supported_sync(&self) -> wire::SupportedResponse {
+    fn supported_sync(&self) -> SupportedResponse {
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             BatchSettlementScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -131,7 +134,7 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        wire::SupportedResponse::new()
+        SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)
     }
@@ -143,10 +146,7 @@ where
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let typed = v2::VerifyRequest::from_verify(request)?;
         let chain_id = self.parse_chain_id()?;
         match &typed.payment_payload.payload {
@@ -172,7 +172,7 @@ where
                     .channel_config()
                     .map(|c| c.payer)
                     .unwrap_or_default();
-                Ok(wire::VerifyResponse::valid(format!("{payer:#x}")))
+                Ok(VerifyResponse::valid(format!("{payer:#x}")))
             }
             BatchSettlementPayload::Refund { .. } => {
                 refund::verify_refund(
@@ -184,7 +184,7 @@ where
                 .await
             }
             BatchSettlementPayload::Claim { .. } | BatchSettlementPayload::Settle { .. } => {
-                Ok(wire::VerifyResponse::invalid(
+                Ok(VerifyResponse::invalid(
                     None,
                     r402_protocol::error::ErrorReason::from_wire(INVALID_PAYLOAD_TYPE),
                 ))
@@ -192,10 +192,7 @@ where
         }
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let typed = v2::SettleRequest::from_settle(request)?;
         let network: CompactString = typed.payment_requirements.network.to_string().into();
         match &typed.payment_payload.payload {
@@ -238,7 +235,7 @@ where
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         std::future::ready(Ok(self.supported_sync()))
     }
 }

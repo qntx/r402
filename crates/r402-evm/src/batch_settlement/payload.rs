@@ -320,24 +320,22 @@ impl BatchSettlementPayload {
 
 /// Wire aliases.
 pub mod v2 {
-    use r402_protocol::payment as wire;
+    use r402_protocol::payment::{
+        PaymentPayload as WirePayload, PaymentRequirements as WireReqs, TypedVerifyRequest,
+    };
 
     use super::{BatchSettlementExtra, BatchSettlementPayload, BatchSettlementScheme};
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
     /// Typed verify request.
-    pub type VerifyRequest = wire::TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
+    pub type VerifyRequest = TypedVerifyRequest<2, PaymentPayload, PaymentRequirements>;
     /// Typed settle request.
     pub type SettleRequest = VerifyRequest;
     /// Payment payload.
-    pub type PaymentPayload = wire::PaymentPayload<PaymentRequirements, BatchSettlementPayload>;
+    pub type PaymentPayload = WirePayload<PaymentRequirements, BatchSettlementPayload>;
     /// Payment requirements.
-    pub type PaymentRequirements = wire::PaymentRequirements<
-        BatchSettlementScheme,
-        TokenAmount,
-        ChecksummedAddress,
-        BatchSettlementExtra,
-    >;
+    pub type PaymentRequirements =
+        WireReqs<BatchSettlementScheme, TokenAmount, ChecksummedAddress, BatchSettlementExtra>;
 }
 
 #[cfg(test)]

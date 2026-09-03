@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 
 use alloy_primitives::{Address, U256};
 use r402_protocol::network::{ChainId, DeployedTokenAmount};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse};
 use r402_server::{PaymentFlowConfig, SchemeNetworkServer, SchemePaymentRequiredContext};
 
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
@@ -43,7 +43,7 @@ impl SchemeNetworkServer for Eip155Upto {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | (req.scheme.as_str() == UptoScheme::VALUE
@@ -66,13 +66,13 @@ impl Eip155Upto {
     pub fn price_tag<A: Into<ChecksummedAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let extra = serde_json::json!({
             "assetTransferMethod": UptoAssetTransferMethod::Permit2,
         });
         let requirements = base_requirements(pay_to, &asset, &chain_id, Some(extra));
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 
     /// Creates a price tag with an explicit `facilitatorAddress`.
@@ -84,7 +84,7 @@ impl Eip155Upto {
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         facilitator_address: F,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let facilitator: ChecksummedAddress = facilitator_address.into();
         let extra = serde_json::json!({
@@ -92,7 +92,7 @@ impl Eip155Upto {
             "facilitatorAddress": facilitator.to_string(),
         });
         let requirements = base_requirements(pay_to, &asset, &chain_id, Some(extra));
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
@@ -101,8 +101,8 @@ fn base_requirements<A: Into<ChecksummedAddress>>(
     asset: &DeployedTokenAmount<U256, Eip155TokenDeployment>,
     chain_id: &ChainId,
     extra: Option<serde_json::Value>,
-) -> wire::PaymentRequirements {
-    wire::PaymentRequirements::new(
+) -> PaymentRequirements {
+    PaymentRequirements::new(
         UptoScheme.to_string().into(),
         chain_id.clone(),
         asset.amount.to_string().into(),
@@ -113,10 +113,7 @@ fn base_requirements<A: Into<ChecksummedAddress>>(
     .with_optional_extra(extra)
 }
 
-fn apply_facilitator_address(
-    req: &mut wire::PaymentRequirements,
-    supported: &wire::SupportedResponse,
-) -> bool {
+fn apply_facilitator_address(req: &mut PaymentRequirements, supported: &SupportedResponse) -> bool {
     if req
         .extra
         .as_ref()
@@ -141,10 +138,7 @@ fn apply_facilitator_address(
     true
 }
 
-fn pick_facilitator_address(
-    supported: &wire::SupportedResponse,
-    chain_id: &ChainId,
-) -> Option<Address> {
+fn pick_facilitator_address(supported: &SupportedResponse, chain_id: &ChainId) -> Option<Address> {
     supported
         .signers_for_chain(chain_id)
         .into_iter()
@@ -157,7 +151,6 @@ mod tests {
 
     use alloy_primitives::{Address, U256};
     use compact_str::CompactString;
-    use r402_protocol::payment as wire;
 
     use super::*;
     use crate::chain::{Eip155ChainReference, Eip155TokenDeployment};
@@ -171,13 +164,13 @@ mod tests {
         }
     }
 
-    fn supported_with_facilitator(facilitator: Address) -> wire::SupportedResponse {
+    fn supported_with_facilitator(facilitator: Address) -> SupportedResponse {
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::new();
         let _ = signers.insert(
             "eip155:8453".into(),
             vec![facilitator.to_checksum(None).into()],
         );
-        wire::SupportedResponse::new().with_signers(signers)
+        SupportedResponse::new().with_signers(signers)
     }
 
     #[test]

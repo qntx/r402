@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::TransactionRequest;
 use compact_str::CompactString;
 use r402_facilitator::PendingSettlementStore;
 use r402_protocol::error::{ErrorReason, FacilitatorError};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::SettleResponse;
 
 use super::response::{settle_failure, settle_success};
 use crate::batch_settlement::payload::BATCH_SETTLEMENT_ADDRESS;
@@ -28,7 +28,7 @@ pub(super) struct Broadcast<'a> {
 pub(super) async fn simulate_and_broadcast<P>(
     provider: &P,
     spec: Broadcast<'_>,
-) -> Result<wire::SettleResponse, FacilitatorError>
+) -> Result<SettleResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,

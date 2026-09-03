@@ -5,7 +5,7 @@ use alloy_provider::Provider;
 use alloy_sol_types::SolCall;
 use compact_str::CompactString;
 use r402_protocol::error::{FacilitatorError, VerificationError};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{SettleResponse, VerifyResponse};
 
 use super::Eip155BatchSettlementFacilitator;
 use super::contract::IBatchSettlement;
@@ -30,7 +30,7 @@ pub(super) async fn verify_refund<P>(
     payload: &v2::PaymentPayload,
     requirements: &v2::PaymentRequirements,
     chain_id: u64,
-) -> Result<wire::VerifyResponse, FacilitatorError>
+) -> Result<VerifyResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,
@@ -64,14 +64,14 @@ where
     if max < claimed {
         return Err(VerificationError::from_wire(CUMULATIVE_BELOW_CLAIMED).into());
     }
-    Ok(wire::VerifyResponse::valid(config.payer.to_string()))
+    Ok(VerifyResponse::valid(config.payer.to_string()))
 }
 
 pub(super) async fn execute_refund<P>(
     fac: &Eip155BatchSettlementFacilitator<P>,
     payload: &v2::PaymentPayload,
     requirements: &v2::PaymentRequirements,
-) -> Result<wire::SettleResponse, FacilitatorError>
+) -> Result<SettleResponse, FacilitatorError>
 where
     P: Eip155MetaTransactionProvider + Sync,
     P::Inner: Provider,

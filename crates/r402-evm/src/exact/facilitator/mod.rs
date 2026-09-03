@@ -24,8 +24,10 @@ use r402_facilitator::{
 };
 use r402_protocol::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
-use r402_protocol::payment as wire;
-use r402_protocol::payment::UnixTimestamp;
+use r402_protocol::payment::{
+    Extensions, SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse,
+    UnixTimestamp, V2, VerifyRequest, VerifyResponse,
+};
 use r402_protocol::scheme::{ExactScheme, SchemeId};
 
 use crate::chain::Eip155MetaTransactionProvider;
@@ -87,9 +89,8 @@ mod verify;
 
 use eip6492::TRANSFER_EVENT_MISMATCH;
 use settle::{ExpectedTransfer, reconcile_pending_receipt, settle_payment, settle_permit2_payment};
-use verify::{verify_payment, verify_permit2_payment};
-
 pub(crate) use verify::{permit2_allowance_gate, permit2_extension_covers_allowance};
+use verify::{verify_payment, verify_permit2_payment};
 
 use crate::error::Eip155ExactError;
 
@@ -234,7 +235,7 @@ impl<P> Eip155ExactFacilitator<P> {
         self
     }
 
-    fn data_suffix(&self, extensions: &wire::Extensions) -> Vec<u8> {
+    fn data_suffix(&self, extensions: &Extensions) -> Vec<u8> {
         self.builder_code
             .as_ref()
             .and_then(|ext| ext.build_data_suffix(extensions, 2))
@@ -288,7 +289,7 @@ where
         cached: CompactString,
         network: CompactString,
         amount: CompactString,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    ) -> Result<SettleResponse, FacilitatorError> {
         let hash: TxHash = cached.parse().map_err(|e| {
             FacilitatorError::Onchain(format!("invalid pending settlement hash: {e}"))
         })?;
@@ -310,7 +311,7 @@ where
         pending_key: &str,
         network: CompactString,
         amount: CompactString,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    ) -> Result<SettleResponse, FacilitatorError> {
         match &payload.payload {
             ExactPayload::Eip3009(eip3009) => {
                 let (contract, payment, eip712_domain) = match verify::assert_valid_payment(
@@ -393,7 +394,7 @@ where
         pending_key: &str,
         payer: Address,
         network: CompactString,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    ) -> Result<SettleResponse, FacilitatorError> {
         match err {
             Eip155ExactError::ReceiptWait { hash, .. } => {
                 self.pending
@@ -456,14 +457,14 @@ fn settle_success(
     hash: TxHash,
     network: CompactString,
     amount: CompactString,
-) -> wire::SettleResponse {
-    wire::SettleResponse::Success {
+) -> SettleResponse {
+    SettleResponse::Success {
         payer: Some(payer.to_string().into()),
         transaction: hash.to_string().into(),
         network,
         amount: Some(amount),
-        extensions: wire::Extensions::new(),
-        extension_responses: wire::Extensions::new(),
+        extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }
@@ -473,23 +474,23 @@ fn settle_failure(
     payer: Option<Address>,
     transaction: impl Into<CompactString>,
     network: CompactString,
-) -> wire::SettleResponse {
-    wire::SettleResponse::Failure {
+) -> SettleResponse {
+    SettleResponse::Failure {
         reason,
         message: None,
         payer: payer.map(|p| p.to_string().into()),
         transaction: transaction.into(),
         network,
-        extensions: wire::Extensions::new(),
-        extension_responses: wire::Extensions::new(),
+        extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }
 
-fn should_release_cache(outcome: &Result<wire::SettleResponse, FacilitatorError>) -> bool {
+fn should_release_cache(outcome: &Result<SettleResponse, FacilitatorError>) -> bool {
     match outcome {
-        Ok(wire::SettleResponse::Success { .. }) => false,
-        Ok(wire::SettleResponse::Failure { transaction, .. }) => transaction.is_empty(),
+        Ok(SettleResponse::Success { .. }) => false,
+        Ok(SettleResponse::Failure { transaction, .. }) => transaction.is_empty(),
         Ok(_) | Err(_) => true,
     }
 }
@@ -507,10 +508,7 @@ where
     P::Inner: Provider,
     Eip155ExactError: From<P::Error>,
 {
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let request = payload::v2::VerifyRequest::from_verify(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
@@ -533,7 +531,7 @@ where
                     &self.eip6492_allowed_factories,
                 )
                 .await?;
-                Ok(wire::VerifyResponse::valid(payer.to_string()))
+                Ok(VerifyResponse::valid(payer.to_string()))
             }
             ExactPayload::Permit2(permit2) => {
                 let (_erc20, payment, eip712_domain) = verify::assert_valid_permit2_payment(
@@ -548,15 +546,12 @@ where
                 .await?;
                 let payer =
                     verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain).await?;
-                Ok(wire::VerifyResponse::valid(payer.to_string()))
+                Ok(VerifyResponse::valid(payer.to_string()))
             }
         }
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let request = payload::v2::SettleRequest::from_settle(request)?;
         let payload = &request.payment_payload;
         let requirements = &request.payment_requirements;
@@ -592,12 +587,12 @@ where
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         use compact_str::CompactString;
 
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             ExactScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -610,7 +605,7 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }
@@ -640,7 +635,7 @@ mod tests {
     #[test]
     fn settle_calldata_carries_builder_code_suffix() {
         let fac = facilitator_with_w();
-        let mut extensions = wire::Extensions::new();
+        let mut extensions = Extensions::new();
         extensions.insert(
             BUILDER_CODE,
             ExtensionEntry::info(json!({ "a": "bc_myapp", "s": ["bc_client"] })),

@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use alloy_primitives::U256;
 use r402_protocol::network::{ChainId, DeployedTokenAmount};
-use r402_protocol::payment as wire;
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
 use r402_protocol::scheme::ExactScheme;
 use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
 
@@ -44,7 +44,7 @@ impl SchemeNetworkServer for Eip155Exact {
 impl Eip155Exact {
     /// Creates a price tag for an EVM exact payment.
     ///
-    /// Generates a [`wire::PriceTag`] that specifies the payment requirements for a
+    /// Generates a [`PriceTag`] that specifies the payment requirements for a
     /// resource. Uses CAIP-2 chain IDs (e.g., `eip155:8453`) and embeds the
     /// requirements directly in the price tag.
     ///
@@ -56,10 +56,10 @@ impl Eip155Exact {
         pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         transfer_method: Option<AssetTransferMethod>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let extra = PaymentRequirementsExtra::from_deployment(asset.token.eip712, transfer_method);
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -68,7 +68,7 @@ impl Eip155Exact {
             300,
         )
         .with_optional_extra(extra);
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
