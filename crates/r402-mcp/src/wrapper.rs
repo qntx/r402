@@ -8,7 +8,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use r402_facilitator::DynFacilitator;
-use r402_protocol::error::FacilitatorError;
+use r402_protocol::error::{FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::payment::{
     Extensions, PaymentRequired, PaymentRequirements, ResourceInfo, SettleResponse,
 };
@@ -66,6 +66,16 @@ fn internal_server_error_result(settle: Option<&SettleResponse>) -> CallToolResu
     match settle {
         Some(settle) => attach_settle_response(result, settle),
         None => result,
+    }
+}
+
+fn facilitator_build_error(err: &FacilitatorError) -> CallToolResult {
+    if err.is_transport() {
+        internal_server_error_result(None)
+    } else {
+        CallToolResult::structured_error(serde_json::json!({
+            "error": err.to_string(),
+        }))
     }
 }
 
@@ -277,9 +287,7 @@ impl PaymentWrapper {
             .await
         {
             Ok(required) => payment_required_tool_result(&required),
-            Err(err) => CallToolResult::structured_error(serde_json::json!({
-                "error": err.to_string(),
-            })),
+            Err(err) => facilitator_build_error(&err),
         }
     }
 
@@ -298,9 +306,7 @@ impl PaymentWrapper {
             .await
         {
             Ok(required) => settlement_failed_tool_result(&required),
-            Err(err) => CallToolResult::structured_error(serde_json::json!({
-                "error": err.to_string(),
-            })),
+            Err(err) => facilitator_build_error(&err),
         }
     }
 
@@ -310,9 +316,12 @@ impl PaymentWrapper {
         error_msg: String,
         payload: Option<&McpPaymentPayload>,
     ) -> Result<PaymentRequired, FacilitatorError> {
-        let supported = DynFacilitator::supported(self.server.facilitator().as_ref())
-            .await
-            .unwrap_or_default();
+        let supported = DynFacilitator::supported(self.server.facilitator().as_ref()).await?;
+        if supported.kinds.is_empty() {
+            return Err(FacilitatorError::transport(
+                FacilitatorTransportKind::MalformedSuccessBody,
+            ));
+        }
         self.server
             .create_payment_required_response(
                 self.config.accepts.clone(),

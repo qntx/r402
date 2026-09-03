@@ -318,6 +318,59 @@ mod tests {
     }
 
     #[test]
+    fn settle_2xx_empty_transaction_with_payer_is_success() {
+        let response = parse_settle_body(&json_response(
+            200,
+            &serde_json::json!({
+                "success": true,
+                "transaction": "",
+                "network": "casper:casper-test",
+                "payer": "00aa"
+            }),
+        ))
+        .expect("empty success transaction is legal");
+        match response {
+            SettleResponse::Success {
+                transaction,
+                payer,
+                network,
+                ..
+            } => {
+                assert!(transaction.is_empty());
+                assert_eq!(payer.as_deref(), Some("00aa"));
+                assert_eq!(network, "casper:casper-test");
+            }
+            other => panic!("expected Success, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn settle_2xx_empty_transaction_omitted_payer_is_success() {
+        let response = parse_settle_body(&json_response(
+            200,
+            &serde_json::json!({
+                "success": true,
+                "transaction": "",
+                "network": "casper:casper-test"
+            }),
+        ))
+        .expect("omitted payer on empty-tx success is legal");
+        match response {
+            SettleResponse::Success {
+                transaction,
+                payer,
+                network,
+                ..
+            } => {
+                assert!(transaction.is_empty());
+                assert!(payer.is_none());
+                assert_eq!(network, "casper:casper-test");
+            }
+            other => panic!("expected Success, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn settle_4xx_success_json_is_transport() {
         let err = parse_settle_body(&json_response(
             400,

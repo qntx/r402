@@ -15,8 +15,8 @@ use rmcp::model::{CallToolRequestParams, CallToolResult};
 
 use super::{
     AfterExecutionContext, PaymentWrapper, ServerHookContext, SettlementContext,
-    empty_success_settle, internal_server_error_result, settle_failure_reason,
-    skip_handler_tool_result,
+    empty_success_settle, facilitator_build_error, internal_server_error_result,
+    settle_failure_reason, skip_handler_tool_result,
 };
 use crate::tool::{
     McpPaymentPayload, attach_settle_response, extract_payment_from_params,
@@ -37,11 +37,7 @@ impl PaymentWrapper {
             .await
         {
             Ok(required) => required,
-            Err(err) => {
-                return CallToolResult::structured_error(serde_json::json!({
-                    "error": err.to_string(),
-                }));
-            }
+            Err(err) => return facilitator_build_error(&err),
         };
 
         let Some(payload) = payload else {

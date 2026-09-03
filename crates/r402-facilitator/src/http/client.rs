@@ -241,8 +241,8 @@ impl FacilitatorClient {
 
     /// Sends a `POST /settle` request to the facilitator.
     ///
-    /// 2xx `Success` requires a non-empty `transaction`. Non-2xx `Failure` is
-    /// `Ok`. Non-2xx `Success` is Transport.
+    /// 2xx `Success` may have `transaction: ""`. Non-2xx `Failure` is `Ok`.
+    /// Non-2xx `Success` is Transport.
     ///
     /// # Errors
     ///
@@ -436,9 +436,15 @@ fn parse_settle_body(raw: &RawHttpResponse) -> Result<SettleResponse, Facilitato
 
 fn parse_supported_body(raw: &RawHttpResponse) -> Result<SupportedResponse, FacilitatorError> {
     if raw.status.is_success() {
-        serde_json::from_slice(&raw.body).map_err(|_| {
+        let parsed: SupportedResponse = serde_json::from_slice(&raw.body).map_err(|_| {
             FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody)
-        })
+        })?;
+        if parsed.kinds.is_empty() {
+            return Err(FacilitatorError::transport(
+                FacilitatorTransportKind::MalformedSuccessBody,
+            ));
+        }
+        Ok(parsed)
     } else {
         Err(status_transport(raw.status))
     }

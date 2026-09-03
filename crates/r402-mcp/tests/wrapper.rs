@@ -28,7 +28,7 @@ use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKi
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{
     Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
-    SupportedResponse, VerifyRequest, VerifyResponse,
+    SupportedPaymentKind, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use r402_server::{
     AfterVerifyDecision, BeforeOpDecision, PaymentFlowConfig, PaymentFlowName, PaymentHookContext,
@@ -38,6 +38,13 @@ use r402_server::{
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::{Value, json};
 
+#[derive(Clone, Copy)]
+enum SupportedScript {
+    Ok,
+    Empty,
+    Transport,
+}
+
 struct MockFacilitator {
     verifies: AtomicUsize,
     settles: AtomicUsize,
@@ -45,6 +52,7 @@ struct MockFacilitator {
     settle_ok: bool,
     fail_settle_from: Option<usize>,
     transport: bool,
+    supported: SupportedScript,
 }
 
 impl MockFacilitator {
@@ -56,6 +64,7 @@ impl MockFacilitator {
             settle_ok,
             fail_settle_from: None,
             transport: false,
+            supported: SupportedScript::Ok,
         })
     }
 
@@ -67,6 +76,19 @@ impl MockFacilitator {
             settle_ok: true,
             fail_settle_from: None,
             transport: true,
+            supported: SupportedScript::Ok,
+        })
+    }
+
+    fn supported_script(script: SupportedScript) -> Arc<Self> {
+        Arc::new(Self {
+            verifies: AtomicUsize::new(0),
+            settles: AtomicUsize::new(0),
+            verify_ok: true,
+            settle_ok: true,
+            fail_settle_from: None,
+            transport: false,
+            supported: script,
         })
     }
 }
@@ -111,7 +133,20 @@ impl Facilitator for MockFacilitator {
     fn supported(
         &self,
     ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
-        std::future::ready(Ok(SupportedResponse::default()))
+        let out = match self.supported {
+            SupportedScript::Ok => {
+                let mut signers = HashMap::new();
+                signers.insert("eip155:1".into(), vec!["0xfeePayer".into()]);
+                Ok(SupportedResponse::new()
+                    .with_kinds(vec![SupportedPaymentKind::new(2, "exact", "eip155:1")])
+                    .with_signers(signers))
+            }
+            SupportedScript::Empty => Ok(SupportedResponse::new()),
+            SupportedScript::Transport => Err(FacilitatorError::transport(
+                FacilitatorTransportKind::Timeout,
+            )),
+        };
+        std::future::ready(out)
     }
 }
 
@@ -362,6 +397,48 @@ async fn facilitator_transport_verify_is_tool_is_error() {
 }
 
 #[tokio::test]
+async fn supported_empty_kinds_is_tool_is_error() {
+    let w = wrapper_with(
+        MockFacilitator::supported_script(SupportedScript::Empty),
+        FlowScheme::authorization(),
+        accepts(),
+        None::<SkipHandlerHook>,
+    )
+    .await;
+    let result = w
+        .invoke(CallToolRequestParams::new("demo"), |_| async {
+            CallToolResult::success(vec![ContentBlock::text("should not run")])
+        })
+        .await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        extract_payment_required(&result).is_none(),
+        "empty /supported kinds must not emit PaymentRequired"
+    );
+}
+
+#[tokio::test]
+async fn supported_transport_is_tool_is_error() {
+    let w = wrapper_with(
+        MockFacilitator::supported_script(SupportedScript::Transport),
+        FlowScheme::authorization(),
+        accepts(),
+        None::<SkipHandlerHook>,
+    )
+    .await;
+    let result = w
+        .invoke(CallToolRequestParams::new("demo"), |_| async {
+            CallToolResult::success(vec![ContentBlock::text("should not run")])
+        })
+        .await;
+    assert_eq!(result.is_error, Some(true));
+    assert!(
+        extract_payment_required(&result).is_none(),
+        "supported transport must not emit PaymentRequired"
+    );
+}
+
+#[tokio::test]
 async fn facilitator_transport_settle_is_tool_is_error() {
     let fac = Arc::new(MockFacilitator {
         verifies: AtomicUsize::new(0),
@@ -370,6 +447,7 @@ async fn facilitator_transport_settle_is_tool_is_error() {
         settle_ok: true,
         fail_settle_from: None,
         transport: true,
+        supported: SupportedScript::Ok,
     });
     // Authorization verify hits Transport first; use skip-verify hook so settle is the transport.
     struct SkipVerify;
@@ -574,6 +652,7 @@ async fn escrow_failed_cancel_includes_deposit_recovery() {
         settle_ok: true,
         fail_settle_from: Some(2),
         transport: false,
+        supported: SupportedScript::Ok,
     });
     let requirements = with_payment_flow(accepts().into_iter().next().unwrap(), "escrow");
     let w = wrapper_with(
