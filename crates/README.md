@@ -64,7 +64,7 @@ extensions    → protocol, facilitator
 http          → protocol, client, server, facilitator, extensions
 mcp           → protocol, client, server, facilitator
 chain crates  → protocol, client, server, facilitator
-umbrella      → r402-evm, r402-http (feature-gated)
+umbrella      → r402-evm, r402-http, r402-concordium (feature-gated)
 contract      → (no r402 path dependency)
 ```
 
