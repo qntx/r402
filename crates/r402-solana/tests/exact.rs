@@ -98,6 +98,14 @@ fn find_default_solana_asset_covers_usdc_and_other_mints() {
 
 #[cfg(feature = "facilitator")]
 #[test]
+fn try_new_is_result_so_question_mark_compiles() {
+    use r402_solana::exact::facilitator::SolanaExactFacilitator;
+
+    let _fac = SolanaExactFacilitator::try_new(()).expect("infallible constructor");
+}
+
+#[cfg(feature = "facilitator")]
+#[test]
 fn transfer_amount_rule_allows_overpay() {
     use r402_solana::exact::facilitator::transfer_amount_meets_requirement;
 

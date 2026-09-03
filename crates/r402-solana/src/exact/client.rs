@@ -29,7 +29,9 @@ use spl_token::solana_program::program_pack::Pack;
 
 use crate::chain::Address;
 use crate::chain::rpc::RpcClientLike;
-use crate::exact::{ATA_PROGRAM_PUBKEY, ExactSolanaPayload, SolanaExact, TransactionInt, payload};
+use crate::exact::{
+    ATA_PROGRAM_PUBKEY, ExactSolanaPayload, SPL_MEMO_PROGRAM, SolanaExact, TransactionInt, payload,
+};
 
 /// Mint information for SPL tokens.
 #[derive(Debug, Clone, Copy)]
@@ -196,6 +198,42 @@ pub async fn get_priority_fee_micro_lamports<S: RpcClientLike>(
     Ok(fee)
 }
 
+/// SPL Memo instruction whose data equals `memo` (spec ≤ 256 bytes).
+///
+/// # Errors
+///
+/// Returns [`ClientError::Signing`] when `memo` exceeds 256 bytes.
+pub fn memo_instruction(memo: &str) -> Result<Instruction, ClientError> {
+    if memo.len() > 256 {
+        return Err(ClientError::Signing(format!(
+            "memo exceeds 256 bytes ({})",
+            memo.len()
+        )));
+    }
+    Ok(Instruction {
+        program_id: SPL_MEMO_PROGRAM,
+        accounts: Vec::new(),
+        data: memo.as_bytes().to_vec(),
+    })
+}
+
+/// Transfer instruction, plus a memo instruction when `memo` is declared.
+///
+/// # Errors
+///
+/// Returns [`ClientError::Signing`] when a declared memo is invalid.
+pub fn with_declared_memo(
+    transfer: Instruction,
+    memo: Option<&str>,
+) -> Result<Vec<Instruction>, ClientError> {
+    let mut ixs = Vec::with_capacity(1 + usize::from(memo.is_some()));
+    ixs.push(transfer);
+    if let Some(memo) = memo {
+        ixs.push(memo_instruction(memo)?);
+    }
+    Ok(ixs)
+}
+
 /// Update the first `set_compute_unit_limit` ix if it exists, else append a new one.
 pub fn update_or_append_set_compute_unit_limit(ixs: &mut Vec<Instruction>, units: u32) {
     let target_program = solana_compute_budget_interface::ID;
@@ -226,6 +264,7 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
     pay_to: &Address,
     asset: &Address,
     amount: u64,
+    memo: Option<&str>,
 ) -> Result<String, ClientError> {
     let mint = fetch_mint(asset, rpc_client).await?;
 
@@ -289,8 +328,9 @@ pub async fn build_signed_transfer_transaction<S: Signer + Sync, R: RpcClientLik
         get_priority_fee_micro_lamports(rpc_client, &[*fee_payer, destination_ata, source_ata])
             .await?;
 
+    let transfer_instructions = with_declared_memo(transfer_instruction, memo)?;
     let (msg_to_sim, instructions) =
-        build_message_to_simulate(*fee_payer, &[transfer_instruction], fee, recent_blockhash)?;
+        build_message_to_simulate(*fee_payer, &transfer_instructions, fee, recent_blockhash)?;
 
     let estimated_cu = estimate_compute_units(rpc_client, &msg_to_sim).await?;
 
@@ -411,6 +451,11 @@ impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSi
             let fee_payer_pubkey: Pubkey = fee_payer.into();
 
             let amount = self.requirements.amount.inner();
+            let memo = self
+                .requirements
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.memo.as_deref());
             let tx_b64 = build_signed_transfer_transaction(
                 &self.signer,
                 &self.rpc_client,
@@ -418,6 +463,7 @@ impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSi
                 &self.requirements.pay_to,
                 &self.requirements.asset,
                 amount,
+                memo,
             )
             .await?;
 
@@ -433,5 +479,48 @@ impl<S: Signer + Send + Sync, R: RpcClientLike + Send + Sync> PaymentCandidateSi
 
             Ok(b64.to_string())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_transfer() -> Instruction {
+        Instruction {
+            program_id: spl_token::id(),
+            accounts: Vec::new(),
+            data: vec![12],
+        }
+    }
+
+    #[test]
+    fn memo_instruction_matches_declared_bytes() {
+        let ix = memo_instruction("order-123").expect("memo");
+        assert_eq!(ix.program_id, SPL_MEMO_PROGRAM);
+        assert!(ix.accounts.is_empty());
+        assert_eq!(ix.data, b"order-123");
+    }
+
+    #[test]
+    fn memo_instruction_rejects_over_256_bytes() {
+        assert!(memo_instruction(&"a".repeat(257)).is_err());
+        assert!(memo_instruction(&"a".repeat(256)).is_ok());
+    }
+
+    #[test]
+    fn declared_memo_is_appended_after_transfer() {
+        let ixs = with_declared_memo(dummy_transfer(), Some("order-123")).expect("ixs");
+        assert_eq!(ixs.len(), 2);
+        assert_eq!(ixs[0].program_id, spl_token::id());
+        assert_eq!(ixs[1].program_id, SPL_MEMO_PROGRAM);
+        assert_eq!(ixs[1].data, b"order-123");
+    }
+
+    #[test]
+    fn absent_memo_leaves_transfer_only() {
+        let ixs = with_declared_memo(dummy_transfer(), None).expect("ixs");
+        assert_eq!(ixs.len(), 1);
+        assert_eq!(ixs[0].program_id, spl_token::id());
     }
 }

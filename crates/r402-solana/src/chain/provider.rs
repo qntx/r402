@@ -22,6 +22,13 @@ use solana_transaction::versioned::VersionedTransaction;
 
 use crate::chain::account::{Address, SolanaChainReference};
 
+/// Recommended hard cap / default for `max_compute_unit_price` (micro-lamports).
+///
+/// Aligned with the Go reference SDK
+/// (`mechanisms/svm/exact/facilitator/scheme.go: maxComputeUnitPriceMicroLamports`).
+/// 5 000 000 µLAM/CU is roughly 0.005 SOL per million CU.
+pub const SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS: u64 = 5_000_000;
+
 /// Errors that can occur when interacting with a Solana chain provider.
 #[derive(thiserror::Error, Debug)]
 pub enum SolanaChainProviderError {
@@ -110,7 +117,8 @@ impl SolanaChainProvider {
     /// - `pubsub_url`: Optional `WebSocket` pubsub endpoint for faster confirmations
     /// - `chain`: The Solana network identifier
     /// - `max_compute_unit_limit`: Maximum compute units per transaction
-    /// - `max_compute_unit_price`: Maximum price per compute unit in micro-lamports
+    /// - `max_compute_unit_price`: Maximum price per compute unit in micro-lamports.
+    ///   `None` uses [`SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS`].
     ///
     /// # Errors
     ///
@@ -121,8 +129,10 @@ impl SolanaChainProvider {
         pubsub_url: Option<String>,
         chain: SolanaChainReference,
         max_compute_unit_limit: u32,
-        max_compute_unit_price: u64,
+        max_compute_unit_price: Option<u64>,
     ) -> Result<Self, PubsubClientError> {
+        let max_compute_unit_price =
+            max_compute_unit_price.unwrap_or(SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS);
         #[cfg(feature = "telemetry")]
         {
             let signer_addresses = vec![keypair.pubkey()];
@@ -473,5 +483,15 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         tx: &VersionedTransaction,
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
         (**self).send(tx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS;
+
+    #[test]
+    fn recommended_cu_price_matches_go_cap() {
+        assert_eq!(SOLANA_MAX_COMPUTE_UNIT_PRICE_MICROLAMPORTS, 5_000_000);
     }
 }

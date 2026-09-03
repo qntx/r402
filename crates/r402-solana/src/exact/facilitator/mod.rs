@@ -47,9 +47,17 @@ impl<P> SolanaExactFacilitator<P> {
     }
 
     /// Builds a facilitator with default config.
-    #[must_use]
-    pub fn try_new(provider: P) -> Self {
-        Self::new(provider, SolanaExactFacilitatorConfig::default())
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. `Result` matches the chain-crate `try_new(provider)`
+    /// template so callers can use `?`.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "try_new returns Result so callers can use ?"
+    )]
+    pub fn try_new(provider: P) -> Result<Self, FacilitatorError> {
+        Ok(Self::new(provider, SolanaExactFacilitatorConfig::default()))
     }
 
     /// Creates a facilitator with a shared [`SettlementCache`].
