@@ -22,7 +22,7 @@ use r402_extensions::BuilderCodeFacilitatorExtension;
 use r402_facilitator::{
     Duplicate, Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
 };
-use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
+use r402_protocol::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment as wire;
 use r402_protocol::payment::UnixTimestamp;
