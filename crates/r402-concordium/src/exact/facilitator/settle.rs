@@ -130,6 +130,7 @@ pub async fn settle_request<N: ConcordiumNode>(
     let signed = match add_sponsor_signature(&tx, sponsor) {
         Ok(tx) => tx,
         Err(e) => {
+            cache.release(&cache_key);
             return settle_failure(
                 ErrorReason::from_wire(&format!("sponsor_signing_failed: {e}")),
                 &network,
@@ -142,6 +143,7 @@ pub async fn settle_request<N: ConcordiumNode>(
     let tx_hash = match node.send_v1(signed).await {
         Ok(hash) => hash,
         Err(e) => {
+            cache.release(&cache_key);
             return settle_failure(
                 ErrorReason::from_wire(&format!("submission_failed: {e}")),
                 &network,

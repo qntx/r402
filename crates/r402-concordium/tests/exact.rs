@@ -162,6 +162,7 @@ mod facilitator {
         token_decimals: u8,
         token_balance: Mutex<Result<Option<u128>, ()>>,
         send_hash: String,
+        send_err: Mutex<Option<String>>,
         finalization: TransactionInfo,
     }
 
@@ -172,10 +173,12 @@ mod facilitator {
                     nonce: Some(1),
                     amount_micro_ccd: Some(5_000_000),
                     info: None,
+                    key_seed: None,
                 }),
                 token_decimals: 6,
                 token_balance: Mutex::new(Ok(Some(1_000_000))),
                 send_hash: "aa".repeat(32),
+                send_err: Mutex::new(None),
                 finalization: TransactionInfo {
                     tx_hash: "aa".repeat(32),
                     status: TransactionStatus::Finalized,
@@ -219,6 +222,9 @@ mod facilitator {
                 concordium_rust_sdk::types::transactions::EncodedPayload,
             >,
         ) -> Result<String, ConcordiumRpcError> {
+            if let Some(err) = self.send_err.lock().expect("lock").as_ref() {
+                return Err(ConcordiumRpcError::Transport(err.clone()));
+            }
             Ok(self.send_hash.clone())
         }
 
@@ -589,6 +595,140 @@ mod facilitator {
         assert!(!resp.is_success());
     }
 
+    #[test]
+    fn transfer_with_memo_rebuild_keeps_memo() {
+        use std::collections::BTreeMap;
+
+        use r402_concordium::chain::tx::rebuild_for_verify;
+        use r402_concordium::exact::payload::{
+            SignableV1Signatures, SignableV1Transaction, SignableV1TransactionHeader,
+            SignableV1TransactionPayload, SponsorHeader,
+        };
+
+        let tx = SignableV1Transaction {
+            version: 1,
+            header: SignableV1TransactionHeader {
+                sender: SENDER.to_owned(),
+                nonce: 1,
+                expiry: json!(1_700_000_300),
+                num_signatures: 1,
+                execution_energy_amount: Some(300),
+                sponsor: Some(SponsorHeader {
+                    account: Some(SPONSOR.to_owned()),
+                    address: None,
+                    num_signatures: 1,
+                }),
+            },
+            payload: SignableV1TransactionPayload::TransferWithMemo {
+                to_address: Some(PAY_TO.to_owned()),
+                amount: json!("1000000"),
+                memo: Some("deadbeef".to_owned()),
+            },
+            signatures: SignableV1Signatures {
+                sender: BTreeMap::from([(
+                    "0".to_owned(),
+                    BTreeMap::from([("0".to_owned(), "aa".to_owned())]),
+                )]),
+                sponsor: BTreeMap::new(),
+            },
+        };
+        let rebuilt = rebuild_for_verify(&tx).expect("rebuild");
+        match rebuilt.payload.decode().expect("decode") {
+            concordium_rust_sdk::base::transactions::Payload::TransferWithMemo { memo, .. } => {
+                assert_eq!(
+                    memo.as_ref(),
+                    hex::decode("deadbeef").expect("hex").as_slice()
+                );
+            }
+            other => panic!("expected TransferWithMemo, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plt_rebuild_preserves_operations_hex() {
+        use r402_concordium::chain::tx::{build_plt_transfer, rebuild_for_verify};
+
+        let signer = dummy_signer(SENDER);
+        let built = build_plt_transfer(&signer, PAY_TO, "1000000", "USDR", 6, SPONSOR, 3, expiry())
+            .expect("build");
+        let wire_hex = match &built.payload {
+            r402_concordium::exact::payload::SignableV1TransactionPayload::TokenUpdate {
+                operations,
+                ..
+            } => operations.as_str().expect("hex").to_owned(),
+            _ => panic!("expected tokenUpdate"),
+        };
+        let rebuilt = rebuild_for_verify(&built).expect("rebuild");
+        match rebuilt.payload.decode().expect("decode") {
+            concordium_rust_sdk::base::transactions::Payload::TokenUpdate { payload } => {
+                assert_eq!(hex::encode(payload.operations.as_ref()), wire_hex);
+            }
+            other => panic!("expected TokenUpdate, got {other:?}"),
+        }
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn submission_failed_releases_settlement_cache() {
+        use r402_concordium::exact::client::create_signed_transaction;
+        use r402_concordium::exact::payload::v2::PaymentRequirements;
+        use r402_concordium::exact::payload::{ConcordiumExtra, ExactScheme};
+        use r402_protocol::payment::SettleResponse;
+
+        let sender = ConcordiumSigner::from_secret(SENDER, "22".repeat(32)).expect("sender");
+        let node = MockNode::default();
+        node.snapshot.lock().expect("lock").nonce = Some(7);
+        node.snapshot.lock().expect("lock").key_seed = Some([0x22; 32]);
+        *node.send_err.lock().expect("lock") = Some("boom".to_owned());
+        let req = PaymentRequirements::new(
+            ExactScheme,
+            CONCORDIUM_TESTNET_CAIP2.parse().expect("net"),
+            "1000000".into(),
+            PAY_TO.into(),
+            "CCD".into(),
+            60,
+        )
+        .with_extra(ConcordiumExtra {
+            fee_payer: Some(SPONSOR.parse().expect("sponsor")),
+        });
+        let signed = create_signed_transaction(&sender, &node, &req)
+            .await
+            .expect("sign");
+        let tx = serde_json::to_value(&signed.signed_transaction).expect("json");
+        let body = verify_body(tx, json!({ "feePayer": SPONSOR }));
+        let provider = ConcordiumChainProvider::new(
+            ConcordiumChainReference::TESTNET,
+            vec![dummy_signer(SPONSOR)],
+            node,
+        );
+        let fac = ConcordiumExactFacilitator::try_new(provider).expect("try_new");
+        let first = fac
+            .settle(SettleRequest::from(body.clone()))
+            .await
+            .expect("settle 1");
+        assert!(!first.is_success());
+        match &first {
+            SettleResponse::Failure { reason, .. } => {
+                assert!(reason.to_string().contains("submission_failed"));
+            }
+            _ => panic!("expected failure"),
+        }
+        let second = fac
+            .settle(SettleRequest::from(body))
+            .await
+            .expect("settle 2");
+        match &second {
+            SettleResponse::Failure { reason, .. } => {
+                assert!(
+                    !reason.to_string().contains("duplicate"),
+                    "cache must release on submission_failed, got {reason}"
+                );
+                assert!(reason.to_string().contains("submission_failed"));
+            }
+            _ => panic!("expected failure"),
+        }
+    }
+
     #[tokio::test]
     async fn rejects_string_expiry_as_missing_header_expiry() {
         let mut tx = ccd_tx(json!({}));
@@ -634,6 +774,7 @@ mod client {
                 nonce: Some(self.nonce),
                 amount_micro_ccd: Some(5_000_000),
                 info: None,
+                key_seed: None,
             })
         }
 
@@ -714,6 +855,7 @@ mod client {
         );
         assert!(tx.signatures.sponsor.is_empty());
         assert!(!tx.signatures.sender.is_empty());
+        assert_eq!(tx.header.execution_energy_amount, Some(300));
         assert!(matches!(
             tx.payload,
             SignableV1TransactionPayload::Transfer { .. }
@@ -736,6 +878,10 @@ mod client {
             payload.signed_transaction.payload,
             SignableV1TransactionPayload::TokenUpdate { .. }
         ));
+        assert_eq!(
+            payload.signed_transaction.header.execution_energy_amount,
+            Some(400)
+        );
         assert!(payload.signed_transaction.signatures.sponsor.is_empty());
     }
 

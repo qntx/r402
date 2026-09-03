@@ -9,8 +9,11 @@ use serde_json::Value;
 use crate::chain::ConcordiumAddress;
 
 /// Extra fields for Concordium payment requirements.
+///
+/// Official extra is an open `Record<string, unknown>`; unknown keys are
+/// ignored so `feePayer` still deserializes next to server-defined fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ConcordiumExtra {
     /// Facilitator sponsor account that pays transaction fees.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -230,9 +233,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extra_rejects_unknown_fields() {
-        let json = serde_json::json!({ "memo": "nope" });
-        assert!(serde_json::from_value::<ConcordiumExtra>(json).is_err());
+    fn extra_keeps_fee_payer_beside_unknown_fields() {
+        let json = serde_json::json!({
+            "feePayer": "3UrcxPQeYywasrPcYUcqhvFu3SB2vBBDjj7TsaRQ431vGiczYp",
+            "customField": "customValue",
+            "anotherField": 42
+        });
+        let extra: ConcordiumExtra = serde_json::from_value(json).expect("open extra");
+        assert_eq!(
+            extra.fee_payer.map(|a| a.to_string()).as_deref(),
+            Some("3UrcxPQeYywasrPcYUcqhvFu3SB2vBBDjj7TsaRQ431vGiczYp")
+        );
         let empty = serde_json::json!({});
         assert!(serde_json::from_value::<ConcordiumExtra>(empty).is_ok());
     }

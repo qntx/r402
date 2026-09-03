@@ -34,6 +34,8 @@ pub struct AccountSnapshot {
     pub amount_micro_ccd: Option<u64>,
     /// Full account info when the node supplied it (signature verification).
     pub info: Option<AccountInfo>,
+    /// Ed25519 seed at credential 0 / key 0 when `info` is absent (mocks).
+    pub key_seed: Option<[u8; 32]>,
 }
 
 /// Node operations required by the exact client and facilitator.
@@ -140,6 +142,7 @@ impl ConcordiumNode for ConcordiumGrpc {
             nonce: Some(info.account_nonce.nonce),
             amount_micro_ccd: Some(info.account_amount.micro_ccd()),
             info: Some(info),
+            key_seed: None,
         })
     }
 

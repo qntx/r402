@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
+use concordium_rust_sdk::base::base::Energy;
 use concordium_rust_sdk::base::common::cbor::cbor_decode;
 use concordium_rust_sdk::base::common::types::{
     Amount, CredentialIndex, KeyIndex, Signature, TransactionSignature, TransactionSignaturesV1,
@@ -11,10 +12,12 @@ use concordium_rust_sdk::base::common::types::{
 use concordium_rust_sdk::base::contracts_common::AccountAddress;
 use concordium_rust_sdk::base::hashes::TransactionSignHash;
 use concordium_rust_sdk::base::protocol_level_tokens::{
-    TokenAmount, TokenId, TokenOperation, TokenOperations, operations,
+    RawCbor, TokenAmount, TokenId, TokenOperation, TokenOperations, TokenOperationsPayload,
+    operations,
 };
 use concordium_rust_sdk::base::transactions::{
-    AccountTransactionV1, EncodedPayload, HasAccountAccessStructure, Payload, construct,
+    AccountTransactionV1, EncodedPayload, HasAccountAccessStructure, Memo, Payload, PayloadLike,
+    TransactionHeaderV1, compute_transaction_sign_hash_v1, construct, cost,
     verify_signature_transaction_sign_hash_v1,
 };
 use concordium_rust_sdk::types::Nonce;
@@ -74,6 +77,7 @@ pub fn build_ccd_transfer(
             to_address: Some(pay_to.to_owned()),
             amount: Value::String(amount.to_owned()),
         },
+        cost::SIMPLE_TRANSFER.energy,
     )
 }
 
@@ -126,6 +130,7 @@ pub fn build_plt_transfer(
             token_id: Some(token_id.to_owned()),
             operations: Value::String(operations_hex),
         },
+        (cost::PLT_OPERATIONS_TRANSACTIONS + cost::PLT_TRANSFER).energy,
     )
 }
 
@@ -183,10 +188,7 @@ pub trait HashToSign {
 
 impl HashToSign for AccountTransactionV1<EncodedPayload> {
     fn hash_to_sign_ref(&self) -> TransactionSignHash {
-        concordium_rust_sdk::base::transactions::compute_transaction_sign_hash_v1(
-            &self.header,
-            &self.payload,
-        )
+        compute_transaction_sign_hash_v1(&self.header, &self.payload)
     }
 }
 
@@ -270,36 +272,132 @@ fn rebuild_pre(
         .ok_or_else(|| ClientError::Signing("missing sponsor".to_owned()))?;
     let sponsor = sdk_address(sponsor)?;
     let expiry = expiry_unix(&tx.header.expiry)?;
-    let nonce = tx.header.nonce;
-    let num_sigs = u32::try_from(tx.header.num_signatures.max(1)).unwrap_or(1);
-    let mut pre = match &tx.payload {
+    let sender_sigs = u32::try_from(tx.header.num_signatures.max(1)).unwrap_or(1);
+    let sponsor_sigs = tx
+        .header
+        .sponsor
+        .as_ref()
+        .map_or(1, |s| u32::try_from(s.num_signatures.max(1)).unwrap_or(1));
+    let (payload, encoded) = encode_wire_payload(&tx.payload)?;
+    let base = tx
+        .header
+        .execution_energy_amount
+        .unwrap_or_else(|| infer_base_energy(&tx.payload));
+    let payload_size = u64::from(u32::from(encoded.size()));
+    let header = TransactionHeaderV1 {
+        sender,
+        nonce: Nonce {
+            nonce: tx.header.nonce,
+        },
+        energy_amount: sponsored_v1_energy(base, payload_size, sender_sigs, sponsor_sigs),
+        payload_size: encoded.size(),
+        expiry: TransactionTime::from_seconds(expiry),
+        sponsor: Some(sponsor),
+    };
+    let hash_to_sign = compute_transaction_sign_hash_v1(&header, &encoded);
+    Ok(construct::PreAccountTransactionV1 {
+        header,
+        payload,
+        encoded,
+        hash_to_sign,
+        sender_signature: None,
+        sponsor_signature: None,
+    })
+}
+
+/// Official web-sdk JSON `executionEnergyAmount` is **base** NRG (size/sig
+/// costs excluded). `preFinalized` then adds A×sigs + B×(header+payload).
+fn infer_base_energy(payload: &SignableV1TransactionPayload) -> u64 {
+    match payload {
+        SignableV1TransactionPayload::Transfer { .. }
+        | SignableV1TransactionPayload::TransferWithMemo { .. } => cost::SIMPLE_TRANSFER.energy,
+        SignableV1TransactionPayload::TokenUpdate { operations, .. } => {
+            plt_base_energy_from_operations(operations)
+        }
+    }
+}
+
+fn plt_base_energy_from_operations(operations: &Value) -> u64 {
+    let Ok(ops) = decode_token_operations(operations) else {
+        return (cost::PLT_OPERATIONS_TRANSACTIONS + cost::PLT_TRANSFER).energy;
+    };
+    let mut energy = cost::PLT_OPERATIONS_TRANSACTIONS.energy;
+    for op in &ops.operations {
+        energy += match op {
+            concordium_rust_sdk::base::common::upward::CborUpward::Known(
+                TokenOperation::Transfer(_),
+            ) => cost::PLT_TRANSFER.energy,
+            concordium_rust_sdk::base::common::upward::CborUpward::Known(
+                TokenOperation::Mint(_) | TokenOperation::Burn(_),
+            ) => cost::PLT_MINT.energy,
+            concordium_rust_sdk::base::common::upward::CborUpward::Known(
+                TokenOperation::AddAllowList(_)
+                | TokenOperation::RemoveAllowList(_)
+                | TokenOperation::AddDenyList(_)
+                | TokenOperation::RemoveDenyList(_),
+            ) => cost::PLT_LIST_UPDATE.energy,
+            concordium_rust_sdk::base::common::upward::CborUpward::Known(
+                TokenOperation::Pause(_) | TokenOperation::Unpause(_),
+            ) => cost::PLT_PAUSE.energy,
+            concordium_rust_sdk::base::common::upward::CborUpward::Unknown(_) => 0,
+        };
+    }
+    energy
+}
+
+/// `AccountTransactionV1.calculateEnergyCost` with a sponsor present:
+/// A×(sender+sponsor sigs) + B×(bitmap + v0 header + 32 + payload) + base.
+fn sponsored_v1_energy(
+    base: u64,
+    payload_size: u64,
+    sender_sigs: u32,
+    sponsor_sigs: u32,
+) -> Energy {
+    const BITMAP_AND_SPONSOR: u64 = 2 + 32;
+    Energy::from(
+        cost::A * u64::from(sender_sigs.saturating_add(sponsor_sigs))
+            + cost::B * (BITMAP_AND_SPONSOR + construct::TRANSACTION_HEADER_SIZE + payload_size)
+            + base,
+    )
+}
+
+/// Encode the wire payload. PLT `operations` hex is used as-is (no CBOR
+/// re-encode) so the sign hash matches official `Payload.fromJSON`.
+fn encode_wire_payload(
+    payload: &SignableV1TransactionPayload,
+) -> Result<(Payload, EncodedPayload), ClientError> {
+    let structured = match payload {
         SignableV1TransactionPayload::Transfer { to_address, amount } => {
             let to = to_address
                 .as_deref()
                 .ok_or_else(|| ClientError::Signing("missing recipient".to_owned()))?;
-            construct::transfer(
-                num_sigs,
-                sender,
-                Nonce { nonce },
-                TransactionTime::from_seconds(expiry),
-                sdk_address(to)?,
-                Amount::from_micro_ccd(parse_u64_amount(&amount_string(amount))?),
-            )
+            Payload::Transfer {
+                to_address: sdk_address(to)?,
+                amount: Amount::from_micro_ccd(parse_u64_amount(&amount_string(amount))?),
+            }
         }
         SignableV1TransactionPayload::TransferWithMemo {
-            to_address, amount, ..
+            to_address,
+            amount,
+            memo,
         } => {
             let to = to_address
                 .as_deref()
                 .ok_or_else(|| ClientError::Signing("missing recipient".to_owned()))?;
-            construct::transfer(
-                num_sigs,
-                sender,
-                Nonce { nonce },
-                TransactionTime::from_seconds(expiry),
-                sdk_address(to)?,
-                Amount::from_micro_ccd(parse_u64_amount(&amount_string(amount))?),
-            )
+            let memo_bytes = match memo.as_deref() {
+                Some(hex_str) if !hex_str.is_empty() => {
+                    hex::decode(hex_str.trim_start_matches("0x"))
+                        .map_err(|e| ClientError::Signing(format!("invalid memo hex: {e}")))?
+                }
+                _ => Vec::new(),
+            };
+            let parsed_memo = Memo::try_from(memo_bytes)
+                .map_err(|_| ClientError::Signing("memo too big".to_owned()))?;
+            Payload::TransferWithMemo {
+                to_address: sdk_address(to)?,
+                memo: parsed_memo,
+                amount: Amount::from_micro_ccd(parse_u64_amount(&amount_string(amount))?),
+            }
         }
         SignableV1TransactionPayload::TokenUpdate {
             token_id,
@@ -308,49 +406,32 @@ fn rebuild_pre(
             let token_id = token_id
                 .as_deref()
                 .ok_or_else(|| ClientError::Signing("missing token id".to_owned()))?;
-            let decoded =
-                decode_token_update(Some(token_id), operations).map_err(ClientError::Signing)?;
-            let decimals = decoded
-                .token_decimals
-                .ok_or_else(|| ClientError::Signing("invalid_token_amount".to_owned()))?;
-            let amount = u64::try_from(decoded.amount.unwrap_or(0))
-                .map_err(|_| ClientError::Signing("invalid_token_amount".to_owned()))?;
-            let receiver = decoded
-                .recipient
-                .as_deref()
-                .ok_or_else(|| ClientError::Signing("missing recipient".to_owned()))?;
             let token: TokenId = token_id
                 .parse()
                 .map_err(|e| ClientError::Signing(format!("{e}")))?;
-            let op = operations::transfer_tokens(
-                sdk_address(receiver)?,
-                TokenAmount::from_raw(amount, decimals),
-            );
-            construct::token_update_operations(
-                num_sigs,
-                sender,
-                Nonce { nonce },
-                TransactionTime::from_seconds(expiry),
-                token,
-                std::iter::once(op).collect(),
-            )
-            .map_err(|e| ClientError::Signing(format!("{e}")))?
+            let bytes = match operations {
+                Value::String(s) if !s.is_empty() => hex::decode(s.trim_start_matches("0x"))
+                    .map_err(|_| ClientError::Signing("invalid_token_operations".to_owned()))?,
+                _ => {
+                    return Err(ClientError::Signing("invalid_token_operations".to_owned()));
+                }
+            };
+            Payload::TokenUpdate {
+                payload: TokenOperationsPayload {
+                    token_id: token,
+                    operations: RawCbor::from(bytes),
+                },
+            }
         }
-    }
-    .extend();
-    let sponsor_sigs = tx
-        .header
-        .sponsor
-        .as_ref()
-        .map_or(1, |s| u32::try_from(s.num_signatures.max(1)).unwrap_or(1));
-    pre.add_sponsor(sponsor, sponsor_sigs)
-        .map_err(ClientError::Signing)?;
-    Ok(pre)
+    };
+    let encoded = structured.encode();
+    Ok((structured, encoded))
 }
 
 fn pre_to_wire(
     pre: &construct::PreAccountTransactionV1,
     payload: SignableV1TransactionPayload,
+    base_energy: u64,
 ) -> Result<SignableV1Transaction, ClientError> {
     let sender_map = signature_to_map(
         pre.sender_signature
@@ -370,7 +451,7 @@ fn pre_to_wire(
             nonce: pre.header.nonce.nonce,
             expiry: Value::from(pre.header.expiry.seconds),
             num_signatures: 1,
-            execution_energy_amount: Some(pre.header.energy_amount.energy),
+            execution_energy_amount: Some(base_energy),
             sponsor: Some(SponsorHeader {
                 account: Some(sponsor_addr),
                 address: None,

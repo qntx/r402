@@ -64,6 +64,11 @@ impl TtlSet {
         self.inner.contains_key(key)
     }
 
+    /// Drops `key` so a later [`TtlSet::reserve`] can succeed.
+    pub fn release(&self, key: &str) {
+        self.inner.invalidate(key);
+    }
+
     /// Returns the approximate current entry count (used for observability).
     #[must_use]
     pub fn entry_count(&self) -> u64 {
@@ -135,6 +140,11 @@ impl SettlementCache {
         outcome
     }
 
+    /// Drops a reserved key (terminal settle failure without a broadcast hash).
+    pub fn release(&self, key: &str) {
+        self.inner.release(key);
+    }
+
     /// Returns the approximate current entry count (observability hook).
     #[must_use]
     pub fn entry_count(&self) -> u64 {
@@ -182,6 +192,14 @@ mod tests {
     }
 
     #[test]
+    fn release_allows_reserve_again() {
+        let cache = cache();
+        assert_eq!(cache.reserve("a"), Duplicate::No);
+        cache.release("a");
+        assert_eq!(cache.reserve("a"), Duplicate::No);
+    }
+
+    #[test]
     fn distinct_keys_are_independent() {
         let cache = cache();
         assert_eq!(cache.reserve("a"), Duplicate::No);
@@ -200,6 +218,14 @@ mod tests {
         let cache = SettlementCache::new();
         assert_eq!(cache.reserve("0xabc"), Duplicate::No);
         assert_eq!(cache.reserve("0xabc"), Duplicate::Yes);
+    }
+
+    #[test]
+    fn settlement_cache_release_allows_retry() {
+        let cache = SettlementCache::new();
+        assert_eq!(cache.reserve("sender:1"), Duplicate::No);
+        cache.release("sender:1");
+        assert_eq!(cache.reserve("sender:1"), Duplicate::No);
     }
 
     #[test]

@@ -1,9 +1,10 @@
 # Crates
 
 Workspace **0.18.0**. Path dependencies match the graph below. Umbrella
-`default = ["evm", "http"]`. **[`r402-contract`](r402-contract/)** is an
-unpublished workspace member — not on crates.io, not in `publish.yml`.
-crates.io **`r402-core` 0.17.1** is not yanked.
+`default = ["evm", "http"]`. Concordium is opt-in (`r402` feature `concordium`),
+not default. **[`r402-contract`](r402-contract/)** is an unpublished workspace
+member — not on crates.io, not in `publish.yml`. crates.io **`r402-core` 0.17.1**
+is not yanked.
 
 SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 `https://github.com/qntx/siwx` at rev `85cf7bf0e9b867088813781b5cd03a640441c583`.

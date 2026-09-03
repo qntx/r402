@@ -62,7 +62,17 @@ impl ConcordiumSigner {
     /// Never: threshold `1` is a valid [`AccountThreshold`].
     #[must_use]
     pub fn keys(&self) -> AccountKeys {
-        let signing = SigningKey::from_bytes(&self.seed);
+        Self::keys_from_seed(self.seed)
+    }
+
+    /// Account keys for a 32-byte Ed25519 seed at credential 0 / key 0.
+    ///
+    /// # Panics
+    ///
+    /// Never: threshold `1` is a valid [`AccountThreshold`].
+    #[must_use]
+    pub fn keys_from_seed(seed: [u8; 32]) -> AccountKeys {
+        let signing = SigningKey::from_bytes(&seed);
         let pair = KeyPair::from(signing);
         let mut keys = BTreeMap::new();
         let _ = keys.insert(KeyIndex(0), pair);

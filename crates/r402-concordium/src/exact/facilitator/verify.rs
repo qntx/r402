@@ -185,13 +185,19 @@ async fn verify_inner<N: ConcordiumNode>(
     let account = node.get_account(&resolved_payer).await.map_err(|e| {
         invalid(format!("signature_verification_failed: {e}")).with_payer(resolved_payer.clone())
     })?;
-    let Some(info) = account.info.as_ref() else {
+    let sig_ok = if let Some(info) = account.info.as_ref() {
+        crate::chain::tx::verify_sender_signature(&rebuilt, info)
+    } else if let Some(seed) = account.key_seed {
+        let keys = crate::chain::ConcordiumSigner::keys_from_seed(seed);
+        let access = concordium_rust_sdk::base::transactions::AccountAccessStructure::from(&keys);
+        crate::chain::tx::verify_sender_signature(&rebuilt, &access)
+    } else {
         return Err(
             invalid("signature_verification_failed: missing account credentials")
                 .with_payer(resolved_payer),
         );
     };
-    if !crate::chain::tx::verify_sender_signature(&rebuilt, info) {
+    if !sig_ok {
         return Err(invalid("invalid_sender_signature").with_payer(resolved_payer));
     }
     if let Some(err) = preflight_likely_to_succeed(
