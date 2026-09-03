@@ -6733,6 +6733,7 @@ dependencies = [
  "r402-facilitator",
  "r402-protocol",
  "rand 0.10.2",
+ "reqwest 0.13.4",
  "serde",
  "serde_json",
  "siwx",
@@ -6742,6 +6743,7 @@ dependencies = [
  "time",
  "tokio",
  "url",
+ "wiremock",
 ]
 
 [[package]]

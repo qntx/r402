@@ -1,7 +1,12 @@
-//! Advertise-only `bazaar` discovery metadata.
+//! `bazaar` discovery metadata advertised on `PaymentRequired`.
 //!
 //! Resource servers declare how a paid HTTP endpoint or MCP tool is called.
-//! This crate does not implement a facilitator `GET /discovery` client.
+//! Facilitator catalog queries (`GET /discovery/resources`, `GET /discovery/search`)
+//! live behind `ext-bazaar-discovery`.
+
+#[cfg(feature = "ext-bazaar-discovery")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ext-bazaar-discovery")))]
+pub mod discovery;
 
 use compact_str::CompactString;
 use r402_protocol::extension::{AdvertiseContext, Extension};

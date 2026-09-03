@@ -32,6 +32,12 @@ pub mod payment_id;
 #[cfg_attr(docsrs, doc(cfg(feature = "siwx")))]
 pub mod siwx;
 
+#[cfg(feature = "ext-bazaar-discovery")]
+pub use bazaar::discovery::{
+    BazaarDiscoveryClient, BazaarDiscoveryError, DiscoveryPagination, DiscoveryResource,
+    DiscoveryResourcesResponse, ListDiscoveryResourcesParams, SearchDiscoveryResourcesParams,
+    SearchDiscoveryResourcesResponse, SearchPagination, with_bazaar,
+};
 #[cfg(feature = "ext-bazaar")]
 pub use bazaar::{
     BAZAAR_KEY, BazaarBodyMethod, BazaarBodyType, BazaarExtension, BazaarQueryMethod,
@@ -86,6 +92,7 @@ pub use siwx::{
 mod _dev_deps {
     use alloy_signer_local as _;
     use tokio as _;
+    use wiremock as _;
 }
 
 #[cfg(test)]

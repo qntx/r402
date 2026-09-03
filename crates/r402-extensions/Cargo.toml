@@ -31,6 +31,16 @@ default = [
 # TtlSet lives in r402-facilitator; only payment-identifier needs it.
 cache = ["dep:r402-facilitator"]
 ext-bazaar = []
+# Off by default: facilitator GET /discovery client, not advertise.
+ext-bazaar-discovery = [
+    "ext-bazaar",
+    "dep:r402-facilitator",
+    "r402-facilitator/http-client",
+    "dep:reqwest",
+    "dep:thiserror",
+    "dep:serde",
+    "dep:url",
+]
 ext-payment-id = ["cache", "dep:thiserror"]
 ext-eip2612 = []
 ext-erc20-approval = []
@@ -80,6 +90,7 @@ r402-facilitator = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 siwx = { workspace = true, optional = true }
 siwx-evm = { workspace = true, optional = true }
 siwx-svm = { workspace = true, optional = true }
@@ -106,10 +117,15 @@ ed25519-dalek = { workspace = true }
 http = { workspace = true }
 r402-client = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock = { workspace = true }
 
 [[test]]
 name = "bazaar"
 required-features = ["ext-bazaar"]
+
+[[test]]
+name = "bazaar_discovery"
+required-features = ["ext-bazaar-discovery"]
 
 [[test]]
 name = "siwx"
