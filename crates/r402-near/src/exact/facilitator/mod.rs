@@ -1,13 +1,14 @@
 //! Facilitator-side payment verification and settlement for the NEAR exact scheme.
 
 mod settle;
+mod settlement_cache;
 mod verify;
 
 use std::collections::HashMap;
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_facilitator::{Facilitator, SettlementCache};
+use r402_facilitator::Facilitator;
 use r402_protocol::error::FacilitatorError;
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment::{
@@ -16,6 +17,7 @@ use r402_protocol::payment::{
 };
 use r402_protocol::scheme::SchemeId;
 pub use settle::settle_request;
+pub use settlement_cache::{SettlementCache, settlement_cache_key};
 pub use verify::{decode_signed_delegate, default_max_sponsored_gas, verify_request_json};
 
 use crate::chain::NearChainProvider;

@@ -154,14 +154,13 @@ mod verify_settle {
     use near_primitives::action::{Action, FunctionCallAction, TransferAction};
     use near_primitives::gas::Gas;
     use near_primitives::types::{AccountId, Balance};
-    use r402_facilitator::SettlementCache;
     use r402_near::chain::rpc::{
         NearAccessKeyPermissionKind, NearAccessKeyView, NearAccountView, NearReceiptStatus,
         NearRpc, NearRpcError, NearSettlementOutcome, NearStorageBalance,
     };
     use r402_near::exact::facilitator::{
-        NearExactFacilitator, NearFacilitatorOps, decode_signed_delegate, settle_request,
-        verify_request_json,
+        NearExactFacilitator, NearFacilitatorOps, SettlementCache, decode_signed_delegate,
+        settle_request, settlement_cache_key, verify_request_json,
     };
     use r402_near::{
         DEFAULT_FT_TRANSFER_GAS, DEFAULT_MAX_SPONSORED_GAS, EMPTY_CONTRACT_CODE_HASH, ONE_YOCTO,
@@ -1419,6 +1418,49 @@ mod verify_settle {
         }
     }
 
+    #[test]
+    fn settlement_cache_key_is_hex_sha256_of_decoded_bytes() {
+        use sha2::{Digest, Sha256};
+
+        let b64 = signed_delegate_b64(DelegateOpts::default());
+        let other = signed_delegate_b64(DelegateOpts {
+            nonce: 6,
+            ..DelegateOpts::default()
+        });
+        let bytes =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &b64).expect("b64");
+        let expected = hex::encode(Sha256::digest(&bytes));
+        let key = settlement_cache_key(&b64).expect("key");
+        assert_eq!(key, expected);
+        assert_ne!(key, b64);
+        assert!(
+            expected.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+            "key must be lowercase hex"
+        );
+        assert_eq!(key.len(), 64);
+        assert_eq!(settlement_cache_key(&b64).expect("key"), key);
+        assert_ne!(settlement_cache_key(&other).expect("other"), key);
+    }
+
+    #[test]
+    fn settlement_cache_flags_inflight_until_release() {
+        let cache = SettlementCache::new();
+        assert!(!cache.is_duplicate("key-a", 100));
+        assert!(cache.is_duplicate("key-a", 100));
+        cache.release("key-a");
+        assert!(!cache.is_duplicate("key-a", 100));
+    }
+
+    #[test]
+    fn settlement_cache_evicts_by_max_block_height() {
+        let cache = SettlementCache::new();
+        assert!(!cache.is_duplicate("key-b", 100));
+        cache.evict_expired(50);
+        assert!(cache.is_duplicate("key-b", 100));
+        cache.evict_expired(101);
+        assert!(!cache.is_duplicate("key-b", 100));
+    }
+
     #[tokio::test]
     async fn settle_rejects_duplicate() {
         let rpc = MockRpc::default();
@@ -1426,7 +1468,8 @@ mod verify_settle {
         let b64 = signed_delegate_b64(DelegateOpts::default());
         let req = request(&b64, &reqs, &reqs);
         let cache = SettlementCache::new();
-        assert_eq!(cache.reserve(&b64), r402_facilitator::Duplicate::No);
+        let key = settlement_cache_key(&b64).expect("key");
+        assert!(!cache.is_duplicate(&key, 1060));
         let response = settle_request(
             &rpc,
             &relayers(),
@@ -1445,6 +1488,64 @@ mod verify_settle {
             }
             _ => panic!("expected duplicate"),
         }
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_key_cache_on_raw_b64() {
+        let rpc = MockRpc::default();
+        let reqs = requirements(json!({}));
+        let b64 = signed_delegate_b64(DelegateOpts::default());
+        let req = request(&b64, &reqs, &reqs);
+        let cache = SettlementCache::new();
+        assert!(!cache.is_duplicate(&b64, 1060));
+        let outcome = rpc.outcome.clone();
+        let response = settle_request(
+            &rpc,
+            &relayers(),
+            &cache,
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+            |_relayer, _b64| async move { Ok(outcome) },
+        )
+        .await;
+        assert!(response.is_success());
+    }
+
+    #[tokio::test]
+    async fn settle_releases_cache_after_attempt() {
+        let rpc = MockRpc::default();
+        let reqs = requirements(json!({}));
+        let b64 = signed_delegate_b64(DelegateOpts::default());
+        let req = request(&b64, &reqs, &reqs);
+        let cache = SettlementCache::new();
+        let first_outcome = rpc.outcome.clone();
+        let first = settle_request(
+            &rpc,
+            &relayers(),
+            &cache,
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+            |_relayer, _b64| async move { Ok(first_outcome) },
+        )
+        .await;
+        assert!(first.is_success());
+        let second_outcome = rpc.outcome.clone();
+        let second = settle_request(
+            &rpc,
+            &relayers(),
+            &cache,
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+            |_relayer, _b64| async move { Ok(second_outcome) },
+        )
+        .await;
+        assert!(
+            second.is_success(),
+            "release after settle must allow a later attempt"
+        );
     }
 
     #[tokio::test]

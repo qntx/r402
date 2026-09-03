@@ -154,7 +154,6 @@ async fn try_new_supported_is_exact_on_provider_chain() {
 #[cfg(feature = "facilitator")]
 mod verify_settle {
     use base64::Engine;
-    use r402_algorand::USDC_TESTNET_ASA_ID;
     use r402_algorand::chain::codec::{
         SignedTransaction, Transaction, TxnType, assign_group, encode_signed, encode_txn,
     };
@@ -166,6 +165,7 @@ mod verify_settle {
     use r402_algorand::exact::ExactAvmPayload;
     use r402_algorand::exact::error::invalid;
     use r402_algorand::exact::facilitator::{settle_request, verify_request_json};
+    use r402_algorand::{MAX_TRANSACTION_GROUP_SIZE, USDC_TESTNET_ASA_ID};
     use r402_facilitator::SettlementCache;
     use r402_protocol::error::ErrorReason;
     use r402_protocol::payment::{SettleResponse, VerifyResponse};
@@ -333,6 +333,57 @@ mod verify_settle {
         }
     }
 
+    fn signed_group_with_extras(
+        client: &AlgorandSigner,
+        fee_payer: &AlgorandSigner,
+        pay_to: AlgorandAddress,
+        extra_count: usize,
+    ) -> ExactAvmPayload {
+        let chain = AlgorandChainReference::TESTNET;
+        let mut pay = Transaction::new(TxnType::Pay, fee_payer.address());
+        pay.receiver = Some(fee_payer.address());
+        pay.fee = 2000;
+        pay.first_valid = 1_000;
+        pay.last_valid = 2_000;
+        pay.genesis_id = chain.genesis_id().to_owned();
+        pay.genesis_hash = chain.genesis_hash();
+
+        let mut axfer = Transaction::new(TxnType::Axfer, client.address());
+        axfer.asset_id = USDC_TESTNET_ASA_ID;
+        axfer.asset_amount = 1_000_000;
+        axfer.asset_receiver = Some(pay_to);
+        axfer.first_valid = 1_000;
+        axfer.last_valid = 2_000;
+        axfer.genesis_id = chain.genesis_id().to_owned();
+        axfer.genesis_hash = chain.genesis_hash();
+
+        let mut txns = vec![pay, axfer];
+        for i in 0..extra_count {
+            let mut extra = Transaction::new(TxnType::Pay, client.address());
+            extra.receiver = Some(client.address());
+            extra.fee = 1000;
+            extra.first_valid = 1_000;
+            extra.last_valid = 2_000;
+            extra.genesis_id = chain.genesis_id().to_owned();
+            extra.genesis_hash = chain.genesis_hash();
+            extra.note = vec![u8::try_from(i).expect("extra_count fits u8")];
+            txns.push(extra);
+        }
+        let grouped = assign_group(txns);
+        let mut payment_group = Vec::with_capacity(grouped.len());
+        payment_group.push(b64(&encode_signed(&SignedTransaction {
+            sig: None,
+            txn: grouped[0].clone(),
+        })));
+        for txn in grouped.iter().skip(1) {
+            payment_group.push(b64(&encode_signed(&client.sign(txn))));
+        }
+        ExactAvmPayload {
+            payment_group,
+            payment_index: 1,
+        }
+    }
+
     fn signed_payment_only(client: &AlgorandSigner, pay_to: AlgorandAddress) -> ExactAvmPayload {
         let mut axfer = Transaction::new(TxnType::Axfer, client.address());
         axfer.asset_id = USDC_TESTNET_ASA_ID;
@@ -491,7 +542,9 @@ mod verify_settle {
 
     #[tokio::test]
     async fn verify_rejects_oversized_group() {
-        let group: Vec<String> = (0..17).map(|_| "AA==".to_owned()).collect();
+        let group: Vec<String> = (0..=MAX_TRANSACTION_GROUP_SIZE)
+            .map(|_| "AA==".to_owned())
+            .collect();
         let req = request_json(
             &ExactAvmPayload {
                 payment_group: group,
@@ -643,11 +696,10 @@ mod verify_settle {
     }
 
     #[tokio::test]
-    async fn verify_rejects_group_len_3() {
-        let group: Vec<String> = (0..3).map(|_| "AA==".to_owned()).collect();
+    async fn verify_rejects_empty_group() {
         let req = request_json(
             &ExactAvmPayload {
-                payment_group: group,
+                payment_group: vec![],
                 payment_index: 0,
             },
             &AlgorandAddress::ZERO,
@@ -659,6 +711,47 @@ mod verify_settle {
         })
         .await;
         assert_eq!(reason(&resp), "invalid_exact_avm_group_size_exceeded");
+    }
+
+    #[tokio::test]
+    async fn verify_accepts_group_len_3() {
+        let client = seed(1);
+        let fee_payer = seed(2);
+        let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+        let payload = signed_group_with_extras(&client, &fee_payer, pay_to, 1);
+        assert_eq!(payload.payment_group.len(), 3);
+        let req = request_json(
+            &payload,
+            &pay_to,
+            "1000000",
+            &USDC_TESTNET_ASA_ID.to_string(),
+        );
+        let addrs = vec![fee_payer.address().to_string()];
+        let resp =
+            verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+        assert!(resp.is_valid(), "expected valid, got {}", reason(&resp));
+    }
+
+    #[tokio::test]
+    async fn verify_accepts_group_of_16() {
+        let client = seed(1);
+        let fee_payer = seed(2);
+        let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
+        let extras = MAX_TRANSACTION_GROUP_SIZE
+            .checked_sub(2)
+            .expect("group size > 2");
+        let payload = signed_group_with_extras(&client, &fee_payer, pay_to, extras);
+        assert_eq!(payload.payment_group.len(), MAX_TRANSACTION_GROUP_SIZE);
+        let req = request_json(
+            &payload,
+            &pay_to,
+            "1000000",
+            &USDC_TESTNET_ASA_ID.to_string(),
+        );
+        let addrs = vec![fee_payer.address().to_string()];
+        let resp =
+            verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
+        assert!(resp.is_valid(), "expected valid, got {}", reason(&resp));
     }
 
     #[tokio::test]
@@ -903,7 +996,7 @@ mod verify_settle {
     }
 
     #[tokio::test]
-    async fn verify_rejects_extra_signed_axfer() {
+    async fn verify_accepts_extra_signed_axfer() {
         let client = seed(1);
         let fee_payer = seed(2);
         let pay_to = AlgorandAddress::from_public_key([3u8; 32]);
@@ -934,7 +1027,7 @@ mod verify_settle {
         let addrs = vec![fee_payer.address().to_string()];
         let resp =
             verify_request_json(&MockRpc::default(), &addrs, &req, sign_with(&fee_payer)).await;
-        assert_eq!(reason(&resp), "invalid_exact_avm_payload");
+        assert!(resp.is_valid(), "expected valid, got {}", reason(&resp));
     }
 
     #[tokio::test]

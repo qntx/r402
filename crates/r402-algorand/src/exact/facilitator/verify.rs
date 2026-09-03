@@ -5,7 +5,9 @@ use compact_str::CompactString;
 use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
-use crate::chain::codec::{SignedTransaction, Transaction, TxnType, decode_signed};
+use crate::chain::codec::{
+    MAX_TRANSACTION_GROUP_SIZE, SignedTransaction, Transaction, TxnType, decode_signed,
+};
 use crate::chain::rpc::AlgodRpc;
 use crate::chain::signer::verify_txn_signature;
 use crate::chain::{AlgorandAddress, normalize_algorand_network};
@@ -105,10 +107,10 @@ where
         .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
 
     let group_n = payment_group.len();
-    if group_n != 1 && group_n != 2 {
+    if group_n == 0 || group_n > MAX_TRANSACTION_GROUP_SIZE {
         return Err(
             invalid("invalid_exact_avm_group_size_exceeded").with_message(format!(
-                "exact Algorand group must be payment only, or payment + unsigned facilitator fee pay (got {group_n})"
+                "Transaction group has {group_n} transactions, maximum is {MAX_TRANSACTION_GROUP_SIZE}"
             )),
         );
     }
@@ -151,19 +153,6 @@ where
         .and_then(Value::as_str)
         .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
     verify_payment_transaction(payment, requirements, encoded_payment)?;
-
-    if group_n == 2 {
-        let extra_idx = 1 - payment_idx;
-        let extra = decoded
-            .get(extra_idx)
-            .ok_or_else(|| invalid("invalid_exact_avm_payload"))?;
-        if extra.has_signature() {
-            return Err(invalid("invalid_exact_avm_payload").with_message(
-                "only an unsigned facilitator 0-amount self-pay may accompany the payment",
-            ));
-        }
-        verify_fee_payer_transaction(&extra.txn)?;
-    }
 
     let prepared =
         prepare_signed_group_with(&decoded, payment_group, facilitator_addresses, &mut sign)?;

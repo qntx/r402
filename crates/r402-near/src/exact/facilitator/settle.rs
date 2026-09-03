@@ -3,11 +3,11 @@
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_facilitator::{Duplicate, SettlementCache};
 use r402_protocol::error::ErrorReason;
 use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
+use super::settlement_cache::{SettlementCache, settlement_cache_key};
 use super::verify::{decode_signed_delegate, verify_request_json};
 use crate::chain::rpc::{NearReceiptStatus, NearRpc, NearRpcError, NearSettlementOutcome};
 
@@ -82,19 +82,25 @@ where
         );
     };
 
-    if decode_signed_delegate(signed_b64).is_err() {
+    let Ok(decoded) = decode_signed_delegate(signed_b64) else {
         return settle_failure(
             ErrorReason::from_wire("invalid_exact_near_payload_signed_delegate_action"),
             &network,
             payer,
         );
-    }
-
-    if cache.reserve(signed_b64) == Duplicate::Yes {
+    };
+    let Some(cache_key) = settlement_cache_key(signed_b64) else {
+        return settle_failure(
+            ErrorReason::from_wire("invalid_exact_near_payload_signed_delegate_action"),
+            &network,
+            payer,
+        );
+    };
+    if cache.is_duplicate(&cache_key, decoded.delegate_action.max_block_height) {
         return settle_failure(ErrorReason::DuplicateSettlement, &network, payer);
     }
 
-    match submit(relayer_id, signed_b64.to_owned()).await {
+    let response = match submit(relayer_id, signed_b64.to_owned()).await {
         Ok(outcome) => match outcome.inner_receipt {
             NearReceiptStatus::Success { .. } => SettleResponse::Success {
                 payer,
@@ -130,7 +136,9 @@ where
             extension_responses: Extensions::new(),
             extra: None,
         },
-    }
+    };
+    cache.release(&cache_key);
+    response
 }
 
 fn settle_failure(
