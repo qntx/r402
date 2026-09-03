@@ -21,7 +21,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, Solana, Tron, Casper, NEAR, XRPL, Hedera, Algorand, Aptos, Keeta, TON, Stellar**.
+Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, Solana, Casper, NEAR, XRPL, Hedera, Algorand, Aptos, Keeta, TON, Stellar**. Tron is experimental / not an x402 protocol mechanism.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
