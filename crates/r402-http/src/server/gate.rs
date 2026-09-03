@@ -34,6 +34,8 @@ pub struct Gate {
     pub(crate) hooks: Option<Arc<dyn DynGateHooks>>,
     pub(crate) settlement_mode: SettlementMode,
     pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
+    #[cfg(feature = "siwx")]
+    pub(crate) siwx: Option<Arc<super::SiwxGate>>,
 }
 
 impl std::fmt::Debug for Gate {
@@ -68,6 +70,7 @@ impl Gate {
         settlement_mode: SettlementMode,
         settlement_tracker: Option<BackgroundSettlementTracker>,
         hooks: Option<Arc<dyn DynGateHooks>>,
+        #[cfg(feature = "siwx")] siwx: Option<Arc<super::SiwxGate>>,
     ) -> Self {
         Self {
             server,
@@ -77,6 +80,38 @@ impl Gate {
             hooks,
             settlement_mode,
             settlement_tracker,
+            #[cfg(feature = "siwx")]
+            siwx,
+        }
+    }
+
+    /// Inserts a fresh SIWX challenge into the built 402 body.
+    #[cfg(feature = "siwx")]
+    pub(crate) fn attach_siwx_challenge(
+        &mut self,
+        siwx: &super::SiwxGate,
+        path: &str,
+    ) -> Result<(), GateError> {
+        let Some(payment_required) = self.payment_required.as_mut() else {
+            return Ok(());
+        };
+        let entry = siwx
+            .challenge_entry(path)
+            .map_err(|err| GateError::PaymentRequiredBuild(err.to_string()))?;
+        payment_required.extensions.insert(super::SIWX_KEY, entry);
+        Ok(())
+    }
+
+    fn record_siwx_success(&self, path: &str, settlement: &SettleResponse) {
+        #[cfg(feature = "siwx")]
+        if let (Some(siwx), SettleResponse::Success { payer, .. }) = (&self.siwx, settlement)
+            && !payer.is_empty()
+        {
+            siwx.record_success(path, payer);
+        }
+        #[cfg(not(feature = "siwx"))]
+        {
+            let _ = (path, settlement);
         }
     }
 
@@ -168,12 +203,23 @@ impl Gate {
         S: Service<Request, Response = Response, Error = Infallible>,
         S::Future: Send,
     {
+        let path = req.uri().path().to_owned();
         match self.prepare(&mut req).await? {
             Prepared::Skipped(response) => Ok(response),
             Prepared::Ready {
                 verified,
                 before_handler,
-            } => sequential_after_verify(inner, req, *verified, before_handler.map(|b| *b)).await,
+            } => {
+                sequential_after_verify(
+                    self,
+                    &path,
+                    inner,
+                    req,
+                    *verified,
+                    before_handler.map(|b| *b),
+                )
+                .await
+            }
         }
     }
 
@@ -192,12 +238,23 @@ impl Gate {
         S: Service<Request, Response = Response, Error = Infallible> + Send,
         S::Future: Send,
     {
+        let path = req.uri().path().to_owned();
         match self.prepare(&mut req).await? {
             Prepared::Skipped(response) => Ok(response),
             Prepared::Ready {
                 verified,
                 before_handler,
-            } => concurrent_after_verify(inner, req, *verified, before_handler.map(|b| *b)).await,
+            } => {
+                concurrent_after_verify(
+                    self,
+                    &path,
+                    inner,
+                    req,
+                    *verified,
+                    before_handler.map(|b| *b),
+                )
+                .await
+            }
         }
     }
 
@@ -240,6 +297,7 @@ impl Gate {
         }
         if let Some(directive) = verified.skip_handler.clone() {
             let receipt = sequential_after_handler(&verified, None, None).await?;
+            self.record_siwx_success(req.uri().path(), &receipt);
             return Ok(Prepared::Skipped(skip_handler_response(
                 &directive, &receipt,
             )?));
@@ -254,6 +312,8 @@ impl Gate {
 }
 
 async fn sequential_after_verify<S>(
+    gate: &Gate,
+    path: &str,
     inner: S,
     req: Request,
     verified: VerifiedPayment,
@@ -270,6 +330,9 @@ where
     };
 
     if response.status().is_client_error() || response.status().is_server_error() {
+        if let Some(completed) = before_handler.as_ref() {
+            gate.record_siwx_success(path, &completed.result);
+        }
         return failed_handler_response(
             response,
             &cancel,
@@ -289,11 +352,14 @@ where
 
     let settlement =
         sequential_after_handler(&verified, overrides.as_ref(), before_handler.as_ref()).await?;
+    gate.record_siwx_success(path, &settlement);
     attach_payment_response(&mut response, &settlement)?;
     Ok(response)
 }
 
 async fn concurrent_after_verify<S>(
+    gate: &Gate,
+    path: &str,
     inner: S,
     req: Request,
     verified: VerifiedPayment,
@@ -320,6 +386,8 @@ where
     let settle = after_handler_settle(verified.clone());
     let outcome = run(scheduled, concurrent_handler(inner, req), settle).await;
     map_concurrent_outcome(
+        gate,
+        path,
         outcome,
         cancel,
         before_handler.as_ref(),
@@ -406,6 +474,8 @@ where
 }
 
 async fn map_concurrent_outcome(
+    gate: &Gate,
+    path: &str,
     outcome: ScheduledSettlement<Response, ConcurrentHandlerError>,
     cancel: CancellationGuard,
     before_handler: Option<&CompletedSettlement>,
@@ -413,7 +483,9 @@ async fn map_concurrent_outcome(
 ) -> Result<Response, GateError> {
     match outcome {
         ScheduledSettlement::HandlerOkSettleOk { mut value, receipt } => {
-            attach_payment_response(&mut value, &map_settle(Ok(receipt))?)?;
+            let settlement = map_settle(Ok(receipt))?;
+            gate.record_siwx_success(path, &settlement);
+            attach_payment_response(&mut value, &settlement)?;
             Ok(value)
         }
         ScheduledSettlement::HandlerErrDetach { error } => match error {

@@ -8,6 +8,8 @@ mod layer;
 mod overrides;
 mod pricing;
 mod receipt;
+#[cfg(feature = "siwx")]
+mod siwx;
 mod verify;
 
 pub use builder::{BuildError, X402Middleware};
@@ -22,12 +24,19 @@ pub use overrides::{
     strip_response_settlement_overrides, take_settlement_overrides_header,
 };
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
+#[cfg(feature = "siwx")]
+pub use r402_extensions::siwx::{
+    InMemoryPaidAddressStore, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxOrigin,
+    SiwxOriginError, SiwxProof, SiwxProofError,
+};
 pub use r402_facilitator::{Facilitator, FacilitatorClient, FacilitatorClientError};
 pub use r402_server::{
     BackgroundSettlementTracker, ResourceServer, SchemeNetworkServer, SettlementMode,
     SkipHandlerDirective,
 };
 pub use receipt::settlement_to_header;
+#[cfg(feature = "siwx")]
+pub use siwx::SiwxGate;
 
 pub use crate::headers::{
     PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X, X402_EXPOSED_HEADERS,

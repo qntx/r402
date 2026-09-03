@@ -51,6 +51,14 @@ pub use siwx::{
 };
 
 #[cfg(test)]
+mod _dev_deps {
+    use alloy_signer as _;
+    use alloy_signer_local as _;
+    use ed25519_dalek as _;
+    use tokio as _;
+}
+
+#[cfg(test)]
 mod tests {
     #[test]
     fn crate_loads() {

@@ -12,7 +12,7 @@ use http::{Request, StatusCode};
 pub enum ProtectedRequestOutcome {
     /// Continue with the x402 payment check.
     Continue,
-    /// Skip payment and forward the request (SIWX fills this slot later).
+    /// Skip payment and forward the request.
     GrantAccess,
     /// Abort with a custom status and optional `text/plain` body.
     Abort {
@@ -23,7 +23,7 @@ pub enum ProtectedRequestOutcome {
     },
 }
 
-/// HTTP-layer hooks. Defaults are no-ops; [`ProtectedRequestOutcome::GrantAccess`] is an empty slot.
+/// HTTP-layer hooks. Defaults are no-ops.
 pub trait GateHooks: Send + Sync {
     /// Fires on every protected request, before the payment check.
     fn on_protected_request<'a>(

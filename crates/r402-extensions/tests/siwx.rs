@@ -6,12 +6,15 @@
     reason = "integration test binaries put #[test] fns at file scope"
 )]
 #![allow(
+    clippy::expect_used,
     clippy::indexing_slicing,
     clippy::unwrap_used,
     clippy::panic,
     reason = "idiomatic test-code patterns"
 )]
 
+use alloy_signer::Signer;
+use alloy_signer_local::PrivateKeySigner;
 use r402_extensions::siwx::{
     InMemoryPaidAddressStore, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension,
     SiwxOrigin, SiwxOriginError, SiwxProof,
@@ -19,6 +22,8 @@ use r402_extensions::siwx::{
 use r402_protocol::extension::Extension;
 use r402_protocol::payment::Base64Bytes;
 use serde_json::json;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 #[test]
 fn origin_requires_absolute_http_url() {
@@ -165,4 +170,203 @@ fn proof_parses_header_and_binds_origin() {
     proof.bind_origin(&origin, "/premium-data").unwrap();
     let mismatch = proof.bind_origin(&origin, "/other").unwrap_err();
     assert_eq!(mismatch, SiwxError::UriMismatch);
+}
+
+#[test]
+fn paid_store_evm_address_is_case_insensitive() {
+    let store = InMemoryPaidAddressStore::new();
+    let key = "https://api.example.com/premium-data";
+    store.record_success(key, "0xAbCDEF");
+    assert!(store.contains(key, "0xabcdef"));
+}
+
+#[test]
+fn nonce_pair_records_and_rejects_reuse() {
+    let store = InMemoryPaidAddressStore::new();
+    assert!(!store.has_used_nonce("n1"));
+    store.record_nonce("n1");
+    assert!(store.has_used_nonce("n1"));
+    assert!(!store.has_used_nonce("n2"));
+}
+
+#[test]
+fn challenge_now_uses_32_hex_nonce() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let ext = SiwxExtension::new(origin).with_chain(SiwxChain::eip191("eip155:8453"));
+    let value = ext.challenge_now("/premium-data").unwrap().to_value();
+    let nonce = value["info"]["nonce"].as_str().unwrap();
+    assert_eq!(nonce.len(), 32);
+    assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_eq!(value["info"]["domain"], "api.example.com");
+}
+
+fn sample_proof_at(issued_at: &str, expiration: Option<&str>) -> SiwxProof {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let mut body = json!({
+        "domain": origin.domain(),
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": origin.uri("/premium-data"),
+        "version": "1",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": issued_at,
+        "signature": "0xabc"
+    });
+    if let Some(exp) = expiration {
+        body["expirationTime"] = json!(exp);
+    }
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    SiwxProof::parse_header(&header).unwrap()
+}
+
+#[test]
+fn validate_rejects_stale_issued_at() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let proof = sample_proof_at("2020-01-01T00:00:00Z", None);
+    let now = OffsetDateTime::parse("2020-01-01T00:10:00Z", &Rfc3339).unwrap();
+    assert_eq!(
+        proof
+            .validate_at(&origin, "/premium-data", now)
+            .unwrap_err(),
+        SiwxError::IssuedAtTooOld
+    );
+}
+
+#[test]
+fn validate_rejects_future_issued_at() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let proof = sample_proof_at("2020-01-01T00:10:00Z", None);
+    let now = OffsetDateTime::parse("2020-01-01T00:00:00Z", &Rfc3339).unwrap();
+    assert_eq!(
+        proof
+            .validate_at(&origin, "/premium-data", now)
+            .unwrap_err(),
+        SiwxError::IssuedAtInFuture
+    );
+}
+
+#[test]
+fn validate_rejects_expired() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let proof = sample_proof_at("2020-01-01T00:00:00Z", Some("2020-01-01T00:01:00Z"));
+    let now = OffsetDateTime::parse("2020-01-01T00:02:00Z", &Rfc3339).unwrap();
+    assert_eq!(
+        proof
+            .validate_at(&origin, "/premium-data", now)
+            .unwrap_err(),
+        SiwxError::Expired
+    );
+}
+
+#[test]
+fn unsupported_chain_is_unsupported_chain() {
+    let body = json!({
+        "domain": "api.example.com",
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": "https://api.example.com/premium-data",
+        "version": "1",
+        "chainId": "bip122:000000000019d6689c085ae165831e93",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let proof = SiwxProof::parse_header(&header).unwrap();
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
+        SiwxError::UnsupportedChain
+    );
+}
+
+const FIXTURE_KEY: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+async fn signed_evm_proof(origin: &SiwxOrigin, path: &str) -> SiwxProof {
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let address = format!("{}", signer.address());
+    let issued = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
+    let body = json!({
+        "domain": origin.domain(),
+        "address": address,
+        "uri": origin.uri(path),
+        "version": "1",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": issued,
+        "signature": "00"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let mut proof = SiwxProof::parse_header(&header).unwrap();
+    let raw = proof.signing_message().unwrap();
+    let sig = signer.sign_message(raw.as_bytes()).await.unwrap();
+    proof.signature = format!("{sig}").into();
+    proof
+}
+
+#[tokio::test]
+async fn evm_caip122_roundtrip() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let proof = signed_evm_proof(&origin, "/premium-data").await;
+    proof.verify(&origin, "/premium-data").await.unwrap();
+}
+
+#[tokio::test]
+async fn evm_bad_signature_is_signature() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let mut proof = signed_evm_proof(&origin, "/premium-data").await;
+    proof.statement = Some("tampered".into());
+    let err = proof.verify(&origin, "/premium-data").await.unwrap_err();
+    assert_eq!(err, SiwxError::Signature);
+}
+
+#[tokio::test]
+async fn solana_caip122_roundtrip() {
+    use ed25519_dalek::{Signer as _, SigningKey};
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let seed: [u8; 32] = std::array::from_fn(|i| u8::try_from(i).unwrap_or(0));
+    let sk = SigningKey::from_bytes(&seed);
+    let address = bs58::encode(sk.verifying_key().to_bytes()).into_string();
+    let issued = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
+    let body = json!({
+        "domain": origin.domain(),
+        "address": address,
+        "uri": origin.uri("/premium-data"),
+        "version": "1",
+        "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "type": "ed25519",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": issued,
+        "signature": "1"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let mut proof = SiwxProof::parse_header(&header).unwrap();
+    let raw = proof.signing_message().unwrap();
+    let sig = sk.sign(raw.as_bytes());
+    proof.signature = bs58::encode(sig.to_bytes()).into_string().into();
+    proof.verify(&origin, "/premium-data").await.unwrap();
+}
+
+#[tokio::test]
+async fn solana_malformed_signature() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let issued = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
+    let body = json!({
+        "domain": origin.domain(),
+        "address": "11111111111111111111111111111111",
+        "uri": origin.uri("/premium-data"),
+        "version": "1",
+        "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        "type": "ed25519",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": issued,
+        "signature": "!!!"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let proof = SiwxProof::parse_header(&header).unwrap();
+    assert_eq!(
+        proof.verify(&origin, "/premium-data").await.unwrap_err(),
+        SiwxError::MalformedSignature
+    );
 }

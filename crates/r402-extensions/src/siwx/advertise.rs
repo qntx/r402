@@ -7,8 +7,10 @@ use compact_str::CompactString;
 use r402_protocol::extension::{AdvertiseContext, Extension};
 use r402_protocol::payment::ExtensionEntry;
 use serde_json::{Value, json};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
-use super::{SIWX_KEY, SiwxError, SiwxOrigin};
+use super::{DEFAULT_CHALLENGE_TTL, SIWX_KEY, SiwxError, SiwxOrigin};
 
 /// One entry in `supportedChains`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +130,32 @@ impl SiwxExtension {
             "schema": client_proof_schema(),
         })))
     }
+
+    /// Fresh nonce and timestamps for this request path.
+    ///
+    /// `expirationTime` is `issuedAt` + 5 minutes. Domain/URI come from the
+    /// configured origin, never `Host`.
+    ///
+    /// # Errors
+    ///
+    /// [`SiwxError::IssuedAt`] / [`SiwxError::ExpirationTime`] if RFC 3339
+    /// formatting fails.
+    pub fn challenge_now(&self, path: &str) -> Result<ExtensionEntry, SiwxError> {
+        let issued = OffsetDateTime::now_utc();
+        let expires = issued + DEFAULT_CHALLENGE_TTL;
+        let issued_at = issued.format(&Rfc3339).map_err(|_| SiwxError::IssuedAt)?;
+        let expiration_time = expires
+            .format(&Rfc3339)
+            .map_err(|_| SiwxError::ExpirationTime)?;
+        self.challenge(path, &random_nonce_hex(), &issued_at, &expiration_time)
+    }
+}
+
+fn random_nonce_hex() -> String {
+    use rand::Rng;
+    let mut bytes = [0u8; 16];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
 }
 
 impl Extension for SiwxExtension {

@@ -74,6 +74,8 @@ pub struct X402Layer<TSource> {
     pub(crate) settlement_mode: SettlementMode,
     pub(crate) settlement_tracker: Option<BackgroundSettlementTracker>,
     pub(crate) hooks: Option<Arc<dyn DynGateHooks>>,
+    #[cfg(feature = "siwx")]
+    pub(crate) siwx: Option<Arc<super::SiwxGate>>,
 }
 
 impl X402Layer<StaticPriceTags> {
@@ -157,6 +159,21 @@ impl<TSource> X402Layer<TSource> {
         self.hooks = Some(Arc::new(hooks));
         self
     }
+
+    /// Enables SIWX access-grant and 402 challenges on this route.
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_siwx(mut self, gate: super::SiwxGate) -> Self {
+        self.siwx = Some(Arc::new(gate));
+        self
+    }
+
+    /// Enables SIWX with auth-only access-grant on this route.
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_auth_only(self, gate: super::SiwxGate) -> Self {
+        self.with_siwx(gate.with_auth_only())
+    }
 }
 
 impl<S, TSource> Layer<S> for X402Layer<TSource>
@@ -176,6 +193,8 @@ where
             settlement_mode: self.settlement_mode,
             settlement_tracker: self.settlement_tracker.clone(),
             hooks: self.hooks.clone(),
+            #[cfg(feature = "siwx")]
+            siwx: self.siwx.clone(),
             inner: BoxCloneSyncService::new(inner),
         }
     }
@@ -195,6 +214,8 @@ pub struct X402MiddlewareService<TSource> {
     settlement_mode: SettlementMode,
     settlement_tracker: Option<BackgroundSettlementTracker>,
     hooks: Option<Arc<dyn DynGateHooks>>,
+    #[cfg(feature = "siwx")]
+    siwx: Option<Arc<super::SiwxGate>>,
     inner: BoxCloneSyncService<Request, Response, Infallible>,
 }
 
@@ -219,6 +240,8 @@ where
             self.settlement_mode,
             self.settlement_tracker.clone(),
             self.hooks.clone(),
+            #[cfg(feature = "siwx")]
+            self.siwx.clone(),
             self.inner.clone(),
             req,
         ))
@@ -238,9 +261,25 @@ async fn enforce<TSource: PriceTagSource>(
     settlement_mode: SettlementMode,
     settlement_tracker: Option<BackgroundSettlementTracker>,
     hooks: Option<Arc<dyn DynGateHooks>>,
+    #[cfg(feature = "siwx")] siwx: Option<Arc<super::SiwxGate>>,
     mut inner: BoxCloneSyncService<Request, Response, Infallible>,
     req: Request,
 ) -> Result<Response, Infallible> {
+    #[cfg(feature = "siwx")]
+    if let Some(siwx_gate) = siwx.as_ref() {
+        let header = req
+            .headers()
+            .get(crate::headers::SIGN_IN_WITH_X)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned);
+        let path = req.uri().path().to_owned();
+        if let Some(header) = header
+            && siwx_gate.try_grant(&header, &path).await
+        {
+            return inner.call(req).await;
+        }
+    }
+
     if let Some(h) = hooks.as_ref() {
         match h.on_protected_request(&req).await {
             ProtectedRequestOutcome::Continue => {}
@@ -254,7 +293,11 @@ async fn enforce<TSource: PriceTagSource>(
     let accepts = price_source
         .resolve(req.headers(), req.uri(), base_url.as_ref())
         .await;
-    if accepts.is_empty() {
+    #[cfg(feature = "siwx")]
+    let auth_only = siwx.as_ref().is_some_and(|g| g.is_auth_only());
+    #[cfg(not(feature = "siwx"))]
+    let auth_only = false;
+    if accepts.is_empty() && !auth_only {
         return inner.call(req).await;
     }
 
@@ -266,6 +309,8 @@ async fn enforce<TSource: PriceTagSource>(
         settlement_mode,
         settlement_tracker,
         hooks,
+        #[cfg(feature = "siwx")]
+        siwx.clone(),
     );
     if let Err(err) = gate.require_schemes().await {
         return Ok(gate.error_response(err));
@@ -274,6 +319,12 @@ async fn enforce<TSource: PriceTagSource>(
         return Ok(gate.error_response(err));
     }
     if let Err(err) = gate.build_payment_required().await {
+        return Ok(gate.error_response(err));
+    }
+    #[cfg(feature = "siwx")]
+    if let Some(siwx) = siwx.as_ref()
+        && let Err(err) = gate.attach_siwx_challenge(siwx, req.uri().path())
+    {
         return Ok(gate.error_response(err));
     }
 

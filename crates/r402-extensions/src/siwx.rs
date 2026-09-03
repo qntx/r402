@@ -1,7 +1,7 @@
 //! Sign-In with X (`sign-in-with-x`) extension.
 //!
-//! Challenge advertisement, origin binding, and paid-address storage live
-//! here. HTTP `GrantAccess` and CAIP-122 verification land in the SIWX PR.
+//! Challenge advertisement, origin binding, paid-address/nonce storage, and
+//! CAIP-122 verification. HTTP `GrantAccess` lives in `r402-http`.
 
 pub mod advertise;
 pub mod origin;
@@ -16,8 +16,13 @@ pub use proof::{SiwxProof, SiwxProofError};
 /// Wire key for the Sign-In with X extension.
 pub const SIWX_KEY: &str = "sign-in-with-x";
 
-/// Spec `invalid_siwx_*` failure codes. Cryptographic variants are unused
-/// until the SIWX crate is wired in.
+/// Default `issuedAt` age accepted during field validation.
+pub const DEFAULT_MAX_ISSUED_AGE: time::Duration = time::Duration::minutes(5);
+
+/// Default challenge `expirationTime` offset from `issuedAt`.
+pub const DEFAULT_CHALLENGE_TTL: time::Duration = time::Duration::minutes(5);
+
+/// Spec `invalid_siwx_*` failure codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SiwxError {

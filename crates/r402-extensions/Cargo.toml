@@ -27,7 +27,17 @@ ext-bazaar = []
 ext-payment-id = ["cache", "dep:thiserror"]
 ext-eip2612 = []
 ext-erc20-approval = []
-siwx = ["dep:thiserror", "dep:url"]
+siwx = [
+    "dep:thiserror",
+    "dep:url",
+    "dep:siwx",
+    "dep:siwx-evm",
+    "dep:siwx-svm",
+    "dep:time",
+    "dep:hex",
+    "dep:rand",
+    "dep:bs58",
+]
 all-extensions = [
     "ext-bazaar",
     "ext-payment-id",
@@ -43,9 +53,21 @@ serde_json = { workspace = true }
 r402-facilitator = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+siwx = { workspace = true, optional = true }
+siwx-evm = { workspace = true, optional = true }
+siwx-svm = { workspace = true, optional = true }
+time = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+bs58 = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+alloy-signer = { workspace = true }
+alloy-signer-local = { workspace = true }
+bs58 = { workspace = true }
+ed25519-dalek = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[test]]
 name = "bazaar"

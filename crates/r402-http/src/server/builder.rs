@@ -31,6 +31,8 @@ pub enum BuildError {
 pub struct X402Middleware {
     server: ResourceServer,
     base_url: Option<Url>,
+    #[cfg(feature = "siwx")]
+    siwx: Option<Arc<super::SiwxGate>>,
 }
 
 impl X402Middleware {
@@ -46,6 +48,8 @@ impl X402Middleware {
         Self {
             server,
             base_url: None,
+            #[cfg(feature = "siwx")]
+            siwx: None,
         }
     }
 
@@ -85,6 +89,27 @@ impl X402Middleware {
         &self.server
     }
 
+    /// Enables SIWX on layers built from this middleware.
+    ///
+    /// Access is granted only with a valid CAIP-122 proof and a paid-address hit.
+    /// Empty price tags still bypass unless [`Self::with_auth_only`].
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_siwx(&self, gate: super::SiwxGate) -> Self {
+        let mut this = self.clone();
+        this.siwx = Some(Arc::new(gate));
+        this
+    }
+
+    /// Enables SIWX and treats empty price tags as auth-only (no layer bypass).
+    ///
+    /// Grants access on valid signature even without a paid-address hit.
+    #[cfg(feature = "siwx")]
+    #[must_use]
+    pub fn with_auth_only(&self, gate: super::SiwxGate) -> Self {
+        self.with_siwx(gate.with_auth_only())
+    }
+
     /// Static single-tag layer. Fails when [`Self::with_base_url`] was not called.
     ///
     /// # Errors
@@ -114,6 +139,8 @@ impl X402Middleware {
             settlement_mode: SettlementMode::default(),
             settlement_tracker: None,
             hooks: None,
+            #[cfg(feature = "siwx")]
+            siwx: self.siwx.clone(),
         })
     }
 
@@ -138,6 +165,8 @@ impl X402Middleware {
             settlement_mode: SettlementMode::default(),
             settlement_tracker: None,
             hooks: None,
+            #[cfg(feature = "siwx")]
+            siwx: self.siwx.clone(),
         })
     }
 }
