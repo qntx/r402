@@ -36,8 +36,9 @@ use r402_protocol::payment::{
     SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use r402_server::{
-    PaymentFlowConfig, PaymentFlowName, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
-    VerifiedPaymentCanceledContext,
+    AfterVerifyDecision, BeforeOpDecision, PaymentFlowConfig, PaymentFlowName, PaymentHookContext,
+    ResourceServer, ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
+    SkipHandlerDirective, VerifiedPaymentCanceledContext, VerifyResultContext,
 };
 use serde_json::json;
 use tower::{Layer, Service};
@@ -122,6 +123,10 @@ impl FakeFacilitator {
 
     pub fn settle_count(&self) -> usize {
         self.settles.load(Ordering::SeqCst)
+    }
+
+    pub fn verify_count(&self) -> usize {
+        self.verifies.load(Ordering::SeqCst)
     }
 
     pub fn last_amount(&self) -> Option<String> {
@@ -286,6 +291,45 @@ pub fn middleware(fac: Arc<FakeFacilitator>, scheme: FlowScheme) -> X402Middlewa
     X402Middleware::from_facilitator(fac)
         .with_base_url(base_url())
         .with_scheme(ChainIdPattern::wildcard("eip155"), scheme)
+}
+
+pub fn middleware_on(server: ResourceServer) -> X402Middleware {
+    X402Middleware::from_resource_server(server).with_base_url(base_url())
+}
+
+pub struct SkipAfterVerify;
+
+impl ResourceServerHooks for SkipAfterVerify {
+    fn after_verify<'a>(
+        &'a self,
+        _: &'a VerifyResultContext,
+    ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+        std::future::ready(AfterVerifyDecision::SkipHandler {
+            response: SkipHandlerDirective::empty(),
+        })
+    }
+}
+
+pub struct SkipVerifyThenHandler;
+
+impl ResourceServerHooks for SkipVerifyThenHandler {
+    fn before_verify<'a>(
+        &'a self,
+        _: &'a PaymentHookContext,
+    ) -> impl Future<Output = BeforeOpDecision<VerifyResponse>> + Send + 'a {
+        std::future::ready(BeforeOpDecision::Skip {
+            result: VerifyResponse::valid("0xlocal"),
+        })
+    }
+
+    fn after_verify<'a>(
+        &'a self,
+        _: &'a VerifyResultContext,
+    ) -> impl Future<Output = AfterVerifyDecision> + Send + 'a {
+        std::future::ready(AfterVerifyDecision::SkipHandler {
+            response: SkipHandlerDirective::empty(),
+        })
+    }
 }
 
 pub async fn call_layer<S>(layer: X402Layer<StaticPriceTags>, inner: S, req: Request) -> Response

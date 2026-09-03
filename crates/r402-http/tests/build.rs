@@ -14,14 +14,14 @@
 
 //! Construct-time `MissingBaseUrl`. `with_resource` does not waive `base_url`.
 
-mod common;
+mod harness;
 
 use std::sync::Arc;
 
 use http::StatusCode;
 use r402_http::server::{BuildError, FacilitatorClientError, X402Middleware};
 
-use crate::common::{
+use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, base_url, call_layer, eip155_tag, unpaid_request,
 };
 

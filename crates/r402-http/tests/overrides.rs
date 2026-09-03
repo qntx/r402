@@ -13,7 +13,7 @@
 
 //! Sequential actual amount from Settlement-Overrides / UptoActualAmount.
 
-mod common;
+mod harness;
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use http::StatusCode;
 use r402_http::server::{SettlementOverrides, UptoActualAmount, set_settlement_overrides};
 use tower::Service;
 
-use crate::common::{
+use crate::harness::{
     FakeFacilitator, FlowScheme, call_layer, eip155_requirements, eip155_tag, middleware,
     payment_request,
 };
@@ -98,4 +98,10 @@ async fn sequential_extension_beats_header() {
     let response = call_layer(layer, ExtInner, payment_request(&eip155_requirements())).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(fac.last_amount().as_deref(), Some("42"));
+    assert!(
+        !response
+            .headers()
+            .contains_key(r402_http::server::settlement_overrides_header_name()),
+        "Settlement-Overrides must not reach the client"
+    );
 }

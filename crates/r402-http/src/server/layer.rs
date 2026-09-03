@@ -16,7 +16,7 @@ use tower::{Layer, Service};
 use url::Url;
 
 use super::SettlementMode;
-use super::fail::abort_response;
+use super::fail::{GateError, abort_response};
 use super::gate::Gate;
 use super::hooks::{DynGateHooks, GateHooks, ProtectedRequestOutcome};
 use super::pricing::{PriceTagSource, StaticPriceTags};
@@ -133,7 +133,7 @@ impl<TSource> X402Layer<TSource> {
         self
     }
 
-    /// Settlement scheduler. Concurrent/Background entries are a later PR.
+    /// Settlement scheduler. Only [`SettlementMode::Sequential`] is served.
     #[must_use]
     pub const fn with_settlement_mode(mut self, mode: SettlementMode) -> Self {
         self.settlement_mode = mode;
@@ -258,6 +258,13 @@ async fn enforce<TSource: PriceTagSource>(
         return Ok(gate.error_response(err));
     }
 
-    let result = gate.handle_request(inner, req).await;
+    let result = match settlement_mode {
+        SettlementMode::Sequential => gate.handle_request(inner, req).await,
+        SettlementMode::Concurrent | SettlementMode::Background => {
+            Err(GateError::UnsupportedSettlementMode {
+                mode: settlement_mode,
+            })
+        }
+    };
     Ok(result.unwrap_or_else(|err| gate.error_response(err)))
 }

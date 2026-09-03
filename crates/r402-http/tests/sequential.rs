@@ -14,20 +14,23 @@
 
 //! Sequential happy path, unpaid 402, handler 4xx cancel, GrantAccess.
 
-mod common;
+mod harness;
 
 use std::future::Future;
 use std::sync::Arc;
 
 use http::StatusCode;
 use r402_http::server::{
-    GateHooks, PAYMENT_REQUIRED, PAYMENT_RESPONSE, ProtectedRequestOutcome, SettlementMode,
+    GateHooks, PAYMENT_REQUIRED, PAYMENT_RESPONSE, ProtectedRequestOutcome, ResourceServer,
+    SettlementMode,
 };
 use r402_http::{ensure_expose_headers, merge_private};
+use r402_protocol::network::ChainIdPattern;
 
-use crate::common::{
-    FakeFacilitator, FlowScheme, OkInner, StatusInner, call_layer, eip155_requirements, eip155_tag,
-    middleware, payment_request, unpaid_request,
+use crate::harness::{
+    FakeFacilitator, FlowScheme, OkInner, SkipAfterVerify, SkipVerifyThenHandler, StatusInner,
+    call_layer, eip155_requirements, eip155_tag, middleware, middleware_on, payment_request,
+    unpaid_request, upfront_tag,
 };
 
 struct GrantAll;
@@ -102,6 +105,57 @@ async fn handler_4xx_skips_after_handler_settle() {
     assert!(
         response.headers().get(PAYMENT_RESPONSE).is_none(),
         "authorization 4xx has no before-handler receipt to echo"
+    );
+}
+
+#[tokio::test]
+async fn skip_handler_authorization_settles_once() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let mut server = ResourceServer::new(Arc::clone(&fac));
+    server.register_scheme(
+        ChainIdPattern::wildcard("eip155"),
+        FlowScheme::authorization(),
+    );
+    server.add_hook(SkipAfterVerify);
+    let layer = middleware_on(server).with_price_tag(eip155_tag()).unwrap();
+    let response = call_layer(
+        layer,
+        StatusInner(StatusCode::BAD_REQUEST),
+        payment_request(&eip155_requirements()),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(fac.verify_count(), 1);
+    assert_eq!(
+        fac.settle_count(),
+        1,
+        "skip_handler authorization settles once"
+    );
+    assert!(response.headers().get(PAYMENT_RESPONSE).is_some());
+}
+
+#[tokio::test]
+async fn skip_handler_upfront_does_not_settle() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let mut server = ResourceServer::new(Arc::clone(&fac));
+    server.register_scheme(
+        ChainIdPattern::wildcard("eip155"),
+        FlowScheme::auth_and_upfront(),
+    );
+    server.add_hook(SkipVerifyThenHandler);
+    let layer = middleware_on(server).with_price_tag(upfront_tag()).unwrap();
+    let response = call_layer(
+        layer,
+        StatusInner(StatusCode::BAD_REQUEST),
+        payment_request(&upfront_tag().requirements),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(fac.verify_count(), 0);
+    assert_eq!(
+        fac.settle_count(),
+        0,
+        "skip_handler upfront must not settle"
     );
 }
 

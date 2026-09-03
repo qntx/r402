@@ -1,4 +1,4 @@
-//! Sequential `handle_request`. Concurrent/Background entries are a later PR.
+//! Sequential `handle_request`.
 
 use std::convert::Infallible;
 use std::sync::Arc;

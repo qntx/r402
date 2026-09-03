@@ -52,11 +52,11 @@ pub fn resolve_response_settlement_amount(
     response: &mut axum_core::response::Response,
     requirements: &PaymentRequirements,
 ) -> Result<Option<String>, SettlementOverrideError> {
+    let header = take_settlement_overrides_header(response.headers_mut());
     if let Some(ext) = response.extensions_mut().remove::<UptoActualAmount>() {
         return Ok(Some(ext.into_inner().into()));
     }
-
-    let Some(overrides) = take_settlement_overrides_header(response.headers_mut()) else {
+    let Some(overrides) = header else {
         return Ok(None);
     };
     let Some(raw) = overrides.amount.filter(|s| !s.is_empty()) else {
@@ -164,5 +164,11 @@ mod tests {
             .expect("override resolve")
             .expect("amount present");
         assert_eq!(amount, "42");
+        assert!(
+            !response
+                .headers()
+                .contains_key(settlement_overrides_header_name()),
+            "Settlement-Overrides must be stripped even when the extension wins"
+        );
     }
 }

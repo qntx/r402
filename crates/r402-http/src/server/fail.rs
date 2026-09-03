@@ -50,6 +50,12 @@ pub enum GateError {
         /// Offending payment flow.
         flow: PaymentFlowName,
     },
+    /// Concurrent/Background requested; only Sequential is implemented.
+    #[error("unsupported settlement mode {mode}")]
+    UnsupportedSettlementMode {
+        /// Requested settlement mode.
+        mode: super::SettlementMode,
+    },
     /// No scheme registered for this accept.
     #[error("missing scheme {scheme} on {network}")]
     MissingScheme {
@@ -153,6 +159,13 @@ impl Gate {
                     "error": "incompatible settlement mode",
                     "mode": mode.as_str(),
                     "flow": flow.as_str(),
+                }),
+            ),
+            GateError::UnsupportedSettlementMode { mode } => json_status_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &json!({
+                    "error": "unsupported settlement mode",
+                    "mode": mode.as_str(),
                 }),
             ),
             GateError::MissingScheme {

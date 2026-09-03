@@ -14,7 +14,7 @@
 
 //! Header names, CORS expose, Cache-Control.
 
-mod common;
+mod harness;
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use http::header::{ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL};
 use r402_http::server::{PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X};
 use r402_http::{X402_EXPOSED_HEADERS, merge_private, set_no_store};
 
-use crate::common::{
+use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, call_layer, eip155_requirements, eip155_tag, middleware,
     payment_request, unpaid_request,
 };
