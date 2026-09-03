@@ -24,8 +24,24 @@ use super::config::SolanaUptoFacilitatorConfig;
 use super::storage::{UptoChannelRecord, UptoChannelStorage};
 use super::verify::{OpenAuth, UptoFailure};
 use crate::chain::provider::{SolanaChainProviderError, SolanaChainProviderLike};
+use crate::exact::facilitator::transaction_message_hash;
 use crate::upto::error::codes;
 use crate::upto::payload::UptoSvmPayload;
+
+/// Inflight / settlement-cache key: channel-scoped so concurrent differently-signed
+/// opens for the same channel still collide.
+fn deposit_channel_key(network: &str, channel_id: &str) -> String {
+    format!("upto:deposit:{network}:{channel_id}")
+}
+
+/// Pending-store key: open-tx message hash so a differently-shaped retry does
+/// not inherit a stale signature (official `upto:deposit:{network}:{hash}`).
+fn deposit_pending_key(network: &str, open_tx: &VersionedTransaction) -> String {
+    format!(
+        "upto:deposit:{network}:{}",
+        transaction_message_hash(open_tx)
+    )
+}
 
 pub(super) struct BroadcastFailure {
     pub(super) signature: Option<Signature>,
@@ -69,11 +85,12 @@ pub async fn settle_deposit<P: SolanaChainProviderLike>(
     inflight: &InflightSettlements,
 ) -> Result<SettleResponse, FacilitatorError> {
     let network = requirements.network.to_string();
-    let deposit_key = format!("upto:deposit:{network}:{}", payload.channel_id);
+    let channel_key = deposit_channel_key(&network, &payload.channel_id);
+    let pending_key = deposit_pending_key(&network, &auth.transaction);
     if let Some(response) = reconcile_pending(
         provider,
         pending,
-        &deposit_key,
+        &pending_key,
         payload,
         &auth.max_amount.to_string(),
         &network,
@@ -92,27 +109,27 @@ pub async fn settle_deposit<P: SolanaChainProviderLike>(
         )
         .into_settle(&network));
     }
-    if !inflight.reserve(&deposit_key) {
+    if !inflight.reserve(&channel_key) {
         return Ok(
             failure("duplicate_settlement", payload, "deposit already in flight")
                 .into_settle(&network),
         );
     }
     if let Err(err) = simulate_open(provider, &auth.transaction).await {
-        inflight.release(&deposit_key);
+        inflight.release(&channel_key);
         return Ok(
             failure(codes::SETTLEMENT_SIMULATION, payload, err.to_string()).into_settle(&network),
         );
     }
     if let Err(err) = storage.upsert(channel_record(payload, requirements, &auth)) {
-        inflight.release(&deposit_key);
+        inflight.release(&channel_key);
         return Ok(
             failure(codes::CHANNEL_BROADCAST, payload, err.to_string()).into_settle(&network)
         );
     }
     match broadcast_open(provider, auth.transaction).await {
         Ok(signature) => {
-            pending.delete(&deposit_key);
+            pending.delete(&pending_key);
             Ok(success(
                 signature,
                 &network,
@@ -124,7 +141,7 @@ pub async fn settle_deposit<P: SolanaChainProviderLike>(
             signature: Some(signature),
             error,
         }) => {
-            pending.set(&deposit_key, signature.to_string().into());
+            pending.set(&pending_key, signature.to_string().into());
             Ok(pending_failure(
                 &signature.to_string(),
                 &payload.from,
@@ -136,7 +153,7 @@ pub async fn settle_deposit<P: SolanaChainProviderLike>(
             signature: None,
             error,
         }) => {
-            inflight.release(&deposit_key);
+            inflight.release(&channel_key);
             Ok(failure(codes::CHANNEL_BROADCAST, payload, error.to_string()).into_settle(&network))
         }
     }
@@ -189,6 +206,7 @@ pub(super) async fn simulate_open<P: SolanaChainProviderLike>(
             },
         )
         .await
+        .map(|_| ())
 }
 
 pub(super) async fn channel_exists<P: SolanaChainProviderLike>(
@@ -300,4 +318,51 @@ pub(super) fn failure(
     message: impl Into<String>,
 ) -> UptoFailure {
     UptoFailure::new(code, payload.from.clone(), message)
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_message::{Message, VersionedMessage};
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction::Instruction;
+
+    use super::*;
+
+    fn dummy_open(marker: u8) -> VersionedTransaction {
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        VersionedTransaction {
+            signatures: vec![Signature::from([marker; 64])],
+            message: VersionedMessage::Legacy(Message::new(
+                &[Instruction {
+                    program_id: Pubkey::new_from_array([marker; 32]),
+                    accounts: Vec::new(),
+                    data: vec![marker],
+                }],
+                Some(&payer),
+            )),
+        }
+    }
+
+    #[test]
+    fn deposit_pending_key_is_open_tx_message_hash() {
+        let network = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+        let channel = "11111111111111111111111111111111";
+        let a = dummy_open(1);
+        let mut b = a.clone();
+        b.signatures[0] = Signature::from([9u8; 64]);
+        assert_eq!(
+            deposit_pending_key(network, &a),
+            deposit_pending_key(network, &b)
+        );
+        let c = dummy_open(2);
+        assert_ne!(
+            deposit_pending_key(network, &a),
+            deposit_pending_key(network, &c)
+        );
+        let channel_key = deposit_channel_key(network, channel);
+        assert_eq!(channel_key, format!("upto:deposit:{network}:{channel}"));
+        assert_ne!(deposit_pending_key(network, &a), channel_key);
+        assert!(deposit_pending_key(network, &a).starts_with("upto:deposit:"));
+    }
 }

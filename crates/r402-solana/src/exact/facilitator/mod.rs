@@ -25,8 +25,10 @@ use r402_protocol::payment::{
 use r402_protocol::{ChainProvider, FacilitatorError, SchemeId, VerificationError};
 pub use settle::{settle_transaction, transaction_message_hash};
 pub use smart_wallet::{
-    ObservedTransfer, extract_top_level_transfers, is_path1_layout_recoverable,
-    match_required_transfer, parse_transfer_checked, smart_wallet_enabled,
+    ObservedTransfer, PostSettlementCheck, PostSettlementMethod, extract_top_level_transfers,
+    extract_transfers_from_inner_instructions, has_static_transfer_layout,
+    is_path1_layout_recoverable, match_required_transfer, parse_transfer_checked,
+    smart_wallet_enabled, verify_post_settlement,
 };
 pub use verify::{
     TransferCheckedInstruction, TransferRequirement, VerifyTransferResult,

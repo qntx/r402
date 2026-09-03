@@ -50,6 +50,44 @@ fn payload_shape_accepts_channel_fields() {
 
 #[cfg(feature = "facilitator")]
 #[test]
+fn deposit_pending_key_differs_from_channel_inflight_key() {
+    use r402_solana::exact::facilitator::transaction_message_hash;
+    use solana_message::{Message, VersionedMessage};
+    use solana_pubkey::Pubkey;
+    use solana_signature::Signature;
+    use solana_transaction::Instruction;
+    use solana_transaction::versioned::VersionedTransaction;
+
+    let payer = Pubkey::new_from_array([1u8; 32]);
+    let tx = VersionedTransaction {
+        signatures: vec![Signature::from([3u8; 64])],
+        message: VersionedMessage::Legacy(Message::new(
+            &[Instruction {
+                program_id: Pubkey::new_from_array([2u8; 32]),
+                accounts: Vec::new(),
+                data: vec![1],
+            }],
+            Some(&payer),
+        )),
+    };
+    let network = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+    let channel = "11111111111111111111111111111111";
+    let pending = format!("upto:deposit:{network}:{}", transaction_message_hash(&tx));
+    let inflight = format!("upto:deposit:{network}:{channel}");
+    assert_ne!(pending, inflight);
+    let mut other = tx;
+    other.signatures[0] = Signature::from([9u8; 64]);
+    assert_eq!(
+        pending,
+        format!(
+            "upto:deposit:{network}:{}",
+            transaction_message_hash(&other)
+        )
+    );
+}
+
+#[cfg(feature = "facilitator")]
+#[test]
 fn try_new_is_result_so_question_mark_compiles() {
     use r402_solana::upto::facilitator::SolanaUptoFacilitator;
 

@@ -1,19 +1,32 @@
 //! Path 2 smart-wallet verification (simulation + CPI outcome matching).
 //!
-//! Aligns with `scheme_exact_svm.md` §3.2–3.3 and the TypeScript reference
+//! Aligns with `scheme_exact_svm.md` §3.2–3.4 and the TypeScript reference
 //! (`@x402/svm` `smartWalletVerification.ts`).
 //!
 //! Path 2 runs only when Path 1 rejects for a **recoverable layout** reason and
 //! [`SolanaExactFacilitatorConfig::enable_smart_wallet_verification`] is set.
 
+use std::str::FromStr;
+use std::time::Duration;
+
 use r402_protocol::VerificationError;
+use solana_client::rpc_response::{
+    ParsedInstruction, UiInnerInstructions, UiInstruction, UiLoadedAddresses, UiParsedInstruction,
+};
 use solana_pubkey::Pubkey;
+use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 
-use super::config::SolanaExactFacilitatorConfig;
+use super::config::{MAX_INSTRUCTION_COUNT, MIN_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig};
 use super::verify::{TransferRequirement, transfer_amount_meets_requirement};
+use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::ATA_PROGRAM_PUBKEY;
 use crate::exact::error::SolanaExactError;
+
+const ERR_CANNOT_DERIVE_ATA: &str = "invalid_exact_svm_smart_wallet_cannot_derive_destination_ata";
+const ERR_NO_TRANSFER: &str = "invalid_exact_svm_smart_wallet_no_transfer_in_simulation";
+const ERR_TRANSFER_MISMATCH: &str = "invalid_exact_svm_smart_wallet_transfer_mismatch";
+const ERR_MULTIPLE: &str = "invalid_exact_svm_smart_wallet_multiple_matching_transfers";
 
 /// SPL Token / Token-2022 `TransferChecked` instruction discriminant.
 pub(super) const IX_TOKEN_TRANSFER_CHECKED: u8 = 12;
@@ -145,7 +158,7 @@ pub fn match_required_transfer(
     let expected_atas = expected_destination_atas(requirement.pay_to, requirement.asset);
     if expected_atas.is_empty() {
         return Err(VerificationError::InvalidFormat(
-            "smart_wallet_cannot_derive_destination_ata".into(),
+            ERR_CANNOT_DERIVE_ATA.into(),
         ));
     }
 
@@ -161,18 +174,258 @@ pub fn match_required_transfer(
         .collect();
 
     match matching.as_slice() {
-        [] if transfers.is_empty() => Err(VerificationError::InvalidFormat(
-            "smart_wallet_no_transfer_in_simulation".into(),
-        )),
+        [] if transfers.is_empty() => Err(VerificationError::InvalidFormat(ERR_NO_TRANSFER.into())),
         [] => Err(VerificationError::InvalidFormat(
-            "smart_wallet_transfer_mismatch".into(),
+            ERR_TRANSFER_MISMATCH.into(),
         )),
         [one] => Ok(*one),
-        [first, ..] => Err(VerificationError::InvalidFormat(format!(
-            "smart_wallet_multiple_matching_transfers (payer {})",
-            first.authority
-        ))),
+        _ => Err(VerificationError::InvalidFormat(ERR_MULTIPLE.into())),
     }
+}
+
+fn is_token_program(program_id: &Pubkey) -> bool {
+    *program_id == spl_token::ID || *program_id == spl_token_2022_interface::ID
+}
+
+/// Static keys plus simulation-loaded ALT addresses (writable, then readonly).
+#[must_use]
+pub(super) fn resolved_account_keys(
+    tx: &VersionedTransaction,
+    loaded: &UiLoadedAddresses,
+) -> Vec<Pubkey> {
+    let mut keys = tx.message.static_account_keys().to_vec();
+    for addr in loaded.writable.iter().chain(&loaded.readonly) {
+        if let Ok(pk) = Pubkey::from_str(addr) {
+            keys.push(pk);
+        }
+    }
+    keys
+}
+
+/// Extract `TransferChecked` from simulation / confirmed-tx inner instructions.
+///
+/// Handles compiled (base58 + account indices), jsonParsed, and partially
+/// decoded RPC shapes — official `extractTransfersFromInnerInstructions`.
+#[must_use]
+pub fn extract_transfers_from_inner_instructions(
+    inner_instructions: &[UiInnerInstructions],
+    account_keys: &[Pubkey],
+) -> Vec<ObservedTransfer> {
+    let mut out = Vec::new();
+    for group in inner_instructions {
+        for ix in &group.instructions {
+            if let Some(t) = extract_one_inner(ix, account_keys) {
+                out.push(t);
+            }
+        }
+    }
+    out
+}
+
+fn extract_one_inner(ix: &UiInstruction, account_keys: &[Pubkey]) -> Option<ObservedTransfer> {
+    match ix {
+        UiInstruction::Compiled(compiled) => {
+            let program_id = *account_keys.get(usize::from(compiled.program_id_index))?;
+            if !is_token_program(&program_id) {
+                return None;
+            }
+            let data = bs58::decode(&compiled.data).into_vec().ok()?;
+            let mut accounts = Vec::with_capacity(compiled.accounts.len());
+            for idx in &compiled.accounts {
+                accounts.push(*account_keys.get(usize::from(*idx))?);
+            }
+            parse_transfer_checked(program_id, &data, &accounts)
+        }
+        UiInstruction::Parsed(UiParsedInstruction::Parsed(parsed)) => {
+            parse_parsed_transfer_checked(parsed)
+        }
+        UiInstruction::Parsed(UiParsedInstruction::PartiallyDecoded(partial)) => {
+            let program_id = Pubkey::from_str(&partial.program_id).ok()?;
+            if !is_token_program(&program_id) {
+                return None;
+            }
+            let data = bs58::decode(&partial.data).into_vec().ok()?;
+            let accounts: Option<Vec<Pubkey>> = partial
+                .accounts
+                .iter()
+                .map(|a| Pubkey::from_str(a).ok())
+                .collect();
+            parse_transfer_checked(program_id, &data, &accounts?)
+        }
+    }
+}
+
+fn parse_parsed_transfer_checked(parsed: &ParsedInstruction) -> Option<ObservedTransfer> {
+    let program_id = Pubkey::from_str(&parsed.program_id).ok()?;
+    if !is_token_program(&program_id) {
+        return None;
+    }
+    if parsed.parsed.get("type")?.as_str()? != "transferChecked" {
+        return None;
+    }
+    let info = parsed.parsed.get("info")?;
+    let amount = info
+        .get("tokenAmount")
+        .and_then(|token_amount| token_amount.get("amount"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| info.get("amount").and_then(serde_json::Value::as_str))
+        .and_then(|s| s.parse().ok())?;
+    let mint = Pubkey::from_str(info.get("mint")?.as_str()?).ok()?;
+    let destination = Pubkey::from_str(info.get("destination")?.as_str()?).ok()?;
+    let authority = info
+        .get("authority")
+        .or_else(|| info.get("owner"))
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| Pubkey::from_str(s).ok())?;
+    Some(ObservedTransfer {
+        program_id,
+        amount,
+        mint,
+        destination,
+        authority,
+    })
+}
+
+/// Path 1 positional layout: 3–7 ixs with `TransferChecked` at index 2.
+#[must_use]
+pub fn has_static_transfer_layout(tx: &VersionedTransaction) -> bool {
+    let instructions = tx.message.instructions();
+    if instructions.len() < MIN_INSTRUCTION_COUNT || instructions.len() > MAX_INSTRUCTION_COUNT {
+        return false;
+    }
+    let keys = tx.message.static_account_keys();
+    let Some(ix) = instructions.get(2) else {
+        return false;
+    };
+    let Some(program_id) = keys.get(usize::from(ix.program_id_index)).copied() else {
+        return false;
+    };
+    if !is_token_program(&program_id) {
+        return false;
+    }
+    let mut accounts = Vec::with_capacity(ix.accounts.len());
+    for idx in &ix.accounts {
+        let Some(key) = keys.get(usize::from(*idx)).copied() else {
+            return false;
+        };
+        accounts.push(key);
+    }
+    parse_transfer_checked(program_id, &ix.data, &accounts).is_some()
+}
+
+/// How post-settle TOCTOU verified the on-chain transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PostSettlementMethod {
+    /// Confirmed-tx inner instructions contained a matching `TransferChecked`.
+    InnerInstructions,
+    /// Destination ATA balance increased by at least the required amount.
+    BalanceDelta,
+    /// Neither method could decide (RPC lag / missing caps).
+    Unverified,
+}
+
+/// Result of [`verify_post_settlement`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PostSettlementCheck {
+    /// Whether the required transfer was confirmed on-chain.
+    pub verified: bool,
+    /// Which method produced [`Self::verified`].
+    pub method: PostSettlementMethod,
+}
+
+/// Post-settle TOCTOU check (spec §3.4).
+///
+/// Prefers confirmed inner instructions. Falls back to ATA balance delta when
+/// the RPC has not indexed inners. `unverified` is a settle Failure.
+pub async fn verify_post_settlement<P: SolanaChainProviderLike>(
+    provider: &P,
+    signature: &Signature,
+    requirement: &TransferRequirement<'_>,
+    fee_payer_signers: &[Pubkey],
+    balance_before: Option<u64>,
+    known_destination: Option<Pubkey>,
+) -> PostSettlementCheck {
+    for attempt in 0u32..3 {
+        if let Ok(Some(inner)) = provider.get_confirmed_inner_instructions(signature).await {
+            return PostSettlementCheck {
+                verified: post_settle_inners_match(
+                    &inner,
+                    requirement,
+                    fee_payer_signers,
+                    known_destination,
+                ),
+                method: PostSettlementMethod::InnerInstructions,
+            };
+        }
+        if attempt < 2 {
+            tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt + 1))).await;
+        }
+    }
+
+    let Some(before) = balance_before else {
+        return PostSettlementCheck {
+            verified: false,
+            method: PostSettlementMethod::Unverified,
+        };
+    };
+
+    if let Some(dest) = known_destination {
+        return match provider.get_token_account_balance(&dest).await {
+            Ok(Some(after)) => PostSettlementCheck {
+                verified: after.saturating_sub(before) >= requirement.amount,
+                method: PostSettlementMethod::BalanceDelta,
+            },
+            Ok(None) | Err(_) => PostSettlementCheck {
+                verified: false,
+                method: PostSettlementMethod::Unverified,
+            },
+        };
+    }
+
+    let atas = expected_destination_atas(requirement.pay_to, requirement.asset);
+    let mut any = false;
+    for ata in atas {
+        if let Ok(Some(after)) = provider.get_token_account_balance(&ata).await {
+            any = true;
+            if after.saturating_sub(before) >= requirement.amount {
+                return PostSettlementCheck {
+                    verified: true,
+                    method: PostSettlementMethod::BalanceDelta,
+                };
+            }
+        }
+    }
+    if any {
+        PostSettlementCheck {
+            verified: false,
+            method: PostSettlementMethod::BalanceDelta,
+        }
+    } else {
+        PostSettlementCheck {
+            verified: false,
+            method: PostSettlementMethod::Unverified,
+        }
+    }
+}
+
+fn post_settle_inners_match(
+    inner: &[UiInnerInstructions],
+    requirement: &TransferRequirement<'_>,
+    fee_payer_signers: &[Pubkey],
+    known_destination: Option<Pubkey>,
+) -> bool {
+    let transfers = extract_transfers_from_inner_instructions(inner, &[]);
+    let expected = known_destination.map_or_else(
+        || expected_destination_atas(requirement.pay_to, requirement.asset),
+        |dest| vec![dest],
+    );
+    let mint = *requirement.asset.pubkey();
+    transfers.iter().any(|t| {
+        t.mint == mint
+            && expected.contains(&t.destination)
+            && transfer_amount_meets_requirement(t.amount, requirement.amount)
+            && !fee_payer_signers.contains(&t.authority)
+    })
 }
 
 fn expected_destination_atas(
@@ -294,5 +547,151 @@ mod tests {
         assert!(is_path1_layout_recoverable(
             &VerificationError::InvalidFormat("Too few instructions".into())
         ));
+    }
+
+    fn transfer_data(amount: u64) -> Vec<u8> {
+        let mut data = vec![IX_TOKEN_TRANSFER_CHECKED];
+        data.extend_from_slice(&amount.to_le_bytes());
+        data.push(6);
+        data
+    }
+
+    fn parsed_inner(t: &ObservedTransfer) -> Vec<UiInnerInstructions> {
+        vec![UiInnerInstructions {
+            index: 0,
+            instructions: vec![UiInstruction::Parsed(UiParsedInstruction::Parsed(
+                ParsedInstruction {
+                    program: "spl-token".into(),
+                    program_id: t.program_id.to_string(),
+                    parsed: serde_json::json!({
+                        "type": "transferChecked",
+                        "info": {
+                            "mint": t.mint.to_string(),
+                            "destination": t.destination.to_string(),
+                            "authority": t.authority.to_string(),
+                            "tokenAmount": { "amount": t.amount.to_string() }
+                        }
+                    }),
+                    stack_height: None,
+                },
+            ))],
+        }]
+    }
+
+    #[test]
+    fn extract_compiled_inner_transfer_checked() {
+        let program = spl_token::ID;
+        let accounts = [
+            Pubkey::new_from_array([10; 32]),
+            Pubkey::new_from_array([11; 32]),
+            Pubkey::new_from_array([12; 32]),
+            Pubkey::new_from_array([13; 32]),
+        ];
+        let mut keys = vec![program];
+        keys.extend_from_slice(&accounts);
+        let data = bs58::encode(transfer_data(1_000)).into_string();
+        let inner = vec![UiInnerInstructions {
+            index: 0,
+            instructions: vec![UiInstruction::Compiled(
+                solana_client::rpc_response::UiCompiledInstruction {
+                    program_id_index: 0,
+                    accounts: vec![1, 2, 3, 4],
+                    data,
+                    stack_height: None,
+                },
+            )],
+        }];
+        let extracted = extract_transfers_from_inner_instructions(&inner, &keys);
+        assert_eq!(extracted.len(), 1);
+        assert_eq!(extracted[0].amount, 1_000);
+        assert_eq!(extracted[0].mint, accounts[1]);
+        assert_eq!(extracted[0].destination, accounts[2]);
+        assert_eq!(extracted[0].authority, accounts[3]);
+    }
+
+    #[test]
+    fn extract_parsed_inner_transfer_checked() {
+        let t = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 42,
+            mint: Pubkey::new_from_array([2; 32]),
+            destination: Pubkey::new_from_array([3; 32]),
+            authority: Pubkey::new_from_array([4; 32]),
+        };
+        let extracted = extract_transfers_from_inner_instructions(&parsed_inner(&t), &[]);
+        assert_eq!(extracted, vec![t]);
+    }
+
+    #[test]
+    fn path2_matches_cpi_only_transfer() {
+        let (_pay_to, asset, requirement) = req(100);
+        let dest = expected_destination_atas(requirement.pay_to, requirement.asset)[0];
+        let t = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 100,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([9; 32]),
+        };
+        let transfers = extract_transfers_from_inner_instructions(&parsed_inner(&t), &[]);
+        let matched = match_required_transfer(&transfers, &requirement, &[]).unwrap();
+        assert_eq!(matched.destination, dest);
+        assert_eq!(matched.amount, 100);
+    }
+
+    #[test]
+    fn post_settle_inner_match_and_miss() {
+        let (_pay_to, asset, requirement) = req(100);
+        let dest = expected_destination_atas(requirement.pay_to, requirement.asset)[0];
+        let t = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 100,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([9; 32]),
+        };
+        assert!(post_settle_inners_match(
+            &parsed_inner(&t),
+            &requirement,
+            &[],
+            Some(dest)
+        ));
+        let miss = ObservedTransfer {
+            destination: Pubkey::new_from_array([8; 32]),
+            ..t
+        };
+        assert!(!post_settle_inners_match(
+            &parsed_inner(&miss),
+            &requirement,
+            &[],
+            Some(dest)
+        ));
+        assert!(!post_settle_inners_match(
+            &[],
+            &requirement,
+            &[],
+            Some(dest)
+        ));
+    }
+
+    #[test]
+    fn has_static_layout_requires_positional_transfer_checked() {
+        use solana_message::{Message, VersionedMessage};
+        use solana_signature::Signature as Sig;
+        use solana_transaction::Instruction;
+
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        let short = VersionedTransaction {
+            signatures: vec![Sig::default()],
+            message: VersionedMessage::Legacy(Message::new(
+                &[Instruction {
+                    program_id: Pubkey::new_from_array([9; 32]),
+                    accounts: Vec::new(),
+                    data: vec![0],
+                }],
+                Some(&payer),
+            )),
+        };
+        assert!(!has_static_transfer_layout(&short));
     }
 }

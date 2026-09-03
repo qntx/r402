@@ -10,6 +10,7 @@ use solana_pubkey::Pubkey;
 use solana_transaction::versioned::VersionedTransaction;
 
 use super::config::SolanaExactFacilitatorConfig;
+use super::smart_wallet::ObservedTransfer;
 use crate::chain::Address;
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::exact::ATA_PROGRAM_PUBKEY;
@@ -29,6 +30,8 @@ pub struct VerifyTransferResult {
     /// (allowed by `scheme_exact_svm.md` §1.4 and the Go/TS facilitators).
     /// Underpayment is rejected before this struct is constructed.
     pub amount: u64,
+    /// Path 2 matched `TransferChecked`. `None` on Path 1.
+    pub matched_transfer: Option<ObservedTransfer>,
 }
 
 /// Returns `true` when `actual` meets the required transfer amount.
@@ -335,15 +338,14 @@ async fn verify_transaction_path1<P: SolanaChainProviderLike>(
         payer,
         transaction,
         amount: transfer_instruction.amount,
+        matched_transfer: None,
     })
 }
 
 /// Path 2 — simulation / outcome-based smart-wallet verification.
 ///
-/// Matches `TransferChecked` instructions anywhere in the top-level message
-/// (and, once RPC inners are plumbed through the provider, CPI traces).
-/// Full CPI extraction from `simulateTransaction` inner instructions is the
-/// next hardening step; top-level multi-ix wallets already work here.
+/// Matches exactly one required `TransferChecked` across top-level
+/// instructions **and** CPI inner instructions (spec §3.2).
 async fn verify_transaction_path2<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: VersionedTransaction,
@@ -351,10 +353,6 @@ async fn verify_transaction_path2<P: SolanaChainProviderLike>(
 ) -> Result<VerifyTransferResult, VerificationError> {
     assert_fee_payer_isolated(&transaction, provider.pubkey())?;
 
-    let mut transfers = super::smart_wallet::extract_top_level_transfers(&transaction);
-    // Simulate with inner instructions requested so the RPC records CPI
-    // traces (used by operators / future extractors). Path 2 still requires
-    // a successful simulation before accepting the payment.
     let tx = TransactionInt::new(transaction.clone()).sign(provider)?;
     let cfg = RpcSimulateTransactionConfig {
         sig_verify: false,
@@ -365,22 +363,24 @@ async fn verify_transaction_path2<P: SolanaChainProviderLike>(
         inner_instructions: true,
         min_context_slot: None,
     };
-    provider
+    let sim = provider
         .simulate_transaction_with_config(tx.inner(), cfg)
-        .await?;
+        .await
+        .map_err(|e| {
+            VerificationError::InvalidFormat(format!(
+                "invalid_exact_svm_smart_wallet_simulation_failed: {e}"
+            ))
+        })?;
 
-    // If no top-level TransferChecked was found, surface a clear Path 2 error.
-    // CPI-only wallets need the provider to return sim.inner_instructions
-    // (tracked as follow-up: plumb RpcSimulateTransactionResult through
-    // SolanaChainProviderLike).
-    if transfers.is_empty() {
-        return Err(VerificationError::InvalidFormat(
-            "smart_wallet_no_transfer_in_simulation: no top-level TransferChecked; \
-             CPI-only smart wallets require inner-instruction plumbing (enable \
-             provider detailed simulation)"
-                .into(),
-        ));
-    }
+    let account_keys =
+        super::smart_wallet::resolved_account_keys(&transaction, &sim.loaded_addresses);
+    let mut transfers = super::smart_wallet::extract_top_level_transfers(&transaction);
+    transfers.extend(
+        super::smart_wallet::extract_transfers_from_inner_instructions(
+            &sim.inner_instructions,
+            &account_keys,
+        ),
+    );
 
     let fee_payers = [provider.pubkey()];
     let matched = super::smart_wallet::match_required_transfer(
@@ -388,13 +388,12 @@ async fn verify_transaction_path2<P: SolanaChainProviderLike>(
         transfer_requirement,
         &fee_payers,
     )?;
-    // Silence unused_mut if we later push CPI transfers into `transfers`.
-    let _ = &mut transfers;
 
     Ok(VerifyTransferResult {
         payer: matched.authority.into(),
         transaction,
         amount: matched.amount,
+        matched_transfer: Some(matched),
     })
 }
 
@@ -513,6 +512,13 @@ pub async fn verify_transfer_instruction<P: SolanaChainProviderLike>(
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+
+    use solana_account::Account;
+    use solana_client::nonblocking::rpc_client::RpcClient;
+    use solana_client::rpc_response::UiInnerInstructions;
+    use solana_commitment_config::CommitmentConfig;
     use solana_compute_budget_interface::ID as COMPUTE_BUDGET;
     use solana_message::{Message, VersionedMessage};
     use solana_signature::Signature;
@@ -520,7 +526,89 @@ mod tests {
 
     use super::*;
     use crate::chain::TOKEN_PROGRAM_ID;
+    use crate::chain::provider::{
+        SignatureConfirm, SimulateTransactionResult, SolanaChainProviderError,
+        SolanaChainProviderLike,
+    };
     use crate::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM, SolanaExactError};
+
+    struct Path2Stub {
+        pubkey: Pubkey,
+        inner: Vec<UiInnerInstructions>,
+    }
+
+    impl SolanaChainProviderLike for Path2Stub {
+        fn simulate_transaction_with_config(
+            &self,
+            _tx: &VersionedTransaction,
+            _cfg: RpcSimulateTransactionConfig,
+        ) -> impl Future<Output = Result<SimulateTransactionResult, SolanaChainProviderError>> + Send
+        {
+            std::future::ready(Ok(SimulateTransactionResult {
+                inner_instructions: self.inner.clone(),
+                ..SimulateTransactionResult::default()
+            }))
+        }
+
+        fn get_multiple_accounts(
+            &self,
+            _pubkeys: &[Pubkey],
+        ) -> impl Future<Output = Result<Vec<Option<Account>>, SolanaChainProviderError>> + Send
+        {
+            std::future::ready(Ok(Vec::new()))
+        }
+
+        fn max_compute_unit_limit(&self) -> u32 {
+            400_000
+        }
+
+        fn max_compute_unit_price(&self) -> u64 {
+            1
+        }
+
+        fn pubkey(&self) -> Pubkey {
+            self.pubkey
+        }
+
+        fn fee_payer(&self) -> Address {
+            Address::new(self.pubkey)
+        }
+
+        fn sign(
+            &self,
+            tx: VersionedTransaction,
+        ) -> Result<VersionedTransaction, SolanaChainProviderError> {
+            Ok(tx)
+        }
+
+        fn send_and_confirm(
+            &self,
+            _tx: &VersionedTransaction,
+            _commitment_config: CommitmentConfig,
+        ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
+            std::future::ready(Err(SolanaChainProviderError::Custom("unused".into())))
+        }
+
+        fn rpc_client(&self) -> Arc<RpcClient> {
+            Arc::new(RpcClient::new("http://127.0.0.1:9".to_owned()))
+        }
+
+        fn send(
+            &self,
+            _tx: &VersionedTransaction,
+        ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
+            std::future::ready(Err(SolanaChainProviderError::Custom("unused".into())))
+        }
+
+        fn confirm_signature(
+            &self,
+            _signature: &Signature,
+            _commitment_config: CommitmentConfig,
+        ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send
+        {
+            std::future::ready(Ok(SignatureConfirm::Confirmed))
+        }
+    }
 
     fn compiled_tx(programs: &[Pubkey]) -> VersionedTransaction {
         let payer = Pubkey::new_from_array([1u8; 32]);
@@ -603,5 +691,76 @@ mod tests {
     fn zero_required_always_meets() {
         assert!(transfer_amount_meets_requirement(0, 0));
         assert!(transfer_amount_meets_requirement(1, 0));
+    }
+
+    #[tokio::test]
+    async fn path2_matches_cpi_inner_transfer_checked() {
+        use solana_client::rpc_response::{ParsedInstruction, UiInstruction, UiParsedInstruction};
+
+        use crate::exact::ATA_PROGRAM_PUBKEY;
+        use crate::exact::facilitator::smart_wallet::ObservedTransfer;
+        use crate::exact::payload::TransactionInt;
+
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = {
+            let (ata, _) = Pubkey::find_program_address(
+                &[pay_to.as_ref(), spl_token::ID.as_ref(), asset.as_ref()],
+                &ATA_PROGRAM_PUBKEY,
+            );
+            ata
+        };
+        let authority = Pubkey::new_from_array([9u8; 32]);
+        let matched = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 1_000,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority,
+        };
+        let inner = vec![UiInnerInstructions {
+            index: 0,
+            instructions: vec![UiInstruction::Parsed(UiParsedInstruction::Parsed(
+                ParsedInstruction {
+                    program: "spl-token".into(),
+                    program_id: spl_token::ID.to_string(),
+                    parsed: serde_json::json!({
+                        "type": "transferChecked",
+                        "info": {
+                            "mint": matched.mint.to_string(),
+                            "destination": dest.to_string(),
+                            "authority": authority.to_string(),
+                            "tokenAmount": { "amount": "1000" }
+                        }
+                    }),
+                    stack_height: None,
+                },
+            ))],
+        }];
+        let payer = Pubkey::new_from_array([7u8; 32]);
+        let tx = compiled_tx(&[Pubkey::new_from_array([8u8; 32])]);
+        let stub = Path2Stub {
+            pubkey: payer,
+            inner,
+        };
+        let config = SolanaExactFacilitatorConfig {
+            enable_smart_wallet_verification: true,
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1_000,
+        };
+        let result = verify_transaction(
+            &stub,
+            TransactionInt::new(tx).as_base64().unwrap(),
+            &requirement,
+            &config,
+        )
+        .await
+        .expect("path 2");
+        assert_eq!(result.payer, Address::new(authority));
+        assert_eq!(result.matched_transfer, Some(matched));
     }
 }

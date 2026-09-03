@@ -17,13 +17,16 @@ use solana_transaction::versioned::VersionedTransaction;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
-use super::verify::{VerifyTransferResult, verify_transfer};
+use super::smart_wallet::{has_static_transfer_layout, verify_post_settlement};
+use super::verify::{TransferRequirement, VerifyTransferResult, verify_transfer};
 use super::{SolanaExactFacilitator, enforce_memo};
 use crate::chain::provider::{SignatureConfirm, SolanaChainProviderError, SolanaChainProviderLike};
 use crate::exact::payload::{self, TransactionInt};
 
 /// Official SVM settle failure when a broadcast tx is rejected on-chain.
 const TRANSACTION_FAILED: &str = "invalid_exact_svm_transaction_failed";
+/// Official Path 2 post-settle TOCTOU failure (spec §3.4).
+const POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED: &str = "post_settlement_transfer_not_confirmed";
 
 /// Base64 SHA-256 of versioned **message** bytes (not the signed wire tx).
 ///
@@ -53,7 +56,7 @@ pub async fn settle_transaction<P: SolanaChainProviderLike>(
     provider: &P,
     verification: VerifyTransferResult,
 ) -> Result<Signature, SolanaChainProviderError> {
-    match broadcast_payment(provider, verification).await {
+    match broadcast_payment(provider, verification.transaction).await {
         Ok(signature) => Ok(signature),
         Err(failure) => Err(*failure.error),
     }
@@ -66,9 +69,9 @@ struct BroadcastFailure {
 
 async fn broadcast_payment<P: SolanaChainProviderLike>(
     provider: &P,
-    verification: VerifyTransferResult,
+    transaction: VersionedTransaction,
 ) -> Result<Signature, BroadcastFailure> {
-    let tx = TransactionInt::new(verification.transaction)
+    let tx = TransactionInt::new(transaction)
         .sign(provider)
         .map_err(|error| BroadcastFailure {
             signature: None,
@@ -116,7 +119,10 @@ async fn broadcast_payment<P: SolanaChainProviderLike>(
 fn should_release(outcome: &Result<SettleResponse, FacilitatorError>) -> bool {
     match outcome {
         Ok(SettleResponse::Success { .. }) => false,
-        Ok(SettleResponse::Failure { reason, .. }) => *reason != ErrorReason::SettlementPending,
+        Ok(SettleResponse::Failure { reason, .. }) => {
+            *reason != ErrorReason::SettlementPending
+                && reason.as_str() != POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED
+        }
         Ok(_) | Err(_) => true,
     }
 }
@@ -169,6 +175,23 @@ fn transaction_failed(
     }
 }
 
+fn post_settlement_failed(signature: &str, payer: &str, network: &str) -> SettleResponse {
+    SettleResponse::Failure {
+        reason: ErrorReason::from_wire(POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED),
+        message: None,
+        payer: Some(payer.into()),
+        transaction: signature.into(),
+        network: network.into(),
+        extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
+        extra: None,
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "reconcile needs pending, path, and requirement together"
+)]
 async fn reconcile_pending<P: SolanaChainProviderLike>(
     provider: &P,
     pending: &dyn PendingSettlementStore,
@@ -176,6 +199,8 @@ async fn reconcile_pending<P: SolanaChainProviderLike>(
     cached: CompactString,
     payer: &str,
     network: &str,
+    smart_wallet: bool,
+    requirement: &TransferRequirement<'_>,
 ) -> Result<SettleResponse, FacilitatorError> {
     let parsed = Signature::from_str(cached.as_str()).map_err(|e| {
         FacilitatorError::Onchain(format!("invalid pending settlement signature: {e}"))
@@ -184,15 +209,31 @@ async fn reconcile_pending<P: SolanaChainProviderLike>(
         .confirm_signature(&parsed, CommitmentConfig::confirmed())
         .await
     {
-        Ok(SignatureConfirm::Confirmed) => Ok(SettleResponse::Success {
-            payer: Some(payer.into()),
-            transaction: parsed.to_string().into(),
-            network: network.into(),
-            amount: None,
-            extensions: Extensions::new(),
-            extension_responses: Extensions::new(),
-            extra: None,
-        }),
+        Ok(SignatureConfirm::Confirmed) => {
+            if smart_wallet {
+                let check = verify_post_settlement(
+                    provider,
+                    &parsed,
+                    requirement,
+                    &[provider.pubkey()],
+                    None,
+                    None,
+                )
+                .await;
+                if !check.verified {
+                    return Ok(post_settlement_failed(cached.as_str(), payer, network));
+                }
+            }
+            Ok(SettleResponse::Success {
+                payer: Some(payer.into()),
+                transaction: parsed.to_string().into(),
+                network: network.into(),
+                amount: None,
+                extensions: Extensions::new(),
+                extension_responses: Extensions::new(),
+                extra: None,
+            })
+        }
         Ok(SignatureConfirm::OnchainFailure(err)) => {
             pending.delete(key);
             Ok(transaction_failed(
@@ -244,6 +285,13 @@ where
 
     if let Some(cached) = facilitator.pending.get(&tx_key) {
         facilitator.pending.delete(&tx_key);
+        let smart_wallet = facilitator.config.enable_smart_wallet_verification
+            && !has_static_transfer_layout(&decoded);
+        let requirement = TransferRequirement {
+            pay_to: &request.payment_requirements.pay_to,
+            asset: &request.payment_requirements.asset,
+            amount: request.payment_requirements.amount.inner(),
+        };
         let outcome = reconcile_pending(
             &facilitator.provider,
             facilitator.pending.as_ref(),
@@ -251,6 +299,8 @@ where
             cached,
             &token_payer(&decoded),
             &network,
+            smart_wallet,
+            &requirement,
         )
         .await;
         if should_release(&outcome) {
@@ -281,7 +331,12 @@ where
 {
     enforce_memo(request)?;
     let verification = verify_transfer(&facilitator.provider, request, &facilitator.config).await?;
-    settle_verified(facilitator, verification, tx_key, network).await
+    let requirement = TransferRequirement {
+        pay_to: &request.payment_requirements.pay_to,
+        asset: &request.payment_requirements.asset,
+        amount: request.payment_requirements.amount.inner(),
+    };
+    settle_verified(facilitator, verification, tx_key, network, &requirement).await
 }
 
 async fn settle_verified<P>(
@@ -289,15 +344,46 @@ async fn settle_verified<P>(
     verification: VerifyTransferResult,
     tx_key: &str,
     network: &str,
+    requirement: &TransferRequirement<'_>,
 ) -> Result<SettleResponse, FacilitatorError>
 where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
     let amount = verification.amount.to_string();
     let payer = verification.payer.to_string();
-    match broadcast_payment(&facilitator.provider, verification).await {
+    let matched = verification.matched_transfer;
+    let known_destination = matched.map(|t| t.destination);
+    let balance_before = if let Some(dest) = known_destination {
+        facilitator
+            .provider
+            .get_token_account_balance(&dest)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+    match broadcast_payment(&facilitator.provider, verification.transaction).await {
         Ok(signature) => {
             facilitator.pending.delete(tx_key);
+            if matched.is_some() {
+                let check = verify_post_settlement(
+                    &facilitator.provider,
+                    &signature,
+                    requirement,
+                    &[facilitator.provider.pubkey()],
+                    balance_before,
+                    known_destination,
+                )
+                .await;
+                if !check.verified {
+                    return Ok(post_settlement_failed(
+                        &signature.to_string(),
+                        &payer,
+                        network,
+                    ));
+                }
+            }
             Ok(settle_success(&payer, signature, network, &amount))
         }
         Err(BroadcastFailure {
@@ -406,6 +492,8 @@ mod tests {
         send_ok: bool,
         confirm: Mutex<SignatureConfirm>,
         broadcast_sig: Signature,
+        inner_ixs: Mutex<Option<Vec<solana_client::rpc_response::UiInnerInstructions>>>,
+        token_balances: Mutex<std::collections::HashMap<Pubkey, u64>>,
     }
 
     impl StubProvider {
@@ -416,6 +504,8 @@ mod tests {
                 send_ok: true,
                 confirm: Mutex::new(confirm),
                 broadcast_sig: Signature::from([7u8; 64]),
+                inner_ixs: Mutex::new(None),
+                token_balances: Mutex::new(std::collections::HashMap::new()),
             }
         }
 
@@ -443,7 +533,12 @@ mod tests {
             &self,
             _tx: &VersionedTransaction,
             _cfg: RpcSimulateTransactionConfig,
-        ) -> impl Future<Output = Result<(), SolanaChainProviderError>> + Send {
+        ) -> impl Future<
+            Output = Result<
+                crate::chain::provider::SimulateTransactionResult,
+                SolanaChainProviderError,
+            >,
+        > + Send {
             std::future::ready(Err(SolanaChainProviderError::Custom("no simulate".into())))
         }
 
@@ -516,6 +611,36 @@ mod tests {
                 .clone();
             std::future::ready(Ok(confirm))
         }
+
+        fn get_confirmed_inner_instructions(
+            &self,
+            _signature: &Signature,
+        ) -> impl Future<
+            Output = Result<
+                Option<Vec<solana_client::rpc_response::UiInnerInstructions>>,
+                SolanaChainProviderError,
+            >,
+        > + Send {
+            let inner = self
+                .inner_ixs
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+            std::future::ready(Ok(inner))
+        }
+
+        fn get_token_account_balance(
+            &self,
+            token_account: &Pubkey,
+        ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
+            let bal = self
+                .token_balances
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get(token_account)
+                .copied();
+            std::future::ready(Ok(bal))
+        }
     }
 
     fn facilitator(
@@ -560,12 +685,20 @@ mod tests {
         let stub = StubProvider::new(SignatureConfirm::TimedOut);
         let sig = stub.broadcast_sig;
         let fac = facilitator(stub, Arc::clone(&pending), SettlementCache::new());
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
         let verification = VerifyTransferResult {
             payer: Address::new(Pubkey::new_from_array([4u8; 32])),
             transaction: tx,
             amount: 1,
+            matched_transfer: None,
         };
-        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet")
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
             .await
             .expect("settle");
         assert!(response.is_retryable_settlement_pending());
@@ -585,12 +718,20 @@ mod tests {
         let cache = SettlementCache::new();
         assert_eq!(cache.reserve(tx_key.clone()), Duplicate::No);
         let fac = facilitator(stub, Arc::clone(&pending), cache.clone());
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
         let verification = VerifyTransferResult {
             payer: Address::new(Pubkey::new_from_array([4u8; 32])),
             transaction: tx,
             amount: 1,
+            matched_transfer: None,
         };
-        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet")
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
             .await
             .expect("settle");
         match response {
@@ -670,13 +811,104 @@ mod tests {
         let mut stub = StubProvider::new(SignatureConfirm::Confirmed);
         stub.send_ok = false;
         let fac = facilitator(stub, Arc::clone(&pending), SettlementCache::new());
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
         let verification = VerifyTransferResult {
             payer: Address::new(Pubkey::new_from_array([4u8; 32])),
             transaction: tx,
             amount: 1,
+            matched_transfer: None,
         };
-        let result = settle_verified(&fac, verification, &tx_key, "solana:devnet").await;
+        let result =
+            settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement).await;
         assert!(result.is_err());
         assert!(pending.get(&tx_key).is_none());
+    }
+
+    #[test]
+    fn should_release_keeps_lock_on_post_settlement_failure() {
+        let failed = post_settlement_failed("sig", "payer", "solana:devnet");
+        assert!(!should_release(&Ok(failed)));
+    }
+
+    #[tokio::test]
+    async fn path2_post_settle_inner_miss_is_failure() {
+        use solana_client::rpc_response::{
+            ParsedInstruction, UiInnerInstructions, UiInstruction, UiParsedInstruction,
+        };
+
+        use crate::exact::ATA_PROGRAM_PUBKEY;
+        use crate::exact::facilitator::smart_wallet::ObservedTransfer;
+
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = {
+            let (ata, _) = Pubkey::find_program_address(
+                &[pay_to.as_ref(), spl_token::ID.as_ref(), asset.as_ref()],
+                &ATA_PROGRAM_PUBKEY,
+            );
+            ata
+        };
+        let matched = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 1,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([4u8; 32]),
+        };
+        let miss = vec![UiInnerInstructions {
+            index: 0,
+            instructions: vec![UiInstruction::Parsed(UiParsedInstruction::Parsed(
+                ParsedInstruction {
+                    program: "spl-token".into(),
+                    program_id: spl_token::ID.to_string(),
+                    parsed: serde_json::json!({
+                        "type": "transferChecked",
+                        "info": {
+                            "mint": matched.mint.to_string(),
+                            "destination": Pubkey::new_from_array([8u8; 32]).to_string(),
+                            "authority": matched.authority.to_string(),
+                            "tokenAmount": { "amount": "1" }
+                        }
+                    }),
+                    stack_height: None,
+                },
+            ))],
+        }];
+
+        let tx = dummy_tx(b"toctou");
+        let tx_key = transaction_message_hash(&tx);
+        let pending = Arc::new(InMemoryPendingSettlementStore::new());
+        let stub = StubProvider::new(SignatureConfirm::Confirmed);
+        stub.inner_ixs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .replace(miss);
+        let fac = facilitator(stub, Arc::clone(&pending), SettlementCache::new());
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
+        let verification = VerifyTransferResult {
+            payer: Address::new(matched.authority),
+            transaction: tx,
+            amount: 1,
+            matched_transfer: Some(matched),
+        };
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
+            .await
+            .expect("settle");
+        match response {
+            SettleResponse::Failure { reason, .. } => {
+                assert_eq!(reason.as_str(), POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED);
+            }
+            other => panic!("expected post-settle failure, got {other:?}"),
+        }
     }
 }

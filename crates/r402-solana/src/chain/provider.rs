@@ -11,9 +11,11 @@ use solana_client::pubsub_client::PubsubClientError;
 use solana_client::rpc_client::SerializableTransaction;
 use solana_client::rpc_config::{
     RpcSendTransactionConfig, RpcSignatureSubscribeConfig, RpcSimulateTransactionConfig,
+    RpcTransactionConfig, UiTransactionEncoding,
 };
 use solana_client::rpc_response::{
-    RpcSignatureResult, TransactionConfirmationStatus, TransactionError, UiTransactionError,
+    RpcSignatureResult, TransactionConfirmationStatus, TransactionError, UiInnerInstructions,
+    UiLoadedAddresses, UiTransactionError,
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::{Keypair, Signer};
@@ -208,6 +210,21 @@ impl ChainProvider for SolanaChainProvider {
     }
 }
 
+/// Successful `simulateTransaction` outcome.
+///
+/// Simulation `err` is mapped to [`SolanaChainProviderError::InvalidTransaction`]
+/// before this struct is returned, so callers only see CPI traces on a
+/// simulation that would commit.
+#[derive(Debug, Clone, Default)]
+pub struct SimulateTransactionResult {
+    /// CPI inner instructions (empty when the RPC omitted them).
+    pub inner_instructions: Vec<UiInnerInstructions>,
+    /// ALT-loaded addresses in runtime order (writable, then readonly).
+    pub loaded_addresses: UiLoadedAddresses,
+    /// Compute units consumed, when the RPC reports them.
+    pub units_consumed: Option<u64>,
+}
+
 /// Result of waiting for a broadcast signature (official `getSignatureStatuses`).
 #[derive(Debug, Clone)]
 pub enum SignatureConfirm {
@@ -225,11 +242,14 @@ pub enum SignatureConfirm {
 /// on Solana, including transaction simulation, signing, and confirmation.
 pub trait SolanaChainProviderLike: Sync {
     /// Simulates a transaction with the given configuration.
+    ///
+    /// Returns inner instructions when the RPC records them (`inner_instructions:
+    /// true`). A simulation `err` is [`SolanaChainProviderError::InvalidTransaction`].
     fn simulate_transaction_with_config(
         &self,
         tx: &VersionedTransaction,
         cfg: RpcSimulateTransactionConfig,
-    ) -> impl Future<Output = Result<(), SolanaChainProviderError>> + Send;
+    ) -> impl Future<Output = Result<SimulateTransactionResult, SolanaChainProviderError>> + Send;
 
     /// Fetches multiple accounts in a single RPC call.
     fn get_multiple_accounts(
@@ -283,6 +303,26 @@ pub trait SolanaChainProviderLike: Sync {
         signature: &Signature,
         commitment_config: CommitmentConfig,
     ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send;
+
+    /// Confirmed-tx inner instructions for Path 2 post-settle TOCTOU.
+    ///
+    /// `Ok(None)` when the tx is not yet indexed or the RPC omitted inners.
+    /// `Ok(Some(vec))` (including empty) means the index returned a meta object.
+    fn get_confirmed_inner_instructions(
+        &self,
+        _signature: &Signature,
+    ) -> impl Future<Output = Result<Option<Vec<UiInnerInstructions>>, SolanaChainProviderError>> + Send
+    {
+        std::future::ready(Ok(None))
+    }
+
+    /// Token-account balance in base units, or `None` if missing/RPC error.
+    fn get_token_account_balance(
+        &self,
+        _token_account: &Pubkey,
+    ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
+        std::future::ready(Ok(None))
+    }
 }
 
 impl SolanaChainProviderLike for SolanaChainProvider {
@@ -290,13 +330,18 @@ impl SolanaChainProviderLike for SolanaChainProvider {
         &self,
         tx: &VersionedTransaction,
         cfg: RpcSimulateTransactionConfig,
-    ) -> Result<(), SolanaChainProviderError> {
+    ) -> Result<SimulateTransactionResult, SolanaChainProviderError> {
         let sim = self
             .rpc_client
             .simulate_transaction_with_config(tx, cfg)
             .await?;
-        sim.value.err.map_or(Ok(()), |e| {
-            Err(SolanaChainProviderError::InvalidTransaction(e))
+        if let Some(err) = sim.value.err {
+            return Err(SolanaChainProviderError::InvalidTransaction(err));
+        }
+        Ok(SimulateTransactionResult {
+            inner_instructions: sim.value.inner_instructions.unwrap_or_default(),
+            loaded_addresses: sim.value.loaded_addresses.unwrap_or_default(),
+            units_consumed: sim.value.units_consumed,
         })
     }
 
@@ -470,6 +515,41 @@ impl SolanaChainProviderLike for SolanaChainProvider {
             tokio::time::sleep(POLL_INTERVAL).await;
         }
     }
+
+    async fn get_confirmed_inner_instructions(
+        &self,
+        signature: &Signature,
+    ) -> Result<Option<Vec<UiInnerInstructions>>, SolanaChainProviderError> {
+        let config = RpcTransactionConfig {
+            encoding: Some(UiTransactionEncoding::JsonParsed),
+            commitment: Some(CommitmentConfig::confirmed()),
+            max_supported_transaction_version: Some(0),
+        };
+        match self
+            .rpc_client
+            .get_transaction_with_config(signature, config)
+            .await
+        {
+            Ok(encoded) => Ok(encoded.transaction.meta.and_then(|meta| {
+                Option::<Vec<UiInnerInstructions>>::from(meta.inner_instructions)
+            })),
+            Err(_) => Ok(None),
+        }
+    }
+
+    async fn get_token_account_balance(
+        &self,
+        token_account: &Pubkey,
+    ) -> Result<Option<u64>, SolanaChainProviderError> {
+        match self
+            .rpc_client
+            .get_token_account_balance_with_commitment(token_account, CommitmentConfig::confirmed())
+            .await
+        {
+            Ok(resp) => Ok(resp.value.amount.parse().ok()),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 fn classify_signature_status(
@@ -493,7 +573,8 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         &self,
         tx: &VersionedTransaction,
         cfg: RpcSimulateTransactionConfig,
-    ) -> impl Future<Output = Result<(), SolanaChainProviderError>> + Send {
+    ) -> impl Future<Output = Result<SimulateTransactionResult, SolanaChainProviderError>> + Send
+    {
         (**self).simulate_transaction_with_config(tx, cfg)
     }
 
@@ -552,6 +633,21 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         commitment_config: CommitmentConfig,
     ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send {
         (**self).confirm_signature(signature, commitment_config)
+    }
+
+    fn get_confirmed_inner_instructions(
+        &self,
+        signature: &Signature,
+    ) -> impl Future<Output = Result<Option<Vec<UiInnerInstructions>>, SolanaChainProviderError>> + Send
+    {
+        (**self).get_confirmed_inner_instructions(signature)
+    }
+
+    fn get_token_account_balance(
+        &self,
+        token_account: &Pubkey,
+    ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
+        (**self).get_token_account_balance(token_account)
     }
 }
 
