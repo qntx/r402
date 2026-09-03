@@ -342,8 +342,8 @@ async fn verify_transaction_path1<P: SolanaChainProviderLike>(
     })
 }
 
-/// Path 2 — official order: caps → allowlist → ALT isolation → compute budget
-/// → simulate inners → exactly-one match (spec §3.2).
+/// Path 2 — official order: caps → resolve ALTs → allowlist → isolation →
+/// compute budget → simulate inners → exactly-one match (spec §3.2).
 async fn verify_transaction_path2<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: VersionedTransaction,
@@ -351,8 +351,8 @@ async fn verify_transaction_path2<P: SolanaChainProviderLike>(
     config: &SolanaExactFacilitatorConfig,
 ) -> Result<VerifyTransferResult, VerificationError> {
     super::smart_wallet::assert_path2_provider(provider, config)?;
-    super::smart_wallet::assert_path2_program_allowlist(&transaction, config)?;
     let keys = super::smart_wallet::resolve_loaded_account_keys(provider, &transaction).await?;
+    super::smart_wallet::assert_path2_program_allowlist(&transaction, &keys, config)?;
     super::smart_wallet::assert_fee_payer_isolated_from_keys(
         &transaction,
         &keys,
@@ -549,6 +549,7 @@ mod tests {
         inner: Vec<UiInnerInstructions>,
         loaded: solana_client::rpc_response::UiLoadedAddresses,
         smart_wallet: bool,
+        lookup_tables: std::collections::HashMap<Pubkey, Vec<Pubkey>>,
     }
 
     impl SolanaChainProviderLike for Path2Stub {
@@ -626,14 +627,22 @@ mod tests {
 
         fn fetch_address_lookup_tables(
             &self,
-            _tables: &[Pubkey],
+            tables: &[Pubkey],
         ) -> impl Future<
             Output = Result<
                 std::collections::HashMap<Pubkey, Vec<Pubkey>>,
                 SolanaChainProviderError,
             >,
         > + Send {
-            std::future::ready(Ok(std::collections::HashMap::new()))
+            let out = tables
+                .iter()
+                .filter_map(|table| {
+                    self.lookup_tables
+                        .get(table)
+                        .map(|addrs| (*table, addrs.clone()))
+                })
+                .collect();
+            std::future::ready(Ok(out))
         }
 
         fn supports_smart_wallet(&self) -> bool {
@@ -776,6 +785,7 @@ mod tests {
             inner,
             loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
             smart_wallet: true,
+            lookup_tables: std::collections::HashMap::new(),
         };
         let config = SolanaExactFacilitatorConfig {
             enable_smart_wallet_verification: true,
@@ -818,6 +828,7 @@ mod tests {
             inner: Vec::new(),
             loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
             smart_wallet: true,
+            lookup_tables: std::collections::HashMap::new(),
         };
         let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
         let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
@@ -847,6 +858,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn path2_alt_loaded_program_is_not_allowed() {
+        use solana_message::compiled_instruction::CompiledInstruction;
+        use solana_message::v0::{Message as MessageV0, MessageAddressTableLookup};
+        use solana_message::{Hash, MessageHeader, VersionedMessage};
+
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let table = Pubkey::new_from_array([5u8; 32]);
+        let tx = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(MessageV0 {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys: vec![payer],
+                recent_blockhash: Hash::default(),
+                instructions: vec![CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: Vec::new(),
+                    data: vec![1],
+                }],
+                address_table_lookups: vec![MessageAddressTableLookup {
+                    account_key: table,
+                    writable_indexes: vec![0],
+                    readonly_indexes: Vec::new(),
+                }],
+            }),
+        };
+        let mut lookup_tables = std::collections::HashMap::new();
+        lookup_tables.insert(table, vec![wallet]);
+        let stub = Path2Stub {
+            pubkey: Pubkey::new_from_array([7u8; 32]),
+            inner: Vec::new(),
+            loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
+            smart_wallet: true,
+            lookup_tables,
+        };
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let config = SolanaExactFacilitatorConfig {
+            enable_smart_wallet_verification: true,
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
+        let err = verify_transaction_path2(&stub, tx, &requirement, &config)
+            .await
+            .unwrap_err();
+        let reason = r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+            .reason()
+            .as_str()
+            .to_owned();
+        assert!(reason.contains("invalid_exact_svm_smart_wallet_program_not_allowed"));
+        assert!(reason.contains(&wallet.to_string()));
+        assert_ne!(reason, "invalid_payload");
+    }
+
+    #[tokio::test]
     async fn path2_without_provider_caps_is_unavailable() {
         use crate::exact::payload::TransactionInt;
         let wallet = Pubkey::new_from_array([8u8; 32]);
@@ -856,6 +930,7 @@ mod tests {
             inner: Vec::new(),
             loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
             smart_wallet: false,
+            lookup_tables: std::collections::HashMap::new(),
         };
         let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
         let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
@@ -931,6 +1006,7 @@ mod tests {
             inner,
             loaded,
             smart_wallet: true,
+            lookup_tables: std::collections::HashMap::new(),
         };
         let config = SolanaExactFacilitatorConfig {
             enable_smart_wallet_verification: true,

@@ -235,17 +235,21 @@ pub(super) fn assert_path2_provider<P: SolanaChainProviderLike>(
 }
 
 /// Top-level programs except `ComputeBudget` and Memo must be in the Path 2 allowlist.
+///
+/// `keys` is the loaded account list (static + ALT writable + ALT readonly).
+/// A `program_id_index` past that list is reject, not skip (I7).
 pub(super) fn assert_path2_program_allowlist(
     tx: &VersionedTransaction,
+    keys: &[Pubkey],
     config: &SolanaExactFacilitatorConfig,
 ) -> Result<(), VerificationError> {
     let allowed = config.path2_allowed_programs();
-    let keys = tx.message.static_account_keys();
     let compute = solana_compute_budget_interface::ID;
     for ix in tx.message.instructions() {
-        let Some(program_id) = keys.get(usize::from(ix.program_id_index)).copied() else {
-            continue;
-        };
+        let program_id = keys
+            .get(usize::from(ix.program_id_index))
+            .copied()
+            .ok_or_else(|| wire(ERR_PROGRAM_NOT_ALLOWED))?;
         if program_id == compute || program_id == crate::exact::SPL_MEMO_PROGRAM {
             continue;
         }
@@ -987,8 +991,80 @@ mod tests {
             accounts: Vec::new(),
             data: vec![1],
         }]);
-        let err = assert_path2_program_allowlist(&tx, &SolanaExactFacilitatorConfig::default())
-            .unwrap_err();
+        let keys = tx.message.static_account_keys().to_vec();
+        let err =
+            assert_path2_program_allowlist(&tx, &keys, &SolanaExactFacilitatorConfig::default())
+                .unwrap_err();
+        let reason = r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+            .reason()
+            .as_str()
+            .to_owned();
+        assert!(reason.contains(ERR_PROGRAM_NOT_ALLOWED));
+        assert!(reason.contains(&wallet.to_string()));
+    }
+
+    fn v0_tx_program_from_alt(_wallet: Pubkey) -> (VersionedTransaction, Pubkey) {
+        use solana_message::compiled_instruction::CompiledInstruction;
+        use solana_message::v0::{Message as MessageV0, MessageAddressTableLookup};
+        use solana_message::{Hash, MessageHeader, VersionedMessage};
+        use solana_signature::Signature as Sig;
+
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        let table = Pubkey::new_from_array([5u8; 32]);
+        let tx = VersionedTransaction {
+            signatures: vec![Sig::default()],
+            message: VersionedMessage::V0(MessageV0 {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys: vec![payer],
+                recent_blockhash: Hash::default(),
+                instructions: vec![CompiledInstruction {
+                    program_id_index: 1,
+                    accounts: Vec::new(),
+                    data: vec![1],
+                }],
+                address_table_lookups: vec![MessageAddressTableLookup {
+                    account_key: table,
+                    writable_indexes: vec![0],
+                    readonly_indexes: Vec::new(),
+                }],
+            }),
+        };
+        (tx, table)
+    }
+
+    #[test]
+    fn path2_allowlist_rejects_alt_indexed_program_not_in_static_keys() {
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let (tx, _table) = v0_tx_program_from_alt(wallet);
+        let static_only = tx.message.static_account_keys().to_vec();
+        assert!(static_only.get(1).is_none());
+        let err = assert_path2_program_allowlist(
+            &tx,
+            &static_only,
+            &SolanaExactFacilitatorConfig::default(),
+        )
+        .unwrap_err();
+        assert!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str()
+                .contains(ERR_PROGRAM_NOT_ALLOWED)
+        );
+    }
+
+    #[test]
+    fn path2_allowlist_rejects_unknown_program_loaded_from_alt() {
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let (tx, _table) = v0_tx_program_from_alt(wallet);
+        let mut keys = tx.message.static_account_keys().to_vec();
+        keys.push(wallet);
+        let err =
+            assert_path2_program_allowlist(&tx, &keys, &SolanaExactFacilitatorConfig::default())
+                .unwrap_err();
         let reason = r402_protocol::AsPaymentProblem::as_payment_problem(&err)
             .reason()
             .as_str()
