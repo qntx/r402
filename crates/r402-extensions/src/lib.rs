@@ -91,6 +91,8 @@ pub use siwx::{
 #[cfg(test)]
 mod _dev_deps {
     use alloy_signer_local as _;
+    #[cfg(not(feature = "siwx"))]
+    use http as _;
     use tokio as _;
     use wiremock as _;
 }

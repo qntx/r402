@@ -14,6 +14,13 @@
     reason = "idiomatic test-code patterns"
 )]
 
+use std::future::Future;
+use std::pin::Pin;
+
+use r402_client::{
+    ClientExtension, DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, PaymentClient,
+    SchemeClient,
+};
 use r402_extensions::{
     BUILDER_CODE, BuilderCodeClient, BuilderCodeData, BuilderCodeExtension,
     BuilderCodeFacilitatorExtension, ERC_8021_MARKER_HEX, MAX_CLIENT_SERVICE_CODES,
@@ -21,8 +28,11 @@ use r402_extensions::{
     encode_builder_code_suffix, parse_builder_code_suffix_from_calldata,
 };
 use r402_protocol::extension::{AdvertiseContext, Extension};
-use r402_protocol::payment::Extensions;
-use serde_json::json;
+use r402_protocol::payment::{
+    Base64Bytes, Extensions, PaymentRequired, PaymentRequirements, ResourceInfo,
+};
+use r402_protocol::{ChainId, ClientError, SchemeId};
+use serde_json::{Value, json};
 
 const APP: &str = "bc_my_app";
 const SERVICE: &str = "bc_my_client";
@@ -30,6 +40,88 @@ const WALLET: &str = "bc_my_facilitator";
 
 fn hex_lower(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn b64_json(value: &Value) -> String {
+    Base64Bytes::encode(serde_json::to_vec(value).unwrap()).to_string()
+}
+
+fn json_from_b64(b64: &str) -> Value {
+    serde_json::from_slice(&Base64Bytes::from(b64.as_bytes()).decode().unwrap()).unwrap()
+}
+
+fn required_bare() -> PaymentRequired {
+    PaymentRequired::new(ResourceInfo::new("https://example.com")).with_accepts(vec![
+        PaymentRequirements::new(
+            "exact".into(),
+            "eip155:1".parse().unwrap(),
+            "1".into(),
+            "0xb".into(),
+            "0xa".into(),
+            60,
+        ),
+    ])
+}
+
+fn builder_code_info(payload: &Value) -> &Value {
+    &payload["extensions"][BUILDER_CODE]["info"]
+}
+
+struct JsonSigner(String);
+
+impl PaymentCandidateSigner for JsonSigner {
+    fn sign_payment<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>> {
+        Box::pin(std::future::ready(Ok(self.0.clone())))
+    }
+}
+
+struct JsonScheme;
+
+impl SchemeId for JsonScheme {
+    fn namespace(&self) -> &'static str {
+        "eip155"
+    }
+    fn scheme(&self) -> &'static str {
+        "exact"
+    }
+}
+
+impl SchemeClient for JsonScheme {
+    fn accept(&self, required: &PaymentRequired) -> Vec<PaymentCandidate> {
+        required
+            .accepts
+            .iter()
+            .map(|requirements| {
+                let envelope = json!({
+                    "x402Version": 2,
+                    "accepted": {
+                        "scheme": requirements.scheme,
+                        "network": requirements.network.to_string(),
+                        "amount": requirements.amount,
+                        "payTo": requirements.pay_to,
+                        "maxTimeoutSeconds": requirements.max_timeout_seconds,
+                        "asset": requirements.asset,
+                    },
+                    "payload": { "signature": "signed" },
+                });
+                PaymentCandidate {
+                    chain_id: requirements.network.clone(),
+                    asset: requirements.asset.clone(),
+                    amount: requirements.amount.clone(),
+                    scheme: requirements.scheme.clone(),
+                    pay_to: requirements.pay_to.clone(),
+                    requirements: requirements.clone(),
+                    signer: Box::new(JsonSigner(b64_json(&envelope))),
+                }
+            })
+            .collect()
+    }
+
+    fn find_default_asset(&self, _: &str, _: &ChainId) -> Option<DefaultAssetInfo> {
+        None
+    }
 }
 
 #[test]
@@ -90,6 +182,154 @@ fn client_rejects_too_many() {
         .collect();
     let refs: Vec<&str> = too_many.iter().map(String::as_str).collect();
     assert!(BuilderCodeClient::try_new(refs).is_err());
+}
+
+#[tokio::test]
+async fn client_enrich_payment_payload_writes_s_not_a() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let encoded = client
+        .enrich_payment_payload(&b64_json(&json!({})), &required_bare())
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&encoded);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["s"], json!([SERVICE]));
+    assert!(info.get("a").is_none());
+}
+
+#[tokio::test]
+async fn client_enrich_merges_advertised_s() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        BUILDER_CODE,
+        declare_builder_code_extension(APP, &["bc_server"]).unwrap(),
+    );
+    let required = required_bare().with_extensions(advertised);
+    let encoded = client
+        .enrich_payment_payload(&b64_json(&json!({})), &required)
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&encoded);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["s"], json!([SERVICE, "bc_server"]));
+    assert!(info.get("a").is_none());
+}
+
+#[tokio::test]
+async fn client_enrich_does_not_insert_a_when_undeclared() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let encoded = client
+        .enrich_payment_payload(&b64_json(&json!({})), &required_bare())
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&encoded);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["s"], json!([SERVICE]));
+    assert!(info.get("a").is_none());
+}
+
+#[tokio::test]
+async fn client_enrich_leaves_existing_payload_a() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let payload = json!({
+        "extensions": {
+            "builder-code": { "info": { "a": "bc_forged" } }
+        }
+    });
+    let encoded = client
+        .enrich_payment_payload(&b64_json(&payload), &required_bare())
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&encoded);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["a"], "bc_forged");
+    assert_eq!(info["s"], json!([SERVICE]));
+}
+
+#[tokio::test]
+async fn client_enrich_json_error() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let required = required_bare();
+    let parse_err = client
+        .enrich_payment_payload("!!!", &required)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(parse_err, ClientError::Parse(_)),
+        "invalid base64 must be Parse, got {parse_err:?}"
+    );
+    let json_err = client
+        .enrich_payment_payload(&Base64Bytes::encode(b"{").to_string(), &required)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(json_err, ClientError::Json(_)),
+        "invalid JSON must be Json, got {json_err:?}"
+    );
+}
+
+#[tokio::test]
+async fn client_enrich_non_object_payload_is_parse() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let required = required_bare();
+    for payload in [json!([]), json!("nope")] {
+        let err = client
+            .enrich_payment_payload(&b64_json(&payload), &required)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ClientError::Parse(ref msg) if msg == "payment payload is not a JSON object"
+            ),
+            "non-object payload must be Parse, got {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn client_enrich_missing_info_creates_s_only() {
+    let client = BuilderCodeClient::try_new([SERVICE]).unwrap();
+    let payload = json!({
+        "extensions": {
+            "builder-code": { "schema": { "type": "object" } }
+        }
+    });
+    let encoded = client
+        .enrich_payment_payload(&b64_json(&payload), &required_bare())
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&encoded);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["s"], json!([SERVICE]));
+    assert!(info.get("a").is_none());
+    assert_eq!(
+        decoded["extensions"][BUILDER_CODE]["schema"],
+        json!({ "type": "object" })
+    );
+}
+
+#[test]
+fn client_registers_via_with_extension() {
+    let client =
+        PaymentClient::new().with_extension(BuilderCodeClient::try_new([SERVICE]).unwrap());
+    assert_eq!(client.extension_count(), 1);
+}
+
+#[tokio::test]
+async fn create_payment_enriches_s() {
+    let created = PaymentClient::new()
+        .disable_spend_controls()
+        .register(JsonScheme)
+        .with_extension(BuilderCodeClient::try_new([SERVICE]).unwrap())
+        .create_payment(&required_bare())
+        .await
+        .unwrap();
+    let decoded = json_from_b64(&created.signed_payload);
+    let info = builder_code_info(&decoded);
+    assert_eq!(info["s"], json!([SERVICE]));
+    assert!(info.get("a").is_none());
 }
 
 #[test]

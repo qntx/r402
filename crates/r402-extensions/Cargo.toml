@@ -44,7 +44,7 @@ ext-bazaar-discovery = [
 ext-payment-id = ["cache", "dep:thiserror"]
 ext-eip2612 = []
 ext-erc20-approval = []
-ext-builder-code = ["dep:thiserror"]
+ext-builder-code = ["dep:thiserror", "dep:r402-client"]
 ext-offer-receipt = [
     "dep:thiserror",
     "dep:serde",

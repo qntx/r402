@@ -1,8 +1,8 @@
 //! `builder-code` extension — ERC-8021 Schema 2 attribution (official wire).
 //!
 //! Server declare `a` (and optional `s[]`) on 402. Facilitator appends a
-//! CBOR Schema 2 suffix at EVM settle (`w` plus echoed `a`/`s`). Client `s[]`
-//! enrich is a helper here; `PaymentClient` wiring is a later PR.
+//! CBOR Schema 2 suffix at EVM settle (`w` plus echoed `a`/`s`). Client
+//! [`BuilderCodeClient`] attaches payload `s[]` via [`r402_client::ClientExtension`].
 
 mod cbor;
 mod client;

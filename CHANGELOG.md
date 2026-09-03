@@ -26,6 +26,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `deny.toml` exception: `nacl` may use `LGPL-3.0-or-later` (`tonlib-core`).
 - `r402-concordium` in `.github/workflows/publish.yml` (official
   `@x402/concordium` 2.24.0).
+- `BuilderCodeClient` implements `ClientExtension`. Register with
+  `PaymentClient::with_extension` / `X402Client::with_extension`. Feature
+  `ext-builder-code` depends on `r402-client`. Enrich writes payload `s[]`
+  only (never `a`).
 
 ### Changed
 
