@@ -190,6 +190,18 @@ fn nonce_pair_records_and_rejects_reuse() {
 }
 
 #[test]
+fn consume_nonce_inserts_once() {
+    let store = InMemoryPaidAddressStore::new();
+    assert!(store.consume_nonce("n1"));
+    assert!(!store.consume_nonce("n1"));
+    assert!(store.has_used_nonce("n1"));
+    let clone = store.clone();
+    assert!(!clone.consume_nonce("n1"));
+    assert!(clone.consume_nonce("n2"));
+    assert!(store.has_used_nonce("n2"));
+}
+
+#[test]
 fn challenge_now_uses_32_hex_nonce() {
     let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
     let ext = SiwxExtension::new(origin).with_chain(SiwxChain::eip191("eip155:8453"));

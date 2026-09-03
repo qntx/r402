@@ -120,18 +120,16 @@ impl SiwxGate {
         let Ok(proof) = SiwxProof::parse_header(header) else {
             return false;
         };
-        if self.store.has_used_nonce(&proof.nonce) {
+        // Consume before verify so concurrent replay cannot both grant.
+        // Failed verify / unpaid miss leave the nonce consumed.
+        if !self.store.consume_nonce(&proof.nonce) {
             return false;
         }
         if proof.verify(self.extension.origin(), path).await.is_err() {
             return false;
         }
         let key = self.extension.origin().store_key(path);
-        if !(self.auth_only || self.store.contains(&key, &proof.address)) {
-            return false;
-        }
-        self.store.record_nonce(&proof.nonce);
-        true
+        self.auth_only || self.store.contains(&key, &proof.address)
     }
 }
 

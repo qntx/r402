@@ -4,9 +4,9 @@
 //! [`SettleResponse::Success`](r402_protocol::payment::SettleResponse) is
 //! recorded. v1 has no Redis and no TTL eviction.
 //!
-//! `has_used_nonce` / `record_nonce` are a pair: a nonce is recorded only
-//! after access is granted, and a recorded nonce is rejected as
-//! [`SiwxError::Nonce`](super::SiwxError::Nonce).
+//! [`PaidAddressStore::consume_nonce`] is insert-if-absent under one lock.
+//! HTTP consumes before CAIP-122 verify. A failed verify does not restore
+//! the nonce.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -19,11 +19,17 @@ pub trait PaidAddressStore: Send + Sync {
     /// Records a successful settlement. Failures and verifies are ignored.
     fn record_success(&self, store_key: &str, address: &str);
 
-    /// Whether `nonce` was already accepted for a granted request.
+    /// Whether `nonce` is already in the used set.
     fn has_used_nonce(&self, nonce: &str) -> bool;
 
-    /// Marks `nonce` as consumed. Called only after access is granted.
+    /// Marks `nonce` as used. Idempotent.
     fn record_nonce(&self, nonce: &str);
+
+    /// Inserts `nonce` if absent. `true` means this caller consumed it.
+    ///
+    /// Must be atomic. A later failed verify must not restore the nonce.
+    #[must_use]
+    fn consume_nonce(&self, nonce: &str) -> bool;
 }
 
 #[derive(Debug, Default)]
@@ -81,6 +87,10 @@ impl PaidAddressStore for InMemoryPaidAddressStore {
 
     fn record_nonce(&self, nonce: &str) {
         let _ = self.lock().nonces.insert(nonce.to_owned());
+    }
+
+    fn consume_nonce(&self, nonce: &str) -> bool {
+        self.lock().nonces.insert(nonce.to_owned())
     }
 }
 
