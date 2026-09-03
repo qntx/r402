@@ -42,10 +42,8 @@ server = [
     "dep:r402-server",
     "dep:solana-client",
     "dep:solana-commitment-config",
-    "dep:solana-keypair",
     "dep:solana-signature",
     "dep:solana-signer",
-    "dep:tokio",
 ]
 facilitator = [
     "dep:bincode",

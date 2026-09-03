@@ -8,17 +8,18 @@
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use r402_protocol::{Base64Bytes, SettleResponse, VerifyResponse};
-use r402_protocol::{FacilitatorError, VerificationError};
+use r402_protocol::{
+    Base64Bytes, FacilitatorError, SettleResponse, VerificationError, VerifyResponse,
+};
 use solana_pubkey::Pubkey;
 use solana_transaction::versioned::VersionedTransaction;
 
 use super::config::{EXPIRES_AT_CLOCK_SKEW_SECS, SolanaUptoFacilitatorConfig};
 use crate::chain::provider::SolanaChainProviderLike;
 use crate::upto::channel::{
-    ChannelConfig, parse_extra_memo, resolve_payment_channel_config, resolve_token_program,
+    ChannelConfig, VerifyOpenExpected, parse_extra_memo, resolve_payment_channel_config,
+    resolve_token_program, verify_open_transaction,
 };
-use crate::upto::channel::{VerifyOpenExpected, verify_open_transaction};
 use crate::upto::error::{codes, upto_reason};
 use crate::upto::payload::{UptoScheme, UptoSvmPayload};
 

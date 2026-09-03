@@ -14,9 +14,9 @@ use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
 use super::SolanaUpto;
-use super::channel::{BuildOpenArgs, build_open_transaction};
 use super::channel::{
-    parse_extra_memo, parse_extra_u64, parse_token_program_hint, resolve_payment_channel_config,
+    BuildOpenArgs, build_open_transaction, parse_extra_memo, parse_extra_u64,
+    parse_token_program_hint, resolve_payment_channel_config,
 };
 use super::payload::{UptoSvmPayload, extra_keys, v2};
 use crate::chain::rpc::RpcClientLike;

@@ -6,9 +6,8 @@
 )]
 
 use solana_compute_budget_interface::ComputeBudgetInstruction;
-use solana_message::Hash;
-use solana_message::VersionedMessage;
 use solana_message::v0::Message as MessageV0;
+use solana_message::{Hash, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::Instruction;

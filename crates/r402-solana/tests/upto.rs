@@ -68,8 +68,7 @@ async fn create_payment_required_writes_escrow_payment_flow() {
         SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
     };
     use r402_server::{PaymentRequiredBuildContext, ResourceServer};
-    use r402_solana::USDC;
-    use r402_solana::UptoSvmScheme;
+    use r402_solana::{USDC, UptoSvmScheme};
     use serde_json::Value;
     use solana_keypair::Keypair;
     use solana_signer::Signer;
