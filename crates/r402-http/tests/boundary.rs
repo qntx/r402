@@ -230,3 +230,17 @@ async fn dynamic_concurrent_escrow_is_500() {
     assert_eq!(body["mode"], "concurrent");
     assert_eq!(body["flow"], "escrow");
 }
+
+#[tokio::test]
+async fn dynamic_escrow_without_cancel_is_500() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let layer = middleware(Arc::clone(&fac), FlowScheme::escrow_without_cancel())
+        .with_dynamic_price(|_, _, _| std::future::ready(vec![escrow_tag()]))
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+    let body = json_body(response).await;
+    assert_eq!(body["error"], "missing settle_on_cancel");
+    assert_eq!(body["scheme"], "exact");
+}
