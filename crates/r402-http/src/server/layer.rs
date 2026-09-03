@@ -330,7 +330,10 @@ async fn enforce<TSource: PriceTagSource>(
 
     let result = match settlement_mode {
         SettlementMode::Sequential => gate.handle_request(inner, req).await,
-        SettlementMode::Concurrent => gate.handle_request_concurrent(inner, req).await,
+        SettlementMode::Concurrent => {
+            // Join future holds handler + settle state (~17 KiB).
+            Box::pin(gate.handle_request_concurrent(inner, req)).await
+        }
         SettlementMode::Background => gate.handle_request_background(inner, req).await,
     };
     Ok(result.unwrap_or_else(|err| gate.error_response(err)))

@@ -437,25 +437,63 @@ fn check_receipt(
     expected: Option<ExpectedTransfer>,
 ) -> Result<TxHash, Eip155ExactError> {
     if !receipt.status() {
-        #[cfg(feature = "telemetry")]
-        tracing::event!(Level::WARN, status = "failed", tx = %receipt.transaction_hash, "{label} failed");
-        return Err(Eip155ExactError::TransactionReverted(
-            receipt.transaction_hash,
-        ));
+        return receipt_reverted(receipt, label);
     }
     if let Some(expected) = expected {
-        let logs = receipt.logs();
-        if !transfer_event_matches(logs, expected) {
-            #[cfg(feature = "telemetry")]
-            tracing::event!(Level::WARN, status = "mismatch", tx = %receipt.transaction_hash, "{label} transfer event mismatch");
-            return Err(Eip155ExactError::TransferEventMismatch(
-                receipt.transaction_hash,
-            ));
-        }
+        check_receipt_transfer(receipt, label, expected)?;
+    }
+    log_receipt_ok(receipt, label);
+    Ok(receipt.transaction_hash)
+}
+
+fn receipt_reverted(
+    receipt: &alloy_rpc_types_eth::TransactionReceipt,
+    #[cfg_attr(
+        not(feature = "telemetry"),
+        allow(unused_variables, reason = "label is telemetry-only")
+    )]
+    label: &str,
+) -> Result<TxHash, Eip155ExactError> {
+    #[cfg(feature = "telemetry")]
+    tracing::event!(Level::WARN, status = "failed", tx = %receipt.transaction_hash, "{label} failed");
+    Err(Eip155ExactError::TransactionReverted(
+        receipt.transaction_hash,
+    ))
+}
+
+fn check_receipt_transfer(
+    receipt: &alloy_rpc_types_eth::TransactionReceipt,
+    #[cfg_attr(
+        not(feature = "telemetry"),
+        allow(unused_variables, reason = "label is telemetry-only")
+    )]
+    label: &str,
+    expected: ExpectedTransfer,
+) -> Result<(), Eip155ExactError> {
+    if transfer_event_matches(receipt.logs(), expected) {
+        return Ok(());
     }
     #[cfg(feature = "telemetry")]
+    tracing::event!(Level::WARN, status = "mismatch", tx = %receipt.transaction_hash, "{label} transfer event mismatch");
+    Err(Eip155ExactError::TransferEventMismatch(
+        receipt.transaction_hash,
+    ))
+}
+
+fn log_receipt_ok(
+    #[cfg_attr(
+        not(feature = "telemetry"),
+        allow(unused_variables, reason = "receipt hash is telemetry-only")
+    )]
+    receipt: &alloy_rpc_types_eth::TransactionReceipt,
+    #[cfg_attr(
+        not(feature = "telemetry"),
+        allow(unused_variables, reason = "label is telemetry-only")
+    )]
+    label: &str,
+) {
+    #[cfg(feature = "telemetry")]
     tracing::event!(Level::INFO, status = "ok", tx = %receipt.transaction_hash, "{label} succeeded");
-    Ok(receipt.transaction_hash)
 }
 
 fn transfer_event_matches(logs: &[alloy_rpc_types_eth::Log], expected: ExpectedTransfer) -> bool {

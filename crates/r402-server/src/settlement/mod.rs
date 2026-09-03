@@ -135,8 +135,8 @@ pub enum ScheduledSettlement<T, E> {
     HandlerOkSettleOk {
         /// Handler value.
         value: T,
-        /// Settle receipt.
-        receipt: SettleResponse,
+        /// Settle receipt. Boxed so the success path does not size the enum.
+        receipt: Box<SettleResponse>,
     },
     /// Handler failed. Concurrent: settle handle dropped (detached). Background: settle already spawned.
     HandlerErrDetach {
@@ -286,7 +286,10 @@ where
     let settle_handle = tokio::spawn(settle);
     match handler.await {
         Ok(value) => match settle_handle.await {
-            Ok(Ok(receipt)) => ScheduledSettlement::HandlerOkSettleOk { value, receipt },
+            Ok(Ok(receipt)) => ScheduledSettlement::HandlerOkSettleOk {
+                value,
+                receipt: Box::new(receipt),
+            },
             Ok(Err(error)) => ScheduledSettlement::SettleErr { value, error },
             Err(join) => ScheduledSettlement::SettleErr {
                 value,
@@ -334,27 +337,33 @@ fn log_background_settle_outcome(
     outcome: &Result<Result<SettleResponse, FacilitatorError>, tokio::task::JoinError>,
 ) {
     match outcome {
-        Ok(Ok(_)) => {
-            #[cfg(feature = "telemetry")]
-            tracing::debug!("background settlement completed");
-        }
-        Ok(Err(err)) => {
-            #[cfg(feature = "telemetry")]
-            tracing::error!(error = %err, "background settlement returned error");
-            #[cfg(not(feature = "telemetry"))]
-            let _ = err;
-        }
-        Err(join_err) => {
-            #[cfg(feature = "telemetry")]
-            if join_err.is_panic() {
-                tracing::error!(error = %join_err, "background settlement task panicked");
-            } else {
-                tracing::warn!(error = %join_err, "background settlement task cancelled");
-            }
-            #[cfg(not(feature = "telemetry"))]
-            let _ = join_err;
-        }
+        Ok(Ok(_)) => log_background_settle_ok(),
+        Ok(Err(err)) => log_background_settle_facilitator_err(err),
+        Err(join_err) => log_background_settle_join_err(join_err),
     }
+}
+
+fn log_background_settle_ok() {
+    #[cfg(feature = "telemetry")]
+    tracing::debug!("background settlement completed");
+}
+
+fn log_background_settle_facilitator_err(err: &FacilitatorError) {
+    #[cfg(feature = "telemetry")]
+    tracing::error!(error = %err, "background settlement returned error");
+    #[cfg(not(feature = "telemetry"))]
+    let _ = err;
+}
+
+fn log_background_settle_join_err(join_err: &tokio::task::JoinError) {
+    #[cfg(feature = "telemetry")]
+    if join_err.is_panic() {
+        tracing::error!(error = %join_err, "background settlement task panicked");
+    } else {
+        tracing::warn!(error = %join_err, "background settlement task cancelled");
+    }
+    #[cfg(not(feature = "telemetry"))]
+    let _ = join_err;
 }
 
 fn record_background_settle_metric(
