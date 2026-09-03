@@ -64,18 +64,13 @@ impl TtlSet {
         self.inner.contains_key(key)
     }
 
-    /// Drops `key` so a later [`TtlSet::reserve`] can succeed.
-    pub fn release(&self, key: &str) {
-        self.inner.invalidate(key);
-    }
-
     /// Returns the approximate current entry count (used for observability).
     #[must_use]
     pub fn entry_count(&self) -> u64 {
         self.inner.entry_count()
     }
 
-    /// Drops `key` so a later [`Self::reserve`] can succeed.
+    /// Drops `key` so a later [`TtlSet::reserve`] can succeed.
     pub fn release(&self, key: &str) {
         self.inner.invalidate(key);
     }
@@ -138,11 +133,6 @@ impl SettlementCache {
             .increment(1);
         }
         outcome
-    }
-
-    /// Drops a reserved key (terminal settle failure without a broadcast hash).
-    pub fn release(&self, key: &str) {
-        self.inner.release(key);
     }
 
     /// Returns the approximate current entry count (observability hook).
