@@ -2,7 +2,7 @@
 
 use http::HeaderMap;
 use r402_facilitator::DynFacilitator;
-use r402_protocol::error::{FacilitatorError, FacilitatorTransportKind};
+use r402_protocol::error::FacilitatorError;
 use r402_protocol::payment::{
     Base64Bytes, Extensions, PaymentRequired, PaymentRequirements, SettleResponse,
     SettlementOverrides, VerifyResponse,
@@ -10,7 +10,7 @@ use r402_protocol::payment::{
 use r402_server::{
     CancelReason, CompletedSettlement, PaymentFlowName, PaymentFlowPhases,
     PaymentRequiredBuildContext, ResourceServer, SettlePhase, SkipHandlerDirective,
-    WirePaymentPayload, resolve_payment_flow_phases,
+    WirePaymentPayload, resolve_payment_flow_phases, validate_accepts_against_supported,
 };
 
 use super::fail::GateError;
@@ -65,23 +65,22 @@ impl Gate {
     ///
     /// # Errors
     ///
-    /// [`GateError::Transport`] when `/supported` fails or returns no kinds.
+    /// [`GateError::Transport`] when `/supported` fails.
+    /// [`GateError::FacilitatorSupport`] when this accept list has no matching
+    /// kind or advertised extra is unusable.
     /// [`GateError::PaymentRequiredBuild`] when 402 construction fails.
     pub async fn build_payment_required(&mut self) -> Result<(), GateError> {
         let facilitator = self.server.facilitator();
         let supported = DynFacilitator::supported(facilitator.as_ref())
             .await
             .map_err(GateError::from_verify_facilitator)?;
-        if supported.kinds.is_empty() {
-            return Err(GateError::from_verify_facilitator(
-                FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody),
-            ));
-        }
         let reqs: Vec<_> = self
             .accepts
             .iter()
             .map(|pt| pt.requirements.clone())
             .collect();
+        validate_accepts_against_supported(&self.server, &reqs, &supported)
+            .map_err(GateError::FacilitatorSupport)?;
         let built = self
             .server
             .create_payment_required_response(

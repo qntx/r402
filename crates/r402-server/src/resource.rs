@@ -5,7 +5,7 @@ use std::sync::Arc;
 use r402_facilitator::{DynFacilitator, Facilitator};
 use r402_protocol::extension::{Extension, ExtensionRegistry};
 use r402_protocol::network::{ChainId, ChainIdPattern};
-use r402_protocol::payment::PaymentRequirements;
+use r402_protocol::payment::{PaymentRequirements, SupportedResponse, V2};
 
 use crate::hooks::{
     CancelReason, DynResourceServerHooks, PaymentHookContext, ResourceServerHooks,
@@ -15,7 +15,7 @@ use crate::payment_flow::{
     PaymentFlowError, PaymentFlowName, PaymentFlowScheme, ResolvedPaymentFlow, SettlePhase,
     resolve_payment_flow,
 };
-use crate::scheme::{DynSchemeNetworkServer, SchemeNetworkServer};
+use crate::scheme::{DynSchemeNetworkServer, FacilitatorSupportError, SchemeNetworkServer};
 
 /// Server-side payment orchestrator.
 pub struct ResourceServer {
@@ -210,4 +210,44 @@ impl ResourceServer {
         self.extensions.register(extension);
         self
     }
+}
+
+/// Checks each accept against facilitator `/supported` kinds.
+///
+/// Unused registrations are ignored. An unregistered accept skips
+/// [`SchemeNetworkServer::validate_facilitator_support`].
+///
+/// # Errors
+///
+/// [`FacilitatorSupportError::KindMissing`] when no v2 kind matches the
+/// accept. Other variants come from the registered scheme hook.
+pub fn validate_accepts_against_supported(
+    server: &ResourceServer,
+    accepts: &[PaymentRequirements],
+    supported: &SupportedResponse,
+) -> Result<(), FacilitatorSupportError> {
+    for requirements in accepts {
+        let scheme = requirements.scheme.as_str();
+        let network = requirements.network.to_string();
+        let kind = supported.kinds.iter().find(|kind| {
+            V2 == kind.x402_version
+                && kind.scheme.as_str() == scheme
+                && kind.network.as_str() == network
+        });
+        let Some(kind) = kind else {
+            return Err(FacilitatorSupportError::KindMissing {
+                scheme: requirements.scheme.clone(),
+                network: requirements.network.clone(),
+            });
+        };
+        let Some(registered) = server.registered_scheme(scheme, &requirements.network) else {
+            continue;
+        };
+        registered.validate_facilitator_support(
+            &requirements.network,
+            kind,
+            &supported.extensions,
+        )?;
+    }
+    Ok(())
 }

@@ -40,7 +40,7 @@ pub use payment_flow::{
     is_recognized_payment_flow, resolve_payment_flow, resolve_payment_flow_phases,
 };
 pub use required::PaymentRequiredBuildContext;
-pub use resource::ResourceServer;
+pub use resource::{ResourceServer, validate_accepts_against_supported};
 pub use scheme::{
     DynSchemeNetworkServer, FacilitatorSupportError, SchemeNetworkServer,
     SchemePaymentRequiredContext,

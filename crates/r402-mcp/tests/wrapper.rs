@@ -19,21 +19,23 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use compact_str::CompactString;
 use r402_facilitator::Facilitator;
 use r402_mcp::{
     McpPaymentPayload, PaymentWrapper, PaymentWrapperConfig, PaymentWrapperConfigError,
     attach_payment_to_params, extract_payment_required, extract_settle_response,
 };
 use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKind};
-use r402_protocol::network::ChainIdPattern;
+use r402_protocol::network::{ChainId, ChainIdPattern};
 use r402_protocol::payment::{
     Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
     SupportedPaymentKind, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use r402_server::{
-    AfterVerifyDecision, BeforeOpDecision, PaymentFlowConfig, PaymentFlowName, PaymentHookContext,
-    ResourceServer, ResourceServerHooks, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
-    SkipHandlerDirective, VerifiedPaymentCanceledContext, VerifyResultContext,
+    AfterVerifyDecision, BeforeOpDecision, FacilitatorSupportError, PaymentFlowConfig,
+    PaymentFlowName, PaymentHookContext, ResourceServer, ResourceServerHooks,
+    SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer, SkipHandlerDirective,
+    VerifiedPaymentCanceledContext, VerifyResultContext,
 };
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock};
 use serde_json::{Value, json};
@@ -258,6 +260,77 @@ impl SchemeNetworkServer for FlowScheme {
     }
 }
 
+struct FeePayerScheme(FlowScheme);
+
+impl SchemeNetworkServer for FeePayerScheme {
+    fn scheme(&self) -> &str {
+        self.0.scheme()
+    }
+
+    fn default_asset_transfer_method(&self) -> &str {
+        self.0.default_asset_transfer_method()
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        self.0.payment_flows()
+    }
+
+    fn validate_facilitator_support(
+        &self,
+        network: &ChainId,
+        kind: &SupportedPaymentKind,
+        _facilitator_extensions: &[CompactString],
+    ) -> Result<(), FacilitatorSupportError> {
+        let has_fee_payer = kind
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("feePayer"))
+            .and_then(Value::as_str)
+            .is_some();
+        if has_fee_payer {
+            Ok(())
+        } else {
+            Err(FacilitatorSupportError::MissingFeePayer {
+                scheme: self.scheme().into(),
+                network: network.clone(),
+            })
+        }
+    }
+}
+
+struct FlipEmptySupported {
+    calls: AtomicUsize,
+}
+
+impl Facilitator for FlipEmptySupported {
+    fn verify(
+        &self,
+        _request: VerifyRequest,
+    ) -> impl Future<Output = Result<VerifyResponse, FacilitatorError>> + Send {
+        std::future::ready(Ok(VerifyResponse::valid("0xpayer")))
+    }
+
+    fn settle(
+        &self,
+        _request: SettleRequest,
+    ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
+        std::future::ready(Ok(mock_settle_success(1)))
+    }
+
+    fn supported(
+        &self,
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
+        let n = self.calls.fetch_add(1, Ordering::SeqCst);
+        let out = if n == 0 {
+            Ok(SupportedResponse::new()
+                .with_kinds(vec![SupportedPaymentKind::new(2, "exact", "eip155:1")]))
+        } else {
+            Ok(SupportedResponse::new())
+        };
+        std::future::ready(out)
+    }
+}
+
 fn eip155_wildcard() -> ChainIdPattern {
     ChainIdPattern::wildcard("eip155")
 }
@@ -401,14 +474,59 @@ async fn facilitator_transport_verify_is_tool_is_error() {
 }
 
 #[tokio::test]
-async fn supported_empty_kinds_is_tool_is_error() {
-    let w = wrapper_with(
-        MockFacilitator::supported_script(SupportedScript::Empty),
-        FlowScheme::authorization(),
-        accepts(),
-        None::<SkipHandlerHook>,
-    )
-    .await;
+async fn try_new_rejects_empty_supported_kinds() {
+    let server = ResourceServer::new(MockFacilitator::supported_script(SupportedScript::Empty))
+        .with_scheme(eip155_wildcard(), FlowScheme::authorization());
+    let config = PaymentWrapperConfig::try_new(accepts(), None).unwrap();
+    let err = PaymentWrapper::try_new(server, config).await.unwrap_err();
+    assert!(matches!(
+        err,
+        PaymentWrapperConfigError::FacilitatorSupport(FacilitatorSupportError::KindMissing { .. })
+    ));
+}
+
+#[tokio::test]
+async fn try_new_rejects_supported_transport() {
+    let server = ResourceServer::new(MockFacilitator::supported_script(
+        SupportedScript::Transport,
+    ))
+    .with_scheme(eip155_wildcard(), FlowScheme::authorization());
+    let config = PaymentWrapperConfig::try_new(accepts(), None).unwrap();
+    let err = PaymentWrapper::try_new(server, config).await.unwrap_err();
+    assert!(matches!(
+        err,
+        PaymentWrapperConfigError::SupportedTransport {
+            kind: FacilitatorTransportKind::Timeout
+        }
+    ));
+}
+
+#[tokio::test]
+async fn try_new_rejects_missing_fee_payer() {
+    let server = ResourceServer::new(MockFacilitator::new(true, true)).with_scheme(
+        eip155_wildcard(),
+        FeePayerScheme(FlowScheme::authorization()),
+    );
+    let config = PaymentWrapperConfig::try_new(accepts(), None).unwrap();
+    let err = PaymentWrapper::try_new(server, config).await.unwrap_err();
+    assert!(matches!(
+        err,
+        PaymentWrapperConfigError::FacilitatorSupport(
+            FacilitatorSupportError::MissingFeePayer { .. }
+        )
+    ));
+}
+
+#[tokio::test]
+async fn invoke_empty_kinds_after_construct_is_tool_is_error() {
+    let server = ResourceServer::new(Arc::new(FlipEmptySupported {
+        calls: AtomicUsize::new(0),
+    }))
+    .with_scheme(eip155_wildcard(), FlowScheme::authorization());
+    let config = PaymentWrapperConfig::try_new(accepts(), None).unwrap();
+    let w = PaymentWrapper::try_new(server, config)
+        .await
+        .expect("first /supported has a kind");
     let result = w
         .invoke(CallToolRequestParams::new("demo"), |_| async {
             CallToolResult::success(vec![ContentBlock::text("should not run")])
@@ -418,27 +536,6 @@ async fn supported_empty_kinds_is_tool_is_error() {
     assert!(
         extract_payment_required(&result).is_none(),
         "empty /supported kinds must not emit PaymentRequired"
-    );
-}
-
-#[tokio::test]
-async fn supported_transport_is_tool_is_error() {
-    let w = wrapper_with(
-        MockFacilitator::supported_script(SupportedScript::Transport),
-        FlowScheme::authorization(),
-        accepts(),
-        None::<SkipHandlerHook>,
-    )
-    .await;
-    let result = w
-        .invoke(CallToolRequestParams::new("demo"), |_| async {
-            CallToolResult::success(vec![ContentBlock::text("should not run")])
-        })
-        .await;
-    assert_eq!(result.is_error, Some(true));
-    assert!(
-        extract_payment_required(&result).is_none(),
-        "supported transport must not emit PaymentRequired"
     );
 }
 

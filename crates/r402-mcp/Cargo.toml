@@ -38,6 +38,7 @@ rmcp = { workspace = true, optional = true, default-features = false }
 tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
+compact_str = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]

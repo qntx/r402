@@ -17,6 +17,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - Empty static price tags fail unless `with_auth_only` was already set.
 - `SchemeNetworkServer::settles_on_cancel` /
   `validate_facilitator_support` (defaulted).
+- `FacilitatorClient::try_new` enables `SupportedCache` (10 min).
+  `without_supported_cache` still disables it.
+- Empty `/supported.kinds` is `KindMissing` (HTTP 500 / MCP construct),
+  not 502.
+- `GateError::FacilitatorSupport`.
+- `PaymentWrapperConfigError::{SupportedTransport, FacilitatorSupport}`.
+  `PaymentWrapper::try_new` fetches `/supported`.
 
 ### Added
 
@@ -31,6 +38,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `ext-builder-code` depends on `r402-client`. Enrich merges payload `s[]`
   and copies advertised `builder-code.a` when payload `a` is absent. Never
   invents `a` when undeclared. Never overwrites existing payload `a`.
+- `validate_accepts_against_supported` for this accept list.
+- EVM `batch-settlement` advertised `receiverAuthorizer` and SVM `upto`
+  advertised `feePayer` `validate_facilitator_support`.
 
 ### Changed
 

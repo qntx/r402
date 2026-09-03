@@ -8,7 +8,7 @@ use http::{HeaderValue, StatusCode};
 use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::network::ChainId;
 use r402_protocol::payment::{Base64Bytes, SettleResponse};
-use r402_server::PaymentFlowName;
+use r402_server::{FacilitatorSupportError, PaymentFlowName};
 use serde_json::json;
 
 use super::gate::Gate;
@@ -65,12 +65,28 @@ pub enum GateError {
         /// Wire scheme name.
         scheme: CompactString,
     },
+    /// Facilitator `/supported` kind missing or extra unusable. HTTP 500.
+    #[error(transparent)]
+    FacilitatorSupport(#[from] FacilitatorSupportError),
     /// Facilitator transport failure. HTTP 502.
     #[error("{kind}")]
     Transport {
         /// Transport failure kind.
         kind: FacilitatorTransportKind,
     },
+}
+
+const fn support_parts(err: &FacilitatorSupportError) -> (&CompactString, &ChainId) {
+    match err {
+        FacilitatorSupportError::KindMissing { scheme, network }
+        | FacilitatorSupportError::MissingFeePayer { scheme, network }
+        | FacilitatorSupportError::InvalidFeePayer { scheme, network }
+        | FacilitatorSupportError::MissingReceiverAuthorizer { scheme, network }
+        | FacilitatorSupportError::ZeroReceiverAuthorizer { scheme, network }
+        | FacilitatorSupportError::InvalidReceiverAuthorizer { scheme, network } => {
+            (scheme, network)
+        }
+    }
 }
 
 fn settlement_failure_summary(resp: &SettleResponse) -> String {
@@ -175,6 +191,18 @@ impl Gate {
                     "scheme": scheme,
                 }),
             ),
+            GateError::FacilitatorSupport(ref err) => {
+                let (scheme, network) = support_parts(err);
+                json_status_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &json!({
+                        "error": "facilitator support",
+                        "scheme": scheme,
+                        "network": network.to_string(),
+                        "reason": err.reason(),
+                    }),
+                )
+            }
             GateError::SettlementAborted(ref detail) => {
                 let mut response = json_status_response(
                     StatusCode::PAYMENT_REQUIRED,

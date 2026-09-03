@@ -81,7 +81,7 @@ struct RawHttpResponse {
 }
 
 impl FacilitatorClient {
-    /// Suggested TTL when opting into `/supported` caching.
+    /// Default `/supported` cache TTL used by [`Self::try_new`].
     pub const DEFAULT_SUPPORTED_CACHE_TTL: Duration = Duration::from_mins(10);
 
     /// Default per-request timeout. Aligned with the Go/TS clients (30 s).
@@ -126,7 +126,8 @@ impl FacilitatorClient {
     /// Constructs a new [`FacilitatorClient`] from a base URL.
     ///
     /// Sets up `./verify`, `./settle`, and `./supported` relative to the base.
-    /// `/supported` is uncached until [`Self::with_supported_cache_ttl`] is called.
+    /// `/supported` is cached for [`Self::DEFAULT_SUPPORTED_CACHE_TTL`].
+    /// Call [`Self::without_supported_cache`] to disable.
     ///
     /// # Errors
     ///
@@ -152,7 +153,7 @@ impl FacilitatorClient {
             settle_url,
             supported_url,
             timeout: Some(Self::DEFAULT_TIMEOUT),
-            supported_cache: None,
+            supported_cache: Some(SupportedCache::new(Self::DEFAULT_SUPPORTED_CACHE_TTL)),
             create_auth_headers: None,
         })
     }
@@ -262,7 +263,7 @@ impl FacilitatorClient {
     }
 
     /// Sends a `GET /supported` request to the facilitator.
-    /// Results are cached only when a TTL was configured.
+    /// Results are cached when a TTL is configured (the default).
     ///
     /// # Errors
     ///
@@ -436,15 +437,9 @@ fn parse_settle_body(raw: &RawHttpResponse) -> Result<SettleResponse, Facilitato
 
 fn parse_supported_body(raw: &RawHttpResponse) -> Result<SupportedResponse, FacilitatorError> {
     if raw.status.is_success() {
-        let parsed: SupportedResponse = serde_json::from_slice(&raw.body).map_err(|_| {
+        serde_json::from_slice(&raw.body).map_err(|_| {
             FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody)
-        })?;
-        if parsed.kinds.is_empty() {
-            return Err(FacilitatorError::transport(
-                FacilitatorTransportKind::MalformedSuccessBody,
-            ));
-        }
-        Ok(parsed)
+        })
     } else {
         Err(status_transport(raw.status))
     }
