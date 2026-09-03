@@ -1,7 +1,7 @@
 //! x402 Payment Protocol SDK for Rust — umbrella crate.
 //!
 //! `default = ["evm", "http"]` opens [`evm`] and [`http`] with each crate's
-//! `client` and `server` features.
+//! `client` and `server` features. Concordium is opt-in (`concordium`).
 //!
 //! Protocol version 2 only. [`evm::Eip155Exact::price_tag`] takes three
 //! arguments. [`http::server::X402Middleware::with_price_tag`] returns
@@ -54,6 +54,9 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "concordium")]
+#[cfg_attr(docsrs, doc(cfg(feature = "concordium")))]
+pub use r402_concordium as concordium;
 #[cfg(feature = "evm")]
 #[cfg_attr(docsrs, doc(cfg(feature = "evm")))]
 pub use r402_evm as evm;

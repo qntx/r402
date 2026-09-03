@@ -33,6 +33,11 @@ siwx-svm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b86708881378
 time = { version = "0.3", features = ["parsing", "formatting"] }
 bs58 = "0.5"
 r402-near = { path = "crates/r402-near", default-features = false }
+r402-concordium = { path = "crates/r402-concordium", default-features = false }
+
+# Concordium (gRPC v2). crates.io `license-file` is MPL-2.0 (already allowlisted).
+# MSRV 1.85, covered by workspace 1.95. Prefer this over hand-rolled V1 serialization.
+concordium-rust-sdk = "9.0.1"
 
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy

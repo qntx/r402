@@ -23,10 +23,12 @@ rustdoc-args = ["--cfg", "docsrs"]
 default = ["evm", "http"]
 evm = ["dep:r402-evm", "r402-evm/client", "r402-evm/server"]
 http = ["dep:r402-http", "r402-http/client", "r402-http/server"]
+concordium = ["dep:r402-concordium", "r402-concordium/client", "r402-concordium/server"]
 
 [dependencies]
 r402-evm = { workspace = true, optional = true }
 r402-http = { workspace = true, optional = true }
+r402-concordium = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true }

@@ -28,6 +28,7 @@ SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 | **[`r402-keeta`](r402-keeta/)** | [![crates.io][r402-keeta-crate]][r402-keeta-crate-url] [![docs.rs][r402-keeta-doc]][r402-keeta-doc-url] | Keeta — exact `SEND` (fee-payer sponsored) |
 | **[`r402-tvm`](r402-tvm/)** | [![crates.io][r402-tvm-crate]][r402-tvm-crate-url] [![docs.rs][r402-tvm-doc]][r402-tvm-doc-url] | TON — TEP-74 / W5R1 exact transfers (Highload V3 facilitator) |
 | **[`r402-stellar`](r402-stellar/)** | [![crates.io][r402-stellar-crate]][r402-stellar-crate-url] [![docs.rs][r402-stellar-doc]][r402-stellar-doc-url] | Stellar — SEP-41 exact transfers (auth-entry signing) |
+| **[`r402-concordium`](r402-concordium/)** | [![crates.io][r402-concordium-crate]][r402-concordium-crate-url] [![docs.rs][r402-concordium-doc]][r402-concordium-doc-url] | Concordium — CCD / PLT exact sponsored V1 |
 | **[`r402-http`](r402-http/)** | [![crates.io][r402-http-crate]][r402-http-crate-url] [![docs.rs][r402-http-doc]][r402-http-doc-url] | HTTP transport — Axum layer, reqwest buyer |
 | **[`r402-mcp`](r402-mcp/)** | [![crates.io][r402-mcp-crate]][r402-mcp-crate-url] [![docs.rs][r402-mcp-doc]][r402-mcp-doc-url] | MCP transport on official **`rmcp`** (Go/TS parity) |
 | **[`r402-contract`](r402-contract/)** | unpublished | JSON contract assertions. Workspace member only. Not published. |
@@ -50,6 +51,7 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | [`r402-keeta`](r402-keeta/) | `keeta:21378`, `keeta:1413829460` | `exact` | In-process via `keetanetwork-client` (fee-payer sponsored) |
 | [`r402-tvm`](r402-tvm/) | `tvm:-239`, `tvm:-3` | `exact` | In-process via REST (Highload V3 relay) |
 | [`r402-stellar`](r402-stellar/) | `stellar:pubnet`, `stellar:testnet` | `exact` | In-process via stellar-rpc-client 27 (fee-sponsored) |
+| [`r402-concordium`](r402-concordium/) | `ccd:9dd9ca4d19e9393877d2c44b70f89acb`, `ccd:4221332d34e1694168c2a0c0b3fd0f27` | `exact` | In-process via concordium-rust-sdk 9 (sponsored V1, not umbrella default) |
 
 ## Dependency graph
 
@@ -119,6 +121,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-tvm-crate-url]: https://crates.io/crates/r402-tvm
 [r402-stellar-crate]: https://img.shields.io/crates/v/r402-stellar.svg
 [r402-stellar-crate-url]: https://crates.io/crates/r402-stellar
+[r402-concordium-crate]: https://img.shields.io/crates/v/r402-concordium.svg
+[r402-concordium-crate-url]: https://crates.io/crates/r402-concordium
 [r402-http-crate]: https://img.shields.io/crates/v/r402-http.svg
 [r402-http-crate-url]: https://crates.io/crates/r402-http
 [r402-mcp-crate]: https://img.shields.io/crates/v/r402-mcp.svg
@@ -159,6 +163,8 @@ Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 [r402-tvm-doc-url]: https://docs.rs/r402-tvm
 [r402-stellar-doc]: https://img.shields.io/docsrs/r402-stellar.svg
 [r402-stellar-doc-url]: https://docs.rs/r402-stellar
+[r402-concordium-doc]: https://img.shields.io/docsrs/r402-concordium.svg
+[r402-concordium-doc-url]: https://docs.rs/r402-concordium
 [r402-http-doc]: https://img.shields.io/docsrs/r402-http.svg
 [r402-http-doc-url]: https://docs.rs/r402-http
 [r402-mcp-doc]: https://img.shields.io/docsrs/r402-mcp.svg
