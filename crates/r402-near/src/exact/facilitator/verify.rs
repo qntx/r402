@@ -22,13 +22,24 @@ use crate::exact::error::{NearInvalid, invalid};
 ///
 /// Envelope checks run on the JSON so `invalid_x402_version` /
 /// `unsupported_scheme` / `invalid_network` are emitted before typed decode.
+/// `expected_network` is the facilitator provider's CAIP-2 id; a NEP-366
+/// blob has no network field, so the request must match this provider.
 pub async fn verify_request_json<R: NearRpc>(
     rpc: &R,
     relayer_ids: &[String],
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
 ) -> VerifyResponse {
-    match verify_inner(rpc, relayer_ids, max_sponsored_gas, request).await {
+    match verify_inner(
+        rpc,
+        relayer_ids,
+        max_sponsored_gas,
+        expected_network,
+        request,
+    )
+    .await
+    {
         Ok(payer) => VerifyResponse::valid(payer),
         Err(invalid) => invalid.into_response(),
     }
@@ -43,6 +54,7 @@ async fn verify_inner<R: NearRpc>(
     rpc: &R,
     relayer_ids: &[String],
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
 ) -> Result<CompactString, NearInvalid> {
     let payload = request
@@ -77,6 +89,10 @@ async fn verify_inner<R: NearRpc>(
         .and_then(Value::as_str)
         .unwrap_or("");
     if accepted_network != req_network {
+        return Err(invalid("invalid_exact_near_network_mismatch"));
+    }
+    // SignedDelegate has no CAIP-2; this provider's RPC is one chain.
+    if req_network != expected_network {
         return Err(invalid("invalid_exact_near_network_mismatch"));
     }
 

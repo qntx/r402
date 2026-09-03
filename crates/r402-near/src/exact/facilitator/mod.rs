@@ -121,10 +121,12 @@ where
     )]
     async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
+        let expected_network = self.provider.chain_id().to_string();
         Ok(verify_request_json(
             &self.provider,
             &self.provider.relayer_ids(),
             self.max_sponsored_gas,
+            &expected_network,
             &json,
         )
         .await)
@@ -137,12 +139,14 @@ where
     async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let relayer_ids = self.provider.relayer_ids();
+        let expected_network = self.provider.chain_id().to_string();
         let provider = self.provider.clone();
         Ok(settle_request(
             &self.provider,
             &relayer_ids,
             &self.settlement_cache,
             self.max_sponsored_gas,
+            &expected_network,
             &json,
             move |relayer_id, signed_b64| async move {
                 provider

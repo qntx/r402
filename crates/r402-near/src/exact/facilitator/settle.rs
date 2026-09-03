@@ -19,6 +19,7 @@ pub async fn settle_request<R, F, Fut>(
     relayer_ids: &[String],
     cache: &SettlementCache,
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
     submit: F,
 ) -> SettleResponse
@@ -34,7 +35,14 @@ where
         .unwrap_or("")
         .to_owned();
 
-    let verified = verify_request_json(rpc, relayer_ids, max_sponsored_gas, request).await;
+    let verified = verify_request_json(
+        rpc,
+        relayer_ids,
+        max_sponsored_gas,
+        expected_network,
+        request,
+    )
+    .await;
     let payer = match verified {
         VerifyResponse::Valid { payer, .. } => Some(payer),
         VerifyResponse::Invalid { payer, reason, .. } => {

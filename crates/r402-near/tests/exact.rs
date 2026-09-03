@@ -145,6 +145,7 @@ async fn try_new_supported_is_exact_on_provider_chain() {
 #[cfg(feature = "facilitator")]
 mod verify_settle {
     use std::collections::HashMap;
+    use std::future::Future;
 
     use near_crypto::{InMemorySigner, KeyType, Signer};
     use near_primitives::action::delegate::{
@@ -159,13 +160,15 @@ mod verify_settle {
         NearRpc, NearRpcError, NearSettlementOutcome, NearStorageBalance,
     };
     use r402_near::exact::facilitator::{
-        decode_signed_delegate, settle_request, verify_request_json,
+        NearExactFacilitator, NearFacilitatorOps, decode_signed_delegate, settle_request,
+        verify_request_json,
     };
     use r402_near::{
         DEFAULT_FT_TRANSFER_GAS, DEFAULT_MAX_SPONSORED_GAS, EMPTY_CONTRACT_CODE_HASH, ONE_YOCTO,
     };
     use r402_protocol::error::ErrorReason;
-    use r402_protocol::payment::{SettleResponse, VerifyResponse};
+    use r402_protocol::network::{ChainId, ChainProvider};
+    use r402_protocol::payment::{SettleResponse, VerifyRequest, VerifyResponse};
     use serde_json::{Value, json};
 
     const SENDER: &str = "alice.testnet";
@@ -184,6 +187,7 @@ mod verify_settle {
         balance: Result<u128, ()>,
         storage: Result<NearStorageBalance, ()>,
         outcome: NearSettlementOutcome,
+        chain: String,
     }
 
     impl Default for MockRpc {
@@ -205,6 +209,7 @@ mod verify_settle {
                         value: String::new(),
                     },
                 },
+                chain: "near:testnet".to_owned(),
             }
         }
     }
@@ -259,6 +264,35 @@ mod verify_settle {
         ) -> Result<NearStorageBalance, NearRpcError> {
             self.storage
                 .map_err(|()| NearRpcError::Rpc("storage check failed".to_owned()))
+        }
+    }
+
+    impl ChainProvider for MockRpc {
+        fn signer_addresses(&self) -> Vec<String> {
+            vec![RELAYER.to_owned()]
+        }
+
+        fn chain_id(&self) -> ChainId {
+            self.chain.parse().expect("mock CAIP-2")
+        }
+    }
+
+    impl NearFacilitatorOps for MockRpc {
+        fn relayer_ids(&self) -> Vec<String> {
+            vec![RELAYER.to_owned()]
+        }
+
+        fn max_sponsored_gas(&self) -> u64 {
+            DEFAULT_MAX_SPONSORED_GAS
+        }
+
+        fn submit_signed_delegate(
+            &self,
+            _relayer_id: &str,
+            _signed_delegate_b64: &str,
+        ) -> impl Future<Output = Result<NearSettlementOutcome, NearRpcError>> + Send {
+            let outcome = self.outcome.clone();
+            async move { Ok(outcome) }
         }
     }
 
@@ -414,6 +448,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -433,8 +468,14 @@ mod verify_settle {
         let (rpc, b64, accepted, reqs) = verify_ok().await;
         let mut req = request(&b64, &accepted, &reqs);
         req["paymentPayload"]["x402Version"] = json!(1);
-        let response =
-            verify_request_json(&rpc, &relayers(), DEFAULT_MAX_SPONSORED_GAS, &req).await;
+        let response = verify_request_json(
+            &rpc,
+            &relayers(),
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+        )
+        .await;
         assert_eq!(reason(&response), "invalid_x402_version");
     }
 
@@ -447,6 +488,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -461,6 +503,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -476,9 +519,38 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
+        assert_eq!(reason(&response), "invalid_exact_near_network_mismatch");
+    }
+
+    #[tokio::test]
+    async fn rejects_provider_chain_mismatch() {
+        let (rpc, b64, _, _) = verify_ok().await;
+        let reqs = requirements(json!({"network": "near:mainnet"}));
+        let response = verify_request_json(
+            &rpc,
+            &relayers(),
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &request(&b64, &reqs, &reqs),
+        )
+        .await;
+        assert_eq!(reason(&response), "invalid_exact_near_network_mismatch");
+    }
+
+    #[tokio::test]
+    async fn facilitator_verify_rejects_other_near_network() {
+        use r402_facilitator::Facilitator;
+
+        let rpc = MockRpc::default();
+        let fac = NearExactFacilitator::try_new(rpc).expect("try_new");
+        let b64 = signed_delegate_b64(DelegateOpts::default());
+        let reqs = requirements(json!({"network": "near:mainnet"}));
+        let req = VerifyRequest::from(request(&b64, &reqs, &reqs));
+        let response = fac.verify(req).await.expect("verify");
         assert_eq!(reason(&response), "invalid_exact_near_network_mismatch");
     }
 
@@ -490,6 +562,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -504,6 +577,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -518,6 +592,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -532,6 +607,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -551,8 +627,14 @@ mod verify_settle {
             },
             "paymentRequirements": reqs
         });
-        let response =
-            verify_request_json(&rpc, &relayers(), DEFAULT_MAX_SPONSORED_GAS, &req).await;
+        let response = verify_request_json(
+            &rpc,
+            &relayers(),
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+        )
+        .await;
         assert_eq!(reason(&response), "invalid_exact_near_payload_shape");
     }
 
@@ -564,6 +646,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request("@@not-borsh@@", &reqs, &reqs),
         )
         .await;
@@ -584,6 +667,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&tampered, &accepted, &reqs),
         )
         .await;
@@ -601,6 +685,7 @@ mod verify_settle {
             &rpc,
             &[SENDER.to_owned()],
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -617,6 +702,7 @@ mod verify_settle {
             &rpc,
             &[],
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &accepted, &reqs),
         )
         .await;
@@ -638,6 +724,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -656,6 +743,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -674,6 +762,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -692,6 +781,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -713,6 +803,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -734,6 +825,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -755,6 +847,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -776,6 +869,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -800,6 +894,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -824,6 +919,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -848,6 +944,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -872,6 +969,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -893,6 +991,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -914,6 +1013,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -938,6 +1038,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -959,6 +1060,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -980,6 +1082,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -999,6 +1102,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1020,6 +1124,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1039,6 +1144,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1063,6 +1169,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1084,6 +1191,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1102,6 +1210,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1123,6 +1232,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1141,6 +1251,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1162,6 +1273,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1183,6 +1295,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1201,6 +1314,7 @@ mod verify_settle {
             &rpc,
             &relayers(),
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &request(&b64, &reqs, &reqs),
         )
         .await;
@@ -1258,6 +1372,7 @@ mod verify_settle {
             &relayers(),
             &cache,
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &req,
             |_relayer, _b64| async move { Ok(outcome) },
         )
@@ -1286,6 +1401,7 @@ mod verify_settle {
             &relayers(),
             &cache,
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &req,
             |_relayer, _b64| async move { Ok(outcome) },
         )
@@ -1314,6 +1430,7 @@ mod verify_settle {
             &relayers(),
             &cache,
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &req,
             |_relayer, _b64| async move {
                 panic!("must not submit duplicate");
@@ -1344,6 +1461,7 @@ mod verify_settle {
             &relayers(),
             &cache,
             DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
             &req,
             |_relayer, _b64| async move {
                 panic!("must not submit invalid payload");
@@ -1351,5 +1469,35 @@ mod verify_settle {
         )
         .await;
         assert!(!response.is_success());
+    }
+
+    #[tokio::test]
+    async fn settle_does_not_submit_when_provider_chain_mismatches() {
+        let rpc = MockRpc::default();
+        let reqs = requirements(json!({"network": "near:mainnet"}));
+        let b64 = signed_delegate_b64(DelegateOpts::default());
+        let req = request(&b64, &reqs, &reqs);
+        let cache = SettlementCache::new();
+        let response = settle_request(
+            &rpc,
+            &relayers(),
+            &cache,
+            DEFAULT_MAX_SPONSORED_GAS,
+            "near:testnet",
+            &req,
+            |_relayer, _b64| async move {
+                panic!("must not submit cross-network payload");
+            },
+        )
+        .await;
+        match response {
+            SettleResponse::Failure {
+                reason, network, ..
+            } => {
+                assert_eq!(reason.as_str(), "invalid_exact_near_network_mismatch");
+                assert_eq!(network, "near:mainnet");
+            }
+            _ => panic!("expected failure"),
+        }
     }
 }
