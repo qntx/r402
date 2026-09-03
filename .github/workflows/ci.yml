@@ -18,3 +18,12 @@ jobs:
       submodules: false
       apt-packages: protobuf-compiler
       deny: true
+
+  layout:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Module roots and crate names
+        run: bash scripts/check-layout.sh

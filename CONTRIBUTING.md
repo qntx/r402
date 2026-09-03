@@ -39,6 +39,7 @@ install nightly`) if you run those recipes.
 ### Quality Gates (run before pushing)
 
 ```bash
+just layout
 just all
 just test
 ```

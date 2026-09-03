@@ -2,7 +2,10 @@
 
 default: all
 
-all: fmt clippy-fix deny test doc-check
+all: layout fmt clippy-fix deny test doc-check
+
+layout:
+    bash scripts/check-layout.sh
 
 list:
     @just --list
