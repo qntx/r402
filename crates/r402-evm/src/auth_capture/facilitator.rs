@@ -14,10 +14,7 @@ use r402_protocol::payment as wire;
 use r402_protocol::scheme::{AuthCaptureScheme, SchemeId};
 
 use super::Eip155AuthCapture;
-use super::payload::{
-    AUTH_CAPTURE_ESCROW_ADDRESS, AuthCapturePayload, EIP3009_TOKEN_COLLECTOR_ADDRESS,
-    PERMIT2_TOKEN_COLLECTOR_ADDRESS, v2,
-};
+use super::payload::{AuthCapturePayload, v2};
 use super::verify::{reconstruct_payment_info, verify_offchain};
 use crate::chain::Eip155MetaTransactionProvider;
 
@@ -169,11 +166,12 @@ where
         let extra = requirements.extra.as_ref().ok_or_else(|| {
             FacilitatorError::Verification(VerificationError::InvalidFormat("missing extra".into()))
         })?;
+        let deployment = extra.require_deployment().map_err(FacilitatorError::from)?;
 
         let (pre_approval, collector, collector_data) = match &payload.payload {
             AuthCapturePayload::Eip3009(p) => (
                 p.authorization.valid_before.as_secs(),
-                EIP3009_TOKEN_COLLECTOR_ADDRESS,
+                deployment.eip3009_collector,
                 p.signature.clone(),
             ),
             AuthCapturePayload::Permit2(p) => {
@@ -183,7 +181,7 @@ where
                     ))
                 })?;
                 let data = SolValue::abi_encode(&p.signature.as_ref());
-                (deadline, PERMIT2_TOKEN_COLLECTOR_ADDRESS, Bytes::from(data))
+                (deadline, deployment.permit2_collector, Bytes::from(data))
             }
         };
 
@@ -210,7 +208,7 @@ where
             salt: info.salt,
         };
 
-        let escrow = IAuthCaptureEscrow::new(AUTH_CAPTURE_ESCROW_ADDRESS, self.provider.inner());
+        let escrow = IAuthCaptureEscrow::new(deployment.escrow, self.provider.inner());
         let amount = requirements.amount.0;
         let pending = escrow
             .authorize(payment_info, amount, collector, collector_data)

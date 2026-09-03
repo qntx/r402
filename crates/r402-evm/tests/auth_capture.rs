@@ -20,11 +20,14 @@ use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, address};
 use alloy_signer_local::PrivateKeySigner;
 use r402_client::SchemeClient;
-use r402_evm::auth_capture::payload::{AuthCaptureExtra, AuthCapturePayload};
+use r402_evm::auth_capture::payload::{
+    AUTH_CAPTURE_ESCROW_V1_0_ADDRESS, AuthCaptureExtra, AuthCapturePayload,
+    EIP3009_TOKEN_COLLECTOR_ADDRESS, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS,
+};
 use r402_evm::chain::{ChecksummedAddress, Eip155ChainProvider, Eip155ChainReference};
 use r402_evm::{Eip155AuthCapture, Eip155AuthCaptureClient, Eip155AuthCaptureFacilitator, USDC};
 use r402_facilitator::Facilitator;
-use r402_protocol::error::{FacilitatorError, VerificationError};
+use r402_protocol::error::{AsPaymentProblem, FacilitatorError, VerificationError};
 use r402_protocol::payment::{PaymentRequired, ResourceInfo, UnixTimestamp, VerifyRequest};
 use r402_protocol::scheme::SchemeId;
 use r402_server::{PaymentFlowName, SchemeNetworkServer};
@@ -70,6 +73,7 @@ fn sample_extra() -> AuthCaptureExtra {
         max_fee_bps: 1000,
         auto_capture: Some(false),
         asset_transfer_method: None,
+        auth_capture_escrow: None,
     }
 }
 
@@ -196,4 +200,156 @@ async fn facilitator_verify_signed_eip3009() {
     let fac = Eip155AuthCaptureFacilitator::try_new(dummy_provider()).expect("try_new");
     let response = fac.verify(request).await.expect("verify");
     assert!(response.is_valid());
+}
+
+fn verify_reason(err: FacilitatorError) -> String {
+    match err {
+        FacilitatorError::Verification(e) => e.as_payment_problem().reason().as_str().to_owned(),
+        other => other.to_string(),
+    }
+}
+
+async fn signed_eip3009(
+    extra: AuthCaptureExtra,
+) -> r402_evm::auth_capture::payload::v2::PaymentPayload {
+    let (signer, _) = wallet();
+    let client = Eip155AuthCaptureClient::new(Arc::new(signer));
+    let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()]);
+    let b64 = client
+        .accept(&required)
+        .first()
+        .expect("one accept")
+        .sign()
+        .await
+        .expect("sign");
+    let json = r402_protocol::payment::Base64Bytes(b64.into_bytes())
+        .decode()
+        .expect("b64");
+    serde_json::from_slice(&json).expect("payload")
+}
+
+#[tokio::test]
+async fn default_client_eip3009_to_is_v1_1_collector() {
+    let payload = signed_eip3009(sample_extra()).await;
+    let AuthCapturePayload::Eip3009(p) = payload.payload else {
+        panic!("default extra is eip3009");
+    };
+    assert_eq!(p.authorization.to, EIP3009_TOKEN_COLLECTOR_ADDRESS);
+    assert_eq!(
+        p.authorization.to.to_checksum(None),
+        "0xEA902B37036bcb4944577ec2101ABdEDF56EbD28"
+    );
+}
+
+#[tokio::test]
+async fn v1_0_escrow_extra_selects_v1_0_collector() {
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some(ChecksummedAddress(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS));
+    let payload = signed_eip3009(extra).await;
+    let AuthCapturePayload::Eip3009(p) = payload.payload else {
+        panic!("eip3009");
+    };
+    assert_eq!(p.authorization.to, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS);
+    assert_eq!(
+        p.authorization.to.to_checksum(None),
+        "0x0E3dF9510de65469C4518D7843919c0b8C7A7757"
+    );
+}
+
+#[tokio::test]
+async fn unknown_escrow_verify_is_invalid_auth_capture_evm_extra() {
+    let payload = signed_eip3009(sample_extra()).await;
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+    let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
+    let typed = r402_evm::auth_capture::payload::v2::VerifyRequest {
+        x402_version: r402_protocol::payment::V2,
+        payment_payload: payload,
+        payment_requirements: serde_json::from_value(
+            serde_json::to_value(&tag.requirements).unwrap(),
+        )
+        .unwrap(),
+    };
+    let request = VerifyRequest::try_from(typed).expect("typed verify");
+    let fac = Eip155AuthCaptureFacilitator::try_new(dummy_provider()).expect("try_new");
+    let err = fac.verify(request).await.expect_err("unknown escrow");
+    assert_eq!(verify_reason(err), "invalid_auth_capture_evm_extra");
+}
+
+#[tokio::test]
+async fn mixed_fee_fields_are_payload_format() {
+    let mut payload = signed_eip3009(sample_extra()).await;
+    match &mut payload.payload {
+        AuthCapturePayload::Eip3009(p) => {
+            p.fee_bps = Some(100);
+            p.fee_amount = Some(r402_evm::chain::TokenAmount::from(
+                alloy_primitives::U256::from(1_u64),
+            ));
+        }
+        AuthCapturePayload::Permit2(_) => panic!("eip3009"),
+    }
+    let tag =
+        Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), sample_extra());
+    let typed = r402_evm::auth_capture::payload::v2::VerifyRequest {
+        x402_version: r402_protocol::payment::V2,
+        payment_payload: payload,
+        payment_requirements: serde_json::from_value(
+            serde_json::to_value(&tag.requirements).unwrap(),
+        )
+        .unwrap(),
+    };
+    let request = VerifyRequest::try_from(typed).expect("typed verify");
+    let fac = Eip155AuthCaptureFacilitator::try_new(dummy_provider()).expect("try_new");
+    let err = fac.verify(request).await.expect_err("mixed fee");
+    assert_eq!(
+        verify_reason(err),
+        "invalid_auth_capture_evm_payload_format"
+    );
+}
+
+#[tokio::test]
+async fn v1_1_rejects_fee_bps_pin() {
+    let mut payload = signed_eip3009(sample_extra()).await;
+    match &mut payload.payload {
+        AuthCapturePayload::Eip3009(p) => p.fee_bps = Some(100),
+        AuthCapturePayload::Permit2(_) => panic!("eip3009"),
+    }
+    let tag =
+        Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), sample_extra());
+    let typed = r402_evm::auth_capture::payload::v2::VerifyRequest {
+        x402_version: r402_protocol::payment::V2,
+        payment_payload: payload,
+        payment_requirements: serde_json::from_value(
+            serde_json::to_value(&tag.requirements).unwrap(),
+        )
+        .unwrap(),
+    };
+    let request = VerifyRequest::try_from(typed).expect("typed verify");
+    let fac = Eip155AuthCaptureFacilitator::try_new(dummy_provider()).expect("try_new");
+    let err = fac.verify(request).await.expect_err("feeBps on v1.1");
+    assert_eq!(
+        verify_reason(err),
+        "invalid_auth_capture_evm_payload_format"
+    );
+}
+
+#[tokio::test]
+async fn unknown_escrow_client_refuses_to_sign() {
+    let (signer, _) = wallet();
+    let client = Eip155AuthCaptureClient::new(Arc::new(signer));
+    let mut extra = sample_extra();
+    extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+    let tag = Eip155AuthCapture::price_tag(pay_to(), USDC::base().amount(1_000_000u64), extra);
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()]);
+    let err = client
+        .accept(&required)
+        .first()
+        .expect("one accept")
+        .sign()
+        .await
+        .expect_err("unknown escrow");
+    assert!(err.to_string().contains("authCaptureEscrow"), "got {err}");
 }

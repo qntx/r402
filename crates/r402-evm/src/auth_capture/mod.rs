@@ -80,6 +80,7 @@ mod client_verify_tests {
             max_fee_bps: 1000,
             auto_capture: Some(false),
             asset_transfer_method: None,
+            auth_capture_escrow: None,
         }
     }
 
@@ -240,6 +241,51 @@ mod client_verify_tests {
             .expect("sign");
         assert!(matches!(scheme_payload, AuthCapturePayload::Permit2(_)));
 
+        let requirements = requirements(extra, amount, pay_to, asset);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
+        let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");
+        assert_eq!(recovered, payer);
+    }
+
+    #[tokio::test]
+    async fn unknown_escrow_is_invalid_extra() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auth_capture_escrow = Some(ChecksummedAddress(Address::repeat_byte(0x99)));
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        assert!(
+            sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+                .await
+                .is_err(),
+            "unknown authCaptureEscrow must not sign"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1_0_escrow_sign_then_verify() {
+        use super::payload::AUTH_CAPTURE_ESCROW_V1_0_ADDRESS;
+        use super::payload::EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS;
+
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auth_capture_escrow = Some(ChecksummedAddress(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS));
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+        match &scheme_payload {
+            AuthCapturePayload::Eip3009(p) => {
+                assert_eq!(p.authorization.to, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS);
+            }
+            AuthCapturePayload::Permit2(_) => panic!("default method is eip3009"),
+        }
         let requirements = requirements(extra, amount, pay_to, asset);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
         let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");

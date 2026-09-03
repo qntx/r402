@@ -17,8 +17,8 @@ use super::nonce::{compute_payer_agnostic_payment_info_hash, hash_as_uint256};
 use super::payload::{
     AuthCaptureEip3009Authorization, AuthCaptureEip3009Payload, AuthCaptureExtra,
     AuthCapturePayload, AuthCapturePermit2Authorization, AuthCapturePermit2Payload,
-    AuthCaptureTokenPermissions, EIP3009_TOKEN_COLLECTOR_ADDRESS, PERMIT2_TOKEN_COLLECTOR_ADDRESS,
-    PaymentInfo, PermitTransferFrom, ReceiveWithAuthorization, TokenPermissions,
+    AuthCaptureTokenPermissions, PaymentInfo, PermitTransferFrom, ReceiveWithAuthorization,
+    TokenPermissions,
 };
 use super::{Eip155AuthCapture, payload};
 use crate::asset::AssetTransferMethod;
@@ -146,6 +146,9 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
             "auth-capture extra.name and extra.version are required".into(),
         ));
     }
+    let deployment = extra.deployment().ok_or_else(|| {
+        ClientError::Signing("Invalid authCaptureEscrow in payment requirements extra".into())
+    })?;
     let now = UnixTimestamp::now().as_secs();
     let pre_approval_expiry = now.saturating_add(max_timeout_seconds);
     let salt_bytes: [u8; 32] = rng().random();
@@ -166,18 +169,22 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
         fee_receiver: extra.fee_recipient.0,
         salt: salt_u256,
     };
-    let nonce = compute_payer_agnostic_payment_info_hash(chain_id, &payment_info);
+    let nonce =
+        compute_payer_agnostic_payment_info_hash(chain_id, &payment_info, deployment.escrow);
 
     match extra.transfer_method() {
         AssetTransferMethod::Permit2 => {
             sign_permit2_auth_capture(
                 signer,
-                chain_id,
-                asset,
-                amount,
-                pre_approval_expiry,
-                nonce,
-                salt,
+                Permit2SignParams {
+                    chain_id,
+                    asset,
+                    amount,
+                    pre_approval_expiry,
+                    nonce,
+                    salt,
+                    spender: deployment.permit2_collector,
+                },
             )
             .await
         }
@@ -191,6 +198,7 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
                     pre_approval_expiry,
                     nonce,
                     salt,
+                    to: deployment.eip3009_collector,
                 },
                 extra,
             )
@@ -207,6 +215,18 @@ struct Eip3009SignParams {
     pre_approval_expiry: u64,
     nonce: B256,
     salt: B256,
+    to: Address,
+}
+
+/// Inputs for a Permit2 auth-capture signature.
+struct Permit2SignParams {
+    chain_id: u64,
+    asset: Address,
+    amount: U256,
+    pre_approval_expiry: u64,
+    nonce: B256,
+    salt: B256,
+    spender: Address,
 }
 
 async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
@@ -221,6 +241,7 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
         pre_approval_expiry,
         nonce,
         salt,
+        to,
     } = params;
     let domain = eip712_domain! {
         name: extra.name.clone(),
@@ -230,7 +251,7 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
     };
     let authorization = AuthCaptureEip3009Authorization {
         from: signer.address(),
-        to: EIP3009_TOKEN_COLLECTOR_ADDRESS,
+        to,
         value: TokenAmount::from(amount),
         valid_after: UnixTimestamp::from_secs(0),
         valid_before: UnixTimestamp::from_secs(pre_approval_expiry),
@@ -253,18 +274,24 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
         authorization,
         signature: Bytes::from(signature.as_bytes().to_vec()),
         salt,
+        fee_bps: None,
+        fee_amount: None,
     }))
 }
 
 async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
     signer: &S,
-    chain_id: u64,
-    asset: Address,
-    amount: U256,
-    pre_approval_expiry: u64,
-    nonce: B256,
-    salt: B256,
+    params: Permit2SignParams,
 ) -> Result<AuthCapturePayload, ClientError> {
+    let Permit2SignParams {
+        chain_id,
+        asset,
+        amount,
+        pre_approval_expiry,
+        nonce,
+        salt,
+        spender,
+    } = params;
     let domain = eip712_domain! {
         name: "Permit2",
         chain_id: chain_id,
@@ -277,7 +304,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
             token: asset,
             amount: TokenAmount::from(amount),
         },
-        spender: PERMIT2_TOKEN_COLLECTOR_ADDRESS,
+        spender,
         nonce: TokenAmount::from(nonce_u256),
         deadline: TokenAmount::from(U256::from(pre_approval_expiry)),
     };
@@ -286,7 +313,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
             token: asset,
             amount,
         },
-        spender: PERMIT2_TOKEN_COLLECTOR_ADDRESS,
+        spender,
         nonce: nonce_u256,
         deadline: U256::from(pre_approval_expiry),
     };
@@ -299,5 +326,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
         permit2_authorization,
         signature: Bytes::from(signature.as_bytes().to_vec()),
         salt,
+        fee_bps: None,
+        fee_amount: None,
     }))
 }

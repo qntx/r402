@@ -95,6 +95,7 @@ impl Eip155AuthCapture {
             max_fee_bps,
             auto_capture: None,
             asset_transfer_method: transfer_method,
+            auth_capture_escrow: None,
         };
         Self::price_tag(pay_to, asset, extra)
     }
