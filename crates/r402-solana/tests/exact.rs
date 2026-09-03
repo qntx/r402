@@ -63,12 +63,23 @@ fn payload_extra_roundtrip() {
     let extra = SupportedPaymentKindExtra {
         fee_payer: Address::new(pubkey!("11111111111111111111111111111111")),
         memo: Some("order-123".into()),
+        features: None,
     };
     let json = serde_json::to_value(&extra).expect("serialize extra");
     assert_eq!(json["feePayer"], "11111111111111111111111111111111");
     assert_eq!(json["memo"], "order-123");
     let back: SupportedPaymentKindExtra = serde_json::from_value(json).expect("deserialize extra");
     assert_eq!(back, extra);
+
+    let with_features = SupportedPaymentKindExtra {
+        fee_payer: extra.fee_payer,
+        memo: None,
+        features: Some(r402_solana::exact::SupportedKindFeatures {
+            smart_wallet_supported: true,
+        }),
+    };
+    let features_json = serde_json::to_value(&with_features).expect("serialize features");
+    assert_eq!(features_json["features"]["smartWalletSupported"], true);
 }
 
 #[test]

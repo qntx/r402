@@ -27,6 +27,23 @@ const ERR_CANNOT_DERIVE_ATA: &str = "invalid_exact_svm_smart_wallet_cannot_deriv
 const ERR_NO_TRANSFER: &str = "invalid_exact_svm_smart_wallet_no_transfer_in_simulation";
 const ERR_TRANSFER_MISMATCH: &str = "invalid_exact_svm_smart_wallet_transfer_mismatch";
 const ERR_MULTIPLE: &str = "invalid_exact_svm_smart_wallet_multiple_matching_transfers";
+const ERR_FEE_PAYER_NOT_ISOLATED: &str = "invalid_exact_svm_smart_wallet_fee_payer_not_isolated";
+const ERR_MALFORMED_COMPUTE_BUDGET: &str =
+    "invalid_exact_svm_smart_wallet_malformed_compute_budget";
+const ERR_MALFORMED_COMPUTE_LIMIT: &str = "invalid_exact_svm_smart_wallet_malformed_compute_limit";
+const ERR_MALFORMED_COMPUTE_PRICE: &str = "invalid_exact_svm_smart_wallet_malformed_compute_price";
+const ERR_COMPUTE_UNITS_TOO_HIGH: &str = "invalid_exact_svm_smart_wallet_compute_units_too_high";
+const ERR_PRIORITY_FEE_TOO_HIGH: &str = "invalid_exact_svm_smart_wallet_priority_fee_too_high";
+const ERR_UNSUPPORTED_COMPUTE_BUDGET: &str =
+    "invalid_exact_svm_smart_wallet_unsupported_compute_budget_instruction";
+const ERR_ALT_UNAVAILABLE: &str = "invalid_exact_svm_smart_wallet_alt_resolution_not_available";
+const ERR_ALT_FAILED: &str = "invalid_exact_svm_smart_wallet_alt_resolution_failed";
+const ERR_SIMULATION_FAILED: &str = "invalid_exact_svm_smart_wallet_simulation_failed";
+const ERR_PROGRAM_NOT_ALLOWED: &str = "invalid_exact_svm_smart_wallet_program_not_allowed";
+const ERR_VERIFICATION_UNAVAILABLE: &str =
+    "invalid_exact_svm_smart_wallet_verification_not_available";
+const IX_SET_COMPUTE_UNIT_LIMIT: u8 = 2;
+const IX_SET_COMPUTE_UNIT_PRICE: u8 = 3;
 
 /// SPL Token / Token-2022 `TransferChecked` instruction discriminant.
 pub(super) const IX_TOKEN_TRANSFER_CHECKED: u8 = 12;
@@ -54,31 +71,44 @@ pub struct ObservedTransfer {
 #[must_use]
 pub fn is_path1_layout_recoverable(err: &VerificationError) -> bool {
     match err {
-        VerificationError::InvalidFormat(_) => true,
         VerificationError::SimulationFailed(msg) => is_recoverable_layout_message(msg),
-        // Semantic and other failures — never Path 2.
+        VerificationError::Wire(reason) => is_recoverable_layout_message(reason.as_str()),
         _ => false,
     }
 }
 
 fn is_recoverable_layout_message(msg: &str) -> bool {
-    // Messages produced by SolanaExactError layout variants via Display.
+    // Official LAYOUT_RECOVERABLE_REASONS (scheme.ts): instruction count,
+    // missing positional transfer, unknown extra ix, malformed compute budget.
+    // Not: blocked program, CreateATA, fee-payer isolation, NoAccountAtIndex.
     const NEEDLES: &[&str] = &[
         "Too few instructions",
         "Additional instructions not allowed",
         "Instruction count exceeds maximum",
         "Program not in allowed list",
-        "Blocked program",
         "Invalid compute limit instruction",
         "Invalid compute price instruction",
         "Invalid token instruction",
         "Empty instruction",
         "Instruction at index",
-        "No account at index",
-        "CreateATA instruction not supported",
-        "Fee payer included in instruction accounts",
+        "invalid_exact_svm_payload_transaction_instructions_length",
+        "invalid_exact_svm_payload_no_transfer_instruction",
+        "invalid_exact_svm_payload_unknown_fourth_instruction",
+        "invalid_exact_svm_payload_unknown_fifth_instruction",
+        "invalid_exact_svm_payload_unknown_sixth_instruction",
+        "invalid_exact_svm_payload_unknown_optional_instruction",
+        "invalid_exact_svm_payload_transaction_instructions_compute_limit_instruction",
+        "invalid_exact_svm_payload_transaction_instructions_compute_price_instruction",
     ];
     NEEDLES.iter().any(|n| msg.contains(n))
+}
+
+fn wire(code: &str) -> VerificationError {
+    VerificationError::from_wire(code)
+}
+
+fn wire_detail(code: &str, detail: impl core::fmt::Display) -> VerificationError {
+    VerificationError::from_wire(&format!("{code}: {detail}"))
 }
 
 /// Parse a compiled `TransferChecked` instruction (program id + data + accounts).
@@ -114,14 +144,21 @@ pub fn parse_transfer_checked(
 /// Extract `TransferChecked` instructions from the **top-level** message.
 #[must_use]
 pub fn extract_top_level_transfers(tx: &VersionedTransaction) -> Vec<ObservedTransfer> {
-    let keys = tx.message.static_account_keys();
+    extract_top_level_transfers_with_keys(tx, tx.message.static_account_keys())
+}
+
+/// Top-level transfers using a resolved account-key list (static + ALTs).
+#[must_use]
+pub(super) fn extract_top_level_transfers_with_keys(
+    tx: &VersionedTransaction,
+    keys: &[Pubkey],
+) -> Vec<ObservedTransfer> {
     let mut out = Vec::new();
     for ix in tx.message.instructions() {
         let Some(program_id) = keys.get(usize::from(ix.program_id_index)).copied() else {
             continue;
         };
-        let is_token = program_id == spl_token::ID || program_id == spl_token_2022_interface::ID;
-        if !is_token {
+        if !is_token_program(&program_id) {
             continue;
         }
         let mut accounts = Vec::with_capacity(ix.accounts.len());
@@ -157,9 +194,7 @@ pub fn match_required_transfer(
 
     let expected_atas = expected_destination_atas(requirement.pay_to, requirement.asset);
     if expected_atas.is_empty() {
-        return Err(VerificationError::InvalidFormat(
-            ERR_CANNOT_DERIVE_ATA.into(),
-        ));
+        return Err(wire(ERR_CANNOT_DERIVE_ATA));
     }
 
     let required_mint = *requirement.asset.pubkey();
@@ -174,17 +209,201 @@ pub fn match_required_transfer(
         .collect();
 
     match matching.as_slice() {
-        [] if transfers.is_empty() => Err(VerificationError::InvalidFormat(ERR_NO_TRANSFER.into())),
-        [] => Err(VerificationError::InvalidFormat(
-            ERR_TRANSFER_MISMATCH.into(),
-        )),
+        [] if transfers.is_empty() => Err(wire(ERR_NO_TRANSFER)),
+        [] => Err(wire(ERR_TRANSFER_MISMATCH)),
         [one] => Ok(*one),
-        _ => Err(VerificationError::InvalidFormat(ERR_MULTIPLE.into())),
+        _ => Err(wire(ERR_MULTIPLE)),
     }
 }
 
 fn is_token_program(program_id: &Pubkey) -> bool {
     *program_id == spl_token::ID || *program_id == spl_token_2022_interface::ID
+}
+
+/// Official Path 2 constructor/runtime cap check.
+pub(super) fn assert_path2_provider<P: SolanaChainProviderLike>(
+    provider: &P,
+    config: &SolanaExactFacilitatorConfig,
+) -> Result<(), VerificationError> {
+    if !provider.supports_smart_wallet() {
+        return Err(wire(ERR_VERIFICATION_UNAVAILABLE));
+    }
+    if let Err(msg) = config.assert_smart_wallet_limits() {
+        return Err(VerificationError::InvalidFormat(msg));
+    }
+    Ok(())
+}
+
+/// Top-level programs except `ComputeBudget` and Memo must be in the Path 2 allowlist.
+pub(super) fn assert_path2_program_allowlist(
+    tx: &VersionedTransaction,
+    config: &SolanaExactFacilitatorConfig,
+) -> Result<(), VerificationError> {
+    let allowed = config.path2_allowed_programs();
+    let keys = tx.message.static_account_keys();
+    let compute = solana_compute_budget_interface::ID;
+    for ix in tx.message.instructions() {
+        let Some(program_id) = keys.get(usize::from(ix.program_id_index)).copied() else {
+            continue;
+        };
+        if program_id == compute || program_id == crate::exact::SPL_MEMO_PROGRAM {
+            continue;
+        }
+        if !allowed.contains(&program_id) {
+            return Err(wire_detail(ERR_PROGRAM_NOT_ALLOWED, program_id));
+        }
+    }
+    Ok(())
+}
+
+/// Resolve static + ALT keys. Empty lookups skip RPC.
+pub(super) async fn resolve_loaded_account_keys<P: SolanaChainProviderLike>(
+    provider: &P,
+    tx: &VersionedTransaction,
+) -> Result<Vec<Pubkey>, VerificationError> {
+    let mut keys = tx.message.static_account_keys().to_vec();
+    let Some(lookups) = tx.message.address_table_lookups() else {
+        return Ok(keys);
+    };
+    if lookups.is_empty() {
+        return Ok(keys);
+    }
+    if !provider.supports_smart_wallet() {
+        return Err(wire(ERR_ALT_UNAVAILABLE));
+    }
+    let table_addrs: Vec<Pubkey> = lookups.iter().map(|lookup| lookup.account_key).collect();
+    let tables = provider
+        .fetch_address_lookup_tables(&table_addrs)
+        .await
+        .map_err(|e| wire_detail(ERR_ALT_FAILED, e))?;
+    let mut writable = Vec::new();
+    let mut readonly = Vec::new();
+    for lookup in lookups {
+        let table = tables
+            .get(&lookup.account_key)
+            .ok_or_else(|| wire(ERR_ALT_FAILED))?;
+        for idx in &lookup.writable_indexes {
+            let addr = table
+                .get(usize::from(*idx))
+                .copied()
+                .ok_or_else(|| wire(ERR_ALT_FAILED))?;
+            writable.push(addr);
+        }
+        for idx in &lookup.readonly_indexes {
+            let addr = table
+                .get(usize::from(*idx))
+                .copied()
+                .ok_or_else(|| wire(ERR_ALT_FAILED))?;
+            readonly.push(addr);
+        }
+    }
+    keys.extend(writable);
+    keys.extend(readonly);
+    Ok(keys)
+}
+
+/// Spec §2.1: fee payer is neither a program id nor an instruction account.
+pub(super) fn assert_fee_payer_isolated_from_keys(
+    tx: &VersionedTransaction,
+    keys: &[Pubkey],
+    fee_payer: Pubkey,
+) -> Result<(), VerificationError> {
+    for ix in tx.message.instructions() {
+        let program_id = keys
+            .get(usize::from(ix.program_id_index))
+            .copied()
+            .ok_or_else(|| wire(ERR_FEE_PAYER_NOT_ISOLATED))?;
+        if program_id == fee_payer {
+            return Err(wire_detail(
+                ERR_FEE_PAYER_NOT_ISOLATED,
+                format!("fee payer {fee_payer} invoked as program"),
+            ));
+        }
+        for idx in &ix.accounts {
+            let account = keys
+                .get(usize::from(*idx))
+                .copied()
+                .ok_or_else(|| wire(ERR_FEE_PAYER_NOT_ISOLATED))?;
+            if account == fee_payer {
+                return Err(wire_detail(
+                    ERR_FEE_PAYER_NOT_ISOLATED,
+                    format!(
+                        "fee payer {fee_payer} appears in instruction accounts (program: {program_id})"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Official Path 2 compute-budget caps (only types 2 and 3).
+pub(super) fn validate_path2_compute_budget(
+    tx: &VersionedTransaction,
+    keys: &[Pubkey],
+    config: &SolanaExactFacilitatorConfig,
+) -> Result<(), VerificationError> {
+    let max_cu = config.path2_max_compute_units();
+    let max_fee = config.path2_max_priority_fee_micro_lamports();
+    let compute = solana_compute_budget_interface::ID;
+    for ix in tx.message.instructions() {
+        let Some(program_id) = keys.get(usize::from(ix.program_id_index)).copied() else {
+            continue;
+        };
+        if program_id != compute {
+            continue;
+        }
+        let data = ix.data.as_slice();
+        if data.is_empty() {
+            return Err(wire(ERR_MALFORMED_COMPUTE_BUDGET));
+        }
+        match data.first().copied() {
+            Some(IX_SET_COMPUTE_UNIT_LIMIT) => {
+                if data.len() < 5 {
+                    return Err(wire(ERR_MALFORMED_COMPUTE_LIMIT));
+                }
+                let units = u32::from_le_bytes(
+                    data.get(1..5)
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| wire(ERR_MALFORMED_COMPUTE_LIMIT))?,
+                );
+                if units > max_cu {
+                    return Err(wire_detail(
+                        ERR_COMPUTE_UNITS_TOO_HIGH,
+                        format!("{units} exceeds max {max_cu}"),
+                    ));
+                }
+            }
+            Some(IX_SET_COMPUTE_UNIT_PRICE) => {
+                if data.len() < 9 {
+                    return Err(wire(ERR_MALFORMED_COMPUTE_PRICE));
+                }
+                let micro = u64::from_le_bytes(
+                    data.get(1..9)
+                        .and_then(|b| b.try_into().ok())
+                        .ok_or_else(|| wire(ERR_MALFORMED_COMPUTE_PRICE))?,
+                );
+                if micro > max_fee {
+                    return Err(wire_detail(
+                        ERR_PRIORITY_FEE_TOO_HIGH,
+                        format!("{micro} exceeds max {max_fee}"),
+                    ));
+                }
+            }
+            Some(other) => {
+                return Err(wire_detail(
+                    ERR_UNSUPPORTED_COMPUTE_BUDGET,
+                    format!("type {other}"),
+                ));
+            }
+            None => return Err(wire(ERR_MALFORMED_COMPUTE_BUDGET)),
+        }
+    }
+    Ok(())
+}
+
+pub(super) const fn simulation_failed_code() -> &'static str {
+    ERR_SIMULATION_FAILED
 }
 
 /// Static keys plus simulation-loaded ALT addresses (writable, then readonly).
@@ -527,10 +746,12 @@ mod tests {
             authority: Pubkey::new_from_array([9; 32]),
         };
         let err = match_required_transfer(&[t], &requirement, &[]).unwrap_err();
-        assert!(matches!(
-            err,
-            VerificationError::InvalidFormat(ref m) if m.contains("smart_wallet_transfer_mismatch")
-        ));
+        assert_eq!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str(),
+            ERR_TRANSFER_MISMATCH
+        );
     }
 
     #[test]
@@ -544,8 +765,19 @@ mod tests {
         assert!(!is_path1_layout_recoverable(
             &VerificationError::SimulationFailed("some other sim failure".into())
         ));
-        assert!(is_path1_layout_recoverable(
+        assert!(!is_path1_layout_recoverable(
             &VerificationError::InvalidFormat("Too few instructions".into())
+        ));
+        assert!(!is_path1_layout_recoverable(
+            &VerificationError::SimulationFailed("Blocked program in transaction: Abc".into())
+        ));
+        assert!(is_path1_layout_recoverable(
+            &VerificationError::SimulationFailed("Too few instructions in transaction".into())
+        ));
+        assert!(!is_path1_layout_recoverable(
+            &VerificationError::SimulationFailed(
+                "Fee payer included in instruction accounts".into()
+            )
         ));
     }
 
@@ -693,5 +925,101 @@ mod tests {
             )),
         };
         assert!(!has_static_transfer_layout(&short));
+    }
+
+    fn tx_with_ixs(ixs: &[solana_transaction::Instruction]) -> VersionedTransaction {
+        use solana_message::{Message, VersionedMessage};
+        use solana_signature::Signature as Sig;
+        let payer = Pubkey::new_from_array([1u8; 32]);
+        VersionedTransaction {
+            signatures: vec![Sig::default()],
+            message: VersionedMessage::Legacy(Message::new(ixs, Some(&payer))),
+        }
+    }
+
+    #[test]
+    fn path2_rejects_unsupported_compute_budget_type() {
+        let mut data = vec![1u8]; // RequestHeapFrame
+        data.extend_from_slice(&32u32.to_le_bytes());
+        let tx = tx_with_ixs(&[solana_transaction::Instruction {
+            program_id: solana_compute_budget_interface::ID,
+            accounts: Vec::new(),
+            data,
+        }]);
+        let keys = tx.message.static_account_keys().to_vec();
+        let err =
+            validate_path2_compute_budget(&tx, &keys, &SolanaExactFacilitatorConfig::default())
+                .unwrap_err();
+        assert!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str()
+                .contains(ERR_UNSUPPORTED_COMPUTE_BUDGET)
+        );
+    }
+
+    #[test]
+    fn path2_rejects_compute_units_above_cap() {
+        let mut data = vec![IX_SET_COMPUTE_UNIT_LIMIT];
+        data.extend_from_slice(&500_000u32.to_le_bytes());
+        let tx = tx_with_ixs(&[solana_transaction::Instruction {
+            program_id: solana_compute_budget_interface::ID,
+            accounts: Vec::new(),
+            data,
+        }]);
+        let keys = tx.message.static_account_keys().to_vec();
+        let err =
+            validate_path2_compute_budget(&tx, &keys, &SolanaExactFacilitatorConfig::default())
+                .unwrap_err();
+        assert!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str()
+                .contains(ERR_COMPUTE_UNITS_TOO_HIGH)
+        );
+    }
+
+    #[test]
+    fn path2_allowlist_rejects_unknown_wallet_program() {
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let tx = tx_with_ixs(&[solana_transaction::Instruction {
+            program_id: wallet,
+            accounts: Vec::new(),
+            data: vec![1],
+        }]);
+        let err = assert_path2_program_allowlist(&tx, &SolanaExactFacilitatorConfig::default())
+            .unwrap_err();
+        let reason = r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+            .reason()
+            .as_str()
+            .to_owned();
+        assert!(reason.contains(ERR_PROGRAM_NOT_ALLOWED));
+        assert!(reason.contains(&wallet.to_string()));
+    }
+
+    #[test]
+    fn match_required_transfer_wire_reason_is_not_invalid_payload() {
+        let (_pay_to, asset, requirement) = req(100);
+        let dest = expected_destination_atas(requirement.pay_to, requirement.asset)[0];
+        let t = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 50,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([9; 32]),
+        };
+        let err = match_required_transfer(&[t], &requirement, &[]).unwrap_err();
+        assert_eq!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str(),
+            ERR_TRANSFER_MISMATCH
+        );
+        assert_ne!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str(),
+            "invalid_payload"
+        );
     }
 }

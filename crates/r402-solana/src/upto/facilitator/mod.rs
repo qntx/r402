@@ -22,7 +22,7 @@ use r402_protocol::payment::{
 };
 use r402_protocol::{ChainProvider, FacilitatorError, SchemeId, VerificationError};
 pub use storage::{InMemoryChannelStorage, UptoChannelRecord, UptoChannelStorage};
-use verify::validate_open_authorization;
+use verify::{decode_transaction, validate_open_authorization};
 
 use super::SolanaUpto;
 use super::error::codes;
@@ -165,6 +165,22 @@ where
             .await;
         }
         if actual == max_amount {
+            // Official: pending reconcile keyed by open-tx message hash runs
+            // before validateOpenAuthorization so an expired clock cannot
+            // block retry of a broadcast-but-unconfirmed deposit.
+            if let Ok(open_tx) = decode_transaction(&payload.open_transaction)
+                && let Some(response) = settle::reconcile_pending(
+                    &self.provider,
+                    self.pending.as_ref(),
+                    &settle::deposit_pending_key(&network, &open_tx),
+                    &payload,
+                    &payload.max_amount,
+                    &network,
+                )
+                .await?
+            {
+                return Ok(response);
+            }
             let auth = match validate_open_authorization(
                 &self.provider,
                 &payload,
@@ -204,6 +220,7 @@ where
         let extra = serde_json::to_value(SupportedPaymentKindExtra {
             fee_payer: self.provider.fee_payer(),
             memo: None,
+            features: None,
         })
         .ok();
         let kinds = vec![

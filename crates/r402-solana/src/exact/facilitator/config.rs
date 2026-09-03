@@ -4,7 +4,7 @@
 //! additional instructions from third-party wallets like Phantom.
 
 use serde::{Deserialize, Serialize};
-use solana_pubkey::Pubkey;
+use solana_pubkey::{Pubkey, pubkey};
 
 use crate::chain::Address;
 use crate::exact::{PHANTOM_LIGHTHOUSE_PROGRAM, SOLFLARE_LIGHTHOUSE_PROGRAM, SPL_MEMO_PROGRAM};
@@ -84,7 +84,39 @@ pub struct SolanaExactFacilitatorConfig {
     /// facilitator default.
     #[serde(default)]
     pub enable_smart_wallet_verification: bool,
+
+    /// Path 2 compute-unit ceiling. `None` uses [`DEFAULT_SMART_WALLET_MAX_COMPUTE_UNITS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smart_wallet_max_compute_units: Option<u32>,
+
+    /// Path 2 priority-fee ceiling in microlamports.
+    /// `None` uses [`DEFAULT_SMART_WALLET_MAX_PRIORITY_FEE_MICROLAMPORTS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smart_wallet_max_priority_fee_micro_lamports: Option<u64>,
+
+    /// Path 2 top-level wallet-program allowlist. `None` uses
+    /// [`DEFAULT_SMART_WALLET_ALLOWED_PROGRAMS`]. `ComputeBudget` and Memo are
+    /// exempt. Empty `Some` admits no wallet programs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smart_wallet_allowed_programs: Option<Vec<Address>>,
 }
+
+/// Official Path 2 default compute-unit cap.
+pub const DEFAULT_SMART_WALLET_MAX_COMPUTE_UNITS: u32 = 400_000;
+
+/// Official Path 2 default priority-fee cap (microlamports).
+pub const DEFAULT_SMART_WALLET_MAX_PRIORITY_FEE_MICROLAMPORTS: u64 = 50_000;
+
+/// Official default Path 2 wallet programs (Squads / Swig / Governance / Metaplex / Lighthouse).
+pub static DEFAULT_SMART_WALLET_ALLOWED_PROGRAMS: &[Pubkey] = &[
+    pubkey!("SQDS4ep65T869zMMBKyuUq6aD6EgTu8psMjkvj52pCf"),
+    pubkey!("SMRTzfY6DfH5ik3TKiyLFfXexV8uSG3d2UksSCYdunG"),
+    pubkey!("SWiGmQedKzMz1tiTqoJCWeGDnGXfNBp2PkXLkpCAtQo"),
+    pubkey!("swigypWHEksbC64pWKwah1WTeh9JXwx8H1rJHLdbQMB"),
+    pubkey!("GovER5Lthms3bLBqWub97yVrMmEogzX7xNjdXpPPCVZw"),
+    pubkey!("CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d"),
+    pubkey!("L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95"),
+];
 
 const fn default_allow_additional_instructions() -> bool {
     true
@@ -110,6 +142,9 @@ impl Default for SolanaExactFacilitatorConfig {
             allowed_program_ids: default_allowed_program_ids(),
             blocked_program_ids: Vec::new(),
             enable_smart_wallet_verification: false,
+            smart_wallet_max_compute_units: None,
+            smart_wallet_max_priority_fee_micro_lamports: None,
+            smart_wallet_allowed_programs: None,
         }
     }
 }
@@ -120,6 +155,49 @@ impl SolanaExactFacilitatorConfig {
     pub const fn with_smart_wallet_verification(mut self, enabled: bool) -> Self {
         self.enable_smart_wallet_verification = enabled;
         self
+    }
+
+    /// Path 2 compute-unit cap (official default `400_000`).
+    #[must_use]
+    pub const fn path2_max_compute_units(&self) -> u32 {
+        match self.smart_wallet_max_compute_units {
+            Some(n) => n,
+            None => DEFAULT_SMART_WALLET_MAX_COMPUTE_UNITS,
+        }
+    }
+
+    /// Path 2 priority-fee cap in microlamports (official default `50_000`).
+    #[must_use]
+    pub const fn path2_max_priority_fee_micro_lamports(&self) -> u64 {
+        match self.smart_wallet_max_priority_fee_micro_lamports {
+            Some(n) => n,
+            None => DEFAULT_SMART_WALLET_MAX_PRIORITY_FEE_MICROLAMPORTS,
+        }
+    }
+
+    /// Path 2 wallet-program allowlist (`ComputeBudget` and Memo are exempt).
+    #[must_use]
+    pub fn path2_allowed_programs(&self) -> Vec<Pubkey> {
+        self.smart_wallet_allowed_programs.as_ref().map_or_else(
+            || DEFAULT_SMART_WALLET_ALLOWED_PROGRAMS.to_vec(),
+            |programs| programs.iter().map(|a| *a.pubkey()).collect(),
+        )
+    }
+
+    /// Operator Path 2 limits must be usable as limits (official `assertSmartWalletLimits`).
+    ///
+    /// # Errors
+    ///
+    /// Returns a message when a configured ceiling is below its minimum.
+    pub fn assert_smart_wallet_limits(&self) -> Result<(), String> {
+        if let Some(units) = self.smart_wallet_max_compute_units
+            && units < 1
+        {
+            return Err(format!(
+                "smartWalletMaxComputeUnits must be a safe integer >= 1, received {units}"
+            ));
+        }
+        Ok(())
     }
 
     /// Official 3..=7 cap, even if [`Self::max_instruction_count`] was mutated.
@@ -184,5 +262,20 @@ mod tests {
             ..SolanaExactFacilitatorConfig::default()
         };
         assert_eq!(config.effective_max_instruction_count(), 7);
+    }
+
+    #[test]
+    fn path2_defaults_match_official() {
+        assert_eq!(DEFAULT_SMART_WALLET_MAX_COMPUTE_UNITS, 400_000);
+        assert_eq!(DEFAULT_SMART_WALLET_MAX_PRIORITY_FEE_MICROLAMPORTS, 50_000);
+        assert_eq!(DEFAULT_SMART_WALLET_ALLOWED_PROGRAMS.len(), 7);
+        let config = SolanaExactFacilitatorConfig::default();
+        assert_eq!(config.path2_max_compute_units(), 400_000);
+        assert!(config.assert_smart_wallet_limits().is_ok());
+        let bad = SolanaExactFacilitatorConfig {
+            smart_wallet_max_compute_units: Some(0),
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        assert!(bad.assert_smart_wallet_limits().is_err());
     }
 }

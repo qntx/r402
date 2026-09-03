@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
@@ -323,6 +324,25 @@ pub trait SolanaChainProviderLike: Sync {
     ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
         std::future::ready(Ok(None))
     }
+
+    /// Resolve Address Lookup Table addresses (spec §2.1.2).
+    ///
+    /// Default: not implemented. Path 2 requires a real implementation.
+    fn fetch_address_lookup_tables(
+        &self,
+        _tables: &[Pubkey],
+    ) -> impl Future<Output = Result<HashMap<Pubkey, Vec<Pubkey>>, SolanaChainProviderError>> + Send
+    {
+        std::future::ready(Err(SolanaChainProviderError::Custom(
+            "fetchAddressLookupTables not implemented".into(),
+        )))
+    }
+
+    /// Whether this provider implements Path 2 caps (simulate inners, confirmed
+    /// inners, token balance, ALT fetch). Official constructor requires this.
+    fn supports_smart_wallet(&self) -> bool {
+        false
+    }
 }
 
 impl SolanaChainProviderLike for SolanaChainProvider {
@@ -550,6 +570,47 @@ impl SolanaChainProviderLike for SolanaChainProvider {
             Err(_) => Ok(None),
         }
     }
+
+    async fn fetch_address_lookup_tables(
+        &self,
+        tables: &[Pubkey],
+    ) -> Result<HashMap<Pubkey, Vec<Pubkey>>, SolanaChainProviderError> {
+        if tables.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let accounts = self.rpc_client.get_multiple_accounts(tables).await?;
+        let mut out = HashMap::with_capacity(tables.len());
+        for (key, account) in tables.iter().zip(accounts) {
+            let Some(account) = account else {
+                continue;
+            };
+            if let Some(addresses) = parse_lookup_table_addresses(&account.data) {
+                out.insert(*key, addresses);
+            }
+        }
+        Ok(out)
+    }
+
+    fn supports_smart_wallet(&self) -> bool {
+        true
+    }
+}
+
+/// Address Lookup Table: 56-byte meta, then packed 32-byte addresses.
+const LOOKUP_TABLE_META_SIZE: usize = 56;
+
+fn parse_lookup_table_addresses(data: &[u8]) -> Option<Vec<Pubkey>> {
+    let rest = data.get(LOOKUP_TABLE_META_SIZE..)?;
+    let (chunks, tail) = rest.as_chunks::<32>();
+    if !tail.is_empty() {
+        return None;
+    }
+    Some(
+        chunks
+            .iter()
+            .map(|chunk| Pubkey::new_from_array(*chunk))
+            .collect(),
+    )
 }
 
 fn classify_signature_status(
@@ -648,6 +709,18 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         token_account: &Pubkey,
     ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
         (**self).get_token_account_balance(token_account)
+    }
+
+    fn fetch_address_lookup_tables(
+        &self,
+        tables: &[Pubkey],
+    ) -> impl Future<Output = Result<HashMap<Pubkey, Vec<Pubkey>>, SolanaChainProviderError>> + Send
+    {
+        (**self).fetch_address_lookup_tables(tables)
+    }
+
+    fn supports_smart_wallet(&self) -> bool {
+        (**self).supports_smart_wallet()
     }
 }
 

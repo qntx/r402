@@ -12,8 +12,9 @@ use std::sync::Arc;
 
 use compact_str::CompactString;
 pub use config::{
-    MAX_INSTRUCTION_COUNT, MIN_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig,
-    clamp_max_instruction_count,
+    DEFAULT_SMART_WALLET_ALLOWED_PROGRAMS, DEFAULT_SMART_WALLET_MAX_COMPUTE_UNITS,
+    DEFAULT_SMART_WALLET_MAX_PRIORITY_FEE_MICROLAMPORTS, MAX_INSTRUCTION_COUNT,
+    MIN_INSTRUCTION_COUNT, SolanaExactFacilitatorConfig, clamp_max_instruction_count,
 };
 use r402_facilitator::{
     Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
@@ -93,6 +94,31 @@ impl<P> SolanaExactFacilitator<P> {
     }
 }
 
+impl<P: SolanaChainProviderLike> SolanaExactFacilitator<P> {
+    /// Construct with Path 2 fail-closed: enabled Path 2 requires provider caps
+    /// (official `assertSmartWalletVerifySigner`).
+    ///
+    /// # Errors
+    ///
+    /// Missing Path 2 RPC caps or invalid Path 2 limits.
+    pub fn try_from_config(
+        provider: P,
+        config: SolanaExactFacilitatorConfig,
+    ) -> Result<Self, FacilitatorError> {
+        let this = Self::new(provider, config);
+        this.assert_path2_ready()?;
+        Ok(this)
+    }
+
+    fn assert_path2_ready(&self) -> Result<(), FacilitatorError> {
+        if !self.config.enable_smart_wallet_verification {
+            return Ok(());
+        }
+        smart_wallet::assert_path2_provider(&self.provider, &self.config)
+            .map_err(FacilitatorError::from)
+    }
+}
+
 impl<P> std::fmt::Debug for SolanaExactFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SolanaExactFacilitator")
@@ -106,6 +132,7 @@ where
     P: SolanaChainProviderLike + ChainProvider + Send + Sync,
 {
     async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
+        self.assert_path2_ready()?;
         let request = payload::v2::VerifyRequest::from_verify(request)?;
         enforce_memo(&request)?;
         let verification = verify_transfer(&self.provider, &request, &self.config).await?;
@@ -113,6 +140,7 @@ where
     }
 
     async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
+        self.assert_path2_ready()?;
         settle::settle(self, request).await
     }
 
@@ -125,6 +153,11 @@ where
             let extra = serde_json::to_value(SupportedPaymentKindExtra {
                 fee_payer,
                 memo: None,
+                features: self.config.enable_smart_wallet_verification.then_some(
+                    crate::exact::SupportedKindFeatures {
+                        smart_wallet_supported: true,
+                    },
+                ),
             })
             .ok();
             vec![

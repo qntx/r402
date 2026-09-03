@@ -74,6 +74,18 @@ pub struct SupportedPaymentKindExtra {
     /// Optional memo required in the transaction.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub memo: Option<compact_str::CompactString>,
+    /// Mechanism features advertised on `/supported`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<SupportedKindFeatures>,
+}
+
+/// `/supported` extra.features (official `smartWalletSupported`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SupportedKindFeatures {
+    /// Path 2 is enabled on this facilitator.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub smart_wallet_supported: bool,
 }
 
 /// Associated Token Account program public key.

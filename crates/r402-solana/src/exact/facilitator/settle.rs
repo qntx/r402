@@ -494,6 +494,8 @@ mod tests {
         broadcast_sig: Signature,
         inner_ixs: Mutex<Option<Vec<solana_client::rpc_response::UiInnerInstructions>>>,
         token_balances: Mutex<std::collections::HashMap<Pubkey, u64>>,
+        balance_reads: AtomicUsize,
+        balance_after: Mutex<Option<u64>>,
     }
 
     impl StubProvider {
@@ -506,6 +508,8 @@ mod tests {
                 broadcast_sig: Signature::from([7u8; 64]),
                 inner_ixs: Mutex::new(None),
                 token_balances: Mutex::new(std::collections::HashMap::new()),
+                balance_reads: AtomicUsize::new(0),
+                balance_after: Mutex::new(None),
             }
         }
 
@@ -633,12 +637,18 @@ mod tests {
             &self,
             token_account: &Pubkey,
         ) -> impl Future<Output = Result<Option<u64>, SolanaChainProviderError>> + Send {
-            let bal = self
+            let n = self.balance_reads.fetch_add(1, Ordering::SeqCst);
+            let stored = self
                 .token_balances
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .get(token_account)
                 .copied();
+            let after = *self
+                .balance_after
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let bal = if n >= 1 { after.or(stored) } else { stored };
             std::future::ready(Ok(bal))
         }
     }
@@ -909,6 +919,152 @@ mod tests {
                 assert_eq!(reason.as_str(), POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED);
             }
             other => panic!("expected post-settle failure, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn path2_post_settle_unverified_is_failure() {
+        use crate::exact::ATA_PROGRAM_PUBKEY;
+        use crate::exact::facilitator::smart_wallet::ObservedTransfer;
+
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = {
+            let (ata, _) = Pubkey::find_program_address(
+                &[pay_to.as_ref(), spl_token::ID.as_ref(), asset.as_ref()],
+                &ATA_PROGRAM_PUBKEY,
+            );
+            ata
+        };
+        let matched = ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 1,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([4u8; 32]),
+        };
+        let tx = dummy_tx(b"unverified");
+        let tx_key = transaction_message_hash(&tx);
+        let pending = Arc::new(InMemoryPendingSettlementStore::new());
+        let stub = StubProvider::new(SignatureConfirm::Confirmed);
+        let fac = facilitator(stub, pending, SettlementCache::new());
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
+        let verification = VerifyTransferResult {
+            payer: Address::new(matched.authority),
+            transaction: tx,
+            amount: 1,
+            matched_transfer: Some(matched),
+        };
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
+            .await
+            .expect("settle");
+        match response {
+            SettleResponse::Failure { reason, .. } => {
+                assert_eq!(reason.as_str(), POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED);
+            }
+            other => panic!("expected unverified failure, got {other:?}"),
+        }
+    }
+
+    fn path2_matched(
+        dest: Pubkey,
+        asset: &Address,
+    ) -> crate::exact::facilitator::smart_wallet::ObservedTransfer {
+        crate::exact::facilitator::smart_wallet::ObservedTransfer {
+            program_id: spl_token::ID,
+            amount: 10,
+            mint: *asset.pubkey(),
+            destination: dest,
+            authority: Pubkey::new_from_array([4u8; 32]),
+        }
+    }
+
+    fn path2_dest_ata(pay_to: &Address, asset: &Address) -> Pubkey {
+        let (ata, _) = Pubkey::find_program_address(
+            &[pay_to.as_ref(), spl_token::ID.as_ref(), asset.as_ref()],
+            &crate::exact::ATA_PROGRAM_PUBKEY,
+        );
+        ata
+    }
+
+    #[tokio::test]
+    async fn path2_post_settle_balance_delta_success() {
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = path2_dest_ata(&pay_to, &asset);
+        let matched = path2_matched(dest, &asset);
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 10,
+        };
+        let tx = dummy_tx(b"delta-ok");
+        let tx_key = transaction_message_hash(&tx);
+        let pending = Arc::new(InMemoryPendingSettlementStore::new());
+        let stub = StubProvider::new(SignatureConfirm::Confirmed);
+        stub.token_balances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(dest, 0);
+        *stub
+            .balance_after
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(10);
+        let fac = facilitator(stub, pending, SettlementCache::new());
+        let verification = VerifyTransferResult {
+            payer: Address::new(matched.authority),
+            transaction: tx,
+            amount: 10,
+            matched_transfer: Some(matched),
+        };
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
+            .await
+            .expect("settle");
+        assert!(matches!(response, SettleResponse::Success { .. }));
+    }
+
+    #[tokio::test]
+    async fn path2_post_settle_balance_delta_insufficient() {
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = path2_dest_ata(&pay_to, &asset);
+        let matched = path2_matched(dest, &asset);
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 10,
+        };
+        let tx = dummy_tx(b"delta-low");
+        let tx_key = transaction_message_hash(&tx);
+        let pending = Arc::new(InMemoryPendingSettlementStore::new());
+        let stub = StubProvider::new(SignatureConfirm::Confirmed);
+        stub.token_balances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(dest, 0);
+        *stub
+            .balance_after
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(1);
+        let fac = facilitator(stub, pending, SettlementCache::new());
+        let verification = VerifyTransferResult {
+            payer: Address::new(matched.authority),
+            transaction: tx,
+            amount: 10,
+            matched_transfer: Some(matched),
+        };
+        let response = settle_verified(&fac, verification, &tx_key, "solana:devnet", &requirement)
+            .await
+            .expect("settle");
+        match response {
+            SettleResponse::Failure { reason, .. } => {
+                assert_eq!(reason.as_str(), POST_SETTLEMENT_TRANSFER_NOT_CONFIRMED);
+            }
+            other => panic!("expected insufficient delta failure, got {other:?}"),
         }
     }
 }

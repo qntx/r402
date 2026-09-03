@@ -36,7 +36,7 @@ fn deposit_channel_key(network: &str, channel_id: &str) -> String {
 
 /// Pending-store key: open-tx message hash so a differently-shaped retry does
 /// not inherit a stale signature (official `upto:deposit:{network}:{hash}`).
-fn deposit_pending_key(network: &str, open_tx: &VersionedTransaction) -> String {
+pub(super) fn deposit_pending_key(network: &str, open_tx: &VersionedTransaction) -> String {
     format!(
         "upto:deposit:{network}:{}",
         transaction_message_hash(open_tx)
@@ -364,5 +364,26 @@ mod tests {
         assert_eq!(channel_key, format!("upto:deposit:{network}:{channel}"));
         assert_ne!(deposit_pending_key(network, &a), channel_key);
         assert!(deposit_pending_key(network, &a).starts_with("upto:deposit:"));
+    }
+
+    #[test]
+    fn deposit_pending_store_roundtrip_uses_hash_key() {
+        use r402_facilitator::InMemoryPendingSettlementStore;
+        let network = "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1";
+        let tx = dummy_open(3);
+        let key = deposit_pending_key(network, &tx);
+        let store = InMemoryPendingSettlementStore::new();
+        store.set(&key, "sig".into());
+        assert_eq!(store.get(&key).as_deref(), Some("sig"));
+        assert!(
+            store
+                .get(&deposit_channel_key(
+                    network,
+                    "11111111111111111111111111111111"
+                ))
+                .is_none()
+        );
+        store.delete(&key);
+        assert!(store.get(&key).is_none());
     }
 }

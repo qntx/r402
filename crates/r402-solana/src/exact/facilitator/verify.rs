@@ -290,7 +290,7 @@ pub async fn verify_transaction<P: SolanaChainProviderLike>(
                 path1 = %path1_err,
                 "Path 1 layout failure; attempting Path 2 smart-wallet verification"
             );
-            verify_transaction_path2(provider, transaction, transfer_requirement).await
+            verify_transaction_path2(provider, transaction, transfer_requirement, config).await
         }
         Err(e) => Err(e),
     }
@@ -342,16 +342,23 @@ async fn verify_transaction_path1<P: SolanaChainProviderLike>(
     })
 }
 
-/// Path 2 — simulation / outcome-based smart-wallet verification.
-///
-/// Matches exactly one required `TransferChecked` across top-level
-/// instructions **and** CPI inner instructions (spec §3.2).
+/// Path 2 — official order: caps → allowlist → ALT isolation → compute budget
+/// → simulate inners → exactly-one match (spec §3.2).
 async fn verify_transaction_path2<P: SolanaChainProviderLike>(
     provider: &P,
     transaction: VersionedTransaction,
     transfer_requirement: &TransferRequirement<'_>,
+    config: &SolanaExactFacilitatorConfig,
 ) -> Result<VerifyTransferResult, VerificationError> {
-    assert_fee_payer_isolated(&transaction, provider.pubkey())?;
+    super::smart_wallet::assert_path2_provider(provider, config)?;
+    super::smart_wallet::assert_path2_program_allowlist(&transaction, config)?;
+    let keys = super::smart_wallet::resolve_loaded_account_keys(provider, &transaction).await?;
+    super::smart_wallet::assert_fee_payer_isolated_from_keys(
+        &transaction,
+        &keys,
+        provider.pubkey(),
+    )?;
+    super::smart_wallet::validate_path2_compute_budget(&transaction, &keys, config)?;
 
     let tx = TransactionInt::new(transaction.clone()).sign(provider)?;
     let cfg = RpcSimulateTransactionConfig {
@@ -367,14 +374,19 @@ async fn verify_transaction_path2<P: SolanaChainProviderLike>(
         .simulate_transaction_with_config(tx.inner(), cfg)
         .await
         .map_err(|e| {
-            VerificationError::InvalidFormat(format!(
-                "invalid_exact_svm_smart_wallet_simulation_failed: {e}"
+            VerificationError::from_wire(&format!(
+                "{}: {e}",
+                super::smart_wallet::simulation_failed_code()
             ))
         })?;
 
-    let account_keys =
-        super::smart_wallet::resolved_account_keys(&transaction, &sim.loaded_addresses);
-    let mut transfers = super::smart_wallet::extract_top_level_transfers(&transaction);
+    let mut account_keys = keys;
+    let loaded = super::smart_wallet::resolved_account_keys(&transaction, &sim.loaded_addresses);
+    if loaded.len() > account_keys.len() {
+        account_keys = loaded;
+    }
+    let mut transfers =
+        super::smart_wallet::extract_top_level_transfers_with_keys(&transaction, &account_keys);
     transfers.extend(
         super::smart_wallet::extract_transfers_from_inner_instructions(
             &sim.inner_instructions,
@@ -535,6 +547,8 @@ mod tests {
     struct Path2Stub {
         pubkey: Pubkey,
         inner: Vec<UiInnerInstructions>,
+        loaded: solana_client::rpc_response::UiLoadedAddresses,
+        smart_wallet: bool,
     }
 
     impl SolanaChainProviderLike for Path2Stub {
@@ -546,6 +560,7 @@ mod tests {
         {
             std::future::ready(Ok(SimulateTransactionResult {
                 inner_instructions: self.inner.clone(),
+                loaded_addresses: self.loaded.clone(),
                 ..SimulateTransactionResult::default()
             }))
         }
@@ -607,6 +622,22 @@ mod tests {
         ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send
         {
             std::future::ready(Ok(SignatureConfirm::Confirmed))
+        }
+
+        fn fetch_address_lookup_tables(
+            &self,
+            _tables: &[Pubkey],
+        ) -> impl Future<
+            Output = Result<
+                std::collections::HashMap<Pubkey, Vec<Pubkey>>,
+                SolanaChainProviderError,
+            >,
+        > + Send {
+            std::future::ready(Ok(std::collections::HashMap::new()))
+        }
+
+        fn supports_smart_wallet(&self) -> bool {
+            self.smart_wallet
         }
     }
 
@@ -738,13 +769,17 @@ mod tests {
             ))],
         }];
         let payer = Pubkey::new_from_array([7u8; 32]);
-        let tx = compiled_tx(&[Pubkey::new_from_array([8u8; 32])]);
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let tx = compiled_tx(&[wallet]);
         let stub = Path2Stub {
             pubkey: payer,
             inner,
+            loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
+            smart_wallet: true,
         };
         let config = SolanaExactFacilitatorConfig {
             enable_smart_wallet_verification: true,
+            smart_wallet_allowed_programs: Some(vec![Address::new(wallet)]),
             ..SolanaExactFacilitatorConfig::default()
         };
         let requirement = TransferRequirement {
@@ -762,5 +797,162 @@ mod tests {
         .expect("path 2");
         assert_eq!(result.payer, Address::new(authority));
         assert_eq!(result.matched_transfer, Some(matched));
+        assert_eq!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(
+                &super::super::smart_wallet::match_required_transfer(&[], &requirement, &[])
+                    .unwrap_err()
+            )
+            .reason()
+            .as_str(),
+            "invalid_exact_svm_smart_wallet_no_transfer_in_simulation"
+        );
+    }
+
+    #[tokio::test]
+    async fn path2_unknown_program_is_not_allowed() {
+        use crate::exact::payload::TransactionInt;
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let tx = compiled_tx(&[wallet]);
+        let stub = Path2Stub {
+            pubkey: Pubkey::new_from_array([7u8; 32]),
+            inner: Vec::new(),
+            loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
+            smart_wallet: true,
+        };
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let config = SolanaExactFacilitatorConfig {
+            enable_smart_wallet_verification: true,
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
+        let err = verify_transaction(
+            &stub,
+            TransactionInt::new(tx).as_base64().unwrap(),
+            &requirement,
+            &config,
+        )
+        .await
+        .unwrap_err();
+        let reason = r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+            .reason()
+            .as_str()
+            .to_owned();
+        assert!(reason.contains("invalid_exact_svm_smart_wallet_program_not_allowed"));
+        assert_ne!(reason, "invalid_payload");
+    }
+
+    #[tokio::test]
+    async fn path2_without_provider_caps_is_unavailable() {
+        use crate::exact::payload::TransactionInt;
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let tx = compiled_tx(&[wallet]);
+        let stub = Path2Stub {
+            pubkey: Pubkey::new_from_array([7u8; 32]),
+            inner: Vec::new(),
+            loaded: solana_client::rpc_response::UiLoadedAddresses::default(),
+            smart_wallet: false,
+        };
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let config = SolanaExactFacilitatorConfig {
+            enable_smart_wallet_verification: true,
+            smart_wallet_allowed_programs: Some(vec![Address::new(wallet)]),
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1,
+        };
+        let err = verify_transaction(
+            &stub,
+            TransactionInt::new(tx).as_base64().unwrap(),
+            &requirement,
+            &config,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            r402_protocol::AsPaymentProblem::as_payment_problem(&err)
+                .reason()
+                .as_str(),
+            "invalid_exact_svm_smart_wallet_verification_not_available"
+        );
+    }
+
+    #[tokio::test]
+    async fn path2_matches_compiled_inner_transfer_checked() {
+        use solana_client::rpc_response::{UiCompiledInstruction, UiInstruction};
+
+        use crate::exact::ATA_PROGRAM_PUBKEY;
+        use crate::exact::payload::TransactionInt;
+
+        let pay_to = Address::new(Pubkey::new_from_array([1u8; 32]));
+        let asset = Address::new(Pubkey::new_from_array([2u8; 32]));
+        let dest = {
+            let (ata, _) = Pubkey::find_program_address(
+                &[pay_to.as_ref(), spl_token::ID.as_ref(), asset.as_ref()],
+                &ATA_PROGRAM_PUBKEY,
+            );
+            ata
+        };
+        let authority = Pubkey::new_from_array([9u8; 32]);
+        let source = Pubkey::new_from_array([10u8; 32]);
+        let mut data = vec![12u8];
+        data.extend_from_slice(&1_000u64.to_le_bytes());
+        data.push(6);
+        let inner = vec![UiInnerInstructions {
+            index: 0,
+            instructions: vec![UiInstruction::Compiled(UiCompiledInstruction {
+                program_id_index: 6,
+                accounts: vec![2, 3, 4, 5],
+                data: bs58::encode(data).into_string(),
+                stack_height: None,
+            })],
+        }];
+        let loaded = solana_client::rpc_response::UiLoadedAddresses {
+            writable: vec![
+                source.to_string(),
+                asset.pubkey().to_string(),
+                dest.to_string(),
+                authority.to_string(),
+                spl_token::ID.to_string(),
+            ],
+            readonly: Vec::new(),
+        };
+        let wallet = Pubkey::new_from_array([8u8; 32]);
+        let stub = Path2Stub {
+            pubkey: Pubkey::new_from_array([7u8; 32]),
+            inner,
+            loaded,
+            smart_wallet: true,
+        };
+        let config = SolanaExactFacilitatorConfig {
+            enable_smart_wallet_verification: true,
+            smart_wallet_allowed_programs: Some(vec![Address::new(wallet)]),
+            ..SolanaExactFacilitatorConfig::default()
+        };
+        let requirement = TransferRequirement {
+            asset: &asset,
+            pay_to: &pay_to,
+            amount: 1_000,
+        };
+        let result = verify_transaction(
+            &stub,
+            TransactionInt::new(compiled_tx(&[wallet]))
+                .as_base64()
+                .unwrap(),
+            &requirement,
+            &config,
+        )
+        .await
+        .expect("compiled path 2");
+        assert_eq!(result.payer, Address::new(authority));
+        assert_eq!(result.amount, 1_000);
     }
 }
