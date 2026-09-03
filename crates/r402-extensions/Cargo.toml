@@ -19,5 +19,40 @@ categories = [
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+[features]
+default = ["ext-bazaar", "ext-payment-id", "ext-eip2612", "ext-erc20-approval"]
+# TtlSet lives in r402-facilitator; only payment-identifier needs it.
+cache = ["dep:r402-facilitator"]
+ext-bazaar = []
+ext-payment-id = ["cache", "dep:thiserror"]
+ext-eip2612 = []
+ext-erc20-approval = []
+siwx = ["dep:thiserror"]
+all-extensions = [
+    "ext-bazaar",
+    "ext-payment-id",
+    "ext-eip2612",
+    "ext-erc20-approval",
+]
+
+[dependencies]
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+serde_json = { workspace = true }
+
+r402-facilitator = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[[test]]
+name = "bazaar"
+required-features = ["ext-bazaar"]
+
+[[test]]
+name = "siwx"
+required-features = ["siwx"]
+
 [lints]
 workspace = true

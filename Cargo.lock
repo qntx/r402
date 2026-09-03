@@ -2645,6 +2645,13 @@ version = "0.18.0"
 [[package]]
 name = "r402-extensions"
 version = "0.18.0"
+dependencies = [
+ "compact_str",
+ "r402-facilitator",
+ "r402-protocol",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "r402-facilitator"
