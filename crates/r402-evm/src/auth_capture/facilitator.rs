@@ -45,13 +45,6 @@ sol! {
             address tokenCollector,
             bytes collectorData
         ) external;
-
-        function charge(
-            PaymentInfo paymentInfo,
-            uint256 amount,
-            address tokenCollector,
-            bytes collectorData
-        ) external;
     }
 }
 
@@ -219,25 +212,14 @@ where
 
         let escrow = IAuthCaptureEscrow::new(AUTH_CAPTURE_ESCROW_ADDRESS, self.provider.inner());
         let amount = requirements.amount.0;
-        let receipt = if extra.auto_capture() {
-            let pending = escrow
-                .charge(payment_info, amount, collector, collector_data)
-                .send()
-                .await
-                .map_err(|e| FacilitatorError::Onchain(format!("auth-capture charge: {e}")))?;
-            pending.get_receipt().await.map_err(|e| {
-                FacilitatorError::Onchain(format!("auth-capture charge receipt: {e}"))
-            })?
-        } else {
-            let pending = escrow
-                .authorize(payment_info, amount, collector, collector_data)
-                .send()
-                .await
-                .map_err(|e| FacilitatorError::Onchain(format!("auth-capture authorize: {e}")))?;
-            pending.get_receipt().await.map_err(|e| {
-                FacilitatorError::Onchain(format!("auth-capture authorize receipt: {e}"))
-            })?
-        };
+        let pending = escrow
+            .authorize(payment_info, amount, collector, collector_data)
+            .send()
+            .await
+            .map_err(|e| FacilitatorError::Onchain(format!("auth-capture authorize: {e}")))?;
+        let receipt = pending.get_receipt().await.map_err(|e| {
+            FacilitatorError::Onchain(format!("auth-capture authorize receipt: {e}"))
+        })?;
 
         if !receipt.status() {
             return Err(FacilitatorError::Onchain(

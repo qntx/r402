@@ -64,7 +64,7 @@ impl AuthCaptureExtra {
         }
     }
 
-    /// Whether settlement uses `charge` instead of `authorize`.
+    /// `extra.autoCapture == true`. Verify rejects this: v1.0 `charge` is 6-arg.
     #[must_use]
     pub const fn auto_capture(&self) -> bool {
         matches!(self.auto_capture, Some(true))

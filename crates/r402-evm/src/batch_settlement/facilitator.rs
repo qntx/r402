@@ -16,7 +16,7 @@ use r402_protocol::payment as wire;
 use r402_protocol::scheme::{BatchSettlementScheme, SchemeId};
 
 use super::Eip155BatchSettlement;
-use super::payload::{BatchSettlementPayload, v2};
+use super::payload::v2;
 use super::store::{ChannelStore, MemoryChannelStore};
 use super::verify::verify_offchain;
 use crate::chain::Eip155MetaTransactionProvider;
@@ -108,11 +108,7 @@ where
         let channel_id = voucher.channel_id;
         let max = voucher.max_claimable_amount;
 
-        if !matches!(
-            typed.payment_payload.payload,
-            BatchSettlementPayload::Refund { .. }
-        ) && !self.store.try_charge(channel_id, charge, max)
-        {
+        if !self.store.try_charge(channel_id, charge, max) {
             return Err(FacilitatorError::Verification(
                 VerificationError::InvalidFormat("charge exceeds voucher ceiling at settle".into()),
             ));

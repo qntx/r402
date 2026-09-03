@@ -245,4 +245,27 @@ mod client_verify_tests {
         let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");
         assert_eq!(recovered, payer);
     }
+
+    #[tokio::test]
+    async fn auto_capture_true_is_invalid_format() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auto_capture = Some(true);
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+        let requirements = requirements(extra, amount, pay_to, asset);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453),
+                Err(VerificationError::InvalidFormat(_))
+            ),
+            "autoCapture true is an unsupported payment flow"
+        );
+    }
 }

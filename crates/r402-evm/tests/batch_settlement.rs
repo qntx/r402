@@ -185,3 +185,25 @@ async fn client_signs_and_facilitator_settles_voucher_offchain() {
         U256::from(50u64)
     );
 }
+
+#[tokio::test]
+async fn client_sign_rejects_withdraw_delay_uint40_overflow() {
+    let (signer, _) = wallet();
+    let client = Eip155BatchSettlementClient::new(Arc::new(signer));
+    let mut extra = sample_extra();
+    extra.withdraw_delay = u64::MAX;
+    let tag = Eip155BatchSettlement::price_tag(pay_to(), USDC::base().amount(50u64), extra);
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![tag.requirements.clone()]);
+    let err = client
+        .accept(&required)
+        .first()
+        .expect("one accept")
+        .sign()
+        .await
+        .expect_err("withdrawDelay >= 2^40 must not panic");
+    assert!(
+        matches!(err, r402_protocol::error::ClientError::Signing(_)),
+        "got {err:?}"
+    );
+}

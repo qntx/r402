@@ -89,7 +89,7 @@ mod e2e_tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let channel_id = compute_channel_id(&cfg, 8453);
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
         let charge = U256::from(50_u64);
         let voucher = sign_voucher(&signer, channel_id, charge, 8453)
             .await
@@ -124,5 +124,100 @@ mod e2e_tests {
             payment.payload.voucher().max_claimable_amount
         ));
         assert_eq!(store.get(&channel_id).charged_cumulative.0, charge);
+    }
+
+    #[tokio::test]
+    async fn extra_900_with_config_uint40_overflow_is_invalid_format() {
+        let cfg = ChannelConfig {
+            payer: Address::repeat_byte(0x11),
+            payer_authorizer: Address::repeat_byte(0x11),
+            receiver: Address::repeat_byte(0x22),
+            receiver_authorizer: Address::repeat_byte(0x33),
+            token: Address::repeat_byte(0x44),
+            withdraw_delay: 1 << 40,
+            salt: B256::ZERO,
+        };
+        let extra = BatchSettlementExtra {
+            receiver_authorizer: ChecksummedAddress(cfg.receiver_authorizer),
+            withdraw_delay: 900,
+            name: "USDC".into(),
+            version: "2".into(),
+            asset_transfer_method: None,
+        };
+        let requirements = v2::PaymentRequirements::new(
+            BatchSettlementScheme,
+            "eip155:8453".parse().expect("chain"),
+            TokenAmount::from(U256::from(50_u64)),
+            ChecksummedAddress(cfg.receiver),
+            ChecksummedAddress(cfg.token),
+            3600,
+        )
+        .with_extra(extra);
+        let body = BatchSettlementPayload::Voucher {
+            channel_config: cfg,
+            voucher: super::payload::VoucherFields {
+                channel_id: B256::ZERO,
+                max_claimable_amount: TokenAmount::from(U256::from(50_u64)),
+                signature: alloy_primitives::Bytes::from(vec![0u8; 65]),
+            },
+        };
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), body);
+        let store = MemoryChannelStore::new();
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453, &store),
+                Err(r402_protocol::error::VerificationError::InvalidFormat(_))
+            ),
+            "overflow withdrawDelay must be InvalidFormat, not panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn refund_on_empty_store_is_invalid_format() {
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let cfg = ChannelConfig {
+            payer,
+            payer_authorizer: payer,
+            receiver: Address::repeat_byte(0x22),
+            receiver_authorizer: Address::repeat_byte(0x33),
+            token: Address::repeat_byte(0x44),
+            withdraw_delay: 900,
+            salt: B256::ZERO,
+        };
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
+        let voucher = sign_voucher(&signer, channel_id, U256::ZERO, 8453)
+            .await
+            .expect("sign");
+        let body = BatchSettlementPayload::Refund {
+            channel_config: cfg,
+            voucher,
+            amount: None,
+        };
+        let extra = BatchSettlementExtra {
+            receiver_authorizer: ChecksummedAddress(cfg.receiver_authorizer),
+            withdraw_delay: 900,
+            name: "USDC".into(),
+            version: "2".into(),
+            asset_transfer_method: None,
+        };
+        let requirements = v2::PaymentRequirements::new(
+            BatchSettlementScheme,
+            "eip155:8453".parse().expect("chain"),
+            TokenAmount::from(U256::ZERO),
+            ChecksummedAddress(cfg.receiver),
+            ChecksummedAddress(cfg.token),
+            3600,
+        )
+        .with_extra(extra);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), body);
+        let store = MemoryChannelStore::new();
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453, &store),
+                Err(r402_protocol::error::VerificationError::InvalidFormat(_))
+            ),
+            "refund must not verify as paid"
+        );
     }
 }

@@ -21,11 +21,21 @@ sol! {
     }
 }
 
+/// `withdrawDelay` does not fit `uint40` (ruint `Uint::from` would panic).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("withdrawDelay exceeds uint40")]
+pub struct ChannelIdError;
+
 /// Computes the chain-bound channel id from config + chain id.
 ///
 /// Matches TS `computeChannelId` / Go `ComputeChannelId`.
-#[must_use]
-pub fn compute_channel_id(config: &ChannelConfig, chain_id: u64) -> B256 {
+///
+/// # Errors
+///
+/// [`ChannelIdError`] when `withdrawDelay >= 2^40`.
+pub fn compute_channel_id(config: &ChannelConfig, chain_id: u64) -> Result<B256, ChannelIdError> {
+    let withdraw_delay = alloy_primitives::Uint::<40, 1>::try_from(config.withdraw_delay)
+        .map_err(|_| ChannelIdError)?;
     let domain = eip712_domain! {
         name: BATCH_SETTLEMENT_DOMAIN_NAME,
         version: BATCH_SETTLEMENT_DOMAIN_VERSION,
@@ -38,24 +48,24 @@ pub fn compute_channel_id(config: &ChannelConfig, chain_id: u64) -> B256 {
         receiver: config.receiver,
         receiverAuthorizer: config.receiver_authorizer,
         token: config.token,
-        withdrawDelay: alloy_primitives::Uint::from(config.withdraw_delay),
+        withdrawDelay: withdraw_delay,
         salt: config.salt,
     };
-    typed.eip712_signing_hash(&domain)
+    Ok(typed.eip712_signing_hash(&domain))
 }
 
-/// Returns an error message when claimed id does not match config.
+/// Returns an error message when claimed id does not match config, or when
+/// `withdrawDelay` overflows `uint40`.
 #[must_use]
 pub fn channel_id_binding_error(
     config: &ChannelConfig,
     claimed: B256,
     chain_id: u64,
 ) -> Option<&'static str> {
-    let expected = compute_channel_id(config, chain_id);
-    if expected == claimed {
-        None
-    } else {
-        Some("channel_id_mismatch")
+    match compute_channel_id(config, chain_id) {
+        Err(_) => Some("withdrawDelay exceeds uint40"),
+        Ok(expected) if expected == claimed => None,
+        Ok(_) => Some("channel_id_mismatch"),
     }
 }
 
@@ -104,11 +114,29 @@ mod tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let a = compute_channel_id(&cfg, 8453);
-        let b = compute_channel_id(&cfg, 8453);
+        let a = compute_channel_id(&cfg, 8453).expect("id");
+        let b = compute_channel_id(&cfg, 8453).expect("id");
         assert_eq!(a, b);
-        let c = compute_channel_id(&cfg, 1);
+        let c = compute_channel_id(&cfg, 1).expect("id");
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn channel_id_rejects_uint40_overflow() {
+        let cfg = ChannelConfig {
+            payer: Address::repeat_byte(0x11),
+            payer_authorizer: Address::repeat_byte(0x11),
+            receiver: Address::repeat_byte(0x22),
+            receiver_authorizer: Address::repeat_byte(0x33),
+            token: Address::repeat_byte(0x44),
+            withdraw_delay: 1 << 40,
+            salt: B256::ZERO,
+        };
+        assert!(compute_channel_id(&cfg, 8453).is_err());
+        assert_eq!(
+            channel_id_binding_error(&cfg, B256::ZERO, 8453),
+            Some("withdrawDelay exceeds uint40")
+        );
     }
 
     #[test]
@@ -122,7 +150,7 @@ mod tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let id = compute_channel_id(&cfg, 8453);
+        let id = compute_channel_id(&cfg, 8453).expect("id");
         assert!(channel_id_binding_error(&cfg, id, 8453).is_none());
         assert!(channel_id_binding_error(&cfg, B256::ZERO, 8453).is_some());
     }

@@ -1,6 +1,5 @@
 //! Off-chain verification for batch-settlement request payloads.
 
-use alloy_primitives::U256;
 use r402_protocol::error::VerificationError;
 use r402_protocol::scheme::BatchSettlementScheme;
 
@@ -81,6 +80,9 @@ pub fn verify_offchain(
         BatchSettlementPayload::Deposit { .. } => Err(VerificationError::InvalidFormat(
             "batch-settlement deposit settle requires on-chain deposit (not implemented on request path; use voucher after external funding)".into(),
         )),
+        BatchSettlementPayload::Refund { .. } => Err(VerificationError::InvalidFormat(
+            "batch-settlement refund settle requires on-chain refund (not implemented on request path)".into(),
+        )),
         BatchSettlementPayload::Voucher { .. } => {
             let needed = state.charged_cumulative.0.saturating_add(request_amount.0);
             if voucher.max_claimable_amount.0 < needed {
@@ -89,14 +91,6 @@ pub fn verify_offchain(
                 ));
             }
             Ok(request_amount)
-        }
-        BatchSettlementPayload::Refund { amount, .. } => {
-            if voucher.max_claimable_amount.0 != state.charged_cumulative.0 {
-                return Err(VerificationError::InvalidFormat(
-                    "refund voucher maxClaimableAmount must equal charged cumulative".into(),
-                ));
-            }
-            Ok(amount.unwrap_or(TokenAmount::from(U256::ZERO)))
         }
     }
 }

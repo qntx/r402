@@ -151,7 +151,8 @@ where
                 self.extra.withdraw_delay,
                 salt,
             );
-            let channel_id = compute_channel_id(&config, self.chain_id);
+            let channel_id = compute_channel_id(&config, self.chain_id)
+                .map_err(|e| ClientError::Signing(e.to_string()))?;
             let charged = self
                 .charged
                 .lock()
@@ -186,7 +187,8 @@ pub async fn sign_voucher_payload<S: SignerLike + Sync>(
     max_claimable: U256,
     chain_id: u64,
 ) -> Result<BatchSettlementPayload, ClientError> {
-    let channel_id = compute_channel_id(config, chain_id);
+    let channel_id =
+        compute_channel_id(config, chain_id).map_err(|e| ClientError::Signing(e.to_string()))?;
     let voucher = sign_voucher(signer, channel_id, max_claimable, chain_id).await?;
     Ok(BatchSettlementPayload::Voucher {
         channel_config: *config,

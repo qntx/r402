@@ -136,7 +136,7 @@ mod tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let channel_id = compute_channel_id(&cfg, 8453);
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
         let voucher = sign_voucher(&signer, channel_id, U256::from(1000_u64), 8453)
             .await
             .expect("sign");
