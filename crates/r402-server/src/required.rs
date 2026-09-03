@@ -66,7 +66,7 @@ impl ResourceServer {
             payment_payload.as_ref(),
         )
         .await?;
-        advertise_registered_extensions(&self.extensions, &mut response)?;
+        advertise_registered_extensions(&self.extensions, &mut response).await?;
         self.apply_payment_flow_extras(&mut response.accepts)?;
         Ok(response)
     }
@@ -135,15 +135,24 @@ impl ResourceServer {
     }
 }
 
-fn advertise_registered_extensions(
+async fn advertise_registered_extensions(
     registry: &ExtensionRegistry,
     response: &mut PaymentRequired,
 ) -> Result<(), FacilitatorError> {
     for ext in registry.iter() {
         let baseline = snapshot_payment_requirements_list(&response.accepts);
-        if response.extensions.get(ext.id()).is_none()
-            && let Some(entry) = ext.advertise(&AdvertiseContext::new(None))
+        let existing = response.extensions.get(ext.id()).cloned();
+        let ctx = AdvertiseContext::for_payment_required(
+            &response.resource,
+            &response.accepts,
+            existing.as_ref(),
+        );
+        if existing.is_none()
+            && let Some(entry) = ext.advertise(&ctx)
         {
+            response.extensions.insert(ext.id(), entry);
+        }
+        if let Some(entry) = ext.enrich_payment_required(&ctx).await {
             response.extensions.insert(ext.id(), entry);
         }
         assert_accepts_allowlisted_after_extension_enrich(&baseline, &response.accepts, ext.id())

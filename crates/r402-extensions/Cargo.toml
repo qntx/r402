@@ -20,13 +20,34 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["ext-bazaar", "ext-payment-id", "ext-eip2612", "ext-erc20-approval"]
+default = [
+    "ext-bazaar",
+    "ext-payment-id",
+    "ext-eip2612",
+    "ext-erc20-approval",
+    "ext-builder-code",
+    "ext-offer-receipt",
+]
 # TtlSet lives in r402-facilitator; only payment-identifier needs it.
 cache = ["dep:r402-facilitator"]
 ext-bazaar = []
 ext-payment-id = ["cache", "dep:thiserror"]
 ext-eip2612 = []
 ext-erc20-approval = []
+ext-builder-code = ["dep:thiserror"]
+ext-offer-receipt = [
+    "dep:thiserror",
+    "dep:serde",
+    "dep:base64",
+    "dep:hex",
+    "dep:bs58",
+    "dep:p256",
+    "dep:k256",
+    "dep:ed25519-dalek",
+    "dep:alloy-primitives",
+    "dep:alloy-sol-types",
+    "dep:alloy-signer",
+]
 siwx = [
     "dep:thiserror",
     "dep:url",
@@ -43,6 +64,8 @@ all-extensions = [
     "ext-payment-id",
     "ext-eip2612",
     "ext-erc20-approval",
+    "ext-builder-code",
+    "ext-offer-receipt",
 ]
 
 [dependencies]
@@ -60,6 +83,14 @@ time = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 bs58 = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
+p256 = { workspace = true, optional = true }
+k256 = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
+alloy-primitives = { workspace = true, optional = true }
+alloy-sol-types = { workspace = true, optional = true }
+alloy-signer = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
@@ -76,6 +107,14 @@ required-features = ["ext-bazaar"]
 [[test]]
 name = "siwx"
 required-features = ["siwx"]
+
+[[test]]
+name = "builder_code"
+required-features = ["ext-builder-code"]
+
+[[test]]
+name = "offer_receipt"
+required-features = ["ext-offer-receipt"]
 
 [lints]
 workspace = true

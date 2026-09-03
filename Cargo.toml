@@ -194,6 +194,10 @@ metrics = "0.24"
 # pinned at the workspace root so all crates run with the same version
 # and configuration.
 proptest = "1"
+# Offer-receipt JWS (ES256 / ES256K). alloy-primitives already pulls k256;
+# pin here so r402-extensions does not take an unpinned transitive.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
 [profile.release]
 codegen-units = 1

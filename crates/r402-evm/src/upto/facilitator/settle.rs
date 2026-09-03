@@ -34,6 +34,7 @@ pub(super) async fn settle_permit2_upto<P, E>(
     provider: &P,
     prepared: &PreparedUptoPermit2,
     actual_amount: U256,
+    data_suffix: &[u8],
 ) -> Result<UptoSettleOutcome, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
@@ -102,7 +103,8 @@ where
             calldata,
             confirmations: 1,
             from: Some(prepared.facilitator),
-        },
+        }
+        .with_data_suffix(data_suffix),
     );
     let receipt = traced!(
         tx_fut,

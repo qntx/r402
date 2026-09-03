@@ -66,6 +66,11 @@ impl Extensions {
     pub fn iter(&self) -> impl Iterator<Item = (&CompactString, &ExtensionEntry)> {
         self.0.iter()
     }
+
+    /// Inserts every entry from `other`, overwriting on id collision.
+    pub fn extend(&mut self, other: Self) {
+        self.0.extend(other.0);
+    }
 }
 
 impl<K, V> FromIterator<(K, V)> for Extensions

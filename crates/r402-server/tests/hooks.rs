@@ -10,6 +10,8 @@
     clippy::missing_const_for_fn,
     clippy::panic,
     clippy::unwrap_used,
+    clippy::manual_async_fn,
+    clippy::unused_async_trait_impl,
     reason = "idiomatic test-code patterns"
 )]
 
@@ -22,9 +24,10 @@ use std::sync::{Arc, Mutex};
 
 use r402_facilitator::{Facilitator, FailureRecovery};
 use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
+use r402_protocol::extension::{AdvertiseContext, Extension, SettleContext as ExtSettleContext};
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{
-    Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
+    ExtensionEntry, Extensions, PaymentRequirements, ResourceInfo, SettleRequest, SettleResponse,
     SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use r402_server::{
@@ -714,6 +717,89 @@ async fn create_payment_required_omits_authorization_payment_flow() {
         .and_then(|accept| accept.extra.as_ref());
     assert!(extra.and_then(|value| value.get("paymentFlow")).is_none());
     assert!(is_authorization_payment_flow(extra));
+}
+
+struct OfferStub;
+
+impl Extension for OfferStub {
+    fn id(&self) -> &'static str {
+        "offer-receipt"
+    }
+
+    fn enrich_payment_required<'a>(
+        &'a self,
+        ctx: &'a AdvertiseContext<'a>,
+    ) -> impl Future<Output = Option<ExtensionEntry>> + Send + 'a {
+        let url = ctx.resource.map(|r| r.url.to_string());
+        let n = ctx.accepts.len();
+        async move {
+            Some(ExtensionEntry::info(serde_json::json!({
+                "offers": n,
+                "resourceUrl": url,
+            })))
+        }
+    }
+
+    fn on_settle<'a>(
+        &'a self,
+        _ctx: &'a ExtSettleContext<'a>,
+    ) -> impl Future<Output = Option<ExtensionEntry>> + Send + 'a {
+        std::future::ready(Some(ExtensionEntry::info(
+            serde_json::json!({ "receipt": true }),
+        )))
+    }
+}
+
+#[tokio::test]
+async fn registered_extension_enriches_402() {
+    let rs = ResourceServer::new(mock_ok())
+        .with_scheme(eip155_wildcard(), MockScheme::authorization())
+        .with_extension(OfferStub);
+    let built = rs
+        .create_payment_required_response(
+            vec![sample_payload().accepted],
+            PaymentRequiredBuildContext {
+                resource: ResourceInfo::new("https://example.com/paid"),
+                error: None,
+                extensions: Extensions::new(),
+                supported: SupportedResponse::default(),
+                payment_payload: None,
+            },
+        )
+        .await
+        .unwrap();
+    let info = built
+        .extensions
+        .get("offer-receipt")
+        .unwrap()
+        .as_info()
+        .unwrap();
+    assert_eq!(info["offers"], 1);
+    assert_eq!(info["resourceUrl"], "https://example.com/paid");
+}
+
+#[tokio::test]
+async fn registered_extension_attaches_settle_receipt() {
+    let mock = mock_ok();
+    let rs = ResourceServer::new(Arc::clone(&mock))
+        .with_scheme(eip155_wildcard(), MockScheme::authorization())
+        .with_extension(OfferStub);
+    let payload = sample_payload().with_resource(ResourceInfo::new("https://example.com/paid"));
+    let req = payload.accepted.clone();
+    let settled = rs
+        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+        .await
+        .unwrap();
+    let info = match &settled {
+        SettleResponse::Success { extensions, .. } => extensions
+            .get("offer-receipt")
+            .unwrap()
+            .as_info()
+            .unwrap()
+            .clone(),
+        SettleResponse::Failure { .. } | _ => panic!("expected success"),
+    };
+    assert_eq!(info["receipt"], true);
 }
 
 #[test]

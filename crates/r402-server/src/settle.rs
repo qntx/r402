@@ -2,9 +2,11 @@
 
 use r402_facilitator::{DynFacilitator, FailureRecovery};
 use r402_protocol::error::{FacilitatorError, VerificationError};
+use r402_protocol::extension::{ExtensionRegistry, SettleContext as ExtensionSettleContext};
 use r402_protocol::payment::{
-    Extensions, PaymentRequirements, SettleRequest, SettleResponse, SettlementOverrides,
-    TypedVerifyRequest, V2, asset_decimals_from_extra, resolve_settlement_override_amount,
+    Extensions, PaymentPayload, PaymentRequirements, SettleRequest, SettleResponse,
+    SettlementOverrides, TypedVerifyRequest, V2, asset_decimals_from_extra,
+    resolve_settlement_override_amount,
 };
 use serde_json::Value;
 
@@ -92,11 +94,12 @@ impl ResourceServer {
             }
         }
 
-        let response = if let Some(local) = skipped {
+        let mut response = if let Some(local) = skipped {
             local
         } else {
             self.call_settle_with_failure_hooks(&settle_ctx).await?
         };
+        attach_settle_extensions(&self.extensions, &settle_ctx, &mut response).await?;
 
         let result_ctx = SettleResultContext {
             settle: settle_ctx,
@@ -189,6 +192,33 @@ impl ResourceServer {
         }
         Err(error)
     }
+}
+
+async fn attach_settle_extensions(
+    registry: &ExtensionRegistry,
+    settle: &SettleContext,
+    response: &mut SettleResponse,
+) -> Result<(), FacilitatorError> {
+    if registry.is_empty() {
+        return Ok(());
+    }
+    let json_payload = json_payment_payload(&settle.payment.payload)?;
+    let extra = {
+        let ctx =
+            ExtensionSettleContext::new(&json_payload, &settle.payment.requirements, response);
+        registry.collect_settle(&ctx).await
+    };
+    response.extensions_mut().extend(extra);
+    Ok(())
+}
+
+fn json_payment_payload(
+    payload: &WirePaymentPayload,
+) -> Result<PaymentPayload<Value, Value>, FacilitatorError> {
+    let accepted = serde_json::to_value(&payload.accepted).map_err(FacilitatorError::internal)?;
+    Ok(PaymentPayload::new(accepted, payload.payload.clone())
+        .with_optional_resource(payload.resource.clone())
+        .with_extensions(payload.extensions.clone()))
 }
 
 fn build_settle_request(

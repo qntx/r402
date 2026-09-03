@@ -63,7 +63,7 @@ pub use batch_settlement::Eip155BatchSettlement;
 pub use batch_settlement::Eip155BatchSettlementClient;
 #[cfg(feature = "facilitator")]
 pub use batch_settlement::Eip155BatchSettlementFacilitator;
-pub use chain::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
+pub use chain::{EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS, append_data_suffix};
 pub use eip2612::{
     EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612ParseError,
     Eip2612SignedPermit,

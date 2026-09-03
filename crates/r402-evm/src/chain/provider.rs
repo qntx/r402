@@ -269,6 +269,13 @@ impl MetaTransaction {
         self.from = Some(from);
         self
     }
+
+    /// Appends a settlement calldata suffix (ERC-8021 builder-code `w`).
+    #[must_use]
+    pub fn with_data_suffix(mut self, suffix: &[u8]) -> Self {
+        self.calldata = crate::chain::append_data_suffix(self.calldata, suffix);
+        self
+    }
 }
 
 impl ChainProvider for Eip155ChainProvider {

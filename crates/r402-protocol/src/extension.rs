@@ -14,25 +14,52 @@ use std::sync::Arc;
 use compact_str::CompactString;
 
 use crate::payment::{
-    ExtensionEntry, Extensions, PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse,
+    ExtensionEntry, Extensions, PaymentPayload, PaymentRequirements, ResourceInfo, SettleResponse,
+    VerifyResponse,
 };
 
 /// Boxed future used by [`DynExtension`].
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Context passed to [`Extension::advertise`].
+/// Context passed to [`Extension::advertise`] / [`Extension::enrich_payment_required`].
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct AdvertiseContext<'a> {
     /// Requirement being advertised. `None` for top-level `PaymentRequired.extensions`.
     pub requirement: Option<&'a PaymentRequirements>,
+    /// Resource metadata from the in-progress 402 body.
+    pub resource: Option<&'a ResourceInfo>,
+    /// `accepts[]` from the in-progress 402 body.
+    pub accepts: &'a [PaymentRequirements],
+    /// Existing declaration already on the 402 body for this extension, if any.
+    pub existing: Option<&'a ExtensionEntry>,
 }
 
 impl<'a> AdvertiseContext<'a> {
-    /// Constructs an advertise context.
+    /// Constructs an advertise context with no 402 body.
     #[must_use]
     pub const fn new(requirement: Option<&'a PaymentRequirements>) -> Self {
-        Self { requirement }
+        Self {
+            requirement,
+            resource: None,
+            accepts: &[],
+            existing: None,
+        }
+    }
+
+    /// Context for enriching a `PaymentRequired` body.
+    #[must_use]
+    pub const fn for_payment_required(
+        resource: &'a ResourceInfo,
+        accepts: &'a [PaymentRequirements],
+        existing: Option<&'a ExtensionEntry>,
+    ) -> Self {
+        Self {
+            requirement: None,
+            resource: Some(resource),
+            accepts,
+            existing,
+        }
     }
 }
 
@@ -55,6 +82,22 @@ impl Debug for VerifyContext<'_> {
     }
 }
 
+impl<'a> VerifyContext<'a> {
+    /// Constructs a verify context.
+    #[must_use]
+    pub const fn new(
+        payload: &'a PaymentPayload<serde_json::Value, serde_json::Value>,
+        requirements: &'a PaymentRequirements,
+        response: &'a VerifyResponse,
+    ) -> Self {
+        Self {
+            payload,
+            requirements,
+            response,
+        }
+    }
+}
+
 /// Context passed to [`Extension::on_settle`].
 #[non_exhaustive]
 pub struct SettleContext<'a> {
@@ -74,6 +117,22 @@ impl Debug for SettleContext<'_> {
     }
 }
 
+impl<'a> SettleContext<'a> {
+    /// Constructs a settle context.
+    #[must_use]
+    pub const fn new(
+        payload: &'a PaymentPayload<serde_json::Value, serde_json::Value>,
+        requirements: &'a PaymentRequirements,
+        response: &'a SettleResponse,
+    ) -> Self {
+        Self {
+            payload,
+            requirements,
+            response,
+        }
+    }
+}
+
 /// A single x402 protocol extension.
 ///
 /// Prefer static `impl Extension`. Use [`DynExtension`] only for a
@@ -85,6 +144,16 @@ pub trait Extension: Send + Sync {
     /// Called when assembling a 402 response.
     fn advertise(&self, _ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
         None
+    }
+
+    /// Async 402 enrich. Default is a no-op; offer-receipt signs offers here.
+    ///
+    /// A `Some` result replaces any existing declaration for this extension.
+    fn enrich_payment_required<'a>(
+        &'a self,
+        _ctx: &'a AdvertiseContext<'a>,
+    ) -> impl Future<Output = Option<ExtensionEntry>> + Send + 'a {
+        std::future::ready(None)
     }
 
     /// Called after facilitator `verify`. Return value goes on
@@ -114,6 +183,12 @@ pub trait DynExtension: Send + Sync {
     /// See [`Extension::advertise`].
     fn advertise(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry>;
 
+    /// See [`Extension::enrich_payment_required`].
+    fn enrich_payment_required<'a>(
+        &'a self,
+        ctx: &'a AdvertiseContext<'a>,
+    ) -> BoxFuture<'a, Option<ExtensionEntry>>;
+
     /// See [`Extension::on_verify`].
     fn on_verify<'a>(&'a self, ctx: &'a VerifyContext<'a>)
     -> BoxFuture<'a, Option<ExtensionEntry>>;
@@ -130,6 +205,13 @@ impl<T: Extension + ?Sized> DynExtension for T {
 
     fn advertise(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
         <Self as Extension>::advertise(self, ctx)
+    }
+
+    fn enrich_payment_required<'a>(
+        &'a self,
+        ctx: &'a AdvertiseContext<'a>,
+    ) -> BoxFuture<'a, Option<ExtensionEntry>> {
+        Box::pin(<Self as Extension>::enrich_payment_required(self, ctx))
     }
 
     fn on_verify<'a>(
@@ -270,7 +352,7 @@ mod tests {
         registry.register(StubExt("x", json!(1)));
         registry.register(StubExt("x", json!(2)));
         assert_eq!(registry.len(), 1);
-        let ctx = AdvertiseContext { requirement: None };
+        let ctx = AdvertiseContext::new(None);
         let ext = registry.advertise(&ctx);
         let val = ext.get("x").unwrap().as_info().unwrap();
         assert_eq!(val, &json!(2));
@@ -281,7 +363,7 @@ mod tests {
         let mut registry = ExtensionRegistry::new();
         registry.register(StubExt("a", json!("A")));
         registry.register(StubExt("b", json!("B")));
-        let ctx = AdvertiseContext { requirement: None };
+        let ctx = AdvertiseContext::new(None);
         let ext = registry.advertise(&ctx);
         assert_eq!(ext.len(), 2);
     }

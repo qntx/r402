@@ -49,6 +49,7 @@ facilitator = [
     "dep:async-trait",
     "dep:dashmap",
     "dep:r402-facilitator",
+    "dep:r402-extensions",
     "dep:tokio",
     "dep:tower",
     "dep:url",
@@ -79,6 +80,9 @@ alloy-transport-http = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 dashmap = { workspace = true, optional = true }
 r402-facilitator = { workspace = true, optional = true }
+r402-extensions = { workspace = true, optional = true, default-features = false, features = [
+    "ext-builder-code",
+] }
 r402-server = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }

@@ -32,6 +32,7 @@ use std::str::FromStr;
 use alloy_primitives::{Address, U256};
 use alloy_provider::Provider;
 use compact_str::CompactString;
+use r402_extensions::BuilderCodeFacilitatorExtension;
 use r402_facilitator::{Duplicate, Facilitator, SettlementCache};
 use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
@@ -53,6 +54,7 @@ pub struct Eip155UptoFacilitator<P> {
     settlement_cache: SettlementCache,
     /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
     erc20_approval_enabled: bool,
+    builder_code: Option<BuilderCodeFacilitatorExtension>,
 }
 
 impl<P> Eip155UptoFacilitator<P> {
@@ -79,6 +81,7 @@ impl<P> Eip155UptoFacilitator<P> {
             clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
             erc20_approval_enabled: false,
+            builder_code: None,
         }
     }
 
@@ -87,6 +90,20 @@ impl<P> Eip155UptoFacilitator<P> {
     pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
         self.erc20_approval_enabled = true;
         self
+    }
+
+    /// Appends an ERC-8021 Schema 2 suffix (`w`) on settlement transactions.
+    #[must_use]
+    pub fn with_builder_code(mut self, extension: BuilderCodeFacilitatorExtension) -> Self {
+        self.builder_code = Some(extension);
+        self
+    }
+
+    fn data_suffix(&self, extensions: &wire::Extensions) -> Vec<u8> {
+        self.builder_code
+            .as_ref()
+            .and_then(|ext| ext.build_data_suffix(extensions, 2))
+            .unwrap_or_default()
     }
 
     /// Overrides the clock-skew tolerance (seconds).
@@ -166,7 +183,9 @@ where
             &request.payment_payload.extensions,
         )?;
         let payer = prepared.from;
-        let outcome = settle_permit2_upto(&self.provider, &prepared, actual_amount).await?;
+        let suffix = self.data_suffix(&request.payment_payload.extensions);
+        let outcome =
+            settle_permit2_upto(&self.provider, &prepared, actual_amount, &suffix).await?;
 
         let network = request.payment_payload.accepted.network.to_string();
         let transaction = match outcome {

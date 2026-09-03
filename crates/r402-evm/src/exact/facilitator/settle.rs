@@ -176,6 +176,7 @@ pub(super) async fn settle_payment<P, E>(
     payment: &Eip3009Payment,
     eip712_domain: &Eip712Domain,
     eip6492_allowed_factories: &[Address],
+    data_suffix: &[u8],
 ) -> Result<TxHash, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
@@ -219,7 +220,8 @@ where
                         calldata: transfer_call.tx.calldata().clone(),
                         confirmations: 1,
                         from: None,
-                    },
+                    }
+                    .with_data_suffix(data_suffix),
                 );
                 traced!(
                     tx_fut,
@@ -250,7 +252,8 @@ where
                         calldata: aggregate_call.abi_encode().into(),
                         confirmations: 1,
                         from: None,
-                    },
+                    }
+                    .with_data_suffix(data_suffix),
                 );
                 traced!(
                     tx_fut,
@@ -273,7 +276,8 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
-                },
+                }
+                .with_data_suffix(data_suffix),
             );
             traced!(
                 tx_fut,
@@ -294,7 +298,8 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
-                },
+                }
+                .with_data_suffix(data_suffix),
             );
             traced!(
                 tx_fut,
@@ -342,6 +347,7 @@ pub(super) fn build_eip2612_abi(
 pub(super) async fn settle_permit2_payment<P, E>(
     provider: &P,
     payment: &Permit2Payment,
+    data_suffix: &[u8],
 ) -> Result<TxHash, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
@@ -387,7 +393,8 @@ where
             calldata,
             confirmations: 1,
             from: None,
-        },
+        }
+        .with_data_suffix(data_suffix),
     );
     let receipt = traced!(
         tx_fut,

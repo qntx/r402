@@ -18,10 +18,11 @@ use std::sync::Arc;
 use alloy_primitives::{Address, B256, Bytes, TxHash, U256, hex};
 use alloy_provider::Provider;
 use compact_str::CompactString;
+use r402_extensions::BuilderCodeFacilitatorExtension;
 use r402_facilitator::{
     Duplicate, Facilitator, InMemoryPendingSettlementStore, PendingSettlementStore, SettlementCache,
 };
-use r402_protocol::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
+use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment as wire;
 use r402_protocol::payment::UnixTimestamp;
@@ -161,6 +162,8 @@ pub struct Eip155ExactFacilitator<P> {
     pending: Arc<dyn PendingSettlementStore>,
     /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
     erc20_approval_enabled: bool,
+    /// Optional ERC-8021 builder-code suffix at settle (`w` + echoed `a`/`s`).
+    builder_code: Option<BuilderCodeFacilitatorExtension>,
 }
 
 impl<P> Eip155ExactFacilitator<P> {
@@ -199,6 +202,7 @@ impl<P> Eip155ExactFacilitator<P> {
             eip6492_allowed_factories: Vec::new(),
             pending: Arc::new(InMemoryPendingSettlementStore::new()),
             erc20_approval_enabled: false,
+            builder_code: None,
         }
     }
 
@@ -221,6 +225,20 @@ impl<P> Eip155ExactFacilitator<P> {
     pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
         self.erc20_approval_enabled = true;
         self
+    }
+
+    /// Appends an ERC-8021 Schema 2 suffix (`w`) on settlement transactions.
+    #[must_use]
+    pub fn with_builder_code(mut self, extension: BuilderCodeFacilitatorExtension) -> Self {
+        self.builder_code = Some(extension);
+        self
+    }
+
+    fn data_suffix(&self, extensions: &wire::Extensions) -> Vec<u8> {
+        self.builder_code
+            .as_ref()
+            .and_then(|ext| ext.build_data_suffix(extensions, 2))
+            .unwrap_or_default()
     }
 
     /// Sets a custom clock-skew tolerance (in seconds) for time-window checks.
@@ -316,12 +334,14 @@ where
                     }
                 };
                 let payer = payment.from;
+                let suffix = self.data_suffix(&payload.extensions);
                 match settle_payment(
                     &self.provider,
                     &contract,
                     &payment,
                     &eip712_domain,
                     &self.eip6492_allowed_factories,
+                    &suffix,
                 )
                 .await
                 {
@@ -355,7 +375,8 @@ where
                     }
                 };
                 let payer = payment.from;
-                match settle_permit2_payment(&self.provider, &payment).await {
+                let suffix = self.data_suffix(&payload.extensions);
+                match settle_permit2_payment(&self.provider, &payment, &suffix).await {
                     Ok(tx_hash) => {
                         self.pending.delete(pending_key);
                         Ok(settle_success(payer, tx_hash, network, amount))

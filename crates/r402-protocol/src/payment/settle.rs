@@ -155,6 +155,13 @@ impl SettleResponse {
         }
     }
 
+    /// Buyer-wire `extensions` map.
+    pub const fn extensions_mut(&mut self) -> &mut Extensions {
+        match self {
+            Self::Success { extensions, .. } | Self::Failure { extensions, .. } => extensions,
+        }
+    }
+
     /// Replaces the sidechannel map.
     pub fn set_extension_responses(&mut self, responses: Extensions) {
         match self {
