@@ -34,15 +34,6 @@ pub enum AliasPolicy {
     Allow,
 }
 
-/// Optional JSON config for [`HederaExactFacilitator`].
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HederaExactFacilitatorConfig {
-    /// Alias policy. Defaults to [`AliasPolicy::Reject`].
-    #[serde(default)]
-    pub alias_policy: AliasPolicy,
-}
-
 /// Operations the exact facilitator needs from a chain provider.
 pub trait HederaFacilitatorOps: ChainProvider + Send + Sync {
     /// Fee-payer account ids this facilitator will sign for.

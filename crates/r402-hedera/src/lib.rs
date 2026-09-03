@@ -57,7 +57,7 @@ pub use exact::HederaExact;
 #[cfg(feature = "client")]
 pub use exact::client::{HederaExactClient, HederaSigner};
 #[cfg(feature = "facilitator")]
-pub use exact::facilitator::{AliasPolicy, HederaExactFacilitator, HederaExactFacilitatorConfig};
+pub use exact::facilitator::{AliasPolicy, HederaExactFacilitator};
 pub use networks::*;
 
 #[cfg(test)]

@@ -70,6 +70,11 @@ async fn verify_inner<P: HederaFacilitatorOps>(
     if !is_hedera_network(req_network) {
         return Err(invalid("network_mismatch"));
     }
+    // Entity ids collide across Hedera networks; this provider's Mirror and
+    // fee-payer keys belong to one CAIP-2 chain.
+    if req_network != provider.chain_id().to_string() {
+        return Err(invalid("network_mismatch"));
+    }
 
     if accepted.get("asset") != requirements.get("asset")
         || accepted.get("amount") != requirements.get("amount")

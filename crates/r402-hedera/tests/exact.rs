@@ -173,6 +173,7 @@ mod verify_settle {
 
     #[derive(Clone)]
     struct MockProvider {
+        chain_id: ChainId,
         fee_payers: Vec<String>,
         resolve: HederaAccountResolution,
         signature: HederaSignatureResult,
@@ -187,6 +188,7 @@ mod verify_settle {
     impl Default for MockProvider {
         fn default() -> Self {
             Self {
+                chain_id: ChainId::new("hedera", "testnet"),
                 fee_payers: vec![FEE_PAYER.to_owned()],
                 resolve: HederaAccountResolution {
                     exists: true,
@@ -209,7 +211,7 @@ mod verify_settle {
         }
 
         fn chain_id(&self) -> ChainId {
-            ChainId::new("hedera", "testnet")
+            self.chain_id.clone()
         }
     }
 
@@ -493,6 +495,18 @@ mod verify_settle {
         let provider = MockProvider::default();
         let reqs = requirements(json!({ "network": "eip155:1" }));
         let req = request(&reqs, "");
+        let result = verify(&provider, &req).await;
+        assert_eq!(reason(&result), "network_mismatch");
+    }
+
+    #[tokio::test]
+    async fn rejects_payload_network_not_provider_chain() {
+        let provider = MockProvider::default();
+        let reqs = requirements(json!({ "network": "hedera:mainnet" }));
+        let req = request(
+            &reqs,
+            &transfer_b64(FEE_PAYER, PAYER, PAY_TO, ASSET, AMOUNT),
+        );
         let result = verify(&provider, &req).await;
         assert_eq!(reason(&result), "network_mismatch");
     }
@@ -970,7 +984,8 @@ mod verify_settle {
             ("hedera:testnet", HEDERA_TESTNET_USDC),
             ("hedera:mainnet", HEDERA_MAINNET_USDC),
         ] {
-            let provider = MockProvider::default();
+            let mut provider = MockProvider::default();
+            provider.chain_id = network.parse().expect("hedera CAIP-2");
             let reqs = requirements(json!({
                 "network": network,
                 "asset": asset,
