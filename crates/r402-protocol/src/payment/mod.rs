@@ -18,7 +18,9 @@ mod verify;
 use std::str::FromStr;
 
 pub use codec::{Base64Bytes, U64String, UnixTimestamp, V2, Version, Version2};
-pub use extensions::{EXTENSION_RESPONSE_LOG_FIELDS, ExtensionEntry, Extensions};
+pub use extensions::{
+    EXTENSION_RESPONSE_LOG_FIELDS, ExtensionEntry, Extensions, schema_has_external_ref,
+};
 pub use overrides::{
     DEFAULT_ASSET_DECIMALS, SettlementOverrideError, SettlementOverrides,
     asset_decimals_from_extra, resolve_settlement_override_amount,

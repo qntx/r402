@@ -182,6 +182,28 @@ impl From<Value> for ExtensionEntry {
     }
 }
 
+/// `true` when any `$ref` or `$id` is not a same-document `#` fragment.
+#[must_use]
+pub fn schema_has_external_ref(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(schema_has_external_ref),
+        Value::Object(map) => {
+            for (key, child) in map {
+                if (key == "$ref" || key == "$id")
+                    && !child.as_str().is_some_and(|s| s.starts_with('#'))
+                {
+                    return true;
+                }
+                if schema_has_external_ref(child) {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,
@@ -245,5 +267,47 @@ mod tests {
         assert_eq!(value["info"]["domain"], "api.example.com");
         assert_eq!(value["supportedChains"][0]["chainId"], "eip155:8453");
         assert_eq!(value["supportedChains"][0]["type"], "eip191");
+    }
+
+    #[test]
+    fn schema_has_external_ref_http_and_file() {
+        assert!(schema_has_external_ref(
+            &json!({"$ref": "http://127.0.0.1/attacker-schema.json"})
+        ));
+        assert!(schema_has_external_ref(
+            &json!({"$ref": "file:///etc/passwd"})
+        ));
+        assert!(schema_has_external_ref(
+            &json!({"$id": "https://evil.example/x.json"})
+        ));
+        assert!(schema_has_external_ref(
+            &json!({"$ref": "../../etc/passwd"})
+        ));
+    }
+
+    #[test]
+    fn schema_has_external_ref_nested_and_non_string() {
+        assert!(schema_has_external_ref(&json!({
+            "properties": { "input": { "$ref": "http://evil.example/schema.json" } }
+        })));
+        assert!(schema_has_external_ref(
+            &json!({"allOf": [{"type": "object"}, {"$ref": "http://evil.example/x.json"}]})
+        ));
+        assert!(schema_has_external_ref(&json!({"$ref": 1})));
+        assert!(schema_has_external_ref(&json!({"$id": true})));
+    }
+
+    #[test]
+    fn schema_has_external_ref_allows_fragments_and_schema_url() {
+        assert!(!schema_has_external_ref(&json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema"
+        })));
+        assert!(!schema_has_external_ref(
+            &json!({"$ref": "#/definitions/root"})
+        ));
+        assert!(!schema_has_external_ref(&json!({"$id": "#"})));
+        assert!(!schema_has_external_ref(&json!({})));
+        assert!(!schema_has_external_ref(&json!("https://example.com")));
+        assert!(!schema_has_external_ref(&Value::Null));
     }
 }

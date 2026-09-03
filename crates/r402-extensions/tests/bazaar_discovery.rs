@@ -14,8 +14,8 @@
 )]
 
 use r402_extensions::{
-    BazaarDiscoveryClient, ListDiscoveryResourcesParams, SearchDiscoveryResourcesParams,
-    with_bazaar,
+    BazaarDiscoveryClient, BazaarDiscoveryError, ListDiscoveryResourcesParams,
+    SearchDiscoveryResourcesParams, with_bazaar,
 };
 use r402_facilitator::FacilitatorClient;
 use serde_json::json;
@@ -39,6 +39,25 @@ fn empty_search_body() -> serde_json::Value {
     json!({
         "x402Version": 2,
         "resources": []
+    })
+}
+
+fn catalog_resource(extensions: &serde_json::Value) -> serde_json::Value {
+    json!({
+        "resource": "https://api.example.com/weather",
+        "type": "http",
+        "x402Version": 2,
+        "accepts": [],
+        "lastUpdated": "2024-01-01T00:00:00.000Z",
+        "extensions": extensions
+    })
+}
+
+fn external_bazaar_extensions() -> serde_json::Value {
+    json!({
+        "bazaar": {
+            "schema": { "$ref": "http://127.0.0.1/attacker-schema.json" }
+        }
     })
 }
 
@@ -418,4 +437,129 @@ fn discovery_resource_deserializes_optional_extensions() {
         resource.extensions.unwrap()["bazaar"]["category"],
         "weather"
     );
+}
+
+#[tokio::test]
+async fn list_resources_external_schema_ref_fails_page() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "items": [catalog_resource(&external_bazaar_extensions())],
+            "pagination": { "limit": 20, "offset": 0, "total": 1 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let err = client
+        .list_resources(&ListDiscoveryResourcesParams::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BazaarDiscoveryError::ExternalSchemaRef));
+    assert_eq!(
+        err.to_string(),
+        "schema must not contain external $ref/$id references"
+    );
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn search_external_schema_ref_fails_page() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "resources": [catalog_resource(&external_bazaar_extensions())]
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let err = client
+        .search(&SearchDiscoveryResourcesParams::new("weather"))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BazaarDiscoveryError::ExternalSchemaRef));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn list_resources_one_bad_item_fails_whole_page() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "items": [
+                catalog_resource(&json!({ "bazaar": { "category": "weather" } })),
+                catalog_resource(&external_bazaar_extensions())
+            ],
+            "pagination": { "limit": 20, "offset": 0, "total": 2 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let err = client
+        .list_resources(&ListDiscoveryResourcesParams::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, BazaarDiscoveryError::ExternalSchemaRef));
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn list_resources_fragment_ref_is_ok() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "items": [catalog_resource(&json!({
+                "bazaar": { "schema": { "$ref": "#/definitions/root" } }
+            }))],
+            "pagination": { "limit": 20, "offset": 0, "total": 1 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let result = client
+        .list_resources(&ListDiscoveryResourcesParams::default())
+        .await
+        .unwrap();
+    assert_eq!(result.items.len(), 1);
+}
+
+#[tokio::test]
+async fn list_resources_schema_url_is_ok() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/discovery/resources"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "x402Version": 2,
+            "items": [catalog_resource(&json!({
+                "bazaar": {
+                    "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema" }
+                }
+            }))],
+            "pagination": { "limit": 20, "offset": 0, "total": 1 }
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let client = discovery_client(&server.uri());
+    let result = client
+        .list_resources(&ListDiscoveryResourcesParams::default())
+        .await
+        .unwrap();
+    assert_eq!(result.items.len(), 1);
 }

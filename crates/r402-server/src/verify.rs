@@ -3,9 +3,10 @@
 use r402_facilitator::{DynFacilitator, FailureRecovery};
 use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
-    Extensions, PaymentRequirements, TypedVerifyRequest, V2, VerifyRequest, VerifyResponse,
+    ExtensionEntry, Extensions, PaymentRequirements, TypedVerifyRequest, V2, VerifyRequest,
+    VerifyResponse,
 };
-use r402_protocol::validate_extension_echoes;
+use r402_protocol::{schema_has_external_ref, validate_extension_echoes};
 use serde::Serialize;
 
 use crate::hooks::{
@@ -51,6 +52,14 @@ impl ResourceServer {
                 .map_or(&[], |ext| ext.dynamic_info_fields())
         })
         .map_err(FacilitatorError::from)?;
+        if advertised.is_some_and(bazaar_schema_has_external_ref)
+            || bazaar_schema_has_external_ref(&payload.extensions)
+        {
+            return Err(VerificationError::InvalidFormat(
+                "schema must not contain external $ref/$id references".into(),
+            )
+            .into());
+        }
         let payment = PaymentHookContext {
             payload: payload.clone(),
             requirements: requirements.clone(),
@@ -192,6 +201,13 @@ pub(crate) fn to_verify_request<T: Serialize>(
 ) -> Result<VerifyRequest, FacilitatorError> {
     let json = serde_json::to_value(typed).map_err(FacilitatorError::internal)?;
     Ok(VerifyRequest::from(json))
+}
+
+fn bazaar_schema_has_external_ref(extensions: &Extensions) -> bool {
+    extensions
+        .get("bazaar")
+        .and_then(ExtensionEntry::as_schema)
+        .is_some_and(schema_has_external_ref)
 }
 
 fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError {
