@@ -172,6 +172,10 @@ impl SchemeNetworkServer for MockScheme {
         self.dynamic
     }
 
+    fn settles_on_cancel(&self) -> bool {
+        self.cancel_requirements.is_some()
+    }
+
     fn settle_on_cancel<'a>(
         &'a self,
         _: &'a VerifiedPaymentCanceledContext,

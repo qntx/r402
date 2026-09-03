@@ -12,18 +12,49 @@
     reason = "idiomatic test-code patterns"
 )]
 
-//! Construct-time `MissingBaseUrl`. `with_resource` does not waive `base_url`.
+//! Construct-time `BuildError`. `with_resource` does not waive `base_url`.
 
 mod harness;
 
 use std::sync::Arc;
 
 use http::StatusCode;
-use r402_http::server::{BuildError, FacilitatorClientError, X402Middleware};
+use r402_http::server::{BuildError, FacilitatorClientError, SettlementMode, X402Middleware};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_server::PaymentFlowError;
+use serde_json::json;
 
 use crate::harness::{
-    FakeFacilitator, FlowScheme, OkInner, base_url, call_layer, eip155_tag, unpaid_request,
+    FakeFacilitator, FlowScheme, OkInner, base_url, call_layer, eip155_requirements, eip155_tag,
+    escrow_tag, middleware, unpaid_request,
 };
+
+fn atm_tag() -> PriceTag {
+    PriceTag::new(eip155_requirements_extra(json!({
+        "assetTransferMethod": "not-an-atm"
+    })))
+}
+
+fn unknown_flow_tag() -> PriceTag {
+    PriceTag::new(eip155_requirements_extra(
+        json!({ "paymentFlow": "not-a-flow" }),
+    ))
+}
+
+fn upto_tag() -> PriceTag {
+    PriceTag::new(PaymentRequirements::new(
+        "upto".into(),
+        "eip155:1".parse().unwrap(),
+        "1000000".into(),
+        "0xpay".into(),
+        "0xasset".into(),
+        60,
+    ))
+}
+
+fn eip155_requirements_extra(extra: serde_json::Value) -> PaymentRequirements {
+    eip155_requirements().with_extra(extra)
+}
 
 #[test]
 fn with_price_tag_requires_base_url() {
@@ -134,4 +165,87 @@ async fn with_resource_pins_url() {
         .unwrap();
     let body: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
     assert_eq!(body["resource"]["url"], "https://api.example.com/pinned");
+}
+
+#[test]
+fn with_price_tag_missing_scheme() {
+    let err = X402Middleware::from_facilitator(FakeFacilitator::new())
+        .with_base_url(base_url())
+        .with_price_tag(eip155_tag())
+        .expect_err("unregistered scheme must fail at construct");
+    assert!(matches!(err, BuildError::MissingScheme { .. }));
+}
+
+#[test]
+fn with_price_tag_unsupported_atm() {
+    let err = middleware(
+        Arc::new(FakeFacilitator::new()),
+        FlowScheme::authorization(),
+    )
+    .with_price_tag(atm_tag())
+    .expect_err("unsupported ATM must fail at construct");
+    assert!(matches!(
+        err,
+        BuildError::PaymentFlow(PaymentFlowError::UnsupportedAssetTransferMethod { .. })
+    ));
+}
+
+#[test]
+fn with_price_tag_unknown_payment_flow() {
+    let err = middleware(
+        Arc::new(FakeFacilitator::new()),
+        FlowScheme::authorization(),
+    )
+    .with_price_tag(unknown_flow_tag())
+    .expect_err("unknown payment flow must fail at construct");
+    assert!(matches!(
+        err,
+        BuildError::PaymentFlow(PaymentFlowError::UnsupportedPaymentFlow { .. })
+    ));
+}
+
+#[test]
+fn with_price_tags_empty_is_err() {
+    let err = middleware(
+        Arc::new(FakeFacilitator::new()),
+        FlowScheme::authorization(),
+    )
+    .with_price_tags(vec![])
+    .expect_err("empty static tags must fail without auth_only");
+    assert_eq!(err, BuildError::EmptyPriceTags);
+}
+
+#[test]
+fn with_price_tag_escrow_without_settles_on_cancel() {
+    let err = middleware(
+        Arc::new(FakeFacilitator::new()),
+        FlowScheme::escrow_without_cancel(),
+    )
+    .with_price_tag(escrow_tag())
+    .expect_err("escrow without cancel settle must fail at construct");
+    assert!(matches!(err, BuildError::MissingSettleOnCancel { .. }));
+}
+
+#[test]
+fn concurrent_escrow_is_mode_err() {
+    let err = middleware(Arc::new(FakeFacilitator::new()), FlowScheme::escrow())
+        .with_price_tag(escrow_tag())
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Concurrent)
+        .expect_err("Concurrent escrow must fail at construct");
+    assert!(matches!(err, BuildError::Mode(_)));
+}
+
+#[test]
+fn layer_with_price_tag_unregistered_scheme_is_err() {
+    let layer = middleware(
+        Arc::new(FakeFacilitator::new()),
+        FlowScheme::authorization(),
+    )
+    .with_price_tag(eip155_tag())
+    .unwrap();
+    let err = layer
+        .with_price_tag(upto_tag())
+        .expect_err("appending an unregistered scheme must fail");
+    assert!(matches!(err, BuildError::MissingScheme { .. }));
 }

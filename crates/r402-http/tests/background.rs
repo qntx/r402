@@ -89,6 +89,7 @@ fn background_layer(
         .with_price_tag(eip155_tag())
         .unwrap()
         .with_settlement_mode(SettlementMode::Background)
+        .expect("compatible settlement mode")
         .with_settlement_tracker(tracker)
 }
 
@@ -254,6 +255,7 @@ async fn spawned_settle_success_records_paid_address() {
         .with_price_tag(eip155_tag())
         .unwrap()
         .with_settlement_mode(SettlementMode::Background)
+        .expect("compatible settlement mode")
         .with_settlement_tracker(tracker.clone());
     let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
     assert_eq!(response.status(), StatusCode::OK);

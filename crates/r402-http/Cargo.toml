@@ -71,6 +71,7 @@ axum = "0.8"
 axum-core = { workspace = true }
 compact_str = { workspace = true }
 http = { workspace = true }
+http-body-util = "0.1"
 r402-client = { workspace = true }
 r402-evm = { workspace = true, features = ["client", "server", "facilitator"] }
 r402-facilitator = { workspace = true, features = ["http-client"] }
