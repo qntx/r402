@@ -18,13 +18,14 @@ use std::sync::Arc;
 
 use alloy_signer_local::PrivateKeySigner;
 use r402_extensions::{
-    Es256JwsSigner, OFFER_RECEIPT, OfferInput, OfferReceiptExtension, ReceiptInput,
-    SignatureFormat, SignedOffer, canonicalize, create_jws,
-    create_offer_eip712, create_offer_jws, create_receipt_eip712, create_receipt_jws,
-    decode_signed_offers, extract_jws_header, extract_jws_payload, extract_offer_payload,
-    extract_offers_from_payment_required, extract_receipt_from_settle_response,
+    EddsaJwsSigner, Es256JwsSigner, Es256kJwsSigner, OFFER_RECEIPT, OfferInput,
+    OfferReceiptExtension, ReceiptInput, SignatureFormat, SignedOffer, SignedReceipt, canonicalize,
+    create_jws, create_offer_eip712, create_offer_jws, create_receipt_eip712, create_receipt_jws,
+    declare_offer_receipt_extension, decode_signed_offers, extract_jws_header, extract_jws_payload,
+    extract_offer_payload, extract_offers_from_payment_required,
+    extract_receipt_from_settle_response, extract_receipt_payload,
     find_accepts_object_from_signed_offer, hash_offer_typed_data, verify_offer_signature_eip712,
-    verify_offer_signature_jws, verify_receipt_signature_eip712,
+    verify_offer_signature_jws, verify_receipt_signature_eip712, verify_receipt_signature_jws,
 };
 use r402_protocol::extension::{AdvertiseContext, Extension, SettleContext};
 use r402_protocol::payment::{
@@ -107,6 +108,53 @@ fn jws_offer_verifies_with_signer_key() {
 }
 
 #[test]
+fn jws_es256k_offer_verifies() {
+    let signer = Es256kJwsSigner::from_bytes(KID, &SECRET).unwrap();
+    let offer = create_offer_jws(RESOURCE, &sample_input(), &signer).unwrap();
+    let SignedOffer::Jws { signature, .. } = &offer else {
+        panic!("expected jws");
+    };
+    let header = extract_jws_header(signature).unwrap();
+    assert_eq!(header.alg, "ES256K");
+    let payload = verify_offer_signature_jws(&offer, Some(&signer.verifying_key())).unwrap();
+    assert_eq!(payload.amount, "10000");
+}
+
+#[test]
+fn jws_eddsa_offer_verifies() {
+    let signer = EddsaJwsSigner::from_bytes(KID, &SECRET).unwrap();
+    let offer = create_offer_jws(RESOURCE, &sample_input(), &signer).unwrap();
+    let SignedOffer::Jws { signature, .. } = &offer else {
+        panic!("expected jws");
+    };
+    let header = extract_jws_header(signature).unwrap();
+    assert_eq!(header.alg, "EdDSA");
+    let payload = verify_offer_signature_jws(&offer, Some(&signer.verifying_key())).unwrap();
+    assert_eq!(payload.amount, "10000");
+}
+
+#[test]
+fn jws_es256k_and_eddsa_receipts_verify() {
+    let es256k = Es256kJwsSigner::from_bytes(KID, &SECRET).unwrap();
+    let eddsa = EddsaJwsSigner::from_bytes(KID, &SECRET).unwrap();
+    let input = ReceiptInput {
+        resource_url: RESOURCE.into(),
+        payer: "0xpayer".into(),
+        network: "eip155:8453".into(),
+        transaction: None,
+    };
+    let k_receipt = create_receipt_jws(&input, &es256k).unwrap();
+    let d_receipt = create_receipt_jws(&input, &eddsa).unwrap();
+    let k_payload =
+        verify_receipt_signature_jws(&k_receipt, Some(&es256k.verifying_key())).unwrap();
+    let d_payload = verify_receipt_signature_jws(&d_receipt, Some(&eddsa.verifying_key())).unwrap();
+    assert_eq!(k_payload.resource_url, RESOURCE);
+    assert_eq!(d_payload.resource_url, RESOURCE);
+    assert!(k_payload.transaction.is_none());
+    assert!(d_payload.transaction.is_none());
+}
+
+#[test]
 fn eip712_offer_has_payload_and_hex_signature() {
     let wallet: PrivateKeySigner = ANVIL_KEY.parse().unwrap();
     let offer = create_offer_eip712(RESOURCE, &sample_input(), &wallet).unwrap();
@@ -175,6 +223,7 @@ async fn extension_enriches_402_with_signed_offers() {
     let accepts = vec![sample_accept()];
     let ctx = AdvertiseContext::for_payment_required(&resource, &accepts, None);
     let entry = ext.enrich_payment_required(&ctx).await.unwrap();
+    assert_eq!(ext.dynamic_info_fields(), &["offers"]);
     let info = entry.as_info().unwrap();
     let offers = info["offers"].as_array().unwrap();
     assert_eq!(offers.len(), 1);
@@ -202,6 +251,89 @@ async fn extension_adds_receipt_on_settle_success() {
     let entry = ext.on_settle(&ctx).await.unwrap();
     let info = entry.as_info().unwrap();
     assert_eq!(info["receipt"]["format"], "jws");
+}
+
+fn settle_success(transaction: &str) -> SettleResponse {
+    SettleResponse::Success {
+        payer: Some("0xpayer".into()),
+        transaction: transaction.into(),
+        network: "eip155:8453".into(),
+        amount: None,
+        extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
+        extra: None,
+    }
+}
+
+fn jws_extension() -> OfferReceiptExtension {
+    let signer = Es256JwsSigner::from_bytes(KID, &SECRET).unwrap();
+    let issuer = r402_extensions::create_jws_offer_receipt_issuer(signer);
+    OfferReceiptExtension::new(Arc::new(issuer))
+}
+
+fn receipt_from_entry(entry: &r402_protocol::payment::ExtensionEntry) -> SignedReceipt {
+    serde_json::from_value(entry.as_info().unwrap()["receipt"].clone()).unwrap()
+}
+
+#[tokio::test]
+async fn receipt_uses_settle_context_resource_url_when_payload_omits_it() {
+    let ext = jws_extension();
+    let requirements = sample_accept();
+    let payload = PaymentPayload::new(json!({}), json!({}));
+    let response = settle_success("0xabc");
+    let ctx = SettleContext::new(&payload, &requirements, &response).with_resource_url(RESOURCE);
+    let entry = ext.on_settle(&ctx).await.unwrap();
+    let decoded = extract_receipt_payload(&receipt_from_entry(&entry)).unwrap();
+    assert_eq!(decoded.resource_url, RESOURCE);
+    assert!(decoded.transaction.is_none());
+}
+
+#[tokio::test]
+async fn receipt_dropped_when_resource_url_unknown() {
+    let ext = jws_extension();
+    let requirements = sample_accept();
+    let payload = PaymentPayload::new(json!({}), json!({}));
+    let response = settle_success("0xabc");
+    let ctx = SettleContext::new(&payload, &requirements, &response);
+    assert!(ext.on_settle(&ctx).await.is_none());
+}
+
+#[tokio::test]
+async fn include_tx_hash_from_advertised_declaration() {
+    let ext = jws_extension();
+    let requirements = sample_accept();
+    let payload = PaymentPayload::new(json!({}), json!({}));
+    let response = settle_success("0xabc");
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        OFFER_RECEIPT,
+        declare_offer_receipt_extension(Some(true), None),
+    );
+    let ctx = SettleContext::new(&payload, &requirements, &response)
+        .with_resource_url(RESOURCE)
+        .with_advertised(&advertised);
+    let entry = ext.on_settle(&ctx).await.unwrap();
+    let decoded = extract_receipt_payload(&receipt_from_entry(&entry)).unwrap();
+    assert_eq!(decoded.transaction.as_deref(), Some("0xabc"));
+}
+
+#[tokio::test]
+async fn advertised_include_tx_hash_false_overrides_constructor() {
+    let ext = jws_extension().with_include_tx_hash(true);
+    let requirements = sample_accept();
+    let payload = PaymentPayload::new(json!({}), json!({}));
+    let response = settle_success("0xabc");
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        OFFER_RECEIPT,
+        declare_offer_receipt_extension(Some(false), None),
+    );
+    let ctx = SettleContext::new(&payload, &requirements, &response)
+        .with_resource_url(RESOURCE)
+        .with_advertised(&advertised);
+    let entry = ext.on_settle(&ctx).await.unwrap();
+    let decoded = extract_receipt_payload(&receipt_from_entry(&entry)).unwrap();
+    assert!(decoded.transaction.is_none());
 }
 
 #[test]

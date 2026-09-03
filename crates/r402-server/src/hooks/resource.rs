@@ -3,6 +3,7 @@
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
 
+use compact_str::CompactString;
 use r402_facilitator::{BoxFuture, FailureRecovery};
 use r402_protocol::error::FacilitatorError;
 use r402_protocol::payment::{
@@ -185,6 +186,8 @@ pub struct SettleContext {
     pub declared_extensions: Extensions,
     /// Which settle invocation is running.
     pub phase: SettlePhase,
+    /// Resource URL from the 402 / request, when known.
+    pub resource_url: Option<CompactString>,
 }
 
 impl Debug for SettleContext {
@@ -204,6 +207,7 @@ impl SettleContext {
             payment,
             declared_extensions: Extensions::new(),
             phase,
+            resource_url: None,
         }
     }
 }

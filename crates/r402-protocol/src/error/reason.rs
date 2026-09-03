@@ -68,6 +68,8 @@ pub enum ErrorReason {
     IncompatibleSettlementMode,
     /// Wire code: `settlement_aborted`. HTTP mapping: 402.
     SettlementAborted,
+    /// Wire code: `extension_echo_mismatch`.
+    ExtensionEchoMismatch,
     /// Unknown wire code, preserved verbatim.
     Custom(CompactString),
 }
@@ -116,6 +118,7 @@ impl ErrorReason {
             Self::InvalidExactSolanaPayloadMemoCount => "invalid_exact_solana_payload_memo_count",
             Self::IncompatibleSettlementMode => "incompatible_settlement_mode",
             Self::SettlementAborted => "settlement_aborted",
+            Self::ExtensionEchoMismatch => "extension_echo_mismatch",
             Self::Custom(s) => s.as_str(),
         }
     }
@@ -163,6 +166,7 @@ impl ErrorReason {
             "invalid_exact_solana_payload_memo_count" => Self::InvalidExactSolanaPayloadMemoCount,
             "incompatible_settlement_mode" => Self::IncompatibleSettlementMode,
             "settlement_aborted" => Self::SettlementAborted,
+            "extension_echo_mismatch" => Self::ExtensionEchoMismatch,
             other => Self::Custom(CompactString::from(other)),
         }
     }
@@ -243,6 +247,14 @@ mod tests {
         assert_eq!(
             ErrorReason::SettlementAborted.as_str(),
             "settlement_aborted"
+        );
+        assert_eq!(
+            ErrorReason::from_wire("extension_echo_mismatch"),
+            ErrorReason::ExtensionEchoMismatch
+        );
+        assert_eq!(
+            ErrorReason::ExtensionEchoMismatch.as_str(),
+            "extension_echo_mismatch"
         );
     }
 

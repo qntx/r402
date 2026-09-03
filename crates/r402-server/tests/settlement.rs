@@ -225,7 +225,7 @@ async fn sequential_upfront_settles_once_then_echo() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
     assert!(
-        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler, None, None)
             .await
             .unwrap()
             .is_success()
@@ -257,7 +257,7 @@ async fn sequential_escrow_settles_before_and_after() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
     assert!(
-        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+        rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler, None, None)
             .await
             .unwrap()
             .is_success()
@@ -270,7 +270,14 @@ async fn sequential_escrow_settles_before_and_after() {
         schedule,
         Some(async move {
             rs_after
-                .settle_payment(&payload_after, &req_after, None, SettlePhase::AfterHandler)
+                .settle_payment(
+                    &payload_after,
+                    &req_after,
+                    None,
+                    SettlePhase::AfterHandler,
+                    None,
+                    None,
+                )
                 .await
         }),
     )

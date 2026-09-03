@@ -103,6 +103,12 @@ pub enum VerificationError {
     /// Official scheme wire reason not represented by a dedicated variant.
     #[error("{0}")]
     Wire(ErrorReason),
+    /// Client extension echo does not match the server advertisement.
+    #[error("extension_echo_mismatch")]
+    ExtensionEchoMismatch {
+        /// Extension key that failed echo validation.
+        extension_key: String,
+    },
 }
 
 impl VerificationError {
@@ -147,6 +153,7 @@ impl AsPaymentProblem for VerificationError {
             Self::UptoUnauthorizedFacilitator => ErrorReason::UptoUnauthorizedFacilitator,
             Self::UptoAmountExceedsPermitted => ErrorReason::UptoAmountExceedsPermitted,
             Self::Wire(reason) => reason.clone(),
+            Self::ExtensionEchoMismatch { .. } => ErrorReason::ExtensionEchoMismatch,
         };
         PaymentProblem::new(reason, self.to_string())
     }
@@ -382,5 +389,19 @@ mod tests {
             mismatch.as_payment_problem().reason().as_str(),
             "invalid_exact_evm_transfer_event_mismatch"
         );
+    }
+
+    #[test]
+    fn extension_echo_mismatch_maps_to_wire_reason() {
+        let err = VerificationError::ExtensionEchoMismatch {
+            extension_key: "builder-code".into(),
+        };
+        let problem = err.as_payment_problem();
+        assert_eq!(problem.reason(), ErrorReason::ExtensionEchoMismatch);
+        let wrapped = FacilitatorError::from(err);
+        let Some(wrapped_problem) = wrapped.as_payment_problem() else {
+            panic!("verification errors must map to a 402 payment problem");
+        };
+        assert_eq!(wrapped_problem.reason(), ErrorReason::ExtensionEchoMismatch);
     }
 }

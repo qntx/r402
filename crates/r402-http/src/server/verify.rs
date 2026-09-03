@@ -24,6 +24,8 @@ pub struct VerifiedPayment {
     pub(crate) requirements: PaymentRequirements,
     pub(crate) server: ResourceServer,
     pub(crate) skip_handler: Option<SkipHandlerDirective>,
+    pub(crate) resource_url: compact_str::CompactString,
+    pub(crate) advertised: Extensions,
 }
 
 impl VerifiedPayment {
@@ -46,7 +48,14 @@ impl VerifiedPayment {
         overrides: Option<&SettlementOverrides>,
     ) -> Result<SettleResponse, FacilitatorError> {
         self.server
-            .settle_payment(&self.payload, &self.requirements, overrides, phase)
+            .settle_payment(
+                &self.payload,
+                &self.requirements,
+                overrides,
+                phase,
+                Some(self.resource_url.as_str()),
+                Some(&self.advertised),
+            )
             .await
     }
 }
@@ -118,7 +127,7 @@ impl Gate {
             .ok_or(GateError::NoPaymentMatching)?;
         let outcome = self
             .server
-            .verify_payment(&payload, &requirements)
+            .verify_payment(&payload, &requirements, Some(&payment_required.extensions))
             .await
             .map_err(GateError::from_verify_facilitator)?;
 
@@ -137,6 +146,8 @@ impl Gate {
             requirements,
             server: self.server.clone(),
             skip_handler: outcome.skip_handler,
+            resource_url: payment_required.resource.url.clone(),
+            advertised: payment_required.extensions.clone(),
         })
     }
 }

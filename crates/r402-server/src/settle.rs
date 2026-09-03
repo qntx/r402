@@ -66,6 +66,8 @@ impl ResourceServer {
         requirements: &PaymentRequirements,
         overrides: Option<&SettlementOverrides>,
         phase: SettlePhase,
+        resource_url: Option<&str>,
+        advertised: Option<&Extensions>,
     ) -> Result<SettleResponse, FacilitatorError> {
         let effective = apply_settlement_overrides(requirements, overrides)?;
         let payload = self
@@ -76,8 +78,9 @@ impl ResourceServer {
                 payload,
                 requirements: effective,
             },
-            declared_extensions: Extensions::new(),
+            declared_extensions: advertised.cloned().unwrap_or_default(),
             phase,
+            resource_url: resource_url.map(compact_str::CompactString::from),
         };
 
         let mut skipped: Option<SettleResponse> = None;
@@ -99,7 +102,8 @@ impl ResourceServer {
         } else {
             self.call_settle_with_failure_hooks(&settle_ctx).await?
         };
-        attach_settle_extensions(&self.extensions, &settle_ctx, &mut response).await?;
+        attach_settle_extensions(&self.extensions, &settle_ctx, &mut response, resource_url)
+            .await?;
 
         let result_ctx = SettleResultContext {
             settle: settle_ctx,
@@ -162,6 +166,7 @@ impl ResourceServer {
             },
             declared_extensions: Extensions::new(),
             phase,
+            resource_url: None,
         };
         let Some(enrichment) = scheme.enrich_settlement_payload(&ctx).await? else {
             return Ok(payload.clone());
@@ -198,14 +203,21 @@ async fn attach_settle_extensions(
     registry: &ExtensionRegistry,
     settle: &SettleContext,
     response: &mut SettleResponse,
+    resource_url: Option<&str>,
 ) -> Result<(), FacilitatorError> {
     if registry.is_empty() {
         return Ok(());
     }
     let json_payload = json_payment_payload(&settle.payment.payload)?;
     let extra = {
-        let ctx =
+        let mut ctx =
             ExtensionSettleContext::new(&json_payload, &settle.payment.requirements, response);
+        if let Some(url) = resource_url.or(settle.resource_url.as_deref()) {
+            ctx = ctx.with_resource_url(url);
+        }
+        if !settle.declared_extensions.is_empty() {
+            ctx = ctx.with_advertised(&settle.declared_extensions);
+        }
         registry.collect_settle(&ctx).await
     };
     response.extensions_mut().extend(extra);

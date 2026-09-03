@@ -76,6 +76,12 @@ impl ResourceServer {
                 &cancel_requirements,
                 None,
                 SettlePhase::Cancel,
+                ctx.payment
+                    .payload
+                    .resource
+                    .as_ref()
+                    .map(|r| r.url.as_str()),
+                None,
             )
             .await
         {

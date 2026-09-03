@@ -615,3 +615,58 @@ where
             .with_signers(signers)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{Address, Bytes};
+    use compact_str::CompactString;
+    use r402_extensions::{
+        BUILDER_CODE, BuilderCodeFacilitatorExtension, parse_builder_code_suffix_from_calldata,
+    };
+    use r402_protocol::payment::ExtensionEntry;
+    use serde_json::json;
+
+    use super::*;
+    use crate::chain::MetaTransaction;
+
+    fn facilitator_with_w() -> Eip155ExactFacilitator<()> {
+        Eip155ExactFacilitator::with_settlement_cache((), SettlementCache::new()).with_builder_code(
+            BuilderCodeFacilitatorExtension::new()
+                .with_builder_code("bc_myfacilitator")
+                .expect("valid facilitator builder code"),
+        )
+    }
+
+    #[test]
+    fn settle_calldata_carries_builder_code_suffix() {
+        let fac = facilitator_with_w();
+        let mut extensions = wire::Extensions::new();
+        extensions.insert(
+            BUILDER_CODE,
+            ExtensionEntry::info(json!({ "a": "bc_myapp", "s": ["bc_client"] })),
+        );
+        let suffix = fac.data_suffix(&extensions);
+        assert!(
+            !suffix.is_empty(),
+            "configured facilitator must emit a suffix"
+        );
+        let calldata = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
+        let tx = MetaTransaction::new(Address::ZERO, calldata, 1).with_data_suffix(&suffix);
+        assert!(
+            tx.calldata.as_ref().ends_with(&suffix),
+            "settlement calldata must end with the ERC-8021 suffix"
+        );
+        let parsed = parse_builder_code_suffix_from_calldata(tx.calldata.as_ref())
+            .expect("calldata must parse as Schema 2 suffix");
+        assert_eq!(parsed.a.as_deref(), Some("bc_myapp"));
+        assert_eq!(parsed.w.as_deref(), Some("bc_myfacilitator"));
+        assert_eq!(
+            parsed
+                .s
+                .iter()
+                .map(CompactString::as_str)
+                .collect::<Vec<_>>(),
+            vec!["bc_client"]
+        );
+    }
+}

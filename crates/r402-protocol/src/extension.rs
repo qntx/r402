@@ -107,6 +107,10 @@ pub struct SettleContext<'a> {
     pub requirements: &'a PaymentRequirements,
     /// In-flight settle response.
     pub response: &'a SettleResponse,
+    /// Resource URL from the 402 / request, when known.
+    pub resource_url: Option<&'a str>,
+    /// 402 advertised extensions (declaration + enriched info).
+    pub advertised: Option<&'a Extensions>,
 }
 
 impl Debug for SettleContext<'_> {
@@ -129,7 +133,23 @@ impl<'a> SettleContext<'a> {
             payload,
             requirements,
             response,
+            resource_url: None,
+            advertised: None,
         }
+    }
+
+    /// Sets the 402/request resource URL.
+    #[must_use]
+    pub const fn with_resource_url(mut self, resource_url: &'a str) -> Self {
+        self.resource_url = Some(resource_url);
+        self
+    }
+
+    /// Sets advertised 402 extensions.
+    #[must_use]
+    pub const fn with_advertised(mut self, advertised: &'a Extensions) -> Self {
+        self.advertised = Some(advertised);
+        self
     }
 }
 
@@ -144,6 +164,11 @@ pub trait Extension: Send + Sync {
     /// Called when assembling a 402 response.
     fn advertise(&self, _ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
         None
+    }
+
+    /// Info fields regenerated per 402 and excluded from echo matching.
+    fn dynamic_info_fields(&self) -> &'static [&'static str] {
+        &[]
     }
 
     /// Async 402 enrich. Default is a no-op; offer-receipt signs offers here.
@@ -183,6 +208,9 @@ pub trait DynExtension: Send + Sync {
     /// See [`Extension::advertise`].
     fn advertise(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry>;
 
+    /// See [`Extension::dynamic_info_fields`].
+    fn dynamic_info_fields(&self) -> &'static [&'static str];
+
     /// See [`Extension::enrich_payment_required`].
     fn enrich_payment_required<'a>(
         &'a self,
@@ -205,6 +233,10 @@ impl<T: Extension + ?Sized> DynExtension for T {
 
     fn advertise(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
         <Self as Extension>::advertise(self, ctx)
+    }
+
+    fn dynamic_info_fields(&self) -> &'static [&'static str] {
+        <Self as Extension>::dynamic_info_fields(self)
     }
 
     fn enrich_payment_required<'a>(

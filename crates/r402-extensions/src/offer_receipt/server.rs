@@ -353,6 +353,10 @@ impl Extension for OfferReceiptExtension {
         OFFER_RECEIPT
     }
 
+    fn dynamic_info_fields(&self) -> &'static [&'static str] {
+        &["offers"]
+    }
+
     async fn enrich_payment_required(&self, ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
         let resource_url = ctx.resource.map(|r| r.url.as_str())?;
         let offers = self.sign_offers(resource_url, ctx).await;
@@ -375,8 +379,13 @@ impl Extension for OfferReceiptExtension {
             return None;
         };
         let payer = payer.as_deref()?;
-        let resource_url = ctx.payload.resource.as_ref().map(|r| r.url.as_str())?;
-        let tx = if self.include_tx_hash && !transaction.is_empty() {
+        let resource_url = ctx
+            .resource_url
+            .or_else(|| ctx.payload.resource.as_ref().map(|r| r.url.as_str()))?;
+        let (declared_include, _) =
+            declaration_config(ctx.advertised.and_then(|ext| ext.get(OFFER_RECEIPT)));
+        let include_tx = declared_include.unwrap_or(self.include_tx_hash);
+        let tx = if include_tx && !transaction.is_empty() {
             Some(transaction.to_string())
         } else {
             None

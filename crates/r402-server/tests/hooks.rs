@@ -11,7 +11,7 @@
     clippy::panic,
     clippy::unwrap_used,
     clippy::manual_async_fn,
-    clippy::unused_async_trait_impl,
+    clippy::unused_async,
     reason = "idiomatic test-code patterns"
 )]
 
@@ -187,11 +187,11 @@ async fn verify_and_settle_invoke_facilitator() {
         .with_scheme(eip155_wildcard(), MockScheme::authorization());
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let out = rs.verify_payment(&payload, &req).await.unwrap();
+    let out = rs.verify_payment(&payload, &req, None).await.unwrap();
     assert!(out.response.is_valid());
     assert!(out.skip_handler.is_none());
     assert!(
-        rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+        rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler, None, None)
             .await
             .unwrap()
             .is_success()
@@ -251,7 +251,7 @@ async fn before_verify_abort() {
         .with_hook(AbortBeforeVerify);
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+    let err = rs.verify_payment(&payload, &req, None).await.unwrap_err();
     assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "blocked"));
 }
 
@@ -275,7 +275,7 @@ async fn before_verify_skip_bypasses_facilitator() {
         .with_hook(SkipVerify);
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let out = rs.verify_payment(&payload, &req).await.unwrap();
+    let out = rs.verify_payment(&payload, &req, None).await.unwrap();
     assert!(out.response.is_valid());
     assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
 }
@@ -314,7 +314,7 @@ async fn after_verify_abort_fires_cancel() {
         .with_hook(CancelHook(Arc::clone(&cancels)));
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+    let err = rs.verify_payment(&payload, &req, None).await.unwrap_err();
     assert!(matches!(err, FacilitatorError::Aborted { reason, .. } if reason == "post"));
     assert_eq!(cancels.load(Ordering::SeqCst), 1);
 }
@@ -338,7 +338,7 @@ async fn after_verify_skip_handler() {
         .with_hook(SkipHandlerHook);
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let out = rs.verify_payment(&payload, &req).await.unwrap();
+    let out = rs.verify_payment(&payload, &req, None).await.unwrap();
     assert!(out.skip_handler.is_some());
 }
 
@@ -367,7 +367,7 @@ async fn verify_failure_recovers() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
     assert!(
-        rs.verify_payment(&payload, &req)
+        rs.verify_payment(&payload, &req, None)
             .await
             .unwrap()
             .response
@@ -409,7 +409,7 @@ async fn verify_skips_facilitator_when_not_verify_before_handler() {
         .with_scheme(eip155_wildcard(), MockScheme::upfront());
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let out = rs.verify_payment(&payload, &req).await.unwrap();
+    let out = rs.verify_payment(&payload, &req, None).await.unwrap();
     assert!(out.response.is_valid());
     assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
 }
@@ -420,7 +420,7 @@ async fn verify_payment_errors_when_table_empty() {
     let rs = ResourceServer::new(Arc::clone(&mock));
     let payload = sample_payload();
     let req = payload.accepted.clone();
-    let err = rs.verify_payment(&payload, &req).await.unwrap_err();
+    let err = rs.verify_payment(&payload, &req, None).await.unwrap_err();
     assert!(matches!(
         err,
         FacilitatorError::Verification(VerificationError::InvalidFormat(ref msg))
@@ -511,7 +511,7 @@ async fn settle_retries_once_on_pending_then_success() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
     let result = rs
-        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler, None, None)
         .await
         .unwrap();
     assert!(matches!(
@@ -528,7 +528,7 @@ async fn settle_does_not_retry_on_facilitator_error() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
     let err = rs
-        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler, None, None)
         .await
         .unwrap_err();
     assert!(matches!(err, FacilitatorError::Onchain(_)));
@@ -615,13 +615,13 @@ async fn settle_payment_merges_scheme_payload_enrichment_after_handler() {
     let payload = sample_payload();
     let req = payload.accepted.clone();
 
-    rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler)
+    rs.settle_payment(&payload, &req, None, SettlePhase::BeforeHandler, None, None)
         .await
         .unwrap();
-    rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+    rs.settle_payment(&payload, &req, None, SettlePhase::AfterHandler, None, None)
         .await
         .unwrap();
-    rs.settle_payment(&payload, &req, None, SettlePhase::Cancel)
+    rs.settle_payment(&payload, &req, None, SettlePhase::Cancel, None, None)
         .await
         .unwrap();
 
@@ -726,6 +726,10 @@ impl Extension for OfferStub {
         "offer-receipt"
     }
 
+    fn dynamic_info_fields(&self) -> &'static [&'static str] {
+        &["offers"]
+    }
+
     fn enrich_payment_required<'a>(
         &'a self,
         ctx: &'a AdvertiseContext<'a>,
@@ -787,7 +791,7 @@ async fn registered_extension_attaches_settle_receipt() {
     let payload = sample_payload().with_resource(ResourceInfo::new("https://example.com/paid"));
     let req = payload.accepted.clone();
     let settled = rs
-        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler)
+        .settle_payment(&payload, &req, None, SettlePhase::AfterHandler, None, None)
         .await
         .unwrap();
     let info = match &settled {
@@ -800,6 +804,114 @@ async fn registered_extension_attaches_settle_receipt() {
         SettleResponse::Failure { .. } | _ => panic!("expected success"),
     };
     assert_eq!(info["receipt"], true);
+}
+
+fn builder_code_entry(info: Value) -> ExtensionEntry {
+    ExtensionEntry::info(info)
+}
+
+#[tokio::test]
+async fn verify_rejects_forged_builder_code_a() {
+    let mock = mock_ok();
+    let rs = ResourceServer::new(Arc::clone(&mock))
+        .with_scheme(eip155_wildcard(), MockScheme::authorization());
+    let mut payload = sample_payload();
+    payload.extensions.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "forged_app"})),
+    );
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "bc_app"})),
+    );
+    let req = payload.accepted.clone();
+    let err = rs
+        .verify_payment(&payload, &req, Some(&advertised))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::ExtensionEchoMismatch {
+            ref extension_key
+        }) if extension_key == "builder-code"
+    ));
+    assert_eq!(
+        err.as_payment_problem().unwrap().reason(),
+        ErrorReason::ExtensionEchoMismatch
+    );
+    assert_eq!(mock.verifies.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn verify_rejects_builder_code_a_without_declaration() {
+    let rs =
+        ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), MockScheme::authorization());
+    let mut payload = sample_payload();
+    payload.extensions.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "forged_app"})),
+    );
+    let req = payload.accepted.clone();
+    let err = rs.verify_payment(&payload, &req, None).await.unwrap_err();
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::ExtensionEchoMismatch { .. })
+    ));
+}
+
+#[tokio::test]
+async fn verify_rejects_builder_code_s_over_budget() {
+    let rs =
+        ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), MockScheme::authorization());
+    let mut padded = vec!["bc_server".to_owned()];
+    padded.extend((0..10).map(|i| format!("bc_fake_{i}")));
+    let mut payload = sample_payload();
+    payload.extensions.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "bc_app", "s": padded})),
+    );
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "bc_app", "s": ["bc_server"]})),
+    );
+    let req = payload.accepted.clone();
+    let err = rs
+        .verify_payment(&payload, &req, Some(&advertised))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::ExtensionEchoMismatch { .. })
+    ));
+}
+
+#[tokio::test]
+async fn verify_accepts_matching_builder_code_a_and_superset_s() {
+    let mock = mock_ok();
+    let rs = ResourceServer::new(Arc::clone(&mock))
+        .with_scheme(eip155_wildcard(), MockScheme::authorization());
+    let mut payload = sample_payload();
+    payload.extensions.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({
+            "a": "bc_app",
+            "s": ["bc_server", "bc_client"]
+        })),
+    );
+    let mut advertised = Extensions::new();
+    advertised.insert(
+        "builder-code",
+        builder_code_entry(serde_json::json!({"a": "bc_app", "s": ["bc_server"]})),
+    );
+    let req = payload.accepted.clone();
+    let out = rs
+        .verify_payment(&payload, &req, Some(&advertised))
+        .await
+        .unwrap();
+    assert!(out.response.is_valid());
+    assert_eq!(mock.verifies.load(Ordering::SeqCst), 1);
 }
 
 #[test]

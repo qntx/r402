@@ -125,6 +125,22 @@ fn suffix_matches_spec_app_only_fixture() {
 }
 
 #[test]
+fn suffix_matches_spec_app_and_facilitator_fixture() {
+    let suffix = encode_builder_code_suffix(&BuilderCodeData {
+        a: Some("bc_myapp".into()),
+        w: Some("bc_myfacilitator".into()),
+        s: vec![],
+    });
+    let hex = hex_lower(&suffix);
+    assert_eq!(
+        hex,
+        format!(
+            "a261616862635f6d7961707061777062635f6d79666163696c697461746f72001f02{ERC_8021_MARKER_HEX}"
+        )
+    );
+}
+
+#[test]
 fn parse_returns_none_without_marker() {
     assert!(parse_builder_code_suffix_from_calldata(&[0xde, 0xad]).is_none());
 }

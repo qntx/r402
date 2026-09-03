@@ -11,6 +11,7 @@
     )
 )]
 
+pub mod echo;
 pub mod error;
 pub mod extension;
 pub mod metrics;
@@ -19,6 +20,7 @@ pub mod network;
 pub mod payment;
 pub mod scheme;
 
+pub use echo::validate_extension_echoes;
 pub use error::{
     AsPaymentProblem, ClientError, ErrorReason, FacilitatorError, FacilitatorTransportKind,
     PaymentProblem, SettlementError, VerificationError,

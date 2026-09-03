@@ -3,8 +3,9 @@
 use r402_facilitator::{DynFacilitator, FailureRecovery};
 use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
-    PaymentRequirements, TypedVerifyRequest, V2, VerifyRequest, VerifyResponse,
+    Extensions, PaymentRequirements, TypedVerifyRequest, V2, VerifyRequest, VerifyResponse,
 };
+use r402_protocol::validate_extension_echoes;
 use serde::Serialize;
 
 use crate::hooks::{
@@ -42,7 +43,14 @@ impl ResourceServer {
         &self,
         payload: &WirePaymentPayload,
         requirements: &PaymentRequirements,
+        advertised: Option<&Extensions>,
     ) -> Result<VerifyPaymentOutcome, FacilitatorError> {
+        validate_extension_echoes(advertised, &payload.extensions, |key| {
+            self.extensions
+                .get(key)
+                .map_or(&[], |ext| ext.dynamic_info_fields())
+        })
+        .map_err(FacilitatorError::from)?;
         let payment = PaymentHookContext {
             payload: payload.clone(),
             requirements: requirements.clone(),

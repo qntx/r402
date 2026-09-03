@@ -6,7 +6,7 @@
 use std::future::Future;
 
 use r402_protocol::error::{FacilitatorError, VerificationError};
-use r402_protocol::payment::{PaymentRequirements, SettleResponse, VerifyResponse};
+use r402_protocol::payment::{Extensions, PaymentRequirements, SettleResponse, VerifyResponse};
 use r402_server::{
     CancelReason, CompletedSettlement, PaymentFlowName, SettlePhase, VerifyPaymentOutcome,
     build_failure_path_settlement_response, resolve_payment_flow_phases,
@@ -59,7 +59,15 @@ impl PaymentWrapper {
         };
         let phases = resolve_payment_flow_phases(flow);
 
-        match self.verify_paid(&tool_name, &payload, &requirements).await {
+        match self
+            .verify_paid(
+                &tool_name,
+                &payload,
+                &requirements,
+                Some(&challenge.extensions),
+            )
+            .await
+        {
             Err(result) => result,
             Ok(verify_out) => {
                 self.after_verify(
@@ -82,8 +90,13 @@ impl PaymentWrapper {
         tool_name: &str,
         payload: &McpPaymentPayload,
         requirements: &PaymentRequirements,
+        advertised: Option<&Extensions>,
     ) -> Result<VerifyPaymentOutcome, CallToolResult> {
-        match self.server.verify_payment(payload, requirements).await {
+        match self
+            .server
+            .verify_payment(payload, requirements, advertised)
+            .await
+        {
             Ok(out) if out.response.is_valid() => Ok(out),
             Ok(out) => {
                 let reason = match out.response {
@@ -298,8 +311,20 @@ impl PaymentWrapper {
             }
             return Ok(empty_success_settle(requirements));
         }
+        let resource_url = payload
+            .resource
+            .as_ref()
+            .map(|r| r.url.as_str())
+            .or_else(|| self.config.resource.as_ref().map(|r| r.url.as_str()));
         self.server
-            .settle_payment(payload, requirements, None, phase)
+            .settle_payment(
+                payload,
+                requirements,
+                None,
+                phase,
+                resource_url,
+                Some(&self.config.extensions),
+            )
             .await
     }
 
