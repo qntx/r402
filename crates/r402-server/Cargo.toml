@@ -31,7 +31,7 @@ r402-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["sync", "time"] }
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
 
 metrics = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

@@ -1,0 +1,572 @@
+//! Payment verification logic for the EIP-155 exact scheme.
+//!
+//! Contains precondition checks (time, domain, balance, value) and the
+//! composite [`verify_payment`] function that ties signature verification
+//! to an on-chain simulation.
+
+use std::future::IntoFuture;
+
+use alloy_primitives::{Address, B256, U256};
+use alloy_provider::Provider;
+use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
+use r402_protocol::error::VerificationError;
+use r402_protocol::network::ChainId;
+use r402_protocol::payment::UnixTimestamp;
+#[cfg(feature = "telemetry")]
+use tracing::instrument;
+
+use super::contract::{IEIP3009, IX402Permit2Proxy};
+use super::settle::{TransferWithAuthorization0Call, TransferWithAuthorization1Call};
+use super::signature::SignedMessage;
+use super::{Eip3009Payment, Permit2Payment};
+use crate::asset::VALIDATOR_ADDRESS;
+use crate::chain::Eip155ChainReference;
+use crate::chain::contracts::{IERC20, Validator6492};
+use crate::error::Eip155ExactError;
+use crate::exact::payload::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
+use crate::exact::{
+    Eip3009Payload, PaymentRequirementsExtra, PermitWitnessTransferFrom, X402_EXACT_PERMIT2_PROXY,
+    payload,
+};
+use crate::permit2::PERMIT2_ADDRESS;
+use crate::signature::{StructuredSignature, assert_time};
+
+/// Runs all preconditions needed for a successful EIP-3009 payment.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
+pub(super) async fn assert_valid_payment<P: Provider>(
+    provider: P,
+    chain: &Eip155ChainReference,
+    eip3009: &Eip3009Payload,
+    payload: &payload::v2::PaymentPayload,
+    requirements: &payload::v2::PaymentRequirements,
+    clock_skew_tolerance: u64,
+) -> Result<(IEIP3009::IEIP3009Instance<P>, Eip3009Payment, Eip712Domain), Eip155ExactError> {
+    let accepted = &payload.accepted;
+    assert_requirements_match(accepted, requirements)?;
+
+    let chain_id: ChainId = chain.into();
+    let payload_chain_id = &accepted.network;
+    if payload_chain_id != &chain_id {
+        return Err(VerificationError::ChainIdMismatch.into());
+    }
+    let authorization = &eip3009.authorization;
+    if authorization.to != accepted.pay_to {
+        return Err(VerificationError::RecipientMismatch.into());
+    }
+    let valid_after = authorization.valid_after;
+    let valid_before = authorization.valid_before;
+    assert_time(valid_after, valid_before, clock_skew_tolerance)?;
+    let asset_address = accepted.asset;
+    let contract = IEIP3009::new(asset_address.into(), provider);
+
+    let amount_required = accepted.amount;
+
+    // Run independent RPC checks in parallel to reduce latency from ~3 RTTs to ~1 RTT.
+    let asset_addr: Address = asset_address.into();
+    let (domain, (), ()) = tokio::try_join!(
+        assert_domain(chain, &contract, &asset_addr, accepted.extra.as_ref()),
+        assert_nonce_unused(&contract, &authorization.from, &authorization.nonce),
+        assert_enough_balance(&contract, &authorization.from, amount_required.into()),
+    )?;
+    assert_exact_value(&authorization.value.into(), &amount_required.into())?;
+
+    let payment = Eip3009Payment {
+        from: authorization.from,
+        to: authorization.to,
+        value: authorization.value.into(),
+        valid_after: authorization.valid_after,
+        valid_before: authorization.valid_before,
+        nonce: authorization.nonce,
+        signature: eip3009.signature.clone(),
+    };
+
+    Ok((contract, payment, domain))
+}
+
+/// Validates that `accepted` satisfies `requirements` via
+/// [`r402_protocol::payment::PaymentRequirements::matches_payload_accepted`].
+///
+/// # Errors
+///
+/// Returns [`VerificationError::AcceptedRequirementsMismatch`] on mismatch.
+pub(super) fn assert_requirements_match(
+    accepted: &payload::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
+) -> Result<(), VerificationError> {
+    if requirements.matches_payload_accepted(accepted) {
+        Ok(())
+    } else {
+        Err(VerificationError::AcceptedRequirementsMismatch)
+    }
+}
+
+/// Checks whether the EIP-3009 authorization nonce has already been used on-chain.
+///
+/// Calls `authorizationState(address, bytes32)` on the token contract. If the
+/// nonce is already consumed, the payment is a replay and must be rejected.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if the RPC call fails or the nonce is already used.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
+    from = %authorizer,
+    nonce = %nonce
+)))]
+pub(super) async fn assert_nonce_unused<P: Provider>(
+    contract: &IEIP3009::IEIP3009Instance<P>,
+    authorizer: &Address,
+    nonce: &B256,
+) -> Result<(), Eip155ExactError> {
+    let call = contract.authorizationState(*authorizer, *nonce);
+    let used_fut = call.call().into_future();
+    let used = traced!(
+        used_fut,
+        tracing::info_span!("check_authorization_state", otel.kind = "client")
+    )?;
+    if used {
+        return Err(VerificationError::NonceAlreadyUsed.into());
+    }
+    Ok(())
+}
+
+/// Validates that the current time is within the `validAfter` and `validBefore` bounds.
+///
+/// Constructs the correct EIP-712 domain for signature verification.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if on-chain name/version queries fail.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
+    network = %chain.as_chain_id(),
+    asset = %asset_address
+)))]
+pub(super) async fn assert_domain<P: Provider>(
+    chain: &Eip155ChainReference,
+    token_contract: &IEIP3009::IEIP3009Instance<P>,
+    asset_address: &Address,
+    extra: Option<&PaymentRequirementsExtra>,
+) -> Result<Eip712Domain, Eip155ExactError> {
+    let name = extra.map(|extra| extra.name.clone());
+    let name = if let Some(name) = name {
+        name
+    } else {
+        let name_b = token_contract.name();
+        let name_fut = name_b.call().into_future();
+        traced!(
+            name_fut,
+            tracing::info_span!("fetch_eip712_name", otel.kind = "client")
+        )?
+    };
+    let version = extra.map(|extra| extra.version.clone());
+    let version = if let Some(version) = version {
+        version
+    } else {
+        let version_b = token_contract.version();
+        let version_fut = version_b.call().into_future();
+        traced!(
+            version_fut,
+            tracing::info_span!("fetch_eip712_version", otel.kind = "client")
+        )?
+    };
+    let domain = eip712_domain! {
+        name: name,
+        version: version,
+        chain_id: chain.inner(),
+        verifying_contract: *asset_address,
+    };
+    Ok(domain)
+}
+
+/// Checks if the payer has enough on-chain token balance to meet the `maxAmountRequired`.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if the balance query fails or funds are insufficient.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
+    sender = %sender,
+    max_required = %max_amount_required,
+    token_contract = %ieip3009_token_contract.address()
+)))]
+pub(super) async fn assert_enough_balance<P: Provider>(
+    ieip3009_token_contract: &IEIP3009::IEIP3009Instance<P>,
+    sender: &Address,
+    max_amount_required: U256,
+) -> Result<(), Eip155ExactError> {
+    let balance_of = ieip3009_token_contract.balanceOf(*sender);
+    let balance_fut = balance_of.call().into_future();
+    let balance = traced!(
+        balance_fut,
+        tracing::info_span!(
+            "fetch_token_balance",
+            token_contract = %ieip3009_token_contract.address(),
+            sender = %sender,
+            otel.kind = "client"
+        )
+    )?;
+
+    if balance < max_amount_required {
+        Err(VerificationError::InsufficientFunds.into())
+    } else {
+        Ok(())
+    }
+}
+
+/// Asserts that the declared payment amount equals the required amount exactly.
+///
+/// x402 v2 §Payment Scheme "exact" mandates buyers transfer **exactly**
+/// `maxAmountRequired`. Over- or under-payment is rejected. The previous
+/// `>=` comparison is a protocol violation that was replaced in v0.14.0.
+///
+/// # Errors
+///
+/// Returns [`VerificationError::InvalidPaymentAmount`] when `sent != required`.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err, fields(
+    sent = %sent,
+    required = %required,
+)))]
+pub(super) fn assert_exact_value(sent: &U256, required: &U256) -> Result<(), VerificationError> {
+    if sent == required {
+        Ok(())
+    } else {
+        Err(VerificationError::InvalidPaymentAmount)
+    }
+}
+
+/// Verifies a payment by checking the signature and simulating the transfer call.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if signature verification or simulation fails.
+pub(super) async fn verify_payment<P: Provider>(
+    provider: &P,
+    contract: &IEIP3009::IEIP3009Instance<&P>,
+    payment: &Eip3009Payment,
+    eip712_domain: &Eip712Domain,
+) -> Result<Address, Eip155ExactError> {
+    let signed_message = SignedMessage::extract(payment, eip712_domain)?;
+
+    let payer = signed_message.address;
+    let hash = signed_message.hash;
+    match signed_message.signature {
+        StructuredSignature::EIP6492 {
+            factory: _,
+            factory_calldata: _,
+            inner,
+            original,
+        } => {
+            let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, &provider);
+            let is_valid_signature_call =
+                validator6492.isValidSigWithSideEffects(payer, hash, original);
+            let transfer_call = TransferWithAuthorization0Call::new(contract, payment, inner);
+            let transfer_call = transfer_call.0;
+            let aggregate3 = provider
+                .multicall()
+                .add(is_valid_signature_call)
+                .add(transfer_call.tx);
+            let aggregate3_call = aggregate3.aggregate3();
+            let (is_valid_signature_result, transfer_result) = traced!(
+                aggregate3_call,
+                transfer_span!("call_transferWithAuthorization_0", transfer_call)
+            )?;
+            let is_valid_signature_result = is_valid_signature_result
+                .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
+            if !is_valid_signature_result {
+                return Err(VerificationError::InvalidSignature(
+                    "Chain reported signature to be invalid".to_owned(),
+                )
+                .into());
+            }
+            transfer_result.map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+        }
+        StructuredSignature::EIP1271(signature) => {
+            let transfer_call = TransferWithAuthorization0Call::new(contract, payment, signature);
+            let transfer_call = transfer_call.0;
+            let transfer_call_fut = transfer_call.tx.call().into_future();
+            traced!(
+                transfer_call_fut,
+                transfer_span!("call_transferWithAuthorization_0", transfer_call)
+            )?;
+        }
+        StructuredSignature::Eoa(signature) => {
+            let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
+            let transfer_call = transfer_call.0;
+            let transfer_call_fut = transfer_call.tx.call().into_future();
+            traced!(
+                transfer_call_fut,
+                transfer_span!("call_transferWithAuthorization_1", transfer_call)
+            )?;
+        }
+    }
+
+    Ok(payer)
+}
+
+/// Runs all preconditions needed for a successful Permit2 payment.
+///
+/// Validates the Permit2 authorization parameters against the payment requirements,
+/// following the same checks as the official Go SDK's `VerifyPermit2`:
+/// spender, recipient, deadline, validAfter, amount, and token.
+#[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
+pub(super) async fn assert_valid_permit2_payment<P: Provider>(
+    provider: P,
+    chain: &Eip155ChainReference,
+    permit2: &crate::exact::Permit2Payload,
+    payload: &payload::v2::PaymentPayload,
+    requirements: &payload::v2::PaymentRequirements,
+    clock_skew_tolerance: u64,
+) -> Result<(IERC20::IERC20Instance<P>, Permit2Payment, Eip712Domain), Eip155ExactError> {
+    let accepted = &payload.accepted;
+    assert_requirements_match(accepted, requirements)?;
+
+    let chain_id: ChainId = chain.into();
+    if accepted.network != chain_id {
+        return Err(VerificationError::ChainIdMismatch.into());
+    }
+
+    let auth = &permit2.permit2_authorization;
+
+    // Verify spender is x402ExactPermit2Proxy
+    if auth.spender != X402_EXACT_PERMIT2_PROXY {
+        return Err(VerificationError::InvalidSignature(
+            "invalid Permit2 spender: must be x402ExactPermit2Proxy".into(),
+        )
+        .into());
+    }
+
+    // Verify witness.to matches payTo
+    if auth.witness.to != Address::from(accepted.pay_to) {
+        return Err(VerificationError::RecipientMismatch.into());
+    }
+
+    // Parse and verify deadline not expired (with clock skew tolerance)
+    let now = UnixTimestamp::now();
+    let deadline_u64: u64 = auth.deadline.0.try_into().unwrap_or(u64::MAX);
+    let deadline_threshold = now.as_secs() + clock_skew_tolerance;
+    if deadline_u64 < deadline_threshold {
+        return Err(VerificationError::Expired.into());
+    }
+
+    // Parse and verify validAfter is not in the future (with clock skew tolerance)
+    let valid_after_u64: u64 = auth.witness.valid_after.0.try_into().unwrap_or(u64::MAX);
+    if valid_after_u64 > now.as_secs() + clock_skew_tolerance {
+        return Err(VerificationError::Early.into());
+    }
+
+    // Verify amount is sufficient
+    let auth_amount: U256 = auth.permitted.amount.into();
+    let required_amount: U256 = accepted.amount.into();
+    assert_exact_value(&auth_amount, &required_amount)?;
+
+    // Verify token matches
+    if auth.permitted.token != Address::from(accepted.asset) {
+        return Err(VerificationError::AssetMismatch.into());
+    }
+
+    let token_address: Address = accepted.asset.into();
+    let erc20 = IERC20::new(token_address, provider);
+
+    // Run independent RPC checks in parallel to reduce latency from ~2 RTTs to ~1 RTT.
+    let allowance_call = erc20.allowance(auth.from, PERMIT2_ADDRESS);
+    let balance_call = erc20.balanceOf(auth.from);
+    let (allowance_result, balance_result) =
+        tokio::join!(allowance_call.call(), balance_call.call(),);
+
+    // Check Permit2 allowance (non-fatal if RPC fails, matching Go SDK behavior)
+    if let Ok(allowance) = allowance_result
+        && allowance < required_amount
+    {
+        return Err(VerificationError::Permit2AllowanceRequired.into());
+    }
+
+    // Check balance
+    if let Ok(balance) = balance_result
+        && balance < required_amount
+    {
+        return Err(VerificationError::InsufficientFunds.into());
+    }
+
+    // Construct EIP-712 domain for Permit2 (name = "Permit2", no version)
+    let domain = eip712_domain! {
+        name: "Permit2",
+        chain_id: chain.inner(),
+        verifying_contract: PERMIT2_ADDRESS,
+    };
+
+    let payment = Permit2Payment {
+        from: auth.from,
+        to: auth.witness.to,
+        token: auth.permitted.token,
+        amount: auth_amount,
+        spender: auth.spender,
+        nonce: auth.nonce.into(),
+        deadline: auth.deadline.into(),
+        valid_after: auth.witness.valid_after.into(),
+        signature: permit2.signature.clone(),
+    };
+
+    Ok((erc20, payment, domain))
+}
+
+/// Verifies a Permit2 payment by checking the EIP-712 signature **and**
+/// simulating the on-chain `x402ExactPermit2Proxy.settle` call via
+/// `eth_call` (Fix-7).
+///
+/// Signature validity alone does not guarantee the settlement transaction
+/// will succeed: the buyer may have burned the nonce, revoked the
+/// allowance, or set a short deadline that expires between verify and
+/// settle. Running `eth_call` on the exact call that `settle_permit2_payment`
+/// would submit catches all of these revert conditions before the
+/// facilitator commits gas.
+///
+/// # Errors
+///
+/// Returns [`Eip155ExactError`] if signature verification or the
+/// simulation call fails.
+pub(super) async fn verify_permit2_payment<P: Provider>(
+    provider: &P,
+    payment: &Permit2Payment,
+    eip712_domain: &Eip712Domain,
+) -> Result<Address, Eip155ExactError> {
+    let permit_witness = PermitWitnessTransferFrom {
+        permitted: SolTokenPermissions {
+            token: payment.token,
+            amount: payment.amount,
+        },
+        spender: payment.spender,
+        nonce: payment.nonce,
+        deadline: payment.deadline,
+        witness: SolWitness {
+            to: payment.to,
+            validAfter: payment.valid_after,
+        },
+    };
+
+    let eip712_hash = permit_witness.eip712_signing_hash(eip712_domain);
+    let payer = payment.from;
+    let signature_bytes = payment.signature.clone();
+
+    let validator6492 = Validator6492::new(VALIDATOR_ADDRESS, provider);
+    let is_valid_call =
+        validator6492.isValidSigWithSideEffects(payer, eip712_hash, signature_bytes.clone());
+    let is_valid_fut = is_valid_call.call().into_future();
+    let is_valid = traced!(
+        is_valid_fut,
+        tracing::info_span!(
+            "verify_permit2_signature",
+            from = %payer,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )
+    .map_err(|e| VerificationError::InvalidSignature(e.to_string()))?;
+
+    if !is_valid {
+        return Err(VerificationError::InvalidSignature("invalid Permit2 signature".into()).into());
+    }
+
+    // Fix-7: simulate the exact proxy.settle call via eth_call to catch
+    // nonce/allowance/deadline reverts before burning gas.
+    let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider);
+    let settle_call = proxy.settle(
+        IX402Permit2Proxy::Permit {
+            permitted: IX402Permit2Proxy::TokenPermissions {
+                token: payment.token,
+                amount: payment.amount,
+            },
+            nonce: payment.nonce,
+            deadline: payment.deadline,
+        },
+        payment.from,
+        IX402Permit2Proxy::Witness {
+            to: payment.to,
+            validAfter: payment.valid_after,
+        },
+        signature_bytes,
+    );
+    let settle_simulation = settle_call.call().into_future();
+    traced!(
+        settle_simulation,
+        tracing::info_span!(
+            "simulate_permit2_settle",
+            from = %payer,
+            to = %payment.to,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )
+    .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+
+    Ok(payer)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assert_exact_value_accepts_equal() {
+        let value = U256::from(1_000_000_u64);
+        assert!(assert_exact_value(&value, &value).is_ok());
+    }
+
+    #[test]
+    fn assert_exact_value_rejects_overpayment() {
+        let required = U256::from(1_000_000_u64);
+        let sent = U256::from(1_000_001_u64);
+        assert!(matches!(
+            assert_exact_value(&sent, &required),
+            Err(VerificationError::InvalidPaymentAmount),
+        ));
+    }
+
+    #[test]
+    fn assert_exact_value_rejects_underpayment() {
+        let required = U256::from(1_000_000_u64);
+        let sent = U256::from(999_999_u64);
+        assert!(matches!(
+            assert_exact_value(&sent, &required),
+            Err(VerificationError::InvalidPaymentAmount),
+        ));
+    }
+
+    fn sample_requirements(
+        timeout: u64,
+        extra: &serde_json::Value,
+    ) -> payload::v2::PaymentRequirements {
+        serde_json::from_value(serde_json::json!({
+            "scheme": "exact",
+            "network": "eip155:1",
+            "amount": "1000000",
+            "payTo": "0x0000000000000000000000000000000000000001",
+            "maxTimeoutSeconds": timeout,
+            "asset": "0x0000000000000000000000000000000000000002",
+            "extra": extra,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn assert_requirements_match_rejects_max_timeout_mismatch() {
+        let extra = serde_json::json!({ "name": "USDC", "version": "2" });
+        let requirements = sample_requirements(60, &extra);
+        let accepted = sample_requirements(999, &extra);
+        assert!(matches!(
+            assert_requirements_match(&accepted, &requirements),
+            Err(VerificationError::AcceptedRequirementsMismatch),
+        ));
+    }
+
+    #[test]
+    fn assert_requirements_match_rejects_extra_mismatch() {
+        let requirements =
+            sample_requirements(60, &serde_json::json!({ "name": "USDC", "version": "2" }));
+        let accepted =
+            sample_requirements(60, &serde_json::json!({ "name": "USDT", "version": "2" }));
+        assert!(matches!(
+            assert_requirements_match(&accepted, &requirements),
+            Err(VerificationError::AcceptedRequirementsMismatch),
+        ));
+    }
+}
