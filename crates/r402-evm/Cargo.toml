@@ -87,5 +87,9 @@ url = { workspace = true }
 name = "exact"
 required-features = ["client", "server", "facilitator"]
 
+[[test]]
+name = "upto"
+required-features = ["client", "server", "facilitator"]
+
 [lints]
 workspace = true

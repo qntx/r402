@@ -1,14 +1,18 @@
 //! EIP-155 (EVM) chain support for the x402 payment protocol.
 //!
 //! Exact scheme: ERC-3009 `transferWithAuthorization` and Permit2 via
-//! `x402ExactPermit2Proxy`. EIP-1271 / EIP-6492 smart-wallet signatures
-//! are accepted on verify and settle.
+//! `x402ExactPermit2Proxy`. Upto scheme: Permit2 witness via
+//! `x402UptoPermit2Proxy` (verify = max, settle = actual ≤ max).
+//! EIP-1271 / EIP-6492 smart-wallet signatures are accepted on verify
+//! and settle. Insufficient Permit2 allowance is
+//! [`r402_protocol::error::VerificationError::Permit2AllowanceRequired`]
+//! (HTTP 412).
 //!
 //! # Features
 //!
-//! - `server` — [`Eip155Exact::price_tag`]
-//! - `client` — [`Eip155ExactClient`] EIP-712 signing
-//! - `facilitator` — in-process [`Eip155ExactFacilitator::try_new`]
+//! - `server` — [`Eip155Exact::price_tag`], [`Eip155Upto::price_tag`]
+//! - `client` — [`Eip155ExactClient`] / [`Eip155UptoClient`] EIP-712 signing
+//! - `facilitator` — [`Eip155ExactFacilitator::try_new`], [`Eip155UptoFacilitator::try_new`]
 //! - `telemetry` — tracing spans on RPC paths
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
@@ -28,6 +32,7 @@ use compact_str as _;
 
 pub mod asset;
 pub mod chain;
+pub mod eip2612;
 #[cfg(feature = "facilitator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "facilitator")))]
 pub mod error;
@@ -40,9 +45,14 @@ pub mod signature;
 #[cfg(feature = "client")]
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub mod signer;
+pub mod upto;
 
 pub use asset::{AssetTransferMethod, VALIDATOR_ADDRESS};
 pub use chain::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS;
+pub use eip2612::{
+    EIP2612_GAS_SPONSORING_KEY, EIP2612_GAS_SPONSORING_VERSION, Eip2612ParseError,
+    Eip2612SignedPermit,
+};
 #[cfg(feature = "facilitator")]
 pub use error::Eip155ExactError;
 pub use exact::Eip155Exact;
@@ -58,6 +68,13 @@ pub use permit2::{Permit2Approver, permit2_allowance_calldata, permit2_approval_
 pub use signature::StructuredSignatureFormatError;
 #[cfg(feature = "client")]
 pub use signer::SignerLike;
+#[cfg(feature = "facilitator")]
+pub use upto::Eip155UptoFacilitator;
+pub use upto::{Eip155Upto, X402_UPTO_PERMIT2_PROXY};
+#[cfg(feature = "client")]
+pub use upto::{
+    Eip155UptoClient, Eip155UptoClientBuilder, Eip2612SigningParams, sign_eip2612_permit,
+};
 
 #[cfg(test)]
 mod _dev_deps {

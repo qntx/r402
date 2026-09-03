@@ -135,9 +135,7 @@ async fn verify_malformed_payload_is_invalid_format() {
     assert!(
         matches!(
             err,
-            FacilitatorError::Verification(VerificationError::InvalidFormat(
-                _
-            ))
+            FacilitatorError::Verification(VerificationError::InvalidFormat(_))
         ),
         "got {err:?}"
     );
