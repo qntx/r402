@@ -79,7 +79,7 @@ macro_rules! transfer_span {
 }
 
 pub(crate) mod contract;
-mod eip6492;
+pub(crate) mod eip6492;
 mod settle;
 pub(crate) mod signature;
 mod verify;

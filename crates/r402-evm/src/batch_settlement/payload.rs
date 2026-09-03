@@ -185,9 +185,35 @@ pub enum DepositAuthorization {
     },
 }
 
-/// Discriminated payment payload for request path (client → server).
+/// Nested voucher inside a [`VoucherClaim`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimVoucherBody {
+    /// Channel config the voucher is bound to.
+    pub channel: ChannelConfig,
+    /// Cumulative claim ceiling.
+    pub max_claimable_amount: TokenAmount,
+}
+
+/// One entry in a `claimWithSignature` batch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoucherClaim {
+    /// Channel-bound voucher fields.
+    pub voucher: ClaimVoucherBody,
+    /// Payer (or payer-authorizer) voucher signature.
+    pub signature: Bytes,
+    /// Cumulative claimed amount this entry applies.
+    pub total_claimed: TokenAmount,
+}
+
+/// Discriminated payment payload (request path + facilitator settle actions).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "Refund carries optional claim-batch fields; boxing would hide the wire shape"
+)]
 pub enum BatchSettlementPayload {
     /// First deposit + initial voucher.
     Deposit {
@@ -198,14 +224,14 @@ pub enum BatchSettlementPayload {
         /// Deposit amount + authorization (boxed: largest variant fields).
         deposit: Box<DepositBody>,
     },
-    /// Subsequent cumulative voucher.
+    /// Subsequent cumulative voucher (verify only; settle is Failure).
     Voucher {
         /// Channel config.
         channel_config: ChannelConfig,
         /// Signed voucher.
         voucher: VoucherFields,
     },
-    /// Cooperative refund request.
+    /// Cooperative refund. Enriched settle requires `refundNonce` + `claims`.
     Refund {
         /// Channel config.
         channel_config: ChannelConfig,
@@ -214,6 +240,33 @@ pub enum BatchSettlementPayload {
         /// Optional refund amount.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         amount: Option<TokenAmount>,
+        /// On-chain refund nonce (enriched settle).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refund_nonce: Option<TokenAmount>,
+        /// Optional bundled claims (field present ⇒ enriched).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claims: Option<Vec<VoucherClaim>>,
+        /// Receiver-authorizer EIP-712 refund signature.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refund_authorizer_signature: Option<Bytes>,
+        /// Receiver-authorizer EIP-712 claim-batch signature.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claim_authorizer_signature: Option<Bytes>,
+    },
+    /// Facilitator settle action: `claimWithSignature`.
+    Claim {
+        /// Voucher claims to submit.
+        claims: Vec<VoucherClaim>,
+        /// Receiver-authorizer signature over the claim batch.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        claim_authorizer_signature: Option<Bytes>,
+    },
+    /// Facilitator settle action: contract `settle(receiver, token)`.
+    Settle {
+        /// Receiver whose claimed funds are swept.
+        receiver: Address,
+        /// Token to sweep.
+        token: Address,
     },
 }
 
@@ -228,24 +281,40 @@ pub struct DepositBody {
 }
 
 impl BatchSettlementPayload {
-    /// Channel config shared by all variants.
+    /// Channel config on deposit / voucher / refund payloads.
     #[must_use]
-    pub const fn channel_config(&self) -> &ChannelConfig {
+    pub const fn channel_config(&self) -> Option<&ChannelConfig> {
         match self {
             Self::Deposit { channel_config, .. }
             | Self::Voucher { channel_config, .. }
-            | Self::Refund { channel_config, .. } => channel_config,
+            | Self::Refund { channel_config, .. } => Some(channel_config),
+            Self::Claim { .. } | Self::Settle { .. } => None,
         }
     }
 
-    /// Voucher fields shared by all variants.
+    /// Voucher fields on deposit / voucher / refund payloads.
     #[must_use]
-    pub const fn voucher(&self) -> &VoucherFields {
+    pub const fn voucher(&self) -> Option<&VoucherFields> {
         match self {
             Self::Deposit { voucher, .. }
             | Self::Voucher { voucher, .. }
-            | Self::Refund { voucher, .. } => voucher,
+            | Self::Refund { voucher, .. } => Some(voucher),
+            Self::Claim { .. } | Self::Settle { .. } => None,
         }
+    }
+
+    /// Official `isBatchSettlementEnrichedRefundPayload`: amount + nonce + claims present.
+    #[must_use]
+    pub const fn is_enriched_refund(&self) -> bool {
+        matches!(
+            self,
+            Self::Refund {
+                amount: Some(_),
+                refund_nonce: Some(_),
+                claims: Some(_),
+                ..
+            }
+        )
     }
 }
 

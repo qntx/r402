@@ -4,6 +4,7 @@ use r402_protocol::error::VerificationError;
 use r402_protocol::scheme::BatchSettlementScheme;
 
 use super::channel::{channel_id_binding_error, withdraw_delay_valid};
+use super::errors::INVALID_PAYLOAD_TYPE;
 use super::payload::{BatchSettlementPayload, v2};
 use super::store::ChannelStore;
 use super::voucher::verify_voucher_signature;
@@ -47,8 +48,12 @@ pub fn verify_offchain(
     }
 
     let body = &payload.payload;
-    let config = body.channel_config();
-    let voucher = body.voucher();
+    let Some(config) = body.channel_config() else {
+        return Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE));
+    };
+    let Some(voucher) = body.voucher() else {
+        return Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE));
+    };
 
     if let Some(err) = channel_id_binding_error(config, voucher.channel_id, chain_id) {
         return Err(VerificationError::InvalidFormat(err.into()));
@@ -91,6 +96,9 @@ pub fn verify_offchain(
                 ));
             }
             Ok(request_amount)
+        }
+        BatchSettlementPayload::Claim { .. } | BatchSettlementPayload::Settle { .. } => {
+            Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE))
         }
     }
 }

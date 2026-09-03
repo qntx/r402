@@ -1,8 +1,8 @@
-//! EIP-155 `batch-settlement` scheme (request-path voucher accounting).
+//! EIP-155 `batch-settlement` scheme.
 //!
-//! **Scope (current):** cumulative EOA voucher verify/settle against a
-//! pluggable [`ChannelStore`]. Deposit request-path settle is **rejected**
-//! until on-chain deposit is implemented; claim/sweep remain operator-side.
+//! Facilitator `/settle` hits the batch-settlement contract for deposit,
+//! claim, settle, and refund. Voucher `/verify` is off-chain + [`ChannelStore`];
+//! voucher `/settle` is Failure `invalid_batch_settlement_evm_payload_type`.
 //!
 //! Spec: `specs/schemes/batch-settlement/scheme_batch_settlement_evm.md`.
 
@@ -12,6 +12,7 @@ use r402_protocol::scheme::SchemeId;
 pub mod channel;
 #[cfg(feature = "client")]
 pub mod client;
+pub mod errors;
 #[cfg(feature = "facilitator")]
 pub mod facilitator;
 pub mod payload;
@@ -118,11 +119,17 @@ mod e2e_tests {
         let store = MemoryChannelStore::new();
         let charged = verify_offchain(&payment, &requirements, 8453, &store).expect("verify");
         assert_eq!(charged.0, charge);
-        assert!(store.try_charge(
-            channel_id,
-            charged,
-            payment.payload.voucher().max_claimable_amount
-        ));
+        assert!(
+            store.try_charge(
+                channel_id,
+                charged,
+                payment
+                    .payload
+                    .voucher()
+                    .expect("voucher payload")
+                    .max_claimable_amount
+            )
+        );
         assert_eq!(store.get(&channel_id).charged_cumulative.0, charge);
     }
 
@@ -193,6 +200,10 @@ mod e2e_tests {
             channel_config: cfg,
             voucher,
             amount: None,
+            refund_nonce: None,
+            claims: None,
+            refund_authorizer_signature: None,
+            claim_authorizer_signature: None,
         };
         let extra = BatchSettlementExtra {
             receiver_authorizer: ChecksummedAddress(cfg.receiver_authorizer),
