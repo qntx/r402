@@ -4,13 +4,7 @@
 //! verifies that payload against `PaymentRequirements` and submits it,
 //! adding a fee-payer signature when `extra.feePayer` is set.
 
-use r402_core::scheme::SchemeId;
-
-#[cfg(feature = "server")]
-pub mod server;
-
-#[cfg(feature = "facilitator")]
-pub mod facilitator;
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -18,8 +12,16 @@ pub mod client;
 pub mod error;
 pub use error::*;
 
-pub mod types;
-pub use types::*;
+#[cfg(feature = "facilitator")]
+pub mod facilitator;
+#[cfg(feature = "facilitator")]
+pub use facilitator::AptosExactFacilitator;
+
+pub mod payload;
+pub use payload::*;
+
+#[cfg(feature = "server")]
+pub mod server;
 
 /// Aptos exact scheme identifier.
 ///

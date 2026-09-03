@@ -3,13 +3,7 @@
 //! The buyer signs a `Payment` transaction. The facilitator verifies that
 //! payload against `PaymentRequirements` and submits the signed blob.
 
-use r402_core::scheme::SchemeId;
-
-#[cfg(feature = "server")]
-pub mod server;
-
-#[cfg(feature = "facilitator")]
-pub mod facilitator;
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -17,8 +11,16 @@ pub mod client;
 pub mod error;
 pub use error::*;
 
-pub mod types;
-pub use types::*;
+#[cfg(feature = "facilitator")]
+pub mod facilitator;
+#[cfg(feature = "facilitator")]
+pub use facilitator::XrplExactFacilitator;
+
+pub mod payload;
+pub use payload::*;
+
+#[cfg(feature = "server")]
+pub mod server;
 
 /// XRPL exact scheme identifier.
 ///

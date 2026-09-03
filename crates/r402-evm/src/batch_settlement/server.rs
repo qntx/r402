@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use alloy_primitives::U256;
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::scheme::BatchSettlementScheme;
-use r402_core::wire;
-use r402_core::{PaymentFlowConfig, SchemeNetworkServer};
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_protocol::scheme::BatchSettlementScheme;
+use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
 
 use super::Eip155BatchSettlement;
-use super::types::BatchSettlementExtra;
+use super::payload::BatchSettlementExtra;
 use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
 
@@ -41,18 +41,17 @@ impl SchemeNetworkServer for Eip155BatchSettlement {
 
 impl Eip155BatchSettlement {
     /// Builds a price tag advertising batch-settlement terms.
-    #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
-        reason = "mirrors Eip155Exact::price_tag signature for API parity"
+        reason = "owned DeployedTokenAmount matches Eip155Exact::price_tag"
     )]
-    pub fn price_tag(
-        pay_to: impl Into<ChecksummedAddress>,
+    pub fn price_tag<A: Into<ChecksummedAddress>>(
+        pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         extra: BatchSettlementExtra,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             BatchSettlementScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -60,19 +59,22 @@ impl Eip155BatchSettlement {
             asset.token.address.to_string().into(),
             3600,
         )
-        .with_extra(serde_json::to_value(extra).unwrap_or_else(|_| serde_json::json!({})));
-        wire::PriceTag::new(requirements)
+        .with_optional_extra(serde_json::to_value(extra).ok());
+        PriceTag::new(requirements)
     }
 
     /// Convenience constructor from deployment EIP-712 metadata.
-    #[must_use]
-    pub fn price_tag_from_deployment(
-        pay_to: impl Into<ChecksummedAddress>,
+    #[allow(
+        clippy::needless_pass_by_value,
+        reason = "owned DeployedTokenAmount matches Eip155Exact::price_tag"
+    )]
+    pub fn price_tag_from_deployment<A: Into<ChecksummedAddress>>(
+        pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         receiver_authorizer: ChecksummedAddress,
         withdraw_delay: u64,
         transfer_method: Option<AssetTransferMethod>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let (name, version) = asset.token.eip712.as_ref().map_or_else(
             || (String::new(), String::new()),
             |e| (e.name.clone(), e.version.clone()),
@@ -85,5 +87,24 @@ impl Eip155BatchSettlement {
             asset_transfer_method: transfer_method,
         };
         Self::price_tag(pay_to, asset, extra)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use r402_server::PaymentFlowName;
+
+    use super::*;
+
+    #[test]
+    fn payment_flows_are_authorization_only() {
+        let scheme = Eip155BatchSettlement;
+        assert_eq!(scheme.scheme(), "batch-settlement");
+        assert_eq!(scheme.default_asset_transfer_method(), "eip3009");
+        let flows = scheme.payment_flows();
+        let expected = PaymentFlowConfig::authorization_only();
+        assert_eq!(flows.get("eip3009"), Some(&expected));
+        assert_eq!(flows.get("permit2"), Some(&expected));
+        assert_eq!(expected.default, PaymentFlowName::Authorization);
     }
 }

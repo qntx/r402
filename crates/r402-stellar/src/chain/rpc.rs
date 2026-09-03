@@ -10,8 +10,8 @@ use stellar_rpc_client::{
 };
 use stellar_xdr::{AccountEntry, Hash, Limits, TransactionEnvelope, WriteXdr};
 
-use super::types::{StellarChainReference, StellarRpcUrlError};
-use crate::{DEFAULT_ESTIMATED_LEDGER_SECONDS, HORIZON_LEDGERS_SAMPLE_SIZE};
+use super::account::{StellarChainReference, StellarRpcUrlError};
+use super::{DEFAULT_ESTIMATED_LEDGER_SECONDS, HORIZON_LEDGERS_SAMPLE_SIZE};
 
 /// Errors from Stellar RPC or Horizon.
 #[derive(Debug, thiserror::Error)]
@@ -142,6 +142,22 @@ pub struct StellarJsonRpc {
     horizon_url: String,
 }
 
+fn is_loopback_url(url: &str) -> bool {
+    url.contains("://127.0.0.1")
+        || url.contains("://localhost")
+        || url.contains("://[::1]")
+        || url.contains("://::1")
+}
+
+fn http_client_for(url: &str) -> reqwest::Client {
+    let mut builder = reqwest::Client::builder();
+    if is_loopback_url(url) {
+        // HTTP_PROXY must not capture loopback mock servers or local RPC.
+        builder = builder.no_proxy();
+    }
+    builder.build().unwrap_or_else(|_| reqwest::Client::new())
+}
+
 impl StellarJsonRpc {
     /// Connects to `chain`, using `rpc_url` when set.
     ///
@@ -156,11 +172,13 @@ impl StellarJsonRpc {
     ) -> Result<Self, StellarRpcError> {
         let url = chain.rpc_url(rpc_url)?;
         let rpc = Client::new(&url)?;
+        let horizon_url = chain.default_horizon_url().to_owned();
+        let http = http_client_for(&url);
         Ok(Self {
             chain,
             rpc,
-            http: reqwest::Client::new(),
-            horizon_url: chain.default_horizon_url().to_owned(),
+            http,
+            horizon_url,
         })
     }
 
@@ -168,6 +186,9 @@ impl StellarJsonRpc {
     #[must_use]
     pub fn with_horizon_url(mut self, url: impl Into<String>) -> Self {
         self.horizon_url = url.into();
+        if is_loopback_url(&self.horizon_url) {
+            self.http = http_client_for(&self.horizon_url);
+        }
         self
     }
 
@@ -464,7 +485,10 @@ mod tests {
             )
             .mount(&server)
             .await;
-        let http = reqwest::Client::new();
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         let seconds = estimate_ledger_seconds(&http, &server.uri()).await;
         assert_eq!(seconds, DEFAULT_ESTIMATED_LEDGER_SECONDS);
     }
@@ -486,7 +510,10 @@ mod tests {
             )
             .mount(&server)
             .await;
-        let http = reqwest::Client::new();
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         let seconds = estimate_ledger_seconds(&http, &server.uri()).await;
         assert_eq!(seconds, 10);
     }

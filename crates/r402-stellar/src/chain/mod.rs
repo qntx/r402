@@ -1,13 +1,12 @@
-//! Stellar chain support for x402 payments.
+//! Stellar chain primitives, RPC, XDR, and facilitator provider.
 //!
 //! - [`StellarChainReference`] — CAIP-2 `pubnet` / `testnet`
 //! - [`StellarAddress`] — G-account, C-account, or M-account
 //! - [`StellarTokenDeployment`] — SEP-41 token metadata
 //! - [`StellarChainProvider`] — facilitator signers + RPC (feature `facilitator`)
 
-/// Core Stellar chain types (addresses, references, token deployments).
-pub mod types;
-pub use types::*;
+pub mod account;
+pub use account::*;
 
 /// Stellar RPC client abstraction.
 #[cfg(any(feature = "client", feature = "facilitator"))]

@@ -5,20 +5,20 @@ use std::future::Future;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 use stellar_rpc_client::{GetTransactionResponse, SimulateTransactionResponse};
 use stellar_xdr::{
     FeeBumpTransaction, FeeBumpTransactionExt, FeeBumpTransactionInnerTx, Hash, SequenceNumber,
     TransactionEnvelope, TransactionExt, TransactionV1Envelope,
 };
 
+use super::account::StellarChainReference;
 use super::rpc::{StellarJsonRpc, StellarRpc, StellarRpcError};
 use super::signer::{StellarSigner, StellarSignerError};
-use super::types::StellarChainReference;
 use super::xdr::{
     StellarXdrError, encode_transaction_envelope, inner_transaction, muxed_account_from_str,
 };
-use crate::{BASE_FEE_STROOPS, DEFAULT_MAX_TRANSACTION_FEE_STROOPS};
+use super::{BASE_FEE_STROOPS, DEFAULT_MAX_TRANSACTION_FEE_STROOPS};
 
 /// Errors from the Stellar facilitator provider.
 #[derive(Debug, thiserror::Error)]

@@ -53,11 +53,6 @@ use r402_hedera::{HederaExact, USDC};
 let tag = HederaExact::price_tag(pay_to, USDC::hedera_testnet().amount(1_000_000u64));
 ```
 
-## Documentation
-
-- Crate docs: <https://docs.rs/r402-hedera>
-- Project README: [`../../README.md`](../../README.md)
-
 ## License
 
 Dual-licensed under [MIT](../../LICENSE-MIT) and

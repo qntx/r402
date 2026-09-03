@@ -48,7 +48,7 @@ sol! {
 sol! {
     /// x402 exact payment Permit2 proxy interface.
     ///
-    /// Deployed at the canonical address [`X402_EXACT_PERMIT2_PROXY`](super::super::types::X402_EXACT_PERMIT2_PROXY)
+    /// Deployed at the canonical address [`X402_EXACT_PERMIT2_PROXY`](super::super::payload::X402_EXACT_PERMIT2_PROXY)
     /// (`0x402085c248EeA27D92E8b30b2C58ed07f9E20001`). The proxy validates the EIP-712
     /// witness against the deployed typehash `Witness(address to,uint256 validAfter)` and
     /// calls through to the canonical Permit2 contract.
@@ -74,7 +74,24 @@ sol! {
             uint256 validAfter;
         }
 
+        struct EIP2612Permit {
+            uint256 value;
+            uint256 deadline;
+            bytes32 r;
+            bytes32 s;
+            uint8   v;
+        }
+
         function settle(
+            Permit permit,
+            address owner,
+            Witness witness,
+            bytes signature
+        ) external;
+
+        /// Settle while atomically broadcasting an EIP-2612 `permit` first.
+        function settleWithPermit(
+            EIP2612Permit permit2612,
             Permit permit,
             address owner,
             Witness witness,

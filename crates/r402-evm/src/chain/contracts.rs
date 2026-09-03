@@ -35,5 +35,16 @@ sol! {
     interface IERC20 {
         function balanceOf(address account) external view returns (uint256);
         function allowance(address owner, address spender) external view returns (uint256);
+        event Transfer(address indexed from, address indexed to, uint256 value);
+    }
+}
+
+sol! {
+    /// ERC-1271 magic used by `SignatureChecker` (USDC / Permit2 / batch-settlement).
+    #[allow(missing_docs, reason = "sol! generated interface")]
+    #[derive(Debug)]
+    #[sol(rpc)]
+    interface IERC1271 {
+        function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4 magicValue);
     }
 }

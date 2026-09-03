@@ -5,10 +5,10 @@ use alloy_primitives::Bytes;
 use alloy_primitives::{Address, B256, Signature, U256};
 use alloy_sol_types::{SolStruct, eip712_domain, sol};
 #[cfg(feature = "client")]
-use r402_core::error::ClientError;
-use r402_core::error::VerificationError;
+use r402_protocol::error::ClientError;
+use r402_protocol::error::VerificationError;
 
-use super::types::{
+use super::payload::{
     BATCH_SETTLEMENT_ADDRESS, BATCH_SETTLEMENT_DOMAIN_NAME, BATCH_SETTLEMENT_DOMAIN_VERSION,
     VoucherFields,
 };
@@ -114,20 +114,15 @@ pub fn verify_voucher_signature(
 }
 
 #[cfg(test)]
+#[cfg(feature = "client")]
 mod tests {
-    #[cfg(feature = "client")]
     use alloy_primitives::Address;
-    #[cfg(feature = "client")]
     use alloy_signer_local::PrivateKeySigner;
 
-    #[cfg(feature = "client")]
     use super::*;
-    #[cfg(feature = "client")]
     use crate::batch_settlement::channel::compute_channel_id;
-    #[cfg(feature = "client")]
-    use crate::batch_settlement::types::ChannelConfig;
+    use crate::batch_settlement::payload::ChannelConfig;
 
-    #[cfg(feature = "client")]
     #[tokio::test]
     async fn sign_and_verify_voucher() {
         let signer = PrivateKeySigner::random();
@@ -141,10 +136,10 @@ mod tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let channel_id = compute_channel_id(&cfg, 8453);
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
         let voucher = sign_voucher(&signer, channel_id, U256::from(1000_u64), 8453)
             .await
-            .unwrap();
+            .expect("sign");
         let recovered = verify_voucher_signature(&voucher, 8453, payer, payer).expect("verify");
         assert_eq!(recovered, payer);
     }

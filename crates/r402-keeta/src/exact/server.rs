@@ -3,12 +3,13 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_protocol::scheme::ExactScheme;
+use r402_server::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
 
 use crate::chain::{KeetaAddress, KeetaTokenDeployment};
-use crate::exact::{ExactScheme, KeetaExact};
+use crate::exact::KeetaExact;
 
 fn keeta_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
     static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
@@ -47,9 +48,9 @@ impl KeetaExact {
     pub fn price_tag<A: Into<KeetaAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<u128, KeetaTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -57,21 +58,23 @@ impl KeetaExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
+    use keetanetwork_account::{
+        Account, Accountable, GenericAccount, KeyED25519, KeyPairType, Keyable,
+    };
+    use r402_server::PaymentFlowName;
+
     use super::*;
     use crate::USDC;
+    use crate::chain::KeetaAddress;
 
     #[test]
     fn price_tag_omits_extra() {
-        use keetanetwork_account::{
-            Account, Accountable, GenericAccount, KeyED25519, KeyPairType, Keyable,
-        };
         let account = Account::<KeyED25519>::try_from(Accountable::KeyAndType(
             Keyable::from([9u8; 32]),
             KeyPairType::ED25519,
@@ -94,11 +97,17 @@ mod tests {
     #[test]
     fn payment_flows_use_default_authorization_and_upfront() {
         let scheme = KeetaExact;
+        assert_eq!(scheme.scheme(), "exact");
         assert_eq!(
-            scheme
-                .payment_flows()
-                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
-            Some(&PaymentFlowConfig::authorization_and_upfront())
+            scheme.default_asset_transfer_method(),
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
         );
+        let row = scheme
+            .payment_flows()
+            .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD)
+            .expect("default ATM");
+        assert_eq!(*row, PaymentFlowConfig::authorization_and_upfront());
+        assert_eq!(row.default, PaymentFlowName::Authorization);
+        assert!(scheme.dynamic_extra_fields().is_empty());
     }
 }

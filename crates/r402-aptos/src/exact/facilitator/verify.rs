@@ -4,14 +4,15 @@ use aptos_sdk::aptos_bcs;
 use aptos_sdk::transaction::authenticator::AccountAuthenticator;
 use aptos_sdk::types::AccountAddress;
 use compact_str::CompactString;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
 use super::AptosFacilitatorOps;
 use crate::chain::codec::{DecodedAptosPayment, is_metadata_type_tag, is_supported_transfer};
-use crate::chain::types::is_aptos_network;
+use crate::chain::{
+    EXPIRATION_BUFFER_SECONDS, MAX_GAS_AMOUNT, MAX_GAS_UNIT_PRICE, is_aptos_network,
+};
 use crate::exact::error::{AptosInvalid, invalid};
-use crate::{EXPIRATION_BUFFER_SECONDS, MAX_GAS_AMOUNT, MAX_GAS_UNIT_PRICE};
 
 /// Verifies a raw facilitator verify/settle request JSON.
 pub async fn verify_request_json<P: AptosFacilitatorOps>(

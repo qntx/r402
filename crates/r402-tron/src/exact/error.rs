@@ -1,7 +1,7 @@
 //! Error types for the Tron "exact" payment scheme.
 
 use alloy_primitives::Address as EvmAddress;
-use r402_core::error::VerificationError;
+use r402_protocol::error::VerificationError;
 
 /// Errors specific to Tron exact scheme operations.
 #[derive(Debug, thiserror::Error)]

@@ -1,13 +1,14 @@
 //! Facilitator settlement for the XRPL exact scheme.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use compact_str::CompactString;
-use r402_core::cache::{DEFAULT_SETTLEMENT_CAPACITY, Duplicate};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_facilitator::{DEFAULT_SETTLEMENT_CAPACITY, Duplicate};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
 use super::verify::verify_request_json;
@@ -81,10 +82,14 @@ pub fn settlement_ttl(max_timeout_seconds: u64) -> Duration {
 }
 
 /// Settles a verified XRPL payment by submitting the signed blob.
+///
+/// `expected_network` is the facilitator provider's CAIP-2 id; see
+/// [`super::verify::verify_request_json`].
 pub async fn settle_request<R, F, Fut>(
     rpc: &R,
     cache: &XrplSettlementCache,
     max_fee_drops: u64,
+    expected_network: &str,
     request: &Value,
     submit: F,
 ) -> SettleResponse
@@ -100,11 +105,15 @@ where
         .unwrap_or("")
         .to_owned();
 
-    let verified = verify_request_json(rpc, max_fee_drops, request).await;
+    let verified = verify_request_json(rpc, max_fee_drops, expected_network, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -164,7 +173,7 @@ where
     match submit(signed_blob.to_owned(), last_ledger).await {
         Ok(outcome) if outcome.validated && outcome.result_code == "tesSUCCESS" => {
             SettleResponse::Success {
-                payer: payer.unwrap_or_default(),
+                payer,
                 transaction: outcome.hash.into(),
                 network: network.into(),
                 amount: request
@@ -173,6 +182,7 @@ where
                     .and_then(Value::as_str)
                     .map(CompactString::from),
                 extensions: Extensions::new(),
+                extension_responses: Extensions::new(),
                 extra: None,
             }
         }
@@ -183,6 +193,7 @@ where
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
         Err(err) => SettleResponse::Failure {
@@ -192,6 +203,7 @@ where
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
     }
@@ -209,6 +221,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

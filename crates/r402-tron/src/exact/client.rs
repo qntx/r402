@@ -12,26 +12,25 @@
 //! signing a Permit2 payment.
 
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy_primitives::{Address as EvmAddress, FixedBytes, Signature, U256};
 use alloy_signer_local::PrivateKeySigner;
 use alloy_sol_types::{SolStruct, eip712_domain};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo, UnixTimestamp};
-use rand::RngExt;
-use rand::rng;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::ChainId;
+use r402_protocol::error::ClientError;
+use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo, UnixTimestamp};
+use r402_protocol::scheme::SchemeId;
+use rand::{RngExt, rng};
 
 use crate::chain::TronChainReference;
-use crate::exact::types;
 use crate::exact::{
     AssetTransferMethod, Eip3009Authorization, Eip3009Payload, ExactPayload,
     PaymentRequirementsExtra, Permit2Authorization, Permit2Payload, Permit2TokenPermissions,
     Permit2Witness, TransferWithAuthorization, TronExact, TronPermitWitnessTransferFrom,
-    TronTokenPermissions, TronWitness,
+    TronTokenPermissions, TronWitness, payload,
 };
 
 /// Abstraction over signing operations, allowing both owned and `Arc`-wrapped signers.
@@ -260,6 +259,7 @@ impl<S: std::fmt::Debug> std::fmt::Debug for TronExactClient<S> {
 
 impl<S> TronExactClient<S> {
     /// Creates a new Tron exact scheme client with the given signer.
+    #[must_use]
     pub const fn new(signer: S) -> Self {
         Self { signer }
     }
@@ -275,8 +275,6 @@ impl<S> SchemeId for TronExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::Sealed for TronExactClient<S> {}
-
 impl<S> SchemeClient for TronExactClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
@@ -286,7 +284,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_reference =
                     TronChainReference::try_from(requirements.network.clone()).ok()?;
                 let candidate = PaymentCandidate {
@@ -317,14 +315,16 @@ struct V2PayloadSigner<S> {
     signer: S,
     resource_info: Option<ResourceInfo>,
     chain_reference: TronChainReference,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
 }
 
 impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let use_permit2 = self
                 .requirements
@@ -363,8 +363,9 @@ where
                 ExactPayload::Eip3009(eip3009_payload)
             };
 
-            let payload = types::v2::PaymentPayload::new(self.requirements.clone(), exact_payload)
-                .with_optional_resource(self.resource_info.clone());
+            let payload =
+                payload::v2::PaymentPayload::new(self.requirements.clone(), exact_payload)
+                    .with_optional_resource(self.resource_info.clone());
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
 

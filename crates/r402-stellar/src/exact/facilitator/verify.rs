@@ -1,13 +1,13 @@
 //! Facilitator verification for the Stellar exact scheme.
 
 use compact_str::CompactString;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 use stellar_rpc_client::SimulateTransactionResponse;
 use stellar_xdr::{SorobanCredentials, TransactionEnvelope};
 
+use crate::chain::account::{ed25519_account_payload, is_facilitator_account, is_stellar_network};
 use crate::chain::rpc::StellarRpc;
-use crate::chain::types::{ed25519_account_payload, is_facilitator_account, is_stellar_network};
 use crate::chain::xdr::{
     StellarXdrError, auth_entry_address, decode_transaction_envelope,
     gather_auth_entry_signature_status, inner_transaction, invoke_host_function_op,

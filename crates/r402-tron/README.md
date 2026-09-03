@@ -1,9 +1,9 @@
 # r402-tron
 
-Tron chain support for the [x402 payment protocol][x402], part of the
-[`r402`](../r402) workspace.
+**Experimental / not an x402 protocol mechanism.** Not re-exported from
+umbrella `r402` (no `tron` feature).
 
-[x402]: https://www.x402.org
+Tron chain support, part of the [`r402`](../r402) workspace.
 
 ## Highlights
 
@@ -14,7 +14,7 @@ Tron chain support for the [x402 payment protocol][x402], part of the
 - **Base58Check addresses** — native `T…` form with the `0x41` prefix
   handled at the type boundary.
 - **On-chain facilitator** — verify and settle through the TronGrid HTTP
-  API (no JSON-RPC), with multi-signer support.
+  API (no JSON-RPC). `TronExactFacilitator::try_new(provider)`.
 
 ## Cargo Features
 
@@ -29,15 +29,15 @@ Tron chain support for the [x402 payment protocol][x402], part of the
 ## Quick Start (server price tag)
 
 ```rust,ignore
-use r402_tron::{TronExact, USDC};
+use alloy_primitives::U256;
+use r402_tron::{AssetTransferMethod, TronExact, USDT};
 
-let tag = TronExact::price_tag(pay_to, USDC::nile().amount(1_000_000u64));
+let tag = TronExact::price_tag(
+    pay_to,
+    &USDT::nile().amount(U256::from(1_000_000u64)),
+    Some(AssetTransferMethod::Permit2),
+);
 ```
-
-## Documentation
-
-- Crate docs: <https://docs.rs/r402-tron>
-- Project README: [`../../README.md`](../../README.md)
 
 ## License
 

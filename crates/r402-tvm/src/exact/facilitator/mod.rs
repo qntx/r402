@@ -1,5 +1,6 @@
 //! Facilitator-side payment verification and settlement for the TON exact scheme.
 
+mod batcher;
 mod settle;
 mod verify;
 
@@ -7,13 +8,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use batcher::SettlementBatcher;
 use compact_str::CompactString;
-use r402_core::cache::SettlementCache;
-use r402_core::chain::ChainProvider;
-use r402_core::error::FacilitatorError;
-use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::scheme::{SchemeBuilder, SchemeId};
-use r402_core::wire;
+use r402_facilitator::{Facilitator, SettlementCache};
+use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainProvider;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
 use serde::Deserialize;
 pub use settle::settle_request;
 pub use verify::{
@@ -21,14 +25,10 @@ pub use verify::{
     verify_request_json, verify_response_json,
 };
 
-#[cfg(test)]
-mod tests;
-
 use crate::chain::TvmChainProvider;
-use crate::exact::settlement_batcher::SettlementBatcher;
 use crate::exact::{ExactScheme, TvmExact, TvmExtra};
 
-/// Optional JSON config for [`TvmExact`] [`SchemeBuilder`].
+/// Optional JSON config for [`TvmExactFacilitator`].
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TvmExactFacilitatorConfig {
@@ -44,13 +44,28 @@ pub struct TvmExactFacilitatorConfig {
 }
 
 /// Facilitator for TON exact scheme payments.
-pub struct TvmExactFacilitator<P> {
-    provider: P,
+pub struct TvmExactFacilitator {
+    provider: TvmChainProvider,
     settlement_cache: SettlementCache,
     batcher: SettlementBatcher,
 }
 
-impl TvmExactFacilitator<TvmChainProvider> {
+impl TvmExactFacilitator {
+    /// Constructs a facilitator from a chain provider.
+    ///
+    /// Uses default batcher intervals and a default [`SettlementCache`].
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: TvmChainProvider) -> Result<Self, FacilitatorError> {
+        Ok(Self::new(provider, TvmExactFacilitatorConfig::default()))
+    }
+
     /// Creates a facilitator with the default in-memory settlement cache.
     #[must_use]
     pub fn new(provider: TvmChainProvider, config: TvmExactFacilitatorConfig) -> Self {
@@ -79,46 +94,19 @@ impl TvmExactFacilitator<TvmChainProvider> {
     }
 }
 
-impl<P> std::fmt::Debug for TvmExactFacilitator<P> {
+impl std::fmt::Debug for TvmExactFacilitator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TvmExactFacilitator")
             .finish_non_exhaustive()
     }
 }
 
-impl SchemeBuilder<TvmChainProvider> for TvmExact {
-    fn build(
-        &self,
-        provider: TvmChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        let parsed = config
-            .map(serde_json::from_value::<TvmExactFacilitatorConfig>)
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Box::new(TvmExactFacilitator::new(provider, parsed)))
-    }
-}
-
-impl SchemeBuilder<&TvmChainProvider> for TvmExact {
-    fn build(
-        &self,
-        provider: &TvmChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        SchemeBuilder::<TvmChainProvider>::build(self, provider.clone(), config)
-    }
-}
-
-impl Facilitator for TvmExactFacilitator<TvmChainProvider> {
+impl Facilitator for TvmExactFacilitator {
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(name = "r402_tvm::exact::verify", skip_all)
     )]
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
         let now = now_unix();
         let provider = self.provider.clone();
@@ -145,10 +133,7 @@ impl Facilitator for TvmExactFacilitator<TvmChainProvider> {
         feature = "telemetry",
         tracing::instrument(name = "r402_tvm::exact::settle", skip_all)
     )]
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let now = now_unix();
         let provider = self.provider.clone();
@@ -175,16 +160,12 @@ impl Facilitator for TvmExactFacilitator<TvmChainProvider> {
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let extra = serde_json::to_value(TvmExtra::sponsored()).ok();
         let kinds = vec![
-            wire::SupportedPaymentKind::new(
-                wire::V2.into(),
-                ExactScheme.to_string(),
-                chain_id.to_string(),
-            )
-            .with_optional_extra(extra),
+            SupportedPaymentKind::new(V2.into(), ExactScheme.to_string(), chain_id.to_string())
+                .with_optional_extra(extra),
         ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(
@@ -195,7 +176,7 @@ impl Facilitator for TvmExactFacilitator<TvmChainProvider> {
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

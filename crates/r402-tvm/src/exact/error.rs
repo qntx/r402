@@ -1,8 +1,8 @@
 //! Error types and wire `invalidReason` codes for the TON `"exact"` scheme.
 
 use compact_str::CompactString;
-use r402_core::error::ErrorReason;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::VerifyResponse;
 
 /// Wire `invalidReason` for an unsupported x402 version.
 pub const ERR_EXACT_TVM_UNSUPPORTED_VERSION: &str = "unsupported_version";

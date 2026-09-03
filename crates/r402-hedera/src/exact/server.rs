@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse, V2};
+use r402_server::{
     PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
     SchemePaymentRequiredContext,
 };
@@ -40,7 +40,7 @@ impl SchemeNetworkServer for HederaExact {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | apply_hedera_fee_payer(req, ctx.supported)
@@ -61,9 +61,9 @@ impl HederaExact {
     pub fn price_tag<A: Into<HederaAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, HederaTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -71,14 +71,11 @@ impl HederaExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
-fn apply_hedera_fee_payer(
-    req: &mut wire::PaymentRequirements,
-    capabilities: &wire::SupportedResponse,
-) -> bool {
+fn apply_hedera_fee_payer(req: &mut PaymentRequirements, capabilities: &SupportedResponse) -> bool {
     if req.scheme.as_str() != ExactScheme::VALUE || req.extra.is_some() {
         return false;
     }
@@ -95,12 +92,12 @@ fn apply_hedera_fee_payer(
 }
 
 fn matching_kind_extra<'a>(
-    capabilities: &'a wire::SupportedResponse,
+    capabilities: &'a SupportedResponse,
     scheme: &str,
     network: &str,
 ) -> Option<&'a serde_json::Value> {
     capabilities.kinds.iter().find_map(|kind| {
-        (wire::V2 == kind.x402_version
+        (V2 == kind.x402_version
             && kind.scheme.as_str() == scheme
             && kind.network.as_str() == network)
             .then_some(kind.extra.as_ref())
@@ -130,12 +127,20 @@ mod tests {
 
     #[test]
     fn payment_flows_use_default_authorization_and_upfront() {
+        use r402_server::PaymentFlowName;
+
         let scheme = HederaExact;
+        assert_eq!(scheme.scheme(), "exact");
         assert_eq!(
-            scheme
-                .payment_flows()
-                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
-            Some(&PaymentFlowConfig::authorization_and_upfront())
+            scheme.default_asset_transfer_method(),
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
         );
+        let row = scheme
+            .payment_flows()
+            .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD)
+            .expect("default ATM");
+        assert_eq!(*row, PaymentFlowConfig::authorization_and_upfront());
+        assert_eq!(row.default, PaymentFlowName::Authorization);
+        assert!(scheme.dynamic_extra_fields().is_empty());
     }
 }

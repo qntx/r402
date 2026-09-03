@@ -1,6 +1,7 @@
 //! JSON-RPC client for NEAR preflight reads and (facilitator) settlement.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 
 use near_jsonrpc_client::errors::JsonRpcError;
 use near_jsonrpc_client::{JsonRpcClient, methods};
@@ -11,7 +12,7 @@ use near_primitives::views::{
 };
 use serde::Deserialize;
 
-use crate::EMPTY_CONTRACT_CODE_HASH;
+use super::EMPTY_CONTRACT_CODE_HASH;
 
 /// Access-key permission variants relevant to delegate-action verification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

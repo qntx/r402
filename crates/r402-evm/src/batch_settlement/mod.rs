@@ -1,25 +1,24 @@
-//! EIP-155 `batch-settlement` scheme (request-path voucher accounting).
+//! EIP-155 `batch-settlement` scheme.
 //!
-//! **Scope (current):** cumulative EOA voucher verify/settle against a
-//! pluggable [`ChannelStore`]. Deposit request-path settle is **rejected**
-//! until on-chain deposit is implemented; claim/sweep remain operator-side.
-//! Treat as experimental for production capital unless the store is durable
-//! and channels are funded off-band.
+//! Facilitator `/settle` hits the batch-settlement contract for deposit,
+//! claim, settle, and refund. Voucher `/verify` is off-chain + [`ChannelStore`];
+//! voucher `/settle` is Failure `invalid_batch_settlement_evm_payload_type`.
 //!
 //! Spec: `specs/schemes/batch-settlement/scheme_batch_settlement_evm.md`.
 
-use r402_core::scheme::{BatchSettlementScheme, SchemeId, Sealed};
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub mod channel;
 #[cfg(feature = "client")]
 pub mod client;
+pub mod errors;
 #[cfg(feature = "facilitator")]
 pub mod facilitator;
+pub mod payload;
 #[cfg(feature = "server")]
 pub mod server;
 pub mod store;
-pub mod types;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub mod verify;
 #[cfg(any(feature = "client", feature = "facilitator"))]
@@ -31,20 +30,15 @@ pub use channel::compute_channel_id;
 pub use client::{Eip155BatchSettlementClient, sign_voucher_payload};
 #[cfg(feature = "facilitator")]
 pub use facilitator::Eip155BatchSettlementFacilitator;
+pub use payload::*;
 pub use store::{ChannelStore, MemoryChannelStore};
-pub use types::{
-    BATCH_SETTLEMENT_ADDRESS, BATCH_SETTLEMENT_DOMAIN_NAME, BATCH_SETTLEMENT_DOMAIN_VERSION,
-    BatchSettlementExtra, BatchSettlementPayload, ChannelConfig, ChannelState,
-    ERC3009_DEPOSIT_COLLECTOR_ADDRESS, MAX_WITHDRAW_DELAY, MIN_WITHDRAW_DELAY,
-    PERMIT2_DEPOSIT_COLLECTOR_ADDRESS, VoucherFields,
-};
 #[cfg(feature = "client")]
 pub use voucher::sign_voucher;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub use voucher::verify_voucher_signature;
 
-/// EIP-155 batch-settlement scheme marker / blueprint.
-#[derive(Debug, Clone, Copy, Default)]
+/// EIP-155 batch-settlement scheme marker.
+#[derive(Debug, Clone, Copy)]
 pub struct Eip155BatchSettlement;
 
 impl SchemeId for Eip155BatchSettlement {
@@ -56,8 +50,6 @@ impl SchemeId for Eip155BatchSettlement {
         BatchSettlementScheme.as_ref()
     }
 }
-
-impl Sealed for Eip155BatchSettlement {}
 
 #[cfg(test)]
 mod tests {
@@ -71,30 +63,20 @@ mod tests {
 }
 
 #[cfg(test)]
+#[cfg(all(feature = "client", feature = "facilitator"))]
 mod e2e_tests {
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use alloy_primitives::{Address, B256, U256};
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use alloy_signer_local::PrivateKeySigner;
-    #[cfg(all(feature = "client", feature = "facilitator"))]
-    use r402_core::scheme::BatchSettlementScheme;
-    #[cfg(all(feature = "client", feature = "facilitator"))]
-    use r402_core::wire::PaymentPayload;
+    use r402_protocol::payment::PaymentPayload;
+    use r402_protocol::scheme::BatchSettlementScheme;
 
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use super::channel::compute_channel_id;
-    #[cfg(all(feature = "client", feature = "facilitator"))]
+    use super::payload::{BatchSettlementExtra, BatchSettlementPayload, ChannelConfig, v2};
     use super::store::{ChannelStore, MemoryChannelStore};
-    #[cfg(all(feature = "client", feature = "facilitator"))]
-    use super::types::{BatchSettlementExtra, BatchSettlementPayload, ChannelConfig, v2};
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use super::verify::verify_offchain;
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use super::voucher::sign_voucher;
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
-    #[cfg(all(feature = "client", feature = "facilitator"))]
     #[tokio::test]
     async fn voucher_sign_verify_and_charge() {
         let signer = PrivateKeySigner::random();
@@ -108,11 +90,11 @@ mod e2e_tests {
             withdraw_delay: 900,
             salt: B256::ZERO,
         };
-        let channel_id = compute_channel_id(&cfg, 8453);
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
         let charge = U256::from(50_u64);
         let voucher = sign_voucher(&signer, channel_id, charge, 8453)
             .await
-            .unwrap();
+            .expect("sign");
         let body = BatchSettlementPayload::Voucher {
             channel_config: cfg,
             voucher,
@@ -126,7 +108,7 @@ mod e2e_tests {
         };
         let requirements = v2::PaymentRequirements::new(
             BatchSettlementScheme,
-            "eip155:8453".parse().unwrap(),
+            "eip155:8453".parse().expect("chain"),
             TokenAmount::from(charge),
             ChecksummedAddress(cfg.receiver),
             ChecksummedAddress(cfg.token),
@@ -135,13 +117,118 @@ mod e2e_tests {
         .with_extra(extra);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), body);
         let store = MemoryChannelStore::new();
-        let charged = verify_offchain(&payment, &requirements, 8453, &store).unwrap();
+        let charged = verify_offchain(&payment, &requirements, 8453, &store).expect("verify");
         assert_eq!(charged.0, charge);
-        assert!(store.try_charge(
-            channel_id,
-            charged,
-            payment.payload.voucher().max_claimable_amount
-        ));
+        assert!(
+            store.try_charge(
+                channel_id,
+                charged,
+                payment
+                    .payload
+                    .voucher()
+                    .expect("voucher payload")
+                    .max_claimable_amount
+            )
+        );
         assert_eq!(store.get(&channel_id).charged_cumulative.0, charge);
+    }
+
+    #[tokio::test]
+    async fn extra_900_with_config_uint40_overflow_is_invalid_format() {
+        let cfg = ChannelConfig {
+            payer: Address::repeat_byte(0x11),
+            payer_authorizer: Address::repeat_byte(0x11),
+            receiver: Address::repeat_byte(0x22),
+            receiver_authorizer: Address::repeat_byte(0x33),
+            token: Address::repeat_byte(0x44),
+            withdraw_delay: 1 << 40,
+            salt: B256::ZERO,
+        };
+        let extra = BatchSettlementExtra {
+            receiver_authorizer: ChecksummedAddress(cfg.receiver_authorizer),
+            withdraw_delay: 900,
+            name: "USDC".into(),
+            version: "2".into(),
+            asset_transfer_method: None,
+        };
+        let requirements = v2::PaymentRequirements::new(
+            BatchSettlementScheme,
+            "eip155:8453".parse().expect("chain"),
+            TokenAmount::from(U256::from(50_u64)),
+            ChecksummedAddress(cfg.receiver),
+            ChecksummedAddress(cfg.token),
+            3600,
+        )
+        .with_extra(extra);
+        let body = BatchSettlementPayload::Voucher {
+            channel_config: cfg,
+            voucher: super::payload::VoucherFields {
+                channel_id: B256::ZERO,
+                max_claimable_amount: TokenAmount::from(U256::from(50_u64)),
+                signature: alloy_primitives::Bytes::from(vec![0u8; 65]),
+            },
+        };
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), body);
+        let store = MemoryChannelStore::new();
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453, &store),
+                Err(r402_protocol::error::VerificationError::InvalidFormat(_))
+            ),
+            "overflow withdrawDelay must be InvalidFormat, not panic"
+        );
+    }
+
+    #[tokio::test]
+    async fn refund_on_empty_store_is_invalid_format() {
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let cfg = ChannelConfig {
+            payer,
+            payer_authorizer: payer,
+            receiver: Address::repeat_byte(0x22),
+            receiver_authorizer: Address::repeat_byte(0x33),
+            token: Address::repeat_byte(0x44),
+            withdraw_delay: 900,
+            salt: B256::ZERO,
+        };
+        let channel_id = compute_channel_id(&cfg, 8453).expect("id");
+        let voucher = sign_voucher(&signer, channel_id, U256::ZERO, 8453)
+            .await
+            .expect("sign");
+        let body = BatchSettlementPayload::Refund {
+            channel_config: cfg,
+            voucher,
+            amount: None,
+            refund_nonce: None,
+            claims: None,
+            refund_authorizer_signature: None,
+            claim_authorizer_signature: None,
+        };
+        let extra = BatchSettlementExtra {
+            receiver_authorizer: ChecksummedAddress(cfg.receiver_authorizer),
+            withdraw_delay: 900,
+            name: "USDC".into(),
+            version: "2".into(),
+            asset_transfer_method: None,
+        };
+        let requirements = v2::PaymentRequirements::new(
+            BatchSettlementScheme,
+            "eip155:8453".parse().expect("chain"),
+            TokenAmount::from(U256::ZERO),
+            ChecksummedAddress(cfg.receiver),
+            ChecksummedAddress(cfg.token),
+            3600,
+        )
+        .with_extra(extra);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), body);
+        let store = MemoryChannelStore::new();
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453, &store),
+                Err(r402_protocol::error::VerificationError::InvalidFormat(_))
+            ),
+            "refund must not verify as paid"
+        );
     }
 }

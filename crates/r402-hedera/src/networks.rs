@@ -1,10 +1,14 @@
 //! Well-known Hedera network definitions and token deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
 use crate::chain::{
     HBAR_ASSET_ID, HBAR_DECIMALS, HEDERA_MAINNET_USDC, HEDERA_TESTNET_USDC, HederaAddress,
@@ -81,6 +85,7 @@ pub fn usdc_hedera_deployment(
 }
 
 /// Reverse lookup by HTS token id and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_hedera_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "hedera" {
@@ -183,7 +188,6 @@ impl HBAR {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
     use super::*;
     use crate::chain::{HBAR_ASSET_ID, HEDERA_MAINNET_USDC, HEDERA_TESTNET_USDC};
@@ -198,6 +202,11 @@ mod tests {
         assert_eq!(HBAR::hedera().address.as_str(), HBAR_ASSET_ID);
         assert_eq!(HBAR::hedera().decimals, HBAR_DECIMALS);
         assert_eq!(HEDERA_NETWORKS.len(), 2);
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn default_usdc_asset_lookup() {
         let network: ChainId = "hedera:mainnet".parse().unwrap();
         let info = find_default_hedera_asset(HEDERA_MAINNET_USDC, &network).unwrap();
         assert_eq!(info.symbol, "USDC");

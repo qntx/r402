@@ -1,0 +1,254 @@
+//! `bazaar` discovery metadata advertised on `PaymentRequired`.
+//!
+//! Resource servers declare how a paid HTTP endpoint or MCP tool is called.
+//! Facilitator catalog queries (`GET /discovery/resources`, `GET /discovery/search`)
+//! live behind `ext-bazaar-discovery`.
+
+#[cfg(feature = "ext-bazaar-discovery")]
+#[cfg_attr(docsrs, doc(cfg(feature = "ext-bazaar-discovery")))]
+pub mod discovery;
+
+use compact_str::CompactString;
+use r402_protocol::extension::{AdvertiseContext, Extension};
+use r402_protocol::payment::ExtensionEntry;
+use serde_json::{Value, json};
+
+/// Stable extension key on the wire.
+pub const BAZAAR_KEY: &str = "bazaar";
+
+/// HTTP methods that advertise as query-parameter discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BazaarQueryMethod {
+    /// `GET`.
+    Get,
+    /// `HEAD`.
+    Head,
+    /// `DELETE`.
+    Delete,
+}
+
+impl BazaarQueryMethod {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Delete => "DELETE",
+        }
+    }
+}
+
+/// HTTP methods that advertise as body discovery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BazaarBodyMethod {
+    /// `POST`.
+    Post,
+    /// `PUT`.
+    Put,
+    /// `PATCH`.
+    Patch,
+}
+
+impl BazaarBodyMethod {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Patch => "PATCH",
+        }
+    }
+}
+
+/// Request body encoding for HTTP `POST`/`PUT`/`PATCH` discovery info.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BazaarBodyType {
+    /// `application/json` body.
+    Json,
+    /// Multipart form body.
+    FormData,
+    /// Plain-text body.
+    Text,
+}
+
+impl BazaarBodyType {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::FormData => "form-data",
+            Self::Text => "text",
+        }
+    }
+}
+
+/// Server-side `bazaar` declaration attached to `PaymentRequired.extensions`.
+#[derive(Debug, Clone)]
+pub struct BazaarExtension {
+    info: Value,
+    schema: Value,
+}
+
+impl BazaarExtension {
+    /// HTTP query-parameter discovery (`GET`/`HEAD`/`DELETE`).
+    #[must_use]
+    pub fn http_query(method: BazaarQueryMethod, query_params: Value) -> Self {
+        Self {
+            info: wrap_input(http_input([
+                ("type", Value::from("http")),
+                ("method", Value::from(method.as_str())),
+                ("queryParams", query_params),
+            ])),
+            schema: query_schema(method),
+        }
+    }
+
+    /// HTTP body discovery (`POST`/`PUT`/`PATCH`).
+    #[must_use]
+    pub fn http_body(method: BazaarBodyMethod, body_type: BazaarBodyType, body: Value) -> Self {
+        Self {
+            info: wrap_input(http_input([
+                ("type", Value::from("http")),
+                ("method", Value::from(method.as_str())),
+                ("bodyType", Value::from(body_type.as_str())),
+                ("body", body),
+            ])),
+            schema: body_schema(method),
+        }
+    }
+
+    /// MCP tool discovery.
+    #[must_use]
+    pub fn mcp(tool_name: impl Into<CompactString>, input_schema: Value) -> Self {
+        let tool_name = tool_name.into();
+        Self {
+            info: wrap_input(http_input([
+                ("type", Value::from("mcp")),
+                ("toolName", Value::from(tool_name.as_str())),
+                ("inputSchema", input_schema),
+            ])),
+            schema: mcp_schema(),
+        }
+    }
+
+    /// Attaches an example JSON response under `info.output`.
+    #[must_use]
+    pub fn with_output(mut self, example: Value) -> Self {
+        if let Some(obj) = self.info.as_object_mut() {
+            let _ = obj.insert(
+                "output".into(),
+                http_input([("type", Value::from("json")), ("example", example)]),
+            );
+        }
+        self
+    }
+}
+
+fn http_input<const N: usize>(fields: [(&str, Value); N]) -> Value {
+    Value::Object(fields.into_iter().map(|(k, v)| (k.to_owned(), v)).collect())
+}
+
+fn wrap_input(input: Value) -> Value {
+    Value::Object(serde_json::Map::from_iter([("input".into(), input)]))
+}
+
+impl Extension for BazaarExtension {
+    fn id(&self) -> &'static str {
+        BAZAAR_KEY
+    }
+
+    fn advertise(&self, _ctx: &AdvertiseContext<'_>) -> Option<ExtensionEntry> {
+        Some(ExtensionEntry::with_schema(
+            self.info.clone(),
+            self.schema.clone(),
+        ))
+    }
+}
+
+fn query_schema(method: BazaarQueryMethod) -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "const": "http" },
+                    "method": { "type": "string", "enum": [method.as_str()] },
+                    "queryParams": { "type": "object" },
+                    "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+                },
+                "required": ["type", "method"],
+                "additionalProperties": false
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string" },
+                    "example": { "type": "object" }
+                },
+                "required": ["type"]
+            }
+        },
+        "required": ["input"]
+    })
+}
+
+fn body_schema(method: BazaarBodyMethod) -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "const": "http" },
+                    "method": { "type": "string", "enum": [method.as_str()] },
+                    "bodyType": { "type": "string", "enum": ["json", "form-data", "text"] },
+                    "body": { "type": "object" },
+                    "queryParams": { "type": "object", "additionalProperties": { "type": "string" } },
+                    "headers": { "type": "object", "additionalProperties": { "type": "string" } }
+                },
+                "required": ["type", "method", "bodyType", "body"],
+                "additionalProperties": false
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string" },
+                    "example": { "type": "object" }
+                },
+                "required": ["type"]
+            }
+        },
+        "required": ["input"]
+    })
+}
+
+fn mcp_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string", "const": "mcp" },
+                    "toolName": { "type": "string" },
+                    "description": { "type": "string" },
+                    "transport": { "type": "string", "enum": ["streamable-http", "sse"] },
+                    "inputSchema": { "type": "object" },
+                    "example": { "type": "object" }
+                },
+                "required": ["type", "toolName", "inputSchema"],
+                "additionalProperties": false
+            },
+            "output": {
+                "type": "object",
+                "properties": {
+                    "type": { "type": "string" },
+                    "example": { "type": "object" }
+                },
+                "required": ["type"]
+            }
+        },
+        "required": ["input"]
+    })
+}

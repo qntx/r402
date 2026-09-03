@@ -1,0 +1,37 @@
+[package]
+name = "r402-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Wire types, CAIP-2, scheme markers, and money for the x402 payment protocol."
+readme = "README.md"
+keywords = ["x402", "payment", "protocol", "http-402", "caip"]
+categories = [
+    "api-bindings",
+    "encoding",
+    "data-structures",
+    "web-programming",
+    "cryptography::cryptocurrencies",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[dependencies]
+base64 = { workspace = true }
+compact_str = { workspace = true }
+rust_decimal = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_with = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

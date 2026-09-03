@@ -1,5 +1,7 @@
 //! Client-side payment signing for the Keeta `"exact"` scheme.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -9,18 +11,13 @@ use keetanetwork_account::{
 use keetanetwork_block::{AccountRef, Amount};
 use keetanetwork_client::UserClient;
 use keetanetwork_crypto::prelude::IntoSecret;
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ChainId, ClientError, PaymentRequired, ResourceInfo};
 
 use crate::chain::KeetaChainReference;
-use crate::chain::types::account_has_private_key;
-use crate::exact::types;
-use crate::exact::{ExactKeetaPayload, KeetaExact};
+use crate::chain::account::account_has_private_key;
+use crate::exact::{ExactKeetaPayload, KeetaExact, payload};
 
 /// Local Keeta signer wrapping a keyed account.
 #[derive(Clone)]
@@ -174,8 +171,6 @@ impl<S> SchemeId for KeetaExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::Sealed for KeetaExactClient<S> {}
-
 impl<S> SchemeClient for KeetaExactClient<S>
 where
     S: AsRef<KeetaSigner> + Send + Sync + Clone + 'static,
@@ -185,7 +180,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "keeta" {
                     return None;
@@ -223,7 +218,7 @@ impl AsRef<Self> for KeetaSigner {
 struct V2PayloadSigner<S> {
     signer: S,
     chain: KeetaChainReference,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -231,7 +226,9 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: AsRef<KeetaSigner> + Send + Sync,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let external = self
                 .requirements
@@ -247,7 +244,7 @@ where
                 external,
             )
             .await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactKeetaPayload { block: b64 },
             )
@@ -260,11 +257,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    reason = "test assertions"
-)]
 mod tests {
     use super::*;
 

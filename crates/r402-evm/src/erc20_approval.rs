@@ -1,57 +1,61 @@
-//! `erc20ApprovalGasSponsoring` extension wire types.
+//! ERC-20 approval gas-sponsoring extension wire types (exact + upto).
 //!
-//! Official key and client `info` shape from
-//! `specs/extensions/erc20_gas_sponsoring.md`. Facilitators that sponsor gas
-//! for non-EIP-2612 tokens broadcast `signedTransaction` then settle.
+//! Official key: `erc20ApprovalGasSponsoring`. Clients attach a signed
+//! `approve(Permit2, max)` transaction; facilitators broadcast it before
+//! Permit2 `settle` when the extension is registered.
 
-use alloy_primitives::{Address, Bytes};
-use r402_core::wire::{ExtensionEntry, Extensions};
+use alloy_primitives::Address;
+use r402_protocol::payment::{ExtensionEntry, Extensions};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-
-use crate::chain::TokenAmount;
 
 /// Stable extension identifier on the wire.
 pub const ERC20_APPROVAL_GAS_SPONSORING_KEY: &str = "erc20ApprovalGasSponsoring";
 
-/// Schema version for client-populated `info.version`.
+/// Schema version written into client-populated `info.version`.
 pub const ERC20_APPROVAL_GAS_SPONSORING_VERSION: &str = "1";
 
-/// Client-signed ERC-20 `approve` transaction for gas-sponsored Permit2 setup.
+/// Official gas limit for the sponsored `approve` transaction.
+pub const ERC20_APPROVE_GAS_LIMIT: u64 = 70_000;
+
+/// Fallback `maxFeePerGas` (1 gwei) when fee estimation is unavailable.
+pub const DEFAULT_MAX_FEE_PER_GAS: u128 = 1_000_000_000;
+
+/// Fallback `maxPriorityFeePerGas` (0.1 gwei) when fee estimation is unavailable.
+pub const DEFAULT_MAX_PRIORITY_FEE_PER_GAS: u128 = 100_000_000;
+
+/// Buyer-signed ERC-20 `approve` transaction for gasless Permit2 allowance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Erc20ApprovalGasSponsoringInfo {
-    /// Token owner / transaction sender.
+    /// Token owner (== payment payer).
     pub from: Address,
-    /// ERC-20 token to approve.
+    /// ERC-20 token contract.
     pub asset: Address,
-    /// Spender (canonical Permit2).
+    /// Spender — MUST be the canonical Permit2 address.
     pub spender: Address,
-    /// Approval amount (typically `MaxUint256`).
-    pub amount: TokenAmount,
-    /// RLP-encoded signed `approve` transaction (`0x…`).
-    pub signed_transaction: Bytes,
+    /// Approved allowance (uint256 decimal string). Official always uses `maxUint256`.
+    pub amount: String,
+    /// RLP-encoded signed EIP-1559 `approve` transaction (`0x`-prefixed hex).
+    pub signed_transaction: String,
     /// Schema version (`"1"`).
     pub version: String,
 }
 
-/// Errors extracting the extension from a payload.
+/// Errors raised while extracting [`Erc20ApprovalGasSponsoringInfo`] from extensions.
 #[derive(Debug, Error)]
 pub enum Erc20ApprovalParseError {
-    /// Malformed extension JSON.
+    /// Extension JSON did not match the expected shape.
     #[error("invalid erc20ApprovalGasSponsoring extension payload: {0}")]
     Invalid(#[from] serde_json::Error),
-    /// Signed transaction payload empty.
-    #[error("erc20ApprovalGasSponsoring.signedTransaction is empty")]
-    EmptyTransaction,
 }
 
 impl Erc20ApprovalGasSponsoringInfo {
-    /// Decodes the extension from payload extensions.
+    /// Decodes the extension from a payload extensions map.
     ///
     /// # Errors
     ///
-    /// Malformed JSON or empty transaction bytes.
+    /// Malformed JSON.
     pub fn from_extensions(
         extensions: &Extensions,
     ) -> Result<Option<Self>, Erc20ApprovalParseError> {
@@ -62,17 +66,14 @@ impl Erc20ApprovalGasSponsoringInfo {
             ExtensionEntry::Structured { info, .. } => serde_json::from_value(info.clone())?,
             ExtensionEntry::Raw(value) => serde_json::from_value(value.clone())?,
         };
-        if parsed.signed_transaction.is_empty() {
-            return Err(Erc20ApprovalParseError::EmptyTransaction);
-        }
         Ok(Some(parsed))
     }
 
-    /// Builds a structured extension entry.
+    /// Builds a structured extension entry for payload insertion.
     ///
     /// # Errors
     ///
-    /// Serde failures.
+    /// Serde failures (should not occur for this type).
     pub fn to_extension_entry(&self) -> Result<ExtensionEntry, serde_json::Error> {
         Ok(ExtensionEntry::info(serde_json::to_value(self)?))
     }
@@ -80,40 +81,52 @@ impl Erc20ApprovalGasSponsoringInfo {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::{Address, Bytes, U256};
-    use r402_core::wire::Extensions;
+    use alloy_primitives::Address;
+    use r402_protocol::payment::Extensions;
 
     use super::*;
 
     fn sample() -> Erc20ApprovalGasSponsoringInfo {
         Erc20ApprovalGasSponsoringInfo {
-            from: Address::repeat_byte(0x11),
-            asset: Address::repeat_byte(0x22),
-            spender: Address::repeat_byte(0x33),
-            amount: TokenAmount::from(U256::MAX),
-            signed_transaction: Bytes::from(vec![0x02, 0xf8, 0x01]),
+            from: Address::repeat_byte(0xAA),
+            asset: Address::repeat_byte(0xBB),
+            spender: Address::repeat_byte(0xCC),
+            amount:
+                "115792089237316195423570985008687907853269984665640564039457584007913129639935"
+                    .into(),
+            signed_transaction: "0xdeadbeef".into(),
             version: ERC20_APPROVAL_GAS_SPONSORING_VERSION.into(),
         }
     }
 
     #[test]
-    fn wire_field_names() {
+    fn wire_uses_signed_transaction_camel_case() {
         let v = serde_json::to_value(sample()).unwrap();
         assert!(v.get("signedTransaction").is_some());
+        assert!(v.get("signed_transaction").is_none());
         assert_eq!(v.get("version"), Some(&serde_json::json!("1")));
     }
 
     #[test]
-    fn round_trip() {
+    fn extension_round_trips_structured() {
         let info = sample();
-        let mut ext = Extensions::new();
-        ext.insert(
+        let mut extensions = Extensions::new();
+        extensions.insert(
             ERC20_APPROVAL_GAS_SPONSORING_KEY,
             info.to_extension_entry().unwrap(),
         );
-        let out = Erc20ApprovalGasSponsoringInfo::from_extensions(&ext)
+        let extracted = Erc20ApprovalGasSponsoringInfo::from_extensions(&extensions)
             .unwrap()
             .unwrap();
-        assert_eq!(out, info);
+        assert_eq!(extracted, info);
+    }
+
+    #[test]
+    fn missing_extension_ok_none() {
+        assert!(
+            Erc20ApprovalGasSponsoringInfo::from_extensions(&Extensions::new())
+                .unwrap()
+                .is_none()
+        );
     }
 }

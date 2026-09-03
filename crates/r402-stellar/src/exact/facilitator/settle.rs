@@ -3,9 +3,9 @@
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_facilitator::{Duplicate, SettlementCache};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 use stellar_rpc_client::GetTransactionResponse;
 
@@ -17,6 +17,10 @@ use crate::chain::rpc::StellarRpc;
 /// Settles a verified Stellar payment.
 ///
 /// `submit` rebuilds the envelope with the facilitator as source and submits it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "sequential settle checklist must stay in one function"
+)]
 pub async fn settle_request<R, F, Fut>(
     rpc: &R,
     facilitator_addresses: &[String],
@@ -56,9 +60,11 @@ where
         Err(invalid) => {
             let response = invalid.into_response();
             return match response {
-                VerifyResponse::Invalid { reason, payer, .. } => {
-                    settle_failure(reason, &network, payer)
-                }
+                VerifyResponse::Invalid { reason, payer, .. } => settle_failure(
+                    reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                    &network,
+                    payer,
+                ),
                 _ => settle_failure(
                     ErrorReason::from_wire("unexpected_verify_error"),
                     &network,
@@ -90,7 +96,7 @@ where
             if confirm.status == "SUCCESS" {
                 let hash = confirm.tx_hash.unwrap_or_default();
                 SettleResponse::Success {
-                    payer,
+                    payer: Some(payer),
                     transaction: hash.into(),
                     network: network.into(),
                     amount: request
@@ -99,6 +105,7 @@ where
                         .and_then(Value::as_str)
                         .map(CompactString::from),
                     extensions: Extensions::new(),
+                    extension_responses: Extensions::new(),
                     extra: None,
                 }
             } else {
@@ -109,6 +116,7 @@ where
                     transaction: confirm.tx_hash.unwrap_or_default().into(),
                     network: network.into(),
                     extensions: Extensions::new(),
+                    extension_responses: Extensions::new(),
                     extra: None,
                 }
             }
@@ -136,6 +144,7 @@ where
                     .unwrap_or_default(),
                 network: network.into(),
                 extensions: Extensions::new(),
+                extension_responses: Extensions::new(),
                 extra: None,
             }
         }
@@ -146,6 +155,7 @@ where
             transaction: CompactString::default(),
             network: network.into(),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
     }
@@ -163,6 +173,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

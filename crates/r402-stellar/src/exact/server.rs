@@ -4,15 +4,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse, V2};
+use r402_protocol::scheme::ExactScheme;
+use r402_server::{
     PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
     SchemePaymentRequiredContext,
 };
 
 use crate::chain::{StellarAddress, StellarTokenDeployment};
-use crate::exact::{ExactScheme, StellarExact, StellarExtra};
+use crate::exact::{StellarExact, StellarExtra};
 
 fn stellar_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
     static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
@@ -40,7 +41,7 @@ impl SchemeNetworkServer for StellarExact {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | apply_stellar_are_fees_sponsored(req, ctx.supported)
@@ -61,9 +62,9 @@ impl StellarExact {
     pub fn price_tag<A: Into<StellarAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<i128, StellarTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -71,13 +72,13 @@ impl StellarExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
 fn apply_stellar_are_fees_sponsored(
-    req: &mut wire::PaymentRequirements,
-    capabilities: &wire::SupportedResponse,
+    req: &mut PaymentRequirements,
+    capabilities: &SupportedResponse,
 ) -> bool {
     if req.scheme.as_str() != ExactScheme::VALUE || req.extra.is_some() {
         return false;
@@ -93,12 +94,12 @@ fn apply_stellar_are_fees_sponsored(
 }
 
 fn matching_kind_extra<'a>(
-    capabilities: &'a wire::SupportedResponse,
+    capabilities: &'a SupportedResponse,
     scheme: &str,
     network: &str,
 ) -> Option<&'a serde_json::Value> {
     capabilities.kinds.iter().find_map(|kind| {
-        (wire::V2 == kind.x402_version
+        (V2 == kind.x402_version
             && kind.scheme.as_str() == scheme
             && kind.network.as_str() == network)
             .then_some(kind.extra.as_ref())
@@ -107,14 +108,12 @@ fn matching_kind_extra<'a>(
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    reason = "test assertions"
-)]
 mod tests {
+    use r402_server::PaymentFlowName;
+
     use super::*;
     use crate::USDC;
+    use crate::chain::StellarAddress;
 
     #[test]
     fn price_tag_omits_extra_until_scheme_enrich() {
@@ -137,9 +136,13 @@ mod tests {
             .parse()
             .unwrap();
         let mut tag = StellarExact::price_tag(pay_to, USDC::stellar_testnet().amount(10_000_000));
-        let supported = wire::SupportedResponse::new().with_kinds(vec![
-            wire::SupportedPaymentKind::new(wire::V2.into(), "exact", "stellar:testnet")
-                .with_extra(serde_json::json!({ "areFeesSponsored": true })),
+        let supported = SupportedResponse::new().with_kinds(vec![
+            r402_protocol::payment::SupportedPaymentKind::new(
+                V2.into(),
+                "exact",
+                "stellar:testnet",
+            )
+            .with_extra(serde_json::json!({ "areFeesSponsored": true })),
         ]);
         assert!(apply_stellar_are_fees_sponsored(
             &mut tag.requirements,
@@ -152,11 +155,17 @@ mod tests {
     #[test]
     fn payment_flows_use_default_authorization_and_upfront() {
         let scheme = StellarExact;
+        assert_eq!(scheme.scheme(), "exact");
         assert_eq!(
-            scheme
-                .payment_flows()
-                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
-            Some(&PaymentFlowConfig::authorization_and_upfront())
+            scheme.default_asset_transfer_method(),
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
         );
+        let row = scheme
+            .payment_flows()
+            .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD)
+            .expect("default ATM");
+        assert_eq!(*row, PaymentFlowConfig::authorization_and_upfront());
+        assert_eq!(row.default, PaymentFlowName::Authorization);
+        assert!(scheme.dynamic_extra_fields().is_empty());
     }
 }

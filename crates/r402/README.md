@@ -1,96 +1,136 @@
 # r402
 
-x402 Payment Protocol SDK for Rust — **umbrella crate**.
-
-This crate re-exports the workspace under feature flags. Prefer depending on
-individual crates when you need a minimal dependency graph.
-
-## Included crates
-
-| Feature | Crate | Role |
-| --- | --- | --- |
-| *(always)* | [`r402-core`](https://docs.rs/r402-core) | Wire types, `Facilitator`, schemes, hooks, extensions |
-| `evm` (default) | [`r402-evm`](https://docs.rs/r402-evm) | EVM exact + upto (ERC-3009 / Permit2) |
-| `solana` | [`r402-solana`](https://docs.rs/r402-solana) | Solana exact (SPL Token / Token-2022) |
-| `tron` | [`r402-tron`](https://docs.rs/r402-tron) | Tron exact (TIP-712 / EIP-3009 + Permit2) |
-| `casper` | [`r402-casper`](https://docs.rs/r402-casper) | Casper exact (CEP-18, remote facilitator) |
-| `near` | [`r402-near`](https://docs.rs/r402-near) | NEAR exact (NEP-141 / NEP-366) |
-| `xrpl` | [`r402-xrpl`](https://docs.rs/r402-xrpl) | XRPL exact (XRP / RLUSD) |
-| `hedera` | [`r402-hedera`](https://docs.rs/r402-hedera) | Hedera exact (HBAR / HTS) |
-| `algorand` | [`r402-algorand`](https://docs.rs/r402-algorand) | Algorand exact (ASA / algod REST) |
-| `aptos` | [`r402-aptos`](https://docs.rs/r402-aptos) | Aptos exact (FA / aptos-sdk 0.6) |
-| `keeta` | [`r402-keeta`](https://docs.rs/r402-keeta) | Keeta exact (signed `SEND` block) |
-| `tvm` | [`r402-tvm`](https://docs.rs/r402-tvm) | TON exact (TEP-74 / W5R1) |
-| `stellar` | [`r402-stellar`](https://docs.rs/r402-stellar) | Stellar exact (SEP-41 auth entries) |
-| `http` (default) | [`r402-http`](https://docs.rs/r402-http) | Axum middleware + reqwest client |
-| `mcp` | [`r402-mcp`](https://docs.rs/r402-mcp) | MCP transport on official `rmcp` (V2) |
-
-Forwarding features: `client`, `server`, `facilitator`, `telemetry`, `cache`,
-`ext-bazaar`, `ext-payment-id`, `ext-eip2612`, `ext-erc20-approval`,
-`all-extensions`, `full`.
-
-## Quick Start
+x402 Payment Protocol SDK for Rust. Protocol version **2** only.
 
 ```toml
 [dependencies]
-# Minimal EVM HTTP server/client
-r402 = { version = "0.17", features = ["evm", "http", "client", "server", "facilitator"] }
-
-# Multi-chain
-r402 = { version = "0.17", features = [
-  "evm", "solana", "tron", "casper", "near", "xrpl",
-  "hedera", "algorand", "aptos", "keeta", "tvm", "stellar",
-  "http", "client", "server", "facilitator",
-] }
+r402 = { version = "0.18", features = ["evm", "http"] }
 ```
 
-```rust,ignore
-// After enabling the matching features:
-use r402::evm;    // r402-evm
-use r402::solana; // r402-solana
-use r402::tron;   // r402-tron
-use r402::casper; // r402-casper
-use r402::near;   // r402-near
-use r402::xrpl;   // r402-xrpl
-use r402::hedera; // r402-hedera
-use r402::algorand; // r402-algorand
-use r402::aptos;    // r402-aptos
-use r402::keeta;  // r402-keeta
-use r402::tvm;    // r402-tvm
-use r402::stellar; // r402-stellar
-use r402::http;   // r402-http
-use r402::mcp;    // r402-mcp (needs feature "mcp")
+`default = ["evm", "http"]`. Concordium is opt-in (`concordium`).
+
+## Protect a Route (Server)
+
+```rust
+use alloy_primitives::address;
+use axum::{Router, routing::get};
+use r402::evm::{Eip155Exact, USDC};
+use r402::http::server::X402Middleware;
+
+let x402 = X402Middleware::try_new("https://facilitator.example.com")?
+    .with_base_url("https://api.example.com".parse()?)
+    .with_scheme("eip155:*".parse()?, Eip155Exact);
+
+let app = Router::new().route(
+    "/paid-content",
+    get(handler).layer(
+        x402.with_price_tag(Eip155Exact::price_tag(
+            address!("0xYourPayToAddress"),
+            USDC::base().amount(1_000_000u64),
+            None,
+        ))?,
+    ),
+);
 ```
 
-## Features
+## Send Payments (Client)
 
-| Flag | Default | What it enables |
-| --- | :---: | --- |
-| `evm` | yes | Re-export `r402-evm` as [`evm`] |
-| `solana` | | Re-export `r402-solana` as [`solana`] |
-| `tron` | | Re-export `r402-tron` as [`tron`] |
-| `casper` | | Re-export `r402-casper` as [`casper`] |
-| `near` | | Re-export `r402-near` as [`near`] |
-| `xrpl` | | Re-export `r402-xrpl` as [`xrpl`] |
-| `hedera` | | Re-export `r402-hedera` as [`hedera`] |
-| `algorand` | | Re-export `r402-algorand` as [`algorand`] |
-| `aptos` | | Re-export `r402-aptos` as [`aptos`] |
-| `keeta` | | Re-export `r402-keeta` as [`keeta`] |
-| `tvm` | | Re-export `r402-tvm` as [`tvm`] |
-| `stellar` | | Re-export `r402-stellar` as [`stellar`] |
-| `http` | yes | Re-export `r402-http` as [`http`] |
-| `mcp` | | Re-export `r402-mcp` as [`mcp`] |
-| `client` | | Forward `client` to enabled chain + http crates |
-| `server` | | Forward `server` to enabled chain + http crates |
-| `facilitator` | | Forward `facilitator` (Casper also enables `http-client`) |
-| `telemetry` | | Forward `telemetry` / `tracing` |
-| `cache` | | `r402-core` settlement cache |
-| `ext-bazaar` | | Bazaar extension |
-| `ext-payment-id` | | Payment-identifier extension |
-| `ext-eip2612` | | EIP-2612 gas-sponsoring extra |
-| `ext-erc20-approval` | | ERC-20 approval gas-sponsoring extra |
-| `all-extensions` | | All built-in extensions |
-| `full` | | Every feature above |
+```rust
+use alloy_signer_local::PrivateKeySigner;
+use r402::evm::Eip155ExactClient;
+use r402::http::{WithPayments, X402Client};
+use std::sync::Arc;
+
+let signer = Arc::new("0x...".parse::<PrivateKeySigner>()?);
+let client = reqwest::Client::new().with_payments(
+    X402Client::new().register(Eip155ExactClient::new(signer)),
+);
+let res = client.get("https://api.example.com/paid").send().await?;
+```
+
+## Settlement Modes
+
+Configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402Layer.html#method.with_settlement_mode) after `with_price_tag`.
+
+### Sequential (default)
+
+Verify → execute → settle. On-chain settlement only after the handler succeeds. `Payment-Response` is attached.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
+
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    S->>H: execute request
+    Note over S,H: Balance verified but NOT locked —<br/>handler executing (variable latency)
+    H-->>S: response body
+    S->>F: settle(payment)
+    Note over S,F: On-chain transfer (2–5 s)
+    F-->>S: SettleResponse (tx_hash)
+    S-->>C: 200 OK + Payment-Response header
+```
+
+### Concurrent
+
+Verify → (settle ∥ execute) → await both. On handler error the settlement task is detached.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
+
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    par settle ∥ execute
+        S->>F: settle(payment)
+        Note over S,F: On-chain transfer
+        F-->>S: SettleResponse (tx_hash)
+    and
+        S->>H: execute request
+        H-->>S: response body
+    end
+    S-->>C: 200 OK + Payment-Response header
+```
+
+### Background
+
+Verify → spawn settle → execute → return. No `Payment-Response` header. For streaming responses.
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+    participant F as Facilitator
+    participant H as Handler
+
+    C->>S: HTTP Request + Payment-Signature
+    S->>F: verify(payment)
+    F-->>S: VerifyResponse ✓
+    S-)F: settle(payment) [fire-and-forget]
+    S->>H: execute request
+    H-->>S: response body (or stream)
+    S-->>C: 200 OK (no Payment-Response header)
+    Note over S,F: Settlement completes asynchronously
+    F-)S: SettleResponse (logged)
+```
+
+### Comparison
+
+| Mode | Total latency | Safety | `Payment-Response` | Best for |
+| --- | --- | --- | --- | --- |
+| **Sequential** | verify + handler + settle | Settlement only on handler success | ✅ Included | Standard request/response APIs |
+| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | ✅ Included | Latency-sensitive endpoints |
+| **Background** | verify + handler | Settlement errors are non-fatal (logged) | ❌ Not attached | SSE / LLM streaming responses |
+
+> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`. Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
 
 ## License
 

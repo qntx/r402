@@ -1,5 +1,7 @@
 //! Client-side payment signing for the NEAR `"exact"` scheme.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 
 use near_crypto::{InMemorySigner, SecretKey, Signer};
@@ -7,19 +9,13 @@ use near_primitives::action::delegate::{DelegateAction, NonDelegateAction, Signe
 use near_primitives::action::{Action, FunctionCallAction};
 use near_primitives::gas::Gas;
 use near_primitives::types::{AccountId, Balance};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ChainId, ClientError, PaymentRequired, ResourceInfo};
 
 use crate::chain::rpc::NearRpc;
-use crate::exact::types;
-use crate::exact::{ExactNearPayload, NearExact};
-use crate::timeout_blocks;
-use crate::{DEFAULT_FT_TRANSFER_GAS, FT_TRANSFER_METHOD, ONE_YOCTO};
+use crate::chain::{DEFAULT_FT_TRANSFER_GAS, FT_TRANSFER_METHOD, ONE_YOCTO, timeout_blocks};
+use crate::exact::{ExactNearPayload, NearExact, payload};
 
 /// Local NEAR signer wrapping an in-memory key.
 #[derive(Clone)]
@@ -162,8 +158,6 @@ impl<S, R> SchemeId for NearExactClient<S, R> {
     }
 }
 
-impl<S, R> r402_core::scheme::Sealed for NearExactClient<S, R> {}
-
 impl<S, R> SchemeClient for NearExactClient<S, R>
 where
     S: AsRef<NearSigner> + Send + Sync + Clone + 'static,
@@ -174,7 +168,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "near" {
                     return None;
@@ -211,7 +205,7 @@ impl AsRef<Self> for NearSigner {
 struct V2PayloadSigner<S, R> {
     signer: S,
     rpc: R,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -220,7 +214,9 @@ where
     S: AsRef<NearSigner> + Send + Sync,
     R: NearRpc,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let b64 = create_signed_delegate_action(
                 self.signer.as_ref(),
@@ -231,7 +227,7 @@ where
                 self.requirements.max_timeout_seconds,
             )
             .await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactNearPayload {
                     signed_delegate_action: b64,

@@ -1,37 +1,30 @@
-//! Facilitator-side verification and settlement for the Casper exact scheme.
+//! Remote facilitator client for the Casper exact scheme.
 //!
-//! Casper settlement is executed by a facilitator that holds a funded Casper
-//! account and a node connection: it relays the buyer's signed EIP-712
-//! authorisation to the CEP-18 token's `transfer_with_authorization` entry
-//! point and pays the gas. The Casper Association operates a hosted instance
-//! at <https://x402-facilitator.cspr.cloud> (documented at
-//! <https://docs.cspr.cloud>).
-//!
-//! [`CasperExactFacilitator`] implements [`Facilitator`] against such a
-//! service, so a Casper chain plugs into the same registry, hook pipeline,
-//! and Axum middleware as the EVM and SVM crates. Every request is validated
-//! locally first (see [`crate::exact::verify`]) so a malformed payment is
-//! rejected with a precise typed error instead of an opaque remote failure.
+//! Casper settlement is executed by a hosted (or self-hosted) facilitator
+//! that holds a funded account and a node connection. This crate talks to it
+//! over `/verify`, `/settle`, and `/supported`.
 
 mod config;
-#[cfg(feature = "http-client")]
 mod transport;
+pub mod verify;
 
+use std::future::Future;
 use std::time::Duration;
 
 pub use config::{
-    CasperFacilitatorConfig, CasperFacilitatorConfigError, DEFAULT_FACILITATOR_URL,
-    FACILITATOR_URL_ENV,
+    CASPER_DOCS_URL, CasperFacilitatorConfig, CasperFacilitatorConfigError,
+    DEFAULT_FACILITATOR_URL, FACILITATOR_URL_ENV,
 };
-use r402_core::error::FacilitatorError;
-use r402_core::error::VerificationError;
-use r402_core::facilitator::Facilitator;
-use r402_core::wire;
-#[cfg(feature = "http-client")]
-pub use transport::ReqwestTransport;
+use r402_facilitator::Facilitator;
+use r402_protocol::error::{FacilitatorError, VerificationError};
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
+};
+pub use transport::{FacilitatorHttpResponse, ReqwestTransport};
+use transport::{parse_settle_body, parse_supported_body, parse_verify_body};
+pub use verify::{ValidatedPayment, validate_at, validate_request, validate_timing};
 
-use crate::exact::types::v2;
-use crate::exact::verify::validate_request;
+use crate::exact::payload::v2;
 
 /// Facilitator for Casper exact scheme payments backed by a remote x402
 /// facilitator service.
@@ -43,33 +36,45 @@ pub struct CasperExactFacilitator<T> {
 
 /// Transport abstraction over the facilitator's HTTP surface.
 ///
-/// Implemented for any HTTP stack the host application already uses; r402
-/// therefore does not force a specific client (or TLS backend) on downstream
-/// consumers of this crate.
-///
-/// Callers MUST honour `timeout` (from [`CasperFacilitatorConfig::timeout`])
-/// so that operator configuration is not silently ignored.
+/// Callers MUST honour `timeout` from [`CasperFacilitatorConfig::timeout`].
+/// The raw status/headers/body are required so verify/settle/supported can
+/// reject non-2xx Valid/Success as Transport instead of treating JSON as paid.
 pub trait FacilitatorTransport: Send + Sync {
-    /// Sends a `POST` with a JSON body and returns the JSON response.
+    /// Sends a `POST` with a JSON body and returns the raw HTTP response.
     fn post_json(
         &self,
         url: &url::Url,
         body: serde_json::Value,
         timeout: Duration,
-    ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> + Send;
+    ) -> impl Future<Output = Result<FacilitatorHttpResponse, FacilitatorError>> + Send;
 
-    /// Sends a `GET` and returns the JSON response.
+    /// Sends a `GET` and returns the raw HTTP response.
     fn get_json(
         &self,
         url: &url::Url,
         timeout: Duration,
-    ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> + Send;
+    ) -> impl Future<Output = Result<FacilitatorHttpResponse, FacilitatorError>> + Send;
 }
 
 impl<T> CasperExactFacilitator<T> {
     /// Creates a facilitator with an explicit configuration and transport.
     pub const fn new(config: CasperFacilitatorConfig, transport: T) -> Self {
         Self { config, transport }
+    }
+
+    /// Constructs a facilitator from a transport using hosted defaults.
+    ///
+    /// Currently infallible. [`Result`] so `try_new(transport)?` compiles.
+    ///
+    /// # Errors
+    ///
+    /// Currently never.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(transport: T) -> Result<Self, FacilitatorError> {
+        Ok(Self::hosted(transport))
     }
 
     /// Creates a facilitator pointing at the hosted Casper facilitator.
@@ -94,21 +99,16 @@ impl<T> CasperExactFacilitator<T> {
     }
 
     /// Runs the local pre-flight validation pass, if enabled.
-    ///
-    /// # Errors
-    ///
-    /// Returns the typed [`VerificationError`] for the first failed check.
     fn preflight(&self, request: &serde_json::Value) -> Result<(), VerificationError> {
         if !self.config.validate_locally {
             return Ok(());
         }
-        let typed = v2::VerifyRequest::from_verify(wire::VerifyRequest::from(request.clone()))?;
+        let typed = v2::VerifyRequest::from_verify(VerifyRequest::from(request.clone()))?;
         validate_request(&typed).map_err(VerificationError::from)?;
         Ok(())
     }
 }
 
-#[cfg(feature = "http-client")]
 impl CasperExactFacilitator<ReqwestTransport> {
     /// Hosted facilitator with the default `reqwest` transport.
     #[must_use]
@@ -131,73 +131,78 @@ impl<T> Facilitator for CasperExactFacilitator<T>
 where
     T: FacilitatorTransport,
 {
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(name = "r402_casper::exact::verify", skip_all)
+    )]
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let body = request.into_json();
         self.preflight(&body)?;
         let response = self
             .transport
             .post_json(&self.config.verify_url(), body, self.config.timeout)
             .await?;
-        serde_json::from_value(response)
-            .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
+        parse_verify_body(&response)
     }
 
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(name = "r402_casper::exact::settle", skip_all)
+    )]
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let body = request.into_json();
         self.preflight(&body)?;
         let response = self
             .transport
             .post_json(&self.config.settle_url(), body, self.config.timeout)
             .await?;
-        serde_json::from_value(response)
-            .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
+        parse_settle_body(&response)
     }
 
-    async fn supported(&self) -> Result<wire::SupportedResponse, FacilitatorError> {
+    #[cfg_attr(
+        feature = "telemetry",
+        tracing::instrument(name = "r402_casper::exact::supported", skip_all)
+    )]
+    async fn supported(&self) -> Result<SupportedResponse, FacilitatorError> {
         let response = self
             .transport
             .get_json(&self.config.supported_url(), self.config.timeout)
             .await?;
-        serde_json::from_value(response)
-            .map_err(|e| FacilitatorError::from(VerificationError::InvalidFormat(e.to_string())))
+        parse_supported_body(&response)
     }
 }
 
-#[allow(
-    clippy::indexing_slicing,
-    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
-)]
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
 
-    use r402_core::error::ErrorReason;
+    use r402_protocol::UnixTimestamp;
+    use r402_protocol::error::{ErrorReason, FacilitatorTransportKind};
 
     use super::*;
 
-    /// Secp256k1 fixture from `scheme_exact_casper.md` (publicKey → from).
     const PAYER: &str = "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3";
     const PUBLIC_KEY: &str = "020376e4f8766e4f33bcc6e20b331b5163f363dc0106063b052ad38afe08637bd867";
     const PAYEE: &str = "00fedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321";
     const ASSET: &str = "3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e";
 
-    /// Records the URLs + timeouts it was called with and replays a canned response.
     #[derive(Debug)]
     struct MockTransport {
-        response: serde_json::Value,
+        response: FacilitatorHttpResponse,
         calls: Mutex<Vec<(String, Duration)>>,
     }
 
     impl MockTransport {
-        fn new(response: serde_json::Value) -> Self {
+        fn new(response: &serde_json::Value) -> Self {
+            Self::with_status(200, response)
+        }
+
+        fn with_status(status: u16, response: &serde_json::Value) -> Self {
             Self {
-                response,
+                response: FacilitatorHttpResponse::new(
+                    status,
+                    serde_json::to_vec(response).unwrap(),
+                ),
                 calls: Mutex::new(Vec::new()),
             }
         }
@@ -227,7 +232,7 @@ mod tests {
             url: &url::Url,
             _body: serde_json::Value,
             timeout: Duration,
-        ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> {
+        ) -> impl Future<Output = Result<FacilitatorHttpResponse, FacilitatorError>> {
             self.calls.lock().unwrap().push((url.to_string(), timeout));
             std::future::ready(Ok(self.response.clone()))
         }
@@ -236,7 +241,7 @@ mod tests {
             &self,
             url: &url::Url,
             timeout: Duration,
-        ) -> impl Future<Output = Result<serde_json::Value, FacilitatorError>> {
+        ) -> impl Future<Output = Result<FacilitatorHttpResponse, FacilitatorError>> {
             self.calls.lock().unwrap().push((url.to_string(), timeout));
             std::future::ready(Ok(self.response.clone()))
         }
@@ -254,9 +259,9 @@ mod tests {
         })
     }
 
-    fn verify_request(amount: &str, valid_before: u64) -> wire::VerifyRequest {
+    fn verify_request(amount: &str, valid_before: u64) -> VerifyRequest {
         let requirements = requirements(amount);
-        wire::VerifyRequest::from(serde_json::json!({
+        VerifyRequest::from(serde_json::json!({
             "x402Version": 2,
             "paymentPayload": {
                 "x402Version": 2,
@@ -279,12 +284,12 @@ mod tests {
     }
 
     fn far_future() -> u64 {
-        crate::exact::verify::now_unix() + 600
+        UnixTimestamp::now().as_secs() + 600
     }
 
     #[tokio::test]
     async fn verify_posts_to_the_configured_verify_endpoint() {
-        let transport = MockTransport::new(serde_json::json!({
+        let transport = MockTransport::new(&serde_json::json!({
             "isValid": true,
             "payer": PAYER
         }));
@@ -306,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn settle_posts_to_the_configured_settle_endpoint() {
-        let transport = MockTransport::new(serde_json::json!({
+        let transport = MockTransport::new(&serde_json::json!({
             "success": true,
             "payer": PAYER,
             "transaction": "9f".repeat(32),
@@ -314,8 +319,7 @@ mod tests {
             "amount": "1500000000"
         }));
         let facilitator = CasperExactFacilitator::hosted(transport);
-        let request =
-            wire::SettleRequest::from(verify_request("1500000000", far_future()).into_json());
+        let request = SettleRequest::from(verify_request("1500000000", far_future()).into_json());
         let response = facilitator.settle(request).await.unwrap();
         assert!(response.is_success());
         assert_eq!(
@@ -326,7 +330,7 @@ mod tests {
 
     #[tokio::test]
     async fn supported_gets_the_supported_endpoint() {
-        let transport = MockTransport::new(serde_json::json!({
+        let transport = MockTransport::new(&serde_json::json!({
             "kinds": [{
                 "x402Version": 2,
                 "scheme": "exact",
@@ -346,7 +350,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_rejects_expired_payments_without_a_round_trip() {
-        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
         let facilitator = CasperExactFacilitator::hosted(transport);
         let error = facilitator
             .verify(verify_request("1500000000", 1))
@@ -364,7 +368,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_rejects_zero_amounts() {
-        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
         let facilitator = CasperExactFacilitator::hosted(transport);
         let error = facilitator
             .verify(verify_request("0", far_future()))
@@ -378,7 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn preflight_can_be_disabled() {
-        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
         let facilitator = CasperExactFacilitator::new(
             CasperFacilitatorConfig::default().with_local_validation(false),
             transport,
@@ -393,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn remote_invalid_response_is_surfaced_verbatim() {
-        let transport = MockTransport::new(serde_json::json!({
+        let transport = MockTransport::new(&serde_json::json!({
             "isValid": false,
             "invalidReason": "insufficient_funds",
             "payer": PAYER
@@ -405,16 +409,16 @@ mod tests {
             .unwrap();
         assert!(matches!(
             response,
-            wire::VerifyResponse::Invalid {
-                reason: ErrorReason::InsufficientFunds,
+            VerifyResponse::Invalid {
+                reason: Some(ErrorReason::InsufficientFunds),
                 ..
             }
         ));
     }
 
     #[tokio::test]
-    async fn malformed_remote_response_becomes_an_invalid_format_error() {
-        let transport = MockTransport::new(serde_json::json!({ "unexpected": true }));
+    async fn malformed_remote_response_is_transport() {
+        let transport = MockTransport::new(&serde_json::json!({ "unexpected": true }));
         let facilitator = CasperExactFacilitator::hosted(transport);
         let error = facilitator
             .verify(verify_request("1500000000", far_future()))
@@ -422,13 +426,15 @@ mod tests {
             .unwrap_err();
         assert!(matches!(
             error,
-            FacilitatorError::Verification(VerificationError::InvalidFormat(_))
+            FacilitatorError::Transport {
+                kind: FacilitatorTransportKind::MalformedSuccessBody
+            }
         ));
     }
 
     #[tokio::test]
     async fn custom_base_url_is_honoured() {
-        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
         let facilitator = CasperExactFacilitator::new(
             CasperFacilitatorConfig::new("https://facilitator.internal/x402/").unwrap(),
             transport,
@@ -445,7 +451,7 @@ mod tests {
 
     #[tokio::test]
     async fn configured_timeout_is_forwarded_to_the_transport() {
-        let transport = MockTransport::new(serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
         let facilitator = CasperExactFacilitator::new(
             CasperFacilitatorConfig::default().with_timeout(Duration::from_secs(7)),
             transport,
@@ -458,5 +464,83 @@ mod tests {
             facilitator.transport.call_timeouts(),
             vec![Duration::from_secs(7)]
         );
+    }
+
+    #[test]
+    fn try_new_is_result() {
+        let transport = MockTransport::new(&serde_json::json!({ "isValid": true, "payer": PAYER }));
+        let _ = CasperExactFacilitator::try_new(transport).expect("try_new is infallible");
+    }
+
+    #[tokio::test]
+    async fn verify_4xx_valid_json_is_transport_not_paid() {
+        let transport = MockTransport::with_status(
+            400,
+            &serde_json::json!({ "isValid": true, "payer": PAYER }),
+        );
+        let facilitator = CasperExactFacilitator::hosted(transport);
+        let error = facilitator
+            .verify(verify_request("1500000000", far_future()))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            FacilitatorError::Transport {
+                kind: FacilitatorTransportKind::HttpStatus { status: 400 }
+            }
+        ));
+        assert!(
+            error.as_payment_problem().is_none(),
+            "non-2xx Valid must not become a 402 payment problem"
+        );
+    }
+
+    #[tokio::test]
+    async fn verify_4xx_invalid_json_stays_invalid() {
+        let transport = MockTransport::with_status(
+            400,
+            &serde_json::json!({
+                "isValid": false,
+                "invalidReason": "insufficient_funds",
+                "payer": PAYER
+            }),
+        );
+        let facilitator = CasperExactFacilitator::hosted(transport);
+        let response = facilitator
+            .verify(verify_request("1500000000", far_future()))
+            .await
+            .unwrap();
+        assert!(!response.is_valid());
+    }
+
+    #[tokio::test]
+    async fn settle_2xx_missing_transaction_is_malformed() {
+        let transport = MockTransport::new(&serde_json::json!({
+            "success": true,
+            "payer": PAYER,
+            "network": "casper:casper-test"
+        }));
+        let facilitator = CasperExactFacilitator::hosted(transport);
+        let request = SettleRequest::from(verify_request("1500000000", far_future()).into_json());
+        let error = facilitator.settle(request).await.unwrap_err();
+        assert!(matches!(
+            error,
+            FacilitatorError::Transport {
+                kind: FacilitatorTransportKind::MalformedSuccessBody
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn supported_503_empty_object_is_http_status() {
+        let transport = MockTransport::with_status(503, &serde_json::json!({}));
+        let facilitator = CasperExactFacilitator::hosted(transport);
+        let error = facilitator.supported().await.unwrap_err();
+        assert!(matches!(
+            error,
+            FacilitatorError::Transport {
+                kind: FacilitatorTransportKind::HttpStatus { status: 503 }
+            }
+        ));
     }
 }

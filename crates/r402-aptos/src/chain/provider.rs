@@ -9,10 +9,10 @@ use aptos_sdk::transaction::PartiallySigned;
 use aptos_sdk::transaction::types::FeePayerRawTransaction;
 use aptos_sdk::types::AccountAddress;
 use aptos_sdk::{Aptos, AptosConfig};
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 
+use super::account::AptosChainReference;
 use super::codec::{AptosCodecError, DecodedAptosPayment, aptos_config_for, signed_from_decoded};
-use super::types::AptosChainReference;
 
 /// A fee-payer account this facilitator controls.
 #[derive(Clone)]

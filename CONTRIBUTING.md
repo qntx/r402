@@ -39,6 +39,7 @@ install nightly`) if you run those recipes.
 ### Quality Gates (run before pushing)
 
 ```bash
+just layout
 just all
 just test
 ```
@@ -67,7 +68,7 @@ cargo deny check all
 2. **Branch from `main`** — keep PRs focused on one logical concern.
 3. **Add tests** alongside any behaviour change. Wire types and schemes
    should round-trip the fixtures in
-   `crates/r402-core/tests/fixtures/spec_v2/`.
+   `tests/fixtures/spec_v2/`.
 4. **Update the changelog** (`CHANGELOG.md`, Keep-a-Changelog format) if
    you make a user-visible or breaking API change.
 5. **Run the quality gates** above. CI will reject `clippy` or `fmt`

@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{PaymentFlowConfig, SchemeNetworkServer, SchemePaymentRequiredContext};
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_server::{PaymentFlowConfig, SchemeNetworkServer, SchemePaymentRequiredContext};
 
 use crate::chain::{XrplAsset, XrplClassicAddress, XrplTokenAmount, XrplTokenDeployment};
 use crate::exact::{ExactScheme, XrplExact, XrplExtra};
@@ -38,7 +38,7 @@ impl SchemeNetworkServer for XrplExact {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts
             .iter_mut()
@@ -60,13 +60,13 @@ impl XrplExact {
     pub fn price_tag<A: Into<XrplClassicAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<XrplTokenAmount, XrplTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let mut extra = XrplExtra::unsponsored();
         if let XrplAsset::Iou(iou) = &asset.token.asset {
             extra.issuer = Some(iou.issuer.clone());
         }
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.as_str().into(),
@@ -75,12 +75,12 @@ impl XrplExact {
             300,
         )
         .with_optional_extra(serde_json::to_value(extra).ok());
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
 /// Force `areFeesSponsored: false` without adding reserved ATM keys.
-fn apply_xrpl_unsponsored(req: &mut wire::PaymentRequirements) -> bool {
+fn apply_xrpl_unsponsored(req: &mut PaymentRequirements) -> bool {
     if req.scheme.as_str() != ExactScheme::VALUE {
         return false;
     }

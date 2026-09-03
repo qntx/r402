@@ -4,13 +4,13 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use alloy_primitives::U256;
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::scheme::AuthCaptureScheme;
-use r402_core::wire;
-use r402_core::{PaymentFlowConfig, SchemeNetworkServer};
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_protocol::scheme::AuthCaptureScheme;
+use r402_server::{PaymentFlowConfig, SchemeNetworkServer};
 
 use super::Eip155AuthCapture;
-use super::types::AuthCaptureExtra;
+use super::payload::AuthCaptureExtra;
 use crate::asset::AssetTransferMethod;
 use crate::chain::{ChecksummedAddress, Eip155TokenDeployment};
 
@@ -41,23 +41,17 @@ impl SchemeNetworkServer for Eip155AuthCapture {
 
 impl Eip155AuthCapture {
     /// Builds a price tag for auth-capture payments.
-    ///
-    /// # Panics
-    ///
-    /// Never panics for valid inputs; fee deadlines are absolute Unix times
-    /// supplied by the caller.
-    #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
-        reason = "mirrors Eip155Exact::price_tag signature for API parity"
+        reason = "owned DeployedTokenAmount matches Eip155Exact::price_tag"
     )]
-    pub fn price_tag(
-        pay_to: impl Into<ChecksummedAddress>,
+    pub fn price_tag<A: Into<ChecksummedAddress>>(
+        pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         extra: AuthCaptureExtra,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             AuthCaptureScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -65,18 +59,18 @@ impl Eip155AuthCapture {
             asset.token.address.to_string().into(),
             300,
         )
-        .with_extra(serde_json::to_value(extra).unwrap_or_else(|_| serde_json::json!({})));
-        wire::PriceTag::new(requirements)
+        .with_optional_extra(serde_json::to_value(extra).ok());
+        PriceTag::new(requirements)
     }
 
     /// Convenience: fill EIP-712 name/version from the token deployment table.
-    #[must_use]
     #[allow(
+        clippy::needless_pass_by_value,
         clippy::too_many_arguments,
-        reason = "maps 1:1 to AuthCaptureExtra fields from deployment metadata"
+        reason = "owned asset matches price_tag; extra fields map 1:1 from deployment metadata"
     )]
-    pub fn price_tag_from_deployment(
-        pay_to: impl Into<ChecksummedAddress>,
+    pub fn price_tag_from_deployment<A: Into<ChecksummedAddress>>(
+        pay_to: A,
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
         capture_authorizer: ChecksummedAddress,
         capture_deadline: u64,
@@ -85,8 +79,7 @@ impl Eip155AuthCapture {
         min_fee_bps: u16,
         max_fee_bps: u16,
         transfer_method: Option<AssetTransferMethod>,
-        auto_capture: bool,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let (name, version) = asset.token.eip712.as_ref().map_or_else(
             || (String::new(), String::new()),
             |e| (e.name.clone(), e.version.clone()),
@@ -100,9 +93,29 @@ impl Eip155AuthCapture {
             fee_recipient,
             min_fee_bps,
             max_fee_bps,
-            auto_capture: Some(auto_capture),
+            auto_capture: None,
             asset_transfer_method: transfer_method,
+            auth_capture_escrow: None,
         };
         Self::price_tag(pay_to, asset, extra)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use r402_server::PaymentFlowName;
+
+    use super::*;
+
+    #[test]
+    fn payment_flows_are_authorization_only() {
+        let scheme = Eip155AuthCapture;
+        assert_eq!(scheme.scheme(), "auth-capture");
+        assert_eq!(scheme.default_asset_transfer_method(), "eip3009");
+        let flows = scheme.payment_flows();
+        let expected = PaymentFlowConfig::authorization_only();
+        assert_eq!(flows.get("eip3009"), Some(&expected));
+        assert_eq!(flows.get("permit2"), Some(&expected));
+        assert_eq!(expected.default, PaymentFlowName::Authorization);
     }
 }

@@ -1,20 +1,22 @@
 //! Client signing for EVM `batch-settlement` (voucher path).
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alloy_primitives::{Address, B256, U256};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::{
-    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
-};
-use r402_core::wire::{Base64Bytes, PaymentRequired};
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::error::ClientError;
+use r402_protocol::network::ChainId;
+use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo};
+use r402_protocol::scheme::SchemeId;
 
 use super::channel::{build_channel_config, compute_channel_id};
-use super::types::{BatchSettlementExtra, BatchSettlementPayload, ChannelConfig};
+use super::payload::{BatchSettlementExtra, BatchSettlementPayload, ChannelConfig};
 use super::voucher::sign_voucher;
+use super::{Eip155BatchSettlement, payload};
+use crate::chain::Eip155ChainReference;
 use crate::signer::SignerLike;
 
 /// Client that signs cumulative vouchers for batch-settlement channels.
@@ -22,11 +24,11 @@ use crate::signer::SignerLike;
 /// Tracks last charged cumulative per channel so the next voucher ceiling is
 /// `charged + amount`. Callers can seed state via [`Self::set_charged`].
 pub struct Eip155BatchSettlementClient<S> {
-    signer: Arc<S>,
+    signer: S,
     /// Optional fixed payer authorizer (defaults to signer address).
     payer_authorizer: Option<Address>,
     /// In-process charged totals (`channel_id` → amount).
-    charged: Arc<std::sync::Mutex<std::collections::HashMap<B256, U256>>>,
+    charged: Arc<Mutex<HashMap<B256, U256>>>,
 }
 
 impl<S: std::fmt::Debug> std::fmt::Debug for Eip155BatchSettlementClient<S> {
@@ -41,9 +43,9 @@ impl<S> Eip155BatchSettlementClient<S> {
     #[must_use]
     pub fn new(signer: S) -> Self {
         Self {
-            signer: Arc::new(signer),
+            signer,
             payer_authorizer: None,
-            charged: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            charged: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -68,66 +70,47 @@ impl<S> Eip155BatchSettlementClient<S> {
     }
 }
 
-impl<S: SignerLike + Sync + 'static> SchemeId for Eip155BatchSettlementClient<S> {
+impl<S> SchemeId for Eip155BatchSettlementClient<S> {
     fn namespace(&self) -> &'static str {
-        "eip155"
+        Eip155BatchSettlement.namespace()
     }
 
-    fn scheme(&self) -> &'static str {
-        "batch-settlement"
+    fn scheme(&self) -> &str {
+        Eip155BatchSettlement.scheme()
     }
 }
 
-impl<S: SignerLike + Sync + 'static> Sealed for Eip155BatchSettlementClient<S> {}
-
-impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155BatchSettlementClient<S> {
+impl<S> SchemeClient for Eip155BatchSettlementClient<S>
+where
+    S: SignerLike + Clone + Send + Sync + 'static,
+{
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let mut out = Vec::new();
-        for req in &payment_required.accepts {
-            if req.scheme.as_str() != "batch-settlement" {
-                continue;
-            }
-            if !req.network.namespace().eq_ignore_ascii_case("eip155") {
-                continue;
-            }
-            let Some(extra_val) = req.extra.clone() else {
-                continue;
-            };
-            let Ok(extra) = serde_json::from_value::<BatchSettlementExtra>(extra_val) else {
-                continue;
-            };
-            let Ok(amount) = req.amount.parse::<U256>() else {
-                continue;
-            };
-            let Ok(pay_to) = req.pay_to.parse::<Address>() else {
-                continue;
-            };
-            let Ok(asset) = req.asset.parse::<Address>() else {
-                continue;
-            };
-            let Ok(chain_id) = req.network.reference().parse::<u64>() else {
-                continue;
-            };
-            out.push(PaymentCandidate {
-                chain_id: req.network.clone(),
-                asset: req.asset.clone(),
-                amount: req.amount.clone(),
-                scheme: "batch-settlement".into(),
-                pay_to: req.pay_to.clone(),
-                requirements: req.clone(),
-                signer: Box::new(BatchVoucherSigner {
-                    signer: Arc::clone(&self.signer),
-                    charged: Arc::clone(&self.charged),
-                    payer_authorizer: self.payer_authorizer,
-                    chain_id,
-                    asset,
-                    pay_to,
-                    amount,
-                    extra,
-                }),
-            });
-        }
-        out
+        payment_required
+            .accepts
+            .iter()
+            .filter_map(|v| {
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
+                let extra = requirements.extra.clone()?;
+                let chain_reference = Eip155ChainReference::try_from(&requirements.network).ok()?;
+                Some(PaymentCandidate {
+                    chain_id: requirements.network.clone(),
+                    asset: requirements.asset.to_string().into(),
+                    amount: requirements.amount.0.to_string().into(),
+                    scheme: self.scheme().into(),
+                    pay_to: requirements.pay_to.to_string().into(),
+                    requirements: v.clone(),
+                    signer: Box::new(BatchVoucherSigner {
+                        signer: self.signer.clone(),
+                        charged: Arc::clone(&self.charged),
+                        resource_info: Some(payment_required.resource.clone()),
+                        payer_authorizer: self.payer_authorizer,
+                        chain_id: chain_reference.inner(),
+                        requirements,
+                        extra,
+                    }),
+                })
+            })
+            .collect()
     }
 
     fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
@@ -136,17 +119,19 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155BatchSettlementClien
 }
 
 struct BatchVoucherSigner<S> {
-    signer: Arc<S>,
-    charged: Arc<std::sync::Mutex<std::collections::HashMap<B256, U256>>>,
+    signer: S,
+    charged: Arc<Mutex<HashMap<B256, U256>>>,
+    resource_info: Option<ResourceInfo>,
     payer_authorizer: Option<Address>,
     chain_id: u64,
-    asset: Address,
-    pay_to: Address,
-    amount: U256,
+    requirements: payload::v2::PaymentRequirements,
     extra: BatchSettlementExtra,
 }
 
-impl<S: SignerLike + Sync + 'static> PaymentCandidateSigner for BatchVoucherSigner<S> {
+impl<S> PaymentCandidateSigner for BatchVoucherSigner<S>
+where
+    S: SignerLike + Sync,
+{
     fn sign_payment<'a>(
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>> {
@@ -160,13 +145,14 @@ impl<S: SignerLike + Sync + 'static> PaymentCandidateSigner for BatchVoucherSign
             let config = build_channel_config(
                 payer,
                 authorizer,
-                self.pay_to,
+                self.requirements.pay_to.0,
                 self.extra.receiver_authorizer.0,
-                self.asset,
+                self.requirements.asset.0,
                 self.extra.withdraw_delay,
                 salt,
             );
-            let channel_id = compute_channel_id(&config, self.chain_id);
+            let channel_id = compute_channel_id(&config, self.chain_id)
+                .map_err(|e| ClientError::Signing(e.to_string()))?;
             let charged = self
                 .charged
                 .lock()
@@ -174,20 +160,18 @@ impl<S: SignerLike + Sync + 'static> PaymentCandidateSigner for BatchVoucherSign
                 .get(&channel_id)
                 .copied()
                 .unwrap_or(U256::ZERO);
-            let max_claimable = charged.saturating_add(self.amount);
-            let voucher = sign_voucher(
-                self.signer.as_ref(),
-                channel_id,
-                max_claimable,
-                self.chain_id,
-            )
-            .await?;
-            let payload = BatchSettlementPayload::Voucher {
+            let max_claimable = charged.saturating_add(self.requirements.amount.0);
+            let voucher =
+                sign_voucher(&self.signer, channel_id, max_claimable, self.chain_id).await?;
+            let scheme_payload = BatchSettlementPayload::Voucher {
                 channel_config: config,
                 voucher,
             };
-            let json = serde_json::to_vec(&payload).map_err(ClientError::Json)?;
-            Ok(Base64Bytes::encode(json).to_string())
+            let payload =
+                payload::v2::PaymentPayload::new(self.requirements.clone(), scheme_payload)
+                    .with_optional_resource(self.resource_info.clone());
+            let json = serde_json::to_vec(&payload)?;
+            Ok(Base64Bytes::encode(&json).to_string())
         })
     }
 }
@@ -203,7 +187,8 @@ pub async fn sign_voucher_payload<S: SignerLike + Sync>(
     max_claimable: U256,
     chain_id: u64,
 ) -> Result<BatchSettlementPayload, ClientError> {
-    let channel_id = compute_channel_id(config, chain_id);
+    let channel_id =
+        compute_channel_id(config, chain_id).map_err(|e| ClientError::Signing(e.to_string()))?;
     let voucher = sign_voucher(signer, channel_id, max_claimable, chain_id).await?;
     Ok(BatchSettlementPayload::Voucher {
         channel_config: *config,

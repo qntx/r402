@@ -1,8 +1,8 @@
 //! Error types for the Keeta `"exact"` payment scheme.
 
 use compact_str::CompactString;
-use r402_core::error::ErrorReason;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::VerifyResponse;
 
 /// A verify failure carrying a wire `invalidReason` and optional payer.
 #[derive(Debug, Clone, PartialEq, Eq)]

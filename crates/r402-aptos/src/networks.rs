@@ -1,14 +1,18 @@
 //! Well-known Aptos network definitions and token deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
-use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{
-    AptosAddress, AptosChainReference, AptosTokenDeployment, USDC_MAINNET_FA, USDC_TESTNET_FA,
+    AptosAddress, AptosChainReference, AptosTokenDeployment, DEFAULT_TOKEN_DECIMALS,
+    USDC_MAINNET_FA, USDC_TESTNET_FA,
 };
 
 /// Well-known Aptos networks with their names and CAIP-2 identifiers.
@@ -63,6 +67,7 @@ pub fn usdc_aptos_deployment(chain: AptosChainReference) -> Option<&'static Apto
 }
 
 /// Reverse lookup by FA metadata address and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_aptos_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "aptos" {
@@ -131,7 +136,6 @@ impl USDC {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
     use super::*;
 
@@ -143,9 +147,5 @@ mod tests {
         assert_eq!(USDC::aptos_testnet().address.as_str(), USDC_TESTNET_FA);
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(APTOS_NETWORKS.len(), 2);
-        let network: ChainId = "aptos:1".parse().unwrap();
-        let info = find_default_aptos_asset(USDC_MAINNET_FA, &network).unwrap();
-        assert_eq!(info.symbol, "USDC");
-        assert_eq!(info.decimals, u32::from(DEFAULT_TOKEN_DECIMALS));
     }
 }

@@ -7,18 +7,17 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_core::cache::SettlementCache;
-use r402_core::chain::ChainProvider;
-use r402_core::error::FacilitatorError;
-use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::scheme::{SchemeBuilder, SchemeId};
-use r402_core::wire;
+use r402_facilitator::{Facilitator, SettlementCache};
+use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainProvider;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
 use serde::Deserialize;
 pub use settle::settle_request;
 pub use verify::verify_request_json;
-
-#[cfg(test)]
-mod tests;
 
 use crate::chain::rpc::{HederaAccountResolution, HederaPreflightResult, HederaSignatureResult};
 use crate::chain::{HederaChainProvider, HederaProviderError};
@@ -33,15 +32,6 @@ pub enum AliasPolicy {
     Reject,
     /// Allow transfers that would create an account from an alias.
     Allow,
-}
-
-/// Optional JSON config for [`HederaExact`] [`SchemeBuilder`].
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HederaExactFacilitatorConfig {
-    /// Alias policy. Defaults to [`AliasPolicy::Reject`].
-    #[serde(default)]
-    pub alias_policy: AliasPolicy,
 }
 
 /// Operations the exact facilitator needs from a chain provider.
@@ -134,12 +124,29 @@ pub struct HederaExactFacilitator<P> {
 }
 
 impl<P> HederaExactFacilitator<P> {
+    /// Constructs a facilitator from a chain provider.
+    ///
+    /// Uses [`AliasPolicy::Reject`] and a default [`SettlementCache`].
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: P) -> Result<Self, FacilitatorError> {
+        Ok(Self::new(provider, AliasPolicy::Reject))
+    }
+
     /// Creates a facilitator with the default in-memory settlement cache.
+    #[must_use]
     pub fn new(provider: P, alias_policy: AliasPolicy) -> Self {
         Self::with_settlement_cache(provider, alias_policy, SettlementCache::new())
     }
 
     /// Creates a facilitator with a shared [`SettlementCache`].
+    #[must_use]
     pub const fn with_settlement_cache(
         provider: P,
         alias_policy: AliasPolicy,
@@ -151,6 +158,13 @@ impl<P> HederaExactFacilitator<P> {
             settlement_cache,
         }
     }
+
+    /// Sets the alias policy for `payTo`.
+    #[must_use]
+    pub const fn with_alias_policy(mut self, alias_policy: AliasPolicy) -> Self {
+        self.alias_policy = alias_policy;
+        self
+    }
 }
 
 impl<P> std::fmt::Debug for HederaExactFacilitator<P> {
@@ -158,33 +172,6 @@ impl<P> std::fmt::Debug for HederaExactFacilitator<P> {
         f.debug_struct("HederaExactFacilitator")
             .field("alias_policy", &self.alias_policy)
             .finish_non_exhaustive()
-    }
-}
-
-impl SchemeBuilder<HederaChainProvider> for HederaExact {
-    fn build(
-        &self,
-        provider: HederaChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        let parsed = config
-            .map(serde_json::from_value::<HederaExactFacilitatorConfig>)
-            .transpose()?
-            .unwrap_or_default();
-        Ok(Box::new(HederaExactFacilitator::new(
-            provider,
-            parsed.alias_policy,
-        )))
-    }
-}
-
-impl SchemeBuilder<&HederaChainProvider> for HederaExact {
-    fn build(
-        &self,
-        provider: &HederaChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        SchemeBuilder::<HederaChainProvider>::build(self, provider.clone(), config)
     }
 }
 
@@ -196,10 +183,7 @@ where
         feature = "telemetry",
         tracing::instrument(name = "r402_hedera::exact::verify", skip_all)
     )]
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
         Ok(verify_request_json(&self.provider, self.alias_policy, &json).await)
     }
@@ -208,10 +192,7 @@ where
         feature = "telemetry",
         tracing::instrument(name = "r402_hedera::exact::settle", skip_all)
     )]
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         Ok(settle_request(
             &self.provider,
@@ -224,7 +205,7 @@ where
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let extra = self
             .provider
@@ -238,12 +219,8 @@ where
                 .ok()
             });
         let kinds = vec![
-            wire::SupportedPaymentKind::new(
-                wire::V2.into(),
-                ExactScheme.to_string(),
-                chain_id.to_string(),
-            )
-            .with_optional_extra(extra),
+            SupportedPaymentKind::new(V2.into(), ExactScheme.to_string(), chain_id.to_string())
+                .with_optional_extra(extra),
         ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(
@@ -254,7 +231,7 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

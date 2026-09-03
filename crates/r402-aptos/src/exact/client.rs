@@ -1,25 +1,25 @@
 //! Client-side payment signing for the Aptos `"exact"` scheme.
 
+use std::future::Future;
+use std::pin::Pin;
+
 use aptos_sdk::Aptos;
 use aptos_sdk::account::Ed25519Account;
 use aptos_sdk::crypto::Ed25519PrivateKey;
 use aptos_sdk::transaction::InputEntryFunctionData;
 use aptos_sdk::transaction::builder::TransactionBuilder;
 use aptos_sdk::types::{AccountAddress, ChainId};
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ClientError, PaymentRequired, ResourceInfo};
 
 use crate::chain::codec::{
     SimpleTransaction, account_authenticator_for, aptos_config_for, encode_aptos_payload,
 };
-use crate::chain::types::AptosChainReference;
-use crate::exact::types;
-use crate::exact::{AptosExact, ExactAptosPayload};
-use crate::{DEFAULT_CLIENT_MAX_GAS, DEFAULT_GAS_UNIT_PRICE, MAX_GAS_UNIT_PRICE};
+use crate::chain::{
+    AptosChainReference, DEFAULT_CLIENT_MAX_GAS, DEFAULT_GAS_UNIT_PRICE, MAX_GAS_UNIT_PRICE,
+};
+use crate::exact::{AptosExact, ExactAptosPayload, payload};
 
 /// Local Aptos signer wrapping an Ed25519 account.
 #[derive(Clone)]
@@ -197,9 +197,9 @@ pub async fn create_signed_transfer_from_network(
 }
 
 fn parse_chain_from_caip(network: &str) -> Result<AptosChainReference, ClientError> {
-    let chain_id: r402_core::chain::ChainId = network
+    let chain_id: r402_protocol::ChainId = network
         .parse()
-        .map_err(|e: r402_core::chain::ChainIdFormatError| ClientError::Signing(e.to_string()))?;
+        .map_err(|e: r402_protocol::ChainIdFormatError| ClientError::Signing(e.to_string()))?;
     AptosChainReference::try_from(chain_id).map_err(|e| ClientError::Signing(e.to_string()))
 }
 
@@ -238,8 +238,6 @@ impl<S> SchemeId for AptosExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::Sealed for AptosExactClient<S> {}
-
 impl<S> SchemeClient for AptosExactClient<S>
 where
     S: AsRef<AptosSigner> + Send + Sync + Clone + 'static,
@@ -249,7 +247,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "aptos" {
                     return None;
@@ -274,7 +272,7 @@ where
     fn find_default_asset(
         &self,
         asset: &str,
-        network: &r402_core::chain::ChainId,
+        network: &r402_protocol::ChainId,
     ) -> Option<DefaultAssetInfo> {
         crate::find_default_aptos_asset(asset, network)
     }
@@ -288,7 +286,7 @@ impl AsRef<Self> for AptosSigner {
 
 struct V2PayloadSigner<S> {
     signer: S,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -296,7 +294,9 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: AsRef<AptosSigner> + Send + Sync,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let fee_payer = self
                 .requirements
@@ -314,7 +314,7 @@ where
                 self.requirements.max_timeout_seconds,
             )
             .await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactAptosPayload { transaction: b64 },
             )

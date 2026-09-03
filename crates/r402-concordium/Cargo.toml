@@ -1,0 +1,72 @@
+[package]
+name = "r402-concordium"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Concordium chain support for the x402 payment protocol."
+keywords = ["x402", "payment", "concordium", "ccd", "usdr"]
+categories = [
+    "api-bindings",
+    "cryptography::cryptocurrencies",
+    "web-programming",
+    "asynchronous",
+]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
+[features]
+default = []
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = [
+    "dep:concordium-rust-sdk",
+    "dep:ed25519-dalek",
+    "dep:hex",
+    "dep:r402-client",
+    "dep:tokio",
+]
+server = ["dep:r402-server"]
+facilitator = [
+    "dep:concordium-rust-sdk",
+    "dep:ed25519-dalek",
+    "dep:hex",
+    "dep:r402-facilitator",
+    "dep:rand",
+    "dep:tokio",
+]
+full = ["telemetry", "client", "server", "facilitator"]
+
+[dependencies]
+bs58 = { workspace = true, features = ["check"] }
+compact_str = { workspace = true }
+r402-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+concordium-rust-sdk = { workspace = true, optional = true }
+ed25519-dalek = { version = "2.1", optional = true, default-features = false, features = [
+    "std",
+] }
+hex = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["time"] }
+tracing = { workspace = true, optional = true }
+tracing-core = { workspace = true, optional = true }
+
+[dev-dependencies]
+concordium-rust-sdk = { workspace = true }
+ed25519-dalek = { version = "2.1", default-features = false, features = ["std"] }
+hex = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

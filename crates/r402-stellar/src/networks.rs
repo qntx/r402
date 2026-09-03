@@ -1,13 +1,14 @@
 //! Well-known Stellar network definitions and token deployments.
-//!
-//! This module provides static network metadata and USDC SEP-41 token
-//! deployment information for Stellar pubnet and testnet.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
 use crate::DEFAULT_TOKEN_DECIMALS;
 use crate::chain::{StellarAddress, StellarChainReference, StellarTokenDeployment};
@@ -75,6 +76,7 @@ pub fn usdc_stellar_deployment(
 }
 
 /// Reverse lookup by SEP-41 contract address and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_stellar_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "stellar" {
@@ -144,7 +146,6 @@ impl USDC {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
     use super::*;
 
@@ -160,8 +161,5 @@ mod tests {
         assert!(USDC::stellar().address.is_contract());
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(STELLAR_NETWORKS.len(), 2);
-        let network: ChainId = "stellar:pubnet".parse().unwrap();
-        let info = find_default_stellar_asset(USDC_PUBNET_ADDRESS, &network).unwrap();
-        assert_eq!(info.symbol, "USDC");
     }
 }

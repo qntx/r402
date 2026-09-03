@@ -21,7 +21,7 @@
 
 **Modular Rust SDK for the [x402 payment protocol](https://www.x402.org/) — client signing, server gating, and facilitator settlement over HTTP 402.**
 
-r402 is a multi-chain x402 SDK (`exact` / `upto`) with client signing, server gating, and facilitator settlement. Deployments: **EVM, Solana, Tron, Casper, NEAR, XRPL, Hedera, Algorand, Aptos, Keeta, TON, Stellar**.
+Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, SVM (Solana), NEAR, XRPL, Hedera, Algorand, Aptos, Keeta, TON, Stellar, Concordium**. Tron is experimental / not an x402 protocol mechanism. Casper is extra / not an x402 protocol mechanism.
 
 > **See also** [`facilitator`](https://github.com/qntx/facilitator) — a production-ready facilitator server built on r402.
 
@@ -31,8 +31,10 @@ r402 is a multi-chain x402 SDK (`exact` / `upto`) with client signing, server ga
 
 ```toml
 [dependencies]
-r402 = { version = "0.17", features = ["evm", "http", "client", "server"] }
+r402 = { version = "0.18", features = ["evm", "http"] }
 ```
+
+`default = ["evm", "http"]`. Concordium is opt-in (`concordium`). SVM (Solana) is crate `r402-svm`. AVM (Algorand) is crate `r402-avm`.
 
 Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.
 
@@ -41,18 +43,21 @@ Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.
 ```rust
 use alloy_primitives::address;
 use axum::{Router, routing::get};
-use r402_evm::{Eip155Exact, USDC};
-use r402_http::server::X402Middleware;
+use r402::evm::{Eip155Exact, USDC};
+use r402::http::server::X402Middleware;
 
-let x402 = X402Middleware::try_new("https://facilitator.example.com")?;
+let x402 = X402Middleware::try_new("https://facilitator.example.com")?
+    .with_base_url("https://api.example.com".parse()?)
+    .with_scheme("eip155:*".parse()?, Eip155Exact);
 
 let app = Router::new().route(
     "/paid-content",
     get(handler).layer(
         x402.with_price_tag(Eip155Exact::price_tag(
             address!("0xYourPayToAddress"),
-            USDC::base().amount(1_000_000u64), // 1 USDC (6 decimals)
-        ))
+            USDC::base().amount(1_000_000u64),
+            None,
+        ))?,
     ),
 );
 ```
@@ -61,51 +66,20 @@ let app = Router::new().route(
 
 ```rust
 use alloy_signer_local::PrivateKeySigner;
-use r402_evm::Eip155ExactClient;
-use r402_http::client::{WithPayments, X402Client};
+use r402::evm::Eip155ExactClient;
+use r402::http::{WithPayments, X402Client};
 use std::sync::Arc;
 
 let signer = Arc::new("0x...".parse::<PrivateKeySigner>()?);
-let x402 = X402Client::new().register(Eip155ExactClient::new(signer));
-
-let client = reqwest::Client::new().with_payments(x402);
-
+let client = reqwest::Client::new().with_payments(
+    X402Client::new().register(Eip155ExactClient::new(signer)),
+);
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
 
-### Usage-Based Pricing (`upto` Scheme)
-
-The `upto` scheme lets the buyer sign a **maximum** while the resource server picks the final charge at request time (meter reads, token usage, dynamic tiers). The facilitator settles for any value in `[0, max]`; a final amount of `0` returns no on-chain transaction.
-
-```rust
-use alloy_primitives::address;
-use axum::{Router, response::IntoResponse, routing::post};
-use r402_evm::{Eip155Upto, USDC};
-use r402_http::server::{UptoActualAmount, X402Middleware};
-
-async fn meter(/* ... */) -> impl IntoResponse {
-    let mut response = "result".into_response();
-    // Charge 0.125 USDC for this call.
-    response.extensions_mut().insert(UptoActualAmount::new("125000"));
-    response
-}
-
-let layer = X402Middleware::try_new("https://facilitator.example.com")?
-    .with_price_tag(Eip155Upto::price_tag(
-        address!("0xYourPayToAddress"),
-        USDC::base().amount(1_000_000u64), // up to 1 USDC
-    ));
-let app = Router::new().route("/meter", post(meter).layer(layer));
-```
-
-Handlers opt in by inserting `UptoActualAmount` into the response extensions; the middleware patches `paymentRequirements.amount` before forwarding the settle request. Buyers sign with `Eip155UptoClient` (shares the Permit2 auto-approve plumbing with `Eip155ExactClient`).
-
-> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`.
-> Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
-
 ## Settlement Modes
 
-`X402Middleware` supports three settlement strategies, configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402Layer.html#method.with_settlement_mode):
+Configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402Layer.html#method.with_settlement_mode) after `with_price_tag`.
 
 ### Sequential (default)
 
@@ -185,24 +159,41 @@ sequenceDiagram
 | **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | ✅ Included | Latency-sensitive endpoints |
 | **Background** | verify + handler | Settlement errors are non-fatal (logged) | ❌ Not attached | SSE / LLM streaming responses |
 
-> For full manual control over settlement timing, use the composable [`Paygate`](https://docs.rs/r402-http/latest/r402_http/server/struct.Paygate.html) API directly with `verify_only()` + `VerifiedPayment::settle()`.
+> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`. Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
+
+## `upto`
+
+EVM `upto` (Permit2 witness: verify = max, settle = actual ≤ max) and Solana `upto` (escrow). `Eip155Upto::price_tag(pay_to, asset)` takes two arguments (the max amount). Handlers opt in with `UptoActualAmount` on Sequential responses.
+
+## Wire
+
+| Item | Contract |
+| --- | --- |
+| Version | `x402Version: 2` |
+| 402 challenge | `Payment-Required` (base64, Title-Case) |
+| Retry | `Payment-Signature` |
+| Receipt | `Payment-Response` |
+| JSON | camelCase, `deny_unknown_fields` |
+
+| Situation | Status |
+| --- | --- |
+| Unpaid / verify fail / settle fail / malformed header | 402 |
+| Permit2 allowance | 412 |
+| Incompatible mode / missing scheme | 500 |
+| Facilitator transport | 502 |
+| Success | 200 |
 
 ## Design
 
-- **Chains** — EVM (EIP-155), Solana, Tron, Casper, NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar
-- **Schemes** — **`exact`** (all chains) + **`upto`** (usage-based, EVM)
-- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 (Casper); NEP-141 / NEP-366 (NEAR); TEP-74 / W5R1 (TON); XRP / RLUSD Payment (XRPL); HBAR / HTS (Hedera); ASA (Algorand); FA (Aptos); SEND (Keeta); SEP-41 (Stellar)
-- **Lifecycle hooks** — `FacilitatorHooks` (verify/settle) + `ClientHooks` (payment creation)
-- **Async model** — zero `async_trait` in core — RPITIT / `Pin<Box<dyn Future>>`
-- **Facilitator trait** — unified, dyn-compatible `Box<dyn Facilitator>` across schemes
-- **Wire format** — V2-only server (CAIP-2 chain IDs, `Payment-Signature` header)
-- **Settlement errors** — failed settle returns 402 with structured error
+- **Chains** — EVM (EIP-155), SVM (Solana), NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar, Concordium. Tron is experimental / not an x402 protocol mechanism. Casper is extra / not an x402 protocol mechanism.
+- **Schemes** — `exact` (all chains) + `upto` (EVM Permit2 witness, Solana escrow)
+- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 (Casper); NEP-141 / NEP-366 (NEAR); TEP-74 / W5R1 (TON); XRP / RLUSD Payment (XRPL); HBAR / HTS (Hedera); ASA (Algorand); FA (Aptos); SEND (Keeta); SEP-41 (Stellar); CCD / PLT (Concordium)
+- **Wire** — V2-only (CAIP-2 chain IDs, `Payment-*` headers)
 - **Smart wallets** — EIP-6492 (counterfactual) + EIP-1271 (deployed) + ERC-2098 (compact)
-- **Strict linting** — Clippy `pedantic` + `nursery` + `correctness` (deny)
 
 ## Crates
 
-See **[`crates/README.md`](crates/README.md)** for the full crate table, chain matrix, dependency graph, and feature flag reference.
+See **[`crates/README.md`](crates/README.md)** for the crate table, chain matrix, and feature flags.
 
 ## Acknowledgments
 

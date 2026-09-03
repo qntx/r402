@@ -1,12 +1,12 @@
 //! Off-chain verification for batch-settlement request payloads.
 
-use alloy_primitives::U256;
-use r402_core::error::VerificationError;
-use r402_core::scheme::BatchSettlementScheme;
+use r402_protocol::error::VerificationError;
+use r402_protocol::scheme::BatchSettlementScheme;
 
 use super::channel::{channel_id_binding_error, withdraw_delay_valid};
+use super::errors::INVALID_PAYLOAD_TYPE;
+use super::payload::{BatchSettlementPayload, v2};
 use super::store::ChannelStore;
-use super::types::{BatchSettlementPayload, v2};
 use super::voucher::verify_voucher_signature;
 use crate::chain::TokenAmount;
 
@@ -30,7 +30,7 @@ pub fn verify_offchain(
     if requirements.scheme != BatchSettlementScheme {
         return Err(VerificationError::UnsupportedScheme);
     }
-    if payload.accepted.scheme.to_string() != "batch-settlement" {
+    if payload.accepted.scheme != BatchSettlementScheme {
         return Err(VerificationError::AcceptedRequirementsMismatch);
     }
     if payload.accepted.network != requirements.network {
@@ -48,8 +48,12 @@ pub fn verify_offchain(
     }
 
     let body = &payload.payload;
-    let config = body.channel_config();
-    let voucher = body.voucher();
+    let Some(config) = body.channel_config() else {
+        return Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE));
+    };
+    let Some(voucher) = body.voucher() else {
+        return Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE));
+    };
 
     if let Some(err) = channel_id_binding_error(config, voucher.channel_id, chain_id) {
         return Err(VerificationError::InvalidFormat(err.into()));
@@ -81,6 +85,9 @@ pub fn verify_offchain(
         BatchSettlementPayload::Deposit { .. } => Err(VerificationError::InvalidFormat(
             "batch-settlement deposit settle requires on-chain deposit (not implemented on request path; use voucher after external funding)".into(),
         )),
+        BatchSettlementPayload::Refund { .. } => Err(VerificationError::InvalidFormat(
+            "batch-settlement refund settle requires on-chain refund (not implemented on request path)".into(),
+        )),
         BatchSettlementPayload::Voucher { .. } => {
             let needed = state.charged_cumulative.0.saturating_add(request_amount.0);
             if voucher.max_claimable_amount.0 < needed {
@@ -90,14 +97,8 @@ pub fn verify_offchain(
             }
             Ok(request_amount)
         }
-        BatchSettlementPayload::Refund { amount, .. } => {
-            // Zero-charge voucher: max should equal charged cumulative.
-            if voucher.max_claimable_amount.0 != state.charged_cumulative.0 {
-                return Err(VerificationError::InvalidFormat(
-                    "refund voucher maxClaimableAmount must equal charged cumulative".into(),
-                ));
-            }
-            Ok(amount.unwrap_or(TokenAmount::from(U256::ZERO)))
+        BatchSettlementPayload::Claim { .. } | BatchSettlementPayload::Settle { .. } => {
+            Err(VerificationError::from_wire(INVALID_PAYLOAD_TYPE))
         }
     }
 }

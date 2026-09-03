@@ -1,16 +1,16 @@
 //! Facilitator settlement for the TON exact scheme.
 
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse};
+use r402_facilitator::{Duplicate, SettlementCache};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse};
 use serde_json::Value;
 
 use super::verify::verify_request_json;
 use crate::chain::TvmRelayRequest;
 use crate::chain::rpc::TvmRpc;
 use crate::exact::error::{ERR_EXACT_TVM_DUPLICATE_SETTLEMENT, ERR_EXACT_TVM_TRANSACTION_FAILED};
-use crate::exact::settlement_batcher::{QueuedSettlement, SettlementBatcher};
+use crate::exact::facilitator::batcher::{QueuedSettlement, SettlementBatcher};
 
 /// Settles a verified TON payment through the Highload V3 batcher.
 pub async fn settle_request<R>(
@@ -63,7 +63,7 @@ where
 
     if result.success {
         SettleResponse::Success {
-            payer,
+            payer: Some(payer),
             transaction: result.transaction.unwrap_or_default().into(),
             network: network.into(),
             amount: request
@@ -72,6 +72,7 @@ where
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         }
     } else {
@@ -102,6 +103,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

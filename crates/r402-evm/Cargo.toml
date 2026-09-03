@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "EIP-155 (EVM) chain support for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "ethereum", "evm", "eip-3009"]
 categories = [
     "api-bindings",
@@ -22,13 +21,22 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
-
-client = ["dep:alloy-signer", "dep:alloy-signer-local", "dep:alloy-sol-types", "dep:rand"]
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = [
+    "dep:alloy-consensus",
+    "dep:alloy-eips",
+    "dep:alloy-network",
+    "dep:alloy-signer",
+    "dep:alloy-signer-local",
+    "dep:alloy-sol-types",
+    "dep:rand",
+]
 client-provider = ["client", "dep:alloy-provider", "dep:alloy-rpc-types-eth"]
-server = []
+server = ["dep:r402-server"]
 facilitator = [
+    "dep:alloy-consensus",
     "dep:alloy-contract",
+    "dep:alloy-eips",
     "dep:alloy-network",
     "dep:alloy-provider",
     "dep:alloy-rpc-client",
@@ -40,10 +48,11 @@ facilitator = [
     "dep:alloy-transport-http",
     "dep:async-trait",
     "dep:dashmap",
+    "dep:r402-facilitator",
+    "dep:r402-extensions",
     "dep:tokio",
     "dep:tower",
     "dep:url",
-    "r402-core/cache",
 ]
 full = ["telemetry", "client", "client-provider", "server", "facilitator"]
 
@@ -51,12 +60,15 @@ full = ["telemetry", "client", "client-provider", "server", "facilitator"]
 alloy-primitives = { workspace = true }
 alloy-sol-types = { workspace = true, optional = true }
 compact_str = { workspace = true }
-r402-core = { workspace = true }
+r402-client = { workspace = true }
+r402-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
+alloy-consensus = { workspace = true, optional = true }
 alloy-contract = { workspace = true, optional = true }
+alloy-eips = { workspace = true, optional = true }
 alloy-network = { workspace = true, optional = true }
 alloy-provider = { workspace = true, optional = true }
 alloy-rpc-client = { workspace = true, optional = true }
@@ -67,6 +79,11 @@ alloy-transport = { workspace = true, optional = true }
 alloy-transport-http = { workspace = true, optional = true }
 async-trait = { workspace = true, optional = true }
 dashmap = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-extensions = { workspace = true, optional = true, default-features = false, features = [
+    "ext-builder-code",
+] }
+r402-server = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
@@ -75,10 +92,37 @@ tracing-core = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-consensus = { workspace = true }
+alloy-eips = { workspace = true }
+alloy-network = { workspace = true }
 alloy-provider = { workspace = true }
+alloy-rpc-types-eth = { workspace = true }
+alloy-signer-local = { workspace = true }
+alloy-sol-types = { workspace = true }
 alloy-transport-http = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time"] }
 url = { workspace = true }
+wiremock = { workspace = true }
+
+[[test]]
+name = "exact"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "upto"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "auth_capture"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "batch_settlement"
+required-features = ["client", "server", "facilitator"]
+
+[[test]]
+name = "onchain_deployment"
+required-features = ["client", "server", "facilitator"]
 
 [lints]
 workspace = true

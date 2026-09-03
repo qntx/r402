@@ -27,7 +27,7 @@
 //! - **EIP-6492 signatures**: Detected by the 32-byte magic suffix and validated via
 //!   the universal EIP-6492 validator contract before settlement.
 
-use r402_core::scheme::SchemeId;
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "server")]
 pub mod server;
@@ -38,8 +38,13 @@ pub mod facilitator;
 #[cfg(feature = "client")]
 pub mod client;
 
-pub mod types;
-pub use types::*;
+#[cfg(feature = "client")]
+pub use client::{Eip155ExactClient, Eip155ExactClientBuilder};
+#[cfg(feature = "facilitator")]
+pub use facilitator::Eip155ExactFacilitator;
+
+pub mod payload;
+pub use payload::*;
 
 /// EIP-155 exact payment scheme identifier.
 ///

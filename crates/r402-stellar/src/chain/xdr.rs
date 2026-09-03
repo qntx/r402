@@ -13,8 +13,14 @@ use stellar_xdr::{
     TransactionV1Envelope, Uint256, WriteXdr,
 };
 
-use crate::TRANSFER_FUNCTION;
-use crate::network_id;
+use super::TRANSFER_FUNCTION;
+
+/// SHA-256 of the network passphrase (Stellar network id).
+#[must_use]
+pub fn network_id(passphrase: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(passphrase.as_bytes()).into()
+}
 
 /// Errors while encoding or decoding Stellar XDR.
 #[derive(Debug, thiserror::Error)]

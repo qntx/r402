@@ -5,14 +5,14 @@ use std::str::FromStr;
 
 use base64::Engine;
 use hedera::{AccountId, AnyTransaction, PrivateKey, TransferTransaction};
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 
+use super::account::HederaChainReference;
 use super::rpc::{
     HederaAccountResolution, HederaMirrorClient, HederaMirrorError, HederaPreflightResult,
     HederaSignatureResult, preflight_transfer, resolve_account, verify_payer_signature,
 };
 use super::tx::create_hedera_client;
-use super::types::HederaChainReference;
 
 /// A fee-payer account this facilitator controls.
 #[derive(Clone)]

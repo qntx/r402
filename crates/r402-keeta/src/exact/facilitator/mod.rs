@@ -10,17 +10,16 @@ use std::sync::Arc;
 
 use compact_str::CompactString;
 pub use queue::{QueueError, SettlementQueue};
-use r402_core::cache::SettlementCache;
-use r402_core::chain::ChainProvider;
-use r402_core::error::FacilitatorError;
-use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::scheme::{SchemeBuilder, SchemeId};
-use r402_core::wire;
+use r402_facilitator::{Facilitator, SettlementCache};
+use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainProvider;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
 pub use settle::settle_request;
 pub use verify::{decode_block, verify_request_json};
-
-#[cfg(test)]
-mod tests;
 
 use crate::chain::KeetaChainProvider;
 use crate::exact::{ExactScheme, KeetaExact};
@@ -54,6 +53,29 @@ impl<P> KeetaExactFacilitator<P> {
     }
 }
 
+impl KeetaExactFacilitator<KeetaChainProvider> {
+    /// Constructs a facilitator from a chain provider.
+    ///
+    /// Builds a per-fee-payer [`SettlementQueue`] on the provider's network.
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: KeetaChainProvider) -> Result<Self, FacilitatorError> {
+        let accounts = provider
+            .fee_payers()
+            .iter()
+            .map(|payer| Arc::clone(payer.account()))
+            .collect();
+        let queue = SettlementQueue::new(accounts, provider.chain_reference().client_network());
+        Ok(Self::new(provider, queue))
+    }
+}
+
 impl<P> std::fmt::Debug for KeetaExactFacilitator<P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("KeetaExactFacilitator")
@@ -62,42 +84,12 @@ impl<P> std::fmt::Debug for KeetaExactFacilitator<P> {
     }
 }
 
-impl SchemeBuilder<KeetaChainProvider> for KeetaExact {
-    fn build(
-        &self,
-        provider: KeetaChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        let _ = config;
-        let accounts = provider
-            .fee_payers()
-            .iter()
-            .map(|payer| Arc::clone(payer.account()))
-            .collect();
-        let queue = SettlementQueue::new(accounts, provider.chain_reference().client_network());
-        Ok(Box::new(KeetaExactFacilitator::new(provider, queue)))
-    }
-}
-
-impl SchemeBuilder<&KeetaChainProvider> for KeetaExact {
-    fn build(
-        &self,
-        provider: &KeetaChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        SchemeBuilder::<KeetaChainProvider>::build(self, provider.clone(), config)
-    }
-}
-
 impl Facilitator for KeetaExactFacilitator<KeetaChainProvider> {
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(name = "r402_keeta::exact::verify", skip_all)
     )]
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
         Ok(verify_request_json(&self.provider, &self.provider.fee_payer_ids(), &json).await)
     }
@@ -106,10 +98,7 @@ impl Facilitator for KeetaExactFacilitator<KeetaChainProvider> {
         feature = "telemetry",
         tracing::instrument(name = "r402_keeta::exact::settle", skip_all)
     )]
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let fee_payer_ids = self.provider.fee_payer_ids();
         Ok(settle_request(
@@ -124,10 +113,10 @@ impl Facilitator for KeetaExactFacilitator<KeetaChainProvider> {
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             ExactScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -140,7 +129,7 @@ impl Facilitator for KeetaExactFacilitator<KeetaChainProvider> {
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

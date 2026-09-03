@@ -7,42 +7,19 @@ use std::collections::HashMap;
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_core::cache::SettlementCache;
-use r402_core::chain::ChainProvider;
-use r402_core::error::FacilitatorError;
-use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::scheme::{SchemeBuilder, SchemeId};
-use r402_core::wire;
-use serde::Deserialize;
+use r402_facilitator::{Facilitator, SettlementCache};
+use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainProvider;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
 pub use settle::settle_request;
 pub use verify::verify_request_json;
 
-#[cfg(test)]
-mod tests;
-
 use crate::chain::{AptosChainProvider, AptosProviderError, AptosSimulationResult};
 use crate::exact::{AptosExact, AptosExtra, ExactScheme};
-
-/// Optional JSON config for [`AptosExact`] [`SchemeBuilder`].
-#[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AptosExactFacilitatorConfig {
-    /// Whether `/supported` advertises `extra.feePayer`. Defaults to `true`.
-    #[serde(default = "default_sponsor")]
-    pub sponsor_transactions: bool,
-}
-
-const fn default_sponsor() -> bool {
-    true
-}
-
-impl Default for AptosExactFacilitatorConfig {
-    fn default() -> Self {
-        Self {
-            sponsor_transactions: true,
-        }
-    }
-}
 
 /// Operations the exact facilitator needs from a chain provider.
 pub trait AptosFacilitatorOps: ChainProvider + Send + Sync {
@@ -120,6 +97,26 @@ pub struct AptosExactFacilitator<P> {
 }
 
 impl<P> AptosExactFacilitator<P> {
+    /// Constructs a facilitator from a chain provider.
+    ///
+    /// Copies [`AptosFacilitatorOps::sponsor_transactions`] and uses a default
+    /// [`SettlementCache`].
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: P) -> Result<Self, FacilitatorError>
+    where
+        P: AptosFacilitatorOps,
+    {
+        let sponsor = provider.sponsor_transactions();
+        Ok(Self::new(provider, sponsor))
+    }
+
     /// Creates a facilitator with the default in-memory settlement cache.
     pub fn new(provider: P, sponsor_transactions: bool) -> Self {
         Self::with_settlement_cache(provider, sponsor_transactions, SettlementCache::new())
@@ -147,32 +144,6 @@ impl<P> std::fmt::Debug for AptosExactFacilitator<P> {
     }
 }
 
-impl SchemeBuilder<AptosChainProvider> for AptosExact {
-    fn build(
-        &self,
-        provider: AptosChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        let sponsor = match config {
-            None => provider.sponsor_transactions(),
-            Some(value) => {
-                serde_json::from_value::<AptosExactFacilitatorConfig>(value)?.sponsor_transactions
-            }
-        };
-        Ok(Box::new(AptosExactFacilitator::new(provider, sponsor)))
-    }
-}
-
-impl SchemeBuilder<&AptosChainProvider> for AptosExact {
-    fn build(
-        &self,
-        provider: &AptosChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        SchemeBuilder::<AptosChainProvider>::build(self, provider.clone(), config)
-    }
-}
-
 impl<P> Facilitator for AptosExactFacilitator<P>
 where
     P: AptosFacilitatorOps + ChainProvider,
@@ -181,10 +152,7 @@ where
         feature = "telemetry",
         tracing::instrument(name = "r402_aptos::exact::verify", skip_all)
     )]
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
         Ok(verify_request_json(&self.provider, &json).await)
     }
@@ -193,17 +161,14 @@ where
         feature = "telemetry",
         tracing::instrument(name = "r402_aptos::exact::settle", skip_all)
     )]
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         Ok(settle_request(&self.provider, &self.settlement_cache, &json).await)
     }
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
         let extra = if self.sponsor_transactions {
             self.provider
@@ -220,12 +185,8 @@ where
             None
         };
         let kinds = vec![
-            wire::SupportedPaymentKind::new(
-                wire::V2.into(),
-                ExactScheme.to_string(),
-                chain_id.to_string(),
-            )
-            .with_optional_extra(extra),
+            SupportedPaymentKind::new(V2.into(), ExactScheme.to_string(), chain_id.to_string())
+                .with_optional_extra(extra),
         ];
         let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::with_capacity(1);
         let _ = signers.insert(
@@ -236,7 +197,7 @@ where
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

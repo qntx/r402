@@ -1,14 +1,9 @@
-//! Error types for the Casper "exact" payment scheme.
-//!
-//! This module centralises the error types used across the exact scheme's
-//! client, server, and facilitator components, and maps them onto the
-//! chain-agnostic [`VerificationError`] taxonomy so HTTP transports emit
-//! spec-compliant error reasons.
+//! Error types for the Casper exact scheme.
 
-use r402_core::error::VerificationError;
+use r402_protocol::error::VerificationError;
 
 use crate::chain::CasperChainReferenceFormatError;
-use crate::motes::MotesParseError;
+use crate::chain::motes::MotesParseError;
 
 /// Errors specific to Casper exact scheme operations.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,9 +21,7 @@ pub enum CasperExactError {
         /// Network declared by the seller's requirements.
         requirements: String,
     },
-    /// `paymentPayload.accepted` does not satisfy `paymentRequirements`
-    /// (`scheme` / `network` / `amount` / `asset` / `payTo` /
-    /// `maxTimeoutSeconds` / extra subset).
+    /// `paymentPayload.accepted` does not satisfy `paymentRequirements`.
     #[error("accepted requirements do not match payment requirements")]
     AcceptedRequirementsMismatch,
     /// The network is not a supported Casper chain.
@@ -129,7 +122,7 @@ impl From<CasperExactError> for VerificationError {
 
 #[cfg(test)]
 mod tests {
-    use r402_core::error::{AsPaymentProblem, ErrorReason};
+    use r402_protocol::error::{AsPaymentProblem, ErrorReason};
 
     use super::*;
 

@@ -3,11 +3,11 @@
 use base64::Engine;
 use compact_str::CompactString;
 use keetanetwork_block::{Amount, Block, Operation};
-use r402_core::wire::VerifyResponse;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
+use crate::chain::account::is_keeta_network;
 use crate::chain::provider::KeetaPreflight;
-use crate::chain::types::is_keeta_network;
 use crate::exact::error::{KeetaInvalid, invalid};
 
 /// Verifies a raw facilitator verify/settle request JSON.

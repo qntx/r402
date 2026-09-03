@@ -1,56 +1,32 @@
 //! Client-side payment signing for the EIP-155 "upto" scheme.
 //!
-//! [`Eip155UptoClient`] produces Permit2 `PermitWitnessTransferFrom`
-//! signatures authorising **up to** the amount declared in the server's
-//! price tag. The facilitator later settles for any amount in `[0, max]`.
-//!
-//! # Permit2 auto-approve
-//!
-//! The upto scheme shares Permit2 plumbing with exact, so the same
-//! [`Permit2Approver`] trait powers both: attach one via
-//! [`Eip155UptoClientBuilder::approver`] (or
-//! [`provider`](Eip155UptoClientBuilder::provider) behind the
-//! `client-provider` feature) to enable hands-off `approve(Permit2, MAX)`
-//! before the first signature.
+//! Produces Permit2 `PermitWitnessTransferFrom` signatures authorising **up to**
+//! the amount declared in the server's price tag.
 
 pub mod eip2612;
 mod signing;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use alloy_primitives::U256;
 pub use eip2612::{Eip2612SigningParams, sign_eip2612_permit};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::{
-    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
-};
-use r402_core::wire::{Base64Bytes, PaymentRequired, ResourceInfo};
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::error::ClientError;
+use r402_protocol::network::ChainId;
+use r402_protocol::payment::{Base64Bytes, Extensions, PaymentRequired, ResourceInfo};
+use r402_protocol::scheme::SchemeId;
 pub use signing::{Permit2UptoSigningParams, sign_permit2_upto_authorization};
 
 use crate::chain::Eip155ChainReference;
+#[cfg(feature = "client-provider")]
+use crate::permit2::BuiltinPermit2Approver;
 use crate::permit2::{PERMIT2_ADDRESS, Permit2Approver};
 use crate::signer::SignerLike;
-use crate::upto::{Eip155Upto, types};
+use crate::upto::{Eip155Upto, payload};
 
 /// Client for signing EIP-155 upto scheme payments (Permit2 only).
-///
-/// # Construction
-///
-/// - [`Eip155UptoClient::new`] — minimal client with no Permit2 allowance
-///   management; the buyer MUST have pre-approved Permit2 for the token.
-/// - [`Eip155UptoClient::builder`] — fluent builder for advanced
-///   configuration including Permit2 auto-approve.
-///
-/// # Example
-///
-/// ```ignore
-/// use r402_evm::Eip155UptoClient;
-///
-/// let client = Eip155UptoClient::new(signer);
-/// let candidates = client.accept(&payment_required_response);
-/// let payload = candidates[0].sign().await?;
-/// ```
 pub struct Eip155UptoClient<S> {
     signer: S,
     approver: Option<Arc<dyn Permit2Approver>>,
@@ -68,9 +44,7 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155UptoClient<S> {
 }
 
 impl<S> Eip155UptoClient<S> {
-    /// Creates a new EIP-155 upto scheme client with the given signer.
-    ///
-    /// For automatic Permit2 approval, use [`builder`](Self::builder) instead.
+    /// Creates a client with no Permit2 allowance management.
     pub const fn new(signer: S) -> Self {
         Self {
             signer,
@@ -79,7 +53,7 @@ impl<S> Eip155UptoClient<S> {
         }
     }
 
-    /// Returns a builder for advanced client configuration.
+    /// Returns a builder for Permit2 auto-approve configuration.
     pub fn builder(signer: S) -> Eip155UptoClientBuilder<S> {
         Eip155UptoClientBuilder {
             signer,
@@ -114,33 +88,21 @@ impl<S> Eip155UptoClientBuilder<S> {
         self
     }
 
-    /// Controls whether the client sends `approve` transactions automatically
-    /// when the ERC-20 allowance on Permit2 is insufficient.
-    ///
-    /// - `true` (default when using the builder) — auto-approve, seamless UX.
-    /// - `false` — return [`ClientError::PreConditionFailed`] with a
-    ///   descriptive message, letting callers orchestrate approval themselves.
-    ///
-    /// Has no effect without an [`approver`](Self::approver) attached.
+    /// Controls whether the client sends `approve` when allowance is insufficient.
     #[must_use]
     pub const fn auto_approve(mut self, auto_approve: bool) -> Self {
         self.auto_approve = auto_approve;
         self
     }
 
-    /// Attaches an Alloy [`Provider`](alloy_provider::Provider) as a Permit2
-    /// approver in one step — the batteries-included auto-approve path.
-    ///
-    /// Requires the `client-provider` feature.
+    /// Attaches an Alloy provider as a Permit2 approver.
     #[cfg(feature = "client-provider")]
     #[must_use]
     pub fn provider<P: alloy_provider::Provider + Send + Sync + 'static>(
         self,
         provider: P,
     ) -> Self {
-        // Re-use the exact scheme's built-in approver; the shape is identical
-        // (check_permit2_allowance + approve_permit2).
-        self.approver(crate::permit2::BuiltinPermit2Approver { provider })
+        self.approver(BuiltinPermit2Approver { provider })
     }
 
     /// Builds the configured [`Eip155UptoClient`].
@@ -163,8 +125,6 @@ impl<S> SchemeId for Eip155UptoClient<S> {
     }
 }
 
-impl<S> Sealed for Eip155UptoClient<S> {}
-
 impl<S> SchemeClient for Eip155UptoClient<S>
 where
     S: SignerLike + Clone + Send + Sync + 'static,
@@ -174,7 +134,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_reference = Eip155ChainReference::try_from(&requirements.network).ok()?;
                 let candidate = PaymentCandidate {
                     chain_id: requirements.network.clone(),
@@ -190,6 +150,7 @@ where
                         requirements,
                         approver: self.approver.clone(),
                         auto_approve: self.auto_approve,
+                        advertised: payment_required.extensions.clone(),
                     }),
                 };
                 Some(candidate)
@@ -206,17 +167,16 @@ struct UptoPayloadSigner<S> {
     signer: S,
     resource_info: Option<ResourceInfo>,
     chain_reference: Eip155ChainReference,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     approver: Option<Arc<dyn Permit2Approver>>,
     auto_approve: bool,
+    advertised: Extensions,
 }
 
 impl<S> UptoPayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    /// Ensures the signer's ERC-20 allowance on Permit2 covers the declared
-    /// authorised maximum. Returns early when no approver is configured.
     async fn ensure_permit2_allowance(&self) -> Result<(), ClientError> {
         let Some(approver) = &self.approver else {
             return Ok(());
@@ -246,13 +206,11 @@ impl<S> PaymentCandidateSigner for UptoPayloadSigner<S>
 where
     S: Sync + SignerLike,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
-            self.ensure_permit2_allowance().await?;
-
-            // Spec §2: the buyer MUST embed `paymentRequirements.extra.facilitatorAddress`
-            // into `witness.facilitator`. Reject early when the server failed
-            // to publish one — we cannot produce a settle-able signature.
+            // Buyer MUST embed extra.facilitatorAddress into witness.facilitator.
             let extra = self.requirements.extra.as_ref().ok_or_else(|| {
                 ClientError::PreConditionFailed(
                     "upto requires paymentRequirements.extra.facilitatorAddress; \
@@ -269,9 +227,49 @@ where
                 max_timeout_seconds: self.requirements.max_timeout_seconds,
             };
             let upto_payload = sign_permit2_upto_authorization(&self.signer, &params).await?;
+            let name = extra.name.as_str();
+            let version = extra.version.as_str();
+            let required: U256 = upto_payload.permit2_authorization.permitted.amount.into();
+            let deadline: U256 = upto_payload.permit2_authorization.deadline.into();
 
-            let payload = types::v2::PaymentPayload::new(self.requirements.clone(), upto_payload)
-                .with_optional_resource(self.resource_info.clone());
+            let mut payload =
+                payload::v2::PaymentPayload::new(self.requirements.clone(), upto_payload)
+                    .with_optional_resource(self.resource_info.clone());
+            if let Some(permit) = eip2612::try_sign_eip2612_permit_extension(
+                &self.signer,
+                self.approver.as_ref(),
+                &self.advertised,
+                name,
+                version,
+                self.chain_reference.inner(),
+                self.requirements.asset.0,
+                required,
+                deadline,
+            )
+            .await?
+            {
+                payload.extensions.insert(
+                    crate::eip2612::EIP2612_GAS_SPONSORING_KEY,
+                    permit.to_extension_entry()?,
+                );
+            } else if let Some(info) = eip2612::try_sign_erc20_approval_extension(
+                &self.signer,
+                self.approver.as_ref(),
+                &self.advertised,
+                self.chain_reference.inner(),
+                self.requirements.asset.0,
+                required,
+            )
+            .await?
+            {
+                payload.extensions.insert(
+                    crate::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY,
+                    info.to_extension_entry()?,
+                );
+            }
+            if payload.extensions.is_empty() {
+                self.ensure_permit2_allowance().await?;
+            }
             let json = serde_json::to_vec(&payload)?;
             let b64 = Base64Bytes::encode(&json);
 

@@ -6,8 +6,8 @@
 //! - [`XrplChainProvider`] — facilitator JSON-RPC (feature `facilitator`)
 
 /// Core XRPL chain types (addresses, references, token deployments).
-pub mod types;
-pub use types::*;
+pub mod account;
+pub use account::*;
 
 /// Binary codec, signing, and decimal helpers.
 #[cfg(any(feature = "client", feature = "facilitator"))]

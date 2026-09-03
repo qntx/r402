@@ -2,9 +2,9 @@
 
 use compact_str::CompactString;
 use keetanetwork_block::Hashable;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_facilitator::{Duplicate, SettlementCache};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
 use super::queue::{QueueError, SettlementQueue};
@@ -28,9 +28,14 @@ pub async fn settle_request<P: KeetaPreflight>(
 
     let verified = verify_request_json(preflight, fee_payer_ids, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, None, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                None,
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -71,7 +76,7 @@ pub async fn settle_request<P: KeetaPreflight>(
 
     match queue.enqueue(block).await {
         Ok(transaction) => SettleResponse::Success {
-            payer: payer.unwrap_or_default(),
+            payer,
             transaction: transaction.into(),
             network: network.into(),
             amount: request
@@ -80,6 +85,7 @@ pub async fn settle_request<P: KeetaPreflight>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
         Err(QueueError::Duplicate) => settle_failure(
@@ -110,6 +116,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

@@ -1,10 +1,4 @@
 //! Configuration for the Casper exact scheme facilitator client.
-//!
-//! Casper settlement is performed by a facilitator that holds a funded
-//! Casper account and a node connection. r402 talks to such a facilitator
-//! over the standard x402 `/verify`, `/settle`, and `/supported` endpoints,
-//! so this crate ships a configuration type rather than a signing stack —
-//! keeping the dependency footprint in line with the other chain crates.
 
 use std::time::Duration;
 
@@ -12,13 +6,14 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 /// Hosted Casper x402 facilitator operated by the Casper Association.
-///
-/// Endpoint documentation: <https://docs.cspr.cloud>
 pub const DEFAULT_FACILITATOR_URL: &str = "https://x402-facilitator.cspr.cloud";
 
 /// Environment variable consulted by [`CasperFacilitatorConfig::from_env`]
 /// to override [`DEFAULT_FACILITATOR_URL`].
 pub const FACILITATOR_URL_ENV: &str = "R402_CASPER_FACILITATOR_URL";
+
+/// Public JSON-RPC endpoint documentation for the Casper facilitator stack.
+pub const CASPER_DOCS_URL: &str = "https://docs.cspr.cloud";
 
 /// Errors produced while building a facilitator configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -36,18 +31,6 @@ pub enum CasperFacilitatorConfigError {
 }
 
 /// Connection settings for a remote Casper x402 facilitator.
-///
-/// # Examples
-///
-/// ```
-/// use r402_casper::exact::facilitator::CasperFacilitatorConfig;
-///
-/// let config = CasperFacilitatorConfig::default();
-/// assert_eq!(
-///     config.verify_url().as_str(),
-///     "https://x402-facilitator.cspr.cloud/verify"
-/// );
-/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CasperFacilitatorConfig {
@@ -58,10 +41,6 @@ pub struct CasperFacilitatorConfig {
     #[serde(default = "default_timeout", with = "duration_secs")]
     pub timeout: Duration,
     /// Whether to run local payload validation before dispatching a request.
-    ///
-    /// Enabled by default: rejecting a malformed payment locally saves a
-    /// network round trip and produces a precise, typed error instead of an
-    /// opaque remote failure.
     #[serde(default = "default_true")]
     pub validate_locally: bool,
 }
@@ -117,9 +96,7 @@ impl CasperFacilitatorConfig {
     /// # Errors
     ///
     /// Returns [`CasperFacilitatorConfigError::InvalidUrl`] when the
-    /// environment variable is set to something that is not a valid URL —
-    /// a silent fallback would send payments somewhere the operator did not
-    /// intend.
+    /// environment variable is set to something that is not a valid URL.
     pub fn from_env() -> Result<Self, CasperFacilitatorConfigError> {
         match std::env::var(FACILITATOR_URL_ENV) {
             Ok(value) if !value.trim().is_empty() => Self::new(value.trim()),
@@ -163,8 +140,6 @@ impl CasperFacilitatorConfig {
     fn endpoint(&self, path: &str) -> Url {
         let mut url = self.base_url.clone();
         if let Ok(mut segments) = url.path_segments_mut() {
-            // A base URL of `https://host/x402/` must yield
-            // `https://host/x402/verify`, not `https://host/verify`.
             segments.pop_if_empty().push(path);
         }
         url
@@ -191,10 +166,6 @@ mod duration_secs {
     }
 }
 
-#[allow(
-    clippy::indexing_slicing,
-    reason = "tests index serde_json values; panic-on-missing-key is the desired assertion behaviour"
-)]
 #[cfg(test)]
 mod tests {
     use super::*;

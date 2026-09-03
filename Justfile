@@ -1,44 +1,38 @@
-# Justfile for Rust project using Cargo
-#
-# Quality bar matches workspace.lints (rust / rustdoc / clippy) in Cargo.toml:
-#   just all   → fmt + clippy (-D warnings) + rustdoc (-D warnings)
-#   just test  → unit + integration + doctests
+# justfile for Rust project using Cargo
 
-all: fmt clippy-fix doc-check
+default: all
 
-# Build the project with all features enabled in release mode
+all: layout fmt clippy-fix deny test doc-check
+
+layout:
+    bash scripts/check-layout.sh
+
+list:
+    @just --list
+
 build:
     cargo build --workspace --release --all-features
 
-# Check the project for compilation errors without producing binaries
 check:
     cargo check --workspace --all-features
 
-# Update dependencies to their latest compatible versions
 update:
     cargo update
 
-# Run the project with all features enabled in release mode
-run:
-    cargo run --release --all-features
-
-# Run all tests with all features enabled (includes doctests)
 test:
     cargo test --workspace --all-features
 
-# Run benchmarks with all features enabled
 bench:
     cargo bench --all-features
 
-# Run Clippy linter with nightly toolchain (check only, for CI)
-# Uses workspace lints from Cargo.toml
+# Prerequisites: `rustup toolchain install nightly --component clippy`
 clippy:
     cargo +nightly clippy --workspace \
         --all-targets \
         --all-features \
         -- -D warnings
 
-# Run Clippy linter with auto-fix (for development)
+# Prerequisites: `rustup toolchain install nightly --component clippy`
 clippy-fix:
     cargo +nightly clippy --workspace \
         --fix \
@@ -48,14 +42,27 @@ clippy-fix:
         --allow-staged \
         -- -D warnings
 
-# Format the code using rustfmt with nightly toolchain
+# Nightly rustfmt provides import grouping.
+# Prerequisites: `rustup toolchain install nightly --component rustfmt`
 fmt:
-    cargo +nightly fmt
+    cargo +nightly fmt --all -- \
+        --config unstable_features=true,group_imports=StdExternalCrate,imports_granularity=Module
 
-# Generate documentation for all crates and open it in the browser
+fmt-check:
+    cargo +nightly fmt --all -- \
+        --check \
+        --config unstable_features=true,group_imports=StdExternalCrate,imports_granularity=Module
+
+# Prerequisites: `rustup toolchain install nightly`
 doc:
     cargo +nightly doc --workspace --all-features --no-deps --open
 
-# Rustdoc with warnings denied (missing docs, broken links, rustdoc::* lints)
 doc-check:
     RUSTDOCFLAGS="-D warnings" cargo +nightly doc --workspace --all-features --no-deps
+
+# Prerequisites: `cargo install cargo-deny`
+deny:
+    cargo deny check
+
+clean:
+    cargo clean

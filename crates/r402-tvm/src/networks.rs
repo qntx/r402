@@ -1,10 +1,14 @@
 //! Well-known TON network definitions and token deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
 use crate::chain::{TvmAddress, TvmChainReference, TvmTokenDeployment};
 use crate::{DEFAULT_TOKEN_DECIMALS, USDT_MAINNET_MINTER, USDT_TESTNET_MINTER};
@@ -64,6 +68,7 @@ pub fn usdt_tvm_deployment(chain: TvmChainReference) -> Option<&'static TvmToken
 }
 
 /// Reverse lookup by jetton minter and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_tvm_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "tvm" {
@@ -139,8 +144,11 @@ mod tests {
         assert_eq!(TVM_NETWORKS.len(), 2);
         assert_eq!(TVM_NETWORKS.first().map(|n| n.reference), Some("-239"));
         assert_eq!(TVM_NETWORKS.get(1).map(|n| n.reference), Some("-3"));
-        let network: ChainId = "tvm:-239".parse().unwrap();
-        let info = find_default_tvm_asset(USDT_MAINNET_MINTER, &network).unwrap();
-        assert_eq!(info.symbol, "USDT");
+        #[cfg(feature = "client")]
+        {
+            let network: ChainId = "tvm:-239".parse().unwrap();
+            let info = find_default_tvm_asset(USDT_MAINNET_MINTER, &network).unwrap();
+            assert_eq!(info.symbol, "USDT");
+        }
     }
 }

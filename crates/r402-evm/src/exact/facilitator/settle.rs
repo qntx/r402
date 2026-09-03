@@ -7,18 +7,22 @@ use alloy_contract::SolCallBuilder;
 use alloy_primitives::{Address, B256, Bytes, Signature, TxHash, U256};
 use alloy_provider::bindings::IMulticall3;
 use alloy_provider::{MULTICALL3_ADDRESS, MulticallItem, Provider};
-use alloy_sol_types::{Eip712Domain, SolCall};
+use alloy_sol_types::{Eip712Domain, SolCall, SolEvent};
 use alloy_transport::TransportError;
+use r402_protocol::error::VerificationError;
 #[cfg(feature = "telemetry")]
 use tracing_core::Level;
 
 use super::contract::{IEIP3009, IX402Permit2Proxy};
+use super::eip6492::{FACTORY_NOT_ALLOWED, deny_undeployed_factory};
 use super::signature::SignedMessage;
 use super::{Eip3009Payment, Permit2Payment};
+use crate::chain::contracts::IERC20;
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+use crate::eip2612::Eip2612SignedPermit;
 use crate::error::Eip155ExactError;
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
-use crate::signature::StructuredSignature;
+use crate::signature::{ClassifiedSignature, classify_with_code};
 
 /// Prepared `transferWithAuthorization` call using a raw bytes signature.
 pub(super) struct TransferWithAuthorization0Call<P>(
@@ -127,6 +131,10 @@ impl<'a, P: Provider> TransferWithAuthorization1Call<&'a P> {
     missing_debug_implementations,
     reason = "generic type params may not impl Debug"
 )]
+#[allow(
+    dead_code,
+    reason = "fields are read by transfer_span! when telemetry is on"
+)]
 pub(super) struct TransferWithAuthorizationCall<P, TCall, TSignature> {
     /// The prepared call builder that can be `.call()`ed or `.send()`ed.
     pub tx: SolCallBuilder<P, TCall>,
@@ -159,6 +167,7 @@ pub(super) struct TransferWithAuthorizationCall<P, TCall, TSignature> {
 /// Panics if the authorization deadline timestamp overflows `i64`.
 #[allow(
     clippy::cognitive_complexity,
+    clippy::too_many_lines,
     reason = "settlement logic is inherently complex"
 )]
 pub(super) async fn settle_payment<P, E>(
@@ -166,6 +175,8 @@ pub(super) async fn settle_payment<P, E>(
     contract: &IEIP3009::IEIP3009Instance<&P::Inner>,
     payment: &Eip3009Payment,
     eip712_domain: &Eip712Domain,
+    eip6492_allowed_factories: &[Address],
+    data_suffix: &[u8],
 ) -> Result<TxHash, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
@@ -173,14 +184,32 @@ where
 {
     let signed_message = SignedMessage::extract(payment, eip712_domain)?;
     let payer = payment.from;
-    let receipt = match signed_message.signature {
-        StructuredSignature::EIP6492 {
+    let classified = classify_with_code(
+        provider.inner(),
+        payer,
+        signed_message.signature,
+        &signed_message.hash,
+    )
+    .await?;
+    let expected = ExpectedTransfer {
+        token: *contract.address(),
+        from: payment.from,
+        to: payment.to,
+        value: payment.value,
+    };
+    let receipt = match classified {
+        ClassifiedSignature::EIP6492 {
             factory,
             factory_calldata,
             inner,
             original: _,
         } => {
             let is_deployed = is_contract_deployed(provider.inner(), &payer).await?;
+            if !is_deployed && deny_undeployed_factory(factory, &[], eip6492_allowed_factories) {
+                #[cfg(feature = "telemetry")]
+                tracing::warn!(factory = %factory, "eip6492_factory_not_allowed");
+                return Err(VerificationError::from_wire(FACTORY_NOT_ALLOWED).into());
+            }
             let transfer_call = TransferWithAuthorization0Call::new(contract, payment, inner);
             let transfer_call = transfer_call.0;
             if is_deployed {
@@ -191,7 +220,8 @@ where
                         calldata: transfer_call.tx.calldata().clone(),
                         confirmations: 1,
                         from: None,
-                    },
+                    }
+                    .with_data_suffix(data_suffix),
                 );
                 traced!(
                     tx_fut,
@@ -222,7 +252,8 @@ where
                         calldata: aggregate_call.abi_encode().into(),
                         confirmations: 1,
                         from: None,
-                    },
+                    }
+                    .with_data_suffix(data_suffix),
                 );
                 traced!(
                     tx_fut,
@@ -234,7 +265,7 @@ where
                 )?
             }
         }
-        StructuredSignature::EIP1271(eip1271_signature) => {
+        ClassifiedSignature::EIP1271(eip1271_signature) => {
             let transfer_call =
                 TransferWithAuthorization0Call::new(contract, payment, eip1271_signature);
             let transfer_call = transfer_call.0;
@@ -245,7 +276,8 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
-                },
+                }
+                .with_data_suffix(data_suffix),
             );
             traced!(
                 tx_fut,
@@ -256,7 +288,7 @@ where
                 )
             )?
         }
-        StructuredSignature::Eoa(signature) => {
+        ClassifiedSignature::Eoa(signature) => {
             let transfer_call = TransferWithAuthorization1Call::new(contract, payment, signature);
             let transfer_call = transfer_call.0;
             let tx_fut = Eip155MetaTransactionProvider::send_transaction(
@@ -266,7 +298,8 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
-                },
+                }
+                .with_data_suffix(data_suffix),
             );
             traced!(
                 tx_fut,
@@ -278,10 +311,31 @@ where
             )?
         }
     };
-    check_receipt(&receipt, "transferWithAuthorization")
+    check_receipt(&receipt, "transferWithAuthorization", Some(expected))
 }
 
-/// Settles a verified Permit2 payment by calling `x402ExactPermit2Proxy.settle()`.
+/// Lowers a wire [`Eip2612SignedPermit`] into the ABI struct for `settleWithPermit`.
+pub(super) fn build_eip2612_abi(
+    eip2612: &Eip2612SignedPermit,
+) -> Result<IX402Permit2Proxy::EIP2612Permit, VerificationError> {
+    let (r, s, v) = eip2612.split_signature().ok_or_else(|| {
+        VerificationError::InvalidFormat(
+            "eip2612GasSponsoring signature is not the canonical 65-byte (r,s,v) form".into(),
+        )
+    })?;
+    Ok(IX402Permit2Proxy::EIP2612Permit {
+        value: eip2612.amount.into(),
+        deadline: eip2612.deadline.into(),
+        r,
+        s,
+        v,
+    })
+}
+
+/// Settles a verified Permit2 payment via `settle` or `settleWithPermit`.
+///
+/// When `eip2612GasSponsoring` is attached, the proxy atomically calls
+/// `token.permit` then Permit2 transfer.
 ///
 /// # Errors
 ///
@@ -293,6 +347,7 @@ where
 pub(super) async fn settle_permit2_payment<P, E>(
     provider: &P,
     payment: &Permit2Payment,
+    data_suffix: &[u8],
 ) -> Result<TxHash, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
@@ -314,8 +369,22 @@ where
         validAfter: payment.valid_after,
     };
 
-    let settle_call = proxy.settle(permit, payment.from, witness, payment.signature.clone());
-    let calldata = settle_call.calldata().clone();
+    let calldata = match payment.eip2612.as_ref() {
+        Some(eip2612) => proxy
+            .settleWithPermit(
+                build_eip2612_abi(eip2612)?,
+                permit,
+                payment.from,
+                witness,
+                payment.signature.clone(),
+            )
+            .calldata()
+            .clone(),
+        None => proxy
+            .settle(permit, payment.from, witness, payment.signature.clone())
+            .calldata()
+            .clone(),
+    };
 
     let tx_fut = Eip155MetaTransactionProvider::send_transaction(
         provider,
@@ -324,7 +393,8 @@ where
             calldata,
             confirmations: 1,
             from: None,
-        },
+        }
+        .with_data_suffix(data_suffix),
     );
     let receipt = traced!(
         tx_fut,
@@ -337,26 +407,83 @@ where
         )
     )?;
 
-    check_receipt(&receipt, "Permit2 settle")
+    let expected = ExpectedTransfer {
+        token: payment.token,
+        from: payment.from,
+        to: payment.to,
+        value: payment.amount,
+    };
+    check_receipt(&receipt, "Permit2 settle", Some(expected))
 }
 
-/// Checks the transaction receipt status and returns the hash on success.
-///
-/// Emits a telemetry event indicating whether the settlement succeeded or failed.
+/// Expected ERC-20 Transfer to match against a success receipt.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct ExpectedTransfer {
+    pub token: Address,
+    pub from: Address,
+    pub to: Address,
+    pub value: U256,
+}
+
+/// Checks the transaction receipt status and, when logs are present, the Transfer event.
+#[allow(clippy::missing_const_for_fn, reason = "telemetry branch is not const")]
 fn check_receipt(
     receipt: &alloy_rpc_types_eth::TransactionReceipt,
+    #[cfg_attr(
+        not(feature = "telemetry"),
+        allow(unused_variables, reason = "label is telemetry-only")
+    )]
     label: &str,
+    expected: Option<ExpectedTransfer>,
 ) -> Result<TxHash, Eip155ExactError> {
-    if receipt.status() {
-        #[cfg(feature = "telemetry")]
-        tracing::event!(Level::INFO, status = "ok", tx = %receipt.transaction_hash, "{label} succeeded");
-        Ok(receipt.transaction_hash)
-    } else {
+    if !receipt.status() {
         #[cfg(feature = "telemetry")]
         tracing::event!(Level::WARN, status = "failed", tx = %receipt.transaction_hash, "{label} failed");
-        Err(Eip155ExactError::TransactionReverted(
+        return Err(Eip155ExactError::TransactionReverted(
             receipt.transaction_hash,
-        ))
+        ));
+    }
+    if let Some(expected) = expected {
+        let logs = receipt.logs();
+        if !transfer_event_matches(logs, expected) {
+            #[cfg(feature = "telemetry")]
+            tracing::event!(Level::WARN, status = "mismatch", tx = %receipt.transaction_hash, "{label} transfer event mismatch");
+            return Err(Eip155ExactError::TransferEventMismatch(
+                receipt.transaction_hash,
+            ));
+        }
+    }
+    #[cfg(feature = "telemetry")]
+    tracing::event!(Level::INFO, status = "ok", tx = %receipt.transaction_hash, "{label} succeeded");
+    Ok(receipt.transaction_hash)
+}
+
+fn transfer_event_matches(logs: &[alloy_rpc_types_eth::Log], expected: ExpectedTransfer) -> bool {
+    logs.iter().any(|log| {
+        if log.address() != expected.token {
+            return false;
+        }
+        IERC20::Transfer::decode_log(&log.inner).is_ok_and(|ev| {
+            ev.from == expected.from && ev.to == expected.to && ev.value == expected.value
+        })
+    })
+}
+
+pub(super) async fn reconcile_pending_receipt<P: Provider>(
+    provider: &P,
+    hash: TxHash,
+    expected: ExpectedTransfer,
+) -> Result<TxHash, Eip155ExactError> {
+    match provider.get_transaction_receipt(hash).await {
+        Ok(Some(receipt)) => check_receipt(&receipt, "pending reconcile", Some(expected)),
+        Ok(None) => Err(Eip155ExactError::ReceiptWait {
+            hash,
+            source: alloy_provider::PendingTransactionError::FailedToRegister,
+        }),
+        Err(e) => Err(Eip155ExactError::ReceiptWait {
+            hash,
+            source: e.into(),
+        }),
     }
 }
 
@@ -374,4 +501,89 @@ async fn is_contract_deployed<P: Provider>(
         )
     )?;
     Ok(!bytes.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::{B256, Log as PrimLog, LogData};
+
+    use super::*;
+
+    fn transfer_log(
+        token: Address,
+        from: Address,
+        to: Address,
+        value: U256,
+    ) -> alloy_rpc_types_eth::Log {
+        let topics = vec![
+            IERC20::Transfer::SIGNATURE_HASH,
+            B256::from(from.into_word()),
+            B256::from(to.into_word()),
+        ];
+        let inner = PrimLog {
+            address: token,
+            data: LogData::new_unchecked(topics, value.to_be_bytes::<32>().into()),
+        };
+        alloy_rpc_types_eth::Log {
+            inner,
+            block_hash: None,
+            block_number: None,
+            block_timestamp: None,
+            transaction_hash: None,
+            transaction_index: None,
+            log_index: None,
+            removed: false,
+        }
+    }
+
+    #[test]
+    fn empty_logs_fail_transfer_match() {
+        let expected = ExpectedTransfer {
+            token: Address::repeat_byte(0xAA),
+            from: Address::repeat_byte(0x11),
+            to: Address::repeat_byte(0x22),
+            value: U256::from(1_000_000_u64),
+        };
+        assert!(!transfer_event_matches(&[], expected));
+    }
+
+    #[test]
+    fn matching_transfer_log_passes() {
+        let token = Address::repeat_byte(0xAA);
+        let from = Address::repeat_byte(0x11);
+        let to = Address::repeat_byte(0x22);
+        let value = U256::from(1_000_000_u64);
+        let logs = vec![transfer_log(token, from, to, value)];
+        let expected = ExpectedTransfer {
+            token,
+            from,
+            to,
+            value,
+        };
+        assert!(transfer_event_matches(&logs, expected));
+    }
+
+    #[test]
+    fn settle_with_permit_selector_differs_from_settle() {
+        use alloy_sol_types::SolCall;
+        assert_ne!(
+            IX402Permit2Proxy::settleCall::SELECTOR,
+            IX402Permit2Proxy::settleWithPermitCall::SELECTOR
+        );
+    }
+
+    #[test]
+    fn wrong_value_fails_transfer_match() {
+        let token = Address::repeat_byte(0xAA);
+        let from = Address::repeat_byte(0x11);
+        let to = Address::repeat_byte(0x22);
+        let logs = vec![transfer_log(token, from, to, U256::from(1_u64))];
+        let expected = ExpectedTransfer {
+            token,
+            from,
+            to,
+            value: U256::from(1_000_000_u64),
+        };
+        assert!(!transfer_event_matches(&logs, expected));
+    }
 }

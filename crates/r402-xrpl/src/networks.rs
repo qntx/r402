@@ -1,11 +1,15 @@
 //! Well-known XRPL network definitions and token deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
 use compact_str::CompactString;
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::network::ChainId;
+use r402_protocol::network::NetworkInfo;
 
 use crate::chain::{
     XrplAsset, XrplChainReference, XrplClassicAddress, XrplIssuedCurrency, XrplTokenDeployment,
@@ -98,6 +102,7 @@ pub fn rlusd_deployment(chain: XrplChainReference) -> Option<&'static XrplTokenD
 }
 
 /// Reverse lookup by RLUSD currency hex and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_xrpl_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "xrpl" {
@@ -198,10 +203,13 @@ mod tests {
             }
             XrplAsset::Xrp => panic!("expected IOU"),
         }
-        let network: ChainId = "xrpl:0".parse().unwrap();
-        let info = find_default_xrpl_asset(RLUSD_CURRENCY, &network).unwrap();
-        assert_eq!(info.symbol, "RLUSD");
-        assert_eq!(info.decimals, u32::from(RLUSD_DECIMALS));
-        assert!(find_default_xrpl_asset("XRP", &network).is_none());
+        #[cfg(feature = "client")]
+        {
+            let network: ChainId = "xrpl:0".parse().unwrap();
+            let info = find_default_xrpl_asset(RLUSD_CURRENCY, &network).unwrap();
+            assert_eq!(info.symbol, "RLUSD");
+            assert_eq!(info.decimals, u32::from(RLUSD_DECIMALS));
+            assert!(find_default_xrpl_asset("XRP", &network).is_none());
+        }
     }
 }

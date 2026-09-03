@@ -2,10 +2,10 @@
 
 use std::fmt::{Debug, Formatter};
 
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 
+use super::account::XrplChainReference;
 use super::rpc::{XrplJsonRpc, XrplRpc, XrplRpcError};
-use super::types::XrplChainReference;
 use crate::DEFAULT_MAX_FEE_DROPS;
 
 /// Provider for interacting with an XRPL network as a facilitator.

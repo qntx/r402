@@ -4,13 +4,7 @@
 //! of the required asset. The facilitator is the fee payer: it verifies the
 //! payload, adds its signature, and submits.
 
-use r402_core::scheme::SchemeId;
-
-#[cfg(feature = "server")]
-pub mod server;
-
-#[cfg(feature = "facilitator")]
-pub mod facilitator;
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -18,8 +12,16 @@ pub mod client;
 pub mod error;
 pub use error::*;
 
-pub mod types;
-pub use types::*;
+#[cfg(feature = "facilitator")]
+pub mod facilitator;
+#[cfg(feature = "facilitator")]
+pub use facilitator::HederaExactFacilitator;
+
+pub mod payload;
+pub use payload::*;
+
+#[cfg(feature = "server")]
+pub mod server;
 
 /// Hedera exact scheme identifier.
 ///

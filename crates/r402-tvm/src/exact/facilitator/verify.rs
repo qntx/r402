@@ -10,16 +10,20 @@
 )]
 
 use compact_str::CompactString;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
-use crate::chain::rpc::TvmRpc;
-use crate::chain::{TvmAddress, TvmRelayRequest};
-use crate::codecs::common::cell_hash_hex;
-use crate::codecs::w5::{
+use crate::chain::codec::cell::cell_hash_hex;
+use crate::chain::codec::w5::{
     ParsedTvmSettlement, StateInitCells, address_from_state_init, is_allowed_client_code,
     parse_exact_tvm_payload, parse_w5_init_data,
 };
+use crate::chain::rpc::{
+    TvmRpc, message_body_hash_matches, normalize_address_or_null, parse_trace_transactions,
+    trace_transaction_compute_fees, trace_transaction_fwd_fees, trace_transaction_hash_to_hex,
+    trace_transaction_storage_fees, transaction_succeeded,
+};
+use crate::chain::{TvmAddress, TvmRelayRequest};
 use crate::exact::error::{
     ERR_EXACT_TVM_ACCOUNT_FROZEN, ERR_EXACT_TVM_FACILITATOR_INSUFFICIENT_BALANCE,
     ERR_EXACT_TVM_INSUFFICIENT_BALANCE, ERR_EXACT_TVM_INVALID_AMOUNT, ERR_EXACT_TVM_INVALID_ASSET,
@@ -33,12 +37,7 @@ use crate::exact::error::{
     ERR_EXACT_TVM_UNSUPPORTED_SCHEME, ERR_EXACT_TVM_UNSUPPORTED_VERSION,
     ERR_EXACT_TVM_VALID_UNTIL_TOO_FAR, TvmInvalid, invalid,
 };
-use crate::exact::types::TvmExtra;
-use crate::trace::{
-    message_body_hash_matches, normalize_address_or_null, parse_trace_transactions,
-    trace_transaction_compute_fees, trace_transaction_fwd_fees, trace_transaction_hash_to_hex,
-    trace_transaction_storage_fees, transaction_succeeded,
-};
+use crate::exact::payload::TvmExtra;
 use crate::{
     DEFAULT_JETTON_WALLET_MESSAGE_AMOUNT, DEFAULT_MAX_TIMEOUT_SECONDS,
     DEFAULT_TVM_OUTER_GAS_BUFFER, MIN_FACILITATOR_TON_BALANCE, W5R1_CODE_HASH,
@@ -410,7 +409,7 @@ pub fn verify_finalized_trace_settlement(
         .unwrap_or_default();
     let mut payer_out_hash = None;
     let expected_b64 =
-        crate::codecs::common::cell_hash_base64_from_ton_hash(&settlement.transfer.body_hash);
+        crate::chain::codec::cell::cell_hash_base64_from_ton_hash(&settlement.transfer.body_hash);
     for message in &out_msgs {
         if normalize_address_or_null(message.get("destination")).as_ref()
             != Some(&settlement.transfer.source_wallet)

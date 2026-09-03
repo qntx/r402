@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "HTTP transport layer for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "http", "axum", "reqwest"]
 categories = [
     "web-programming::http-server",
@@ -25,54 +24,109 @@ default = []
 client = [
     "dep:async-trait",
     "dep:http",
-    "dep:r402-core",
+    "dep:r402-client",
+    "dep:r402-protocol",
     "dep:reqwest",
     "dep:reqwest-middleware",
     "dep:serde_json",
 ]
 server = [
     "dep:axum-core",
+    "dep:compact_str",
     "dep:http",
-    "dep:httpdate",
-    "dep:r402-core",
-    "dep:reqwest",
-    "dep:serde",
+    "dep:r402-facilitator",
+    "dep:r402-protocol",
+    "dep:r402-server",
     "dep:serde_json",
     "dep:thiserror",
-    "dep:tokio",
     "dep:tower",
     "dep:url",
 ]
-telemetry = ["dep:r402-core", "dep:tracing", "r402-core/telemetry"]
-# Backend-agnostic metrics emission via the `metrics` facade. See the
-# `r402_core::metrics` module for the catalogue of metric names. Operators
-# install a recorder (e.g. `metrics-exporter-prometheus`) at startup; with
-# no recorder the macros expand to no-ops.
-metrics = ["dep:r402-core", "dep:metrics", "r402-core/metrics"]
-full = ["client", "server", "telemetry", "metrics"]
+siwx = ["server", "dep:r402-extensions", "r402-extensions/siwx"]
 
 [dependencies]
-compact_str = { workspace = true }
-r402-core = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-
 async-trait = { workspace = true, optional = true }
 axum-core = { workspace = true, optional = true }
+compact_str = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
-httpdate = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-extensions = { workspace = true, optional = true, default-features = false }
+r402-facilitator = { workspace = true, optional = true, features = ["http-client"] }
+r402-protocol = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 reqwest-middleware = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-metrics = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["macros", "time"], optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
 tower = { workspace = true, optional = true }
-tracing = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-network = { workspace = true }
+alloy-primitives = { workspace = true }
+alloy-provider = { workspace = true }
+alloy-signer = { workspace = true }
+alloy-signer-local = { workspace = true }
+axum = "0.8"
+axum-core = { workspace = true }
+compact_str = { workspace = true }
+http = { workspace = true }
+r402-client = { workspace = true }
+r402-evm = { workspace = true, features = ["client", "server", "facilitator"] }
+r402-facilitator = { workspace = true, features = ["http-client"] }
+r402-protocol = { workspace = true }
+r402-server = { workspace = true }
+reqwest = { workspace = true }
+reqwest-middleware = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
+tower = { workspace = true }
+url = { workspace = true }
 wiremock = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[[test]]
+name = "buyer"
+required-features = ["client"]
+
+[[test]]
+name = "sequential"
+required-features = ["server"]
+
+[[test]]
+name = "concurrent"
+required-features = ["server"]
+
+[[test]]
+name = "background"
+required-features = ["server"]
+
+[[test]]
+name = "headers"
+required-features = ["server"]
+
+[[test]]
+name = "boundary"
+required-features = ["server"]
+
+[[test]]
+name = "overrides"
+required-features = ["server"]
+
+[[test]]
+name = "upfront"
+required-features = ["server"]
+
+[[test]]
+name = "build"
+required-features = ["server"]
+
+[[test]]
+name = "siwx"
+required-features = ["server", "siwx"]
+
+[[test]]
+name = "e2e_exact_evm"
+required-features = ["server", "client"]
 
 [lints]
 workspace = true

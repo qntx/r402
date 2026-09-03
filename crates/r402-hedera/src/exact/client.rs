@@ -1,19 +1,17 @@
 //! Client-side payment signing for the Hedera `"exact"` scheme.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 
 use hedera::{AccountId, PrivateKey};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::error::ClientError;
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ChainId, PaymentRequired, ResourceInfo};
 
 use crate::chain::tx::create_partially_signed_transfer;
-use crate::exact::types;
-use crate::exact::{ExactHederaPayload, HederaExact};
+use crate::exact::{ExactHederaPayload, HederaExact, payload};
 
 /// Local Hedera signer wrapping an account id and private key.
 #[derive(Clone)]
@@ -147,8 +145,6 @@ impl<S> SchemeId for HederaExactClient<S> {
     }
 }
 
-impl<S> r402_core::scheme::Sealed for HederaExactClient<S> {}
-
 impl<S> SchemeClient for HederaExactClient<S>
 where
     S: AsRef<HederaSigner> + Send + Sync + Clone + 'static,
@@ -158,7 +154,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "hedera" {
                     return None;
@@ -194,7 +190,7 @@ impl AsRef<Self> for HederaSigner {
 
 struct V2PayloadSigner<S> {
     signer: S,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -202,7 +198,9 @@ impl<S> PaymentCandidateSigner for V2PayloadSigner<S>
 where
     S: AsRef<HederaSigner> + Send + Sync,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let extra = self.requirements.extra.as_ref().ok_or_else(|| {
                 ClientError::Signing(
@@ -217,7 +215,7 @@ where
                 extra.fee_payer.as_str(),
                 &self.requirements.network.to_string(),
             )?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactHederaPayload { transaction: b64 },
             )

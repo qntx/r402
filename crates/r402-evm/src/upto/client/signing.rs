@@ -2,10 +2,9 @@
 
 use alloy_primitives::{Address, U256};
 use alloy_sol_types::{SolStruct, eip712_domain};
-use r402_core::error::ClientError;
-use r402_core::wire::UnixTimestamp;
-use rand::RngExt;
-use rand::rng;
+use r402_protocol::error::ClientError;
+use r402_protocol::payment::UnixTimestamp;
+use rand::{RngExt, rng};
 
 use crate::chain::TokenAmount;
 use crate::permit2::{PERMIT2_ADDRESS, Permit2TokenPermissions};
@@ -25,26 +24,15 @@ pub struct Permit2UptoSigningParams {
     pub asset_address: Address,
     /// Recipient address for the transfer.
     pub pay_to: Address,
-    /// Facilitator address authorised in the witness. The on-chain proxy
-    /// enforces `msg.sender == witness.facilitator`, so this MUST equal an
-    /// address listed in the facilitator's `/supported` response and MUST
-    /// be the same address that ultimately submits the settle transaction.
+    /// Facilitator address authorised in the witness.
     pub facilitator_address: Address,
-    /// **Maximum** amount the buyer authorises. The facilitator may settle
-    /// for any value in `[0, max_amount]`.
+    /// Maximum amount the buyer authorises. Facilitator may settle any value in `[0, max]`.
     pub max_amount: U256,
     /// Maximum time in seconds the authorization remains valid.
     pub max_timeout_seconds: u64,
 }
 
 /// Signs a Permit2 `PermitWitnessTransferFrom` for the upto scheme using EIP-712.
-///
-/// Constructs the Permit2 domain (`name = "Permit2"`,
-/// `verifyingContract = PERMIT2_ADDRESS`), embeds the facilitator address
-/// into `witness.facilitator` (the on-chain proxy reverts with
-/// `UnauthorizedFacilitator` when the settle caller doesn't match), and
-/// returns a payload ready to serialise into the `PAYMENT-SIGNATURE`
-/// header.
 ///
 /// # Errors
 ///
@@ -60,13 +48,10 @@ pub async fn sign_permit2_upto_authorization<S: SignerLike + Sync>(
     };
 
     let now = UnixTimestamp::now();
-    // `validAfter` is shifted 10 minutes into the past to absorb mild clock
-    // skew between the buyer's host and the facilitator chain node
-    // (matches the official TypeScript / Go reference clients).
+    // Shift `validAfter` 10 minutes into the past to absorb mild clock skew.
     let valid_after_secs = now.as_secs().saturating_sub(10 * 60);
     let deadline_secs = now.as_secs() + params.max_timeout_seconds;
 
-    // Permit2 nonce is a fresh uint256; we draw 32 random bytes.
     let nonce_bytes: [u8; 32] = rng().random();
     let nonce = U256::from_be_bytes(nonce_bytes);
 
@@ -142,7 +127,6 @@ mod tests {
         assert_eq!(auth.permitted.amount.0, params.max_amount);
         assert_eq!(auth.witness.to, params.pay_to);
         assert_eq!(auth.witness.facilitator, facilitator);
-        // 65-byte EOA signature.
         assert_eq!(payload.signature.len(), 65);
     }
 

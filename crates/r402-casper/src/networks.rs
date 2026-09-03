@@ -1,21 +1,19 @@
-//! Well-known Casper network definitions and token deployments.
-//!
-//! This module provides static network metadata and the wCSPR (CEP-18)
-//! deployments r402 ships with.
+//! Well-known Casper network definitions and wCSPR deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
+use crate::chain::motes::CSPR_DECIMALS;
 use crate::chain::{CasperChainReference, CasperTokenDeployment, ContractPackageHash};
-use crate::motes::CSPR_DECIMALS;
 
 /// Well-known Casper networks with their names and CAIP-2 identifiers.
-///
-/// Casper uses its chain name as the CAIP-2 reference, so the `name` and
-/// `reference` fields coincide.
 pub static CASPER_NETWORKS: &[NetworkInfo] = &[
     NetworkInfo {
         name: "casper",
@@ -42,10 +40,6 @@ const WCSPR_TESTNET_PACKAGE: &str =
     "3d80df21ba4ee4d66a2a1f60c32570dd5685e4b279f6538162a5fd1314847c1e";
 
 /// Well-known wCSPR deployments on Casper networks.
-///
-/// Only networks with an x402-enabled CEP-18 deployment appear here. Chains
-/// without a built-in entry are still fully usable — construct a
-/// [`CasperTokenDeployment`] directly with the package hash you operate.
 #[allow(
     clippy::expect_used,
     reason = "hardcoded package hashes are validated at crate build time by the unit tests"
@@ -79,6 +73,7 @@ pub fn wcspr_casper_deployment(
 }
 
 /// Reverse lookup by CEP-18 package hash and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_casper_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "casper" {
@@ -97,16 +92,7 @@ pub fn find_default_casper_asset(asset: &str, network: &ChainId) -> Option<Defau
         })
 }
 
-/// Ergonomic accessors for wCSPR token deployments on well-known Casper
-/// chains.
-///
-/// Combine with [`CasperTokenDeployment::amount`] for a fluent pricing API:
-///
-/// ```ignore
-/// use r402_casper::{CasperExact, WCSPR};
-///
-/// let tag = CasperExact::price_tag(pay_to, WCSPR::casper_test().amount(1_000_000_000));
-/// ```
+/// Ergonomic accessors for wCSPR token deployments on well-known Casper chains.
 #[derive(Debug, Clone, Copy)]
 #[allow(
     clippy::upper_case_acronyms,
@@ -121,8 +107,6 @@ pub struct WCSPR;
 )]
 impl WCSPR {
     /// Looks up a wCSPR deployment by chain reference.
-    ///
-    /// Returns `None` if the chain is not in the built-in deployment table.
     #[must_use]
     pub fn on(chain: CasperChainReference) -> Option<&'static CasperTokenDeployment> {
         wcspr_casper_deployment(chain)
@@ -145,6 +129,7 @@ impl WCSPR {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chain::CasperChainReference;
 
     #[test]
     fn network_table_matches_caip2_ids() {
@@ -178,6 +163,11 @@ mod tests {
         assert_eq!(deployment.name, WCSPR_NAME);
         assert_eq!(deployment.version, WCSPR_VERSION);
         assert_eq!(deployment.address.to_string(), WCSPR_TESTNET_PACKAGE);
+    }
+
+    #[cfg(feature = "client")]
+    #[test]
+    fn find_default_asset_resolves_testnet_wcspr() {
         let network: ChainId = "casper:casper-test".parse().unwrap();
         let info = find_default_casper_asset(WCSPR_TESTNET_PACKAGE, &network).unwrap();
         assert_eq!(info.symbol, "wCSPR");

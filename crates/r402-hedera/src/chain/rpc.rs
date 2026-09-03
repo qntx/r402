@@ -6,7 +6,7 @@ use base64::Engine;
 use hedera::{AnyTransaction, PublicKey};
 use serde::Deserialize;
 
-use super::types::is_hbar_asset;
+use super::account::is_hbar_asset;
 
 /// Errors from Mirror Node REST reads.
 #[derive(Debug, thiserror::Error)]
@@ -131,14 +131,25 @@ impl Debug for HederaMirrorClient {
     }
 }
 
+fn is_loopback_url(url: &str) -> bool {
+    url.contains("://127.0.0.1")
+        || url.contains("://localhost")
+        || url.contains("://[::1]")
+        || url.contains("://::1")
+}
+
 impl HederaMirrorClient {
     /// Connects to the given Mirror Node base URL (no trailing slash).
     #[must_use]
     pub fn connect(base_url: impl Into<String>) -> Self {
-        Self {
-            http: reqwest::Client::new(),
-            base_url: trim_slash(base_url.into()),
+        let base_url = trim_slash(base_url.into());
+        let mut builder = reqwest::Client::builder();
+        if is_loopback_url(&base_url) {
+            // HTTP_PROXY must not capture loopback mock servers or local Mirror.
+            builder = builder.no_proxy();
         }
+        let http = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        Self { http, base_url }
     }
 
     /// Fetches `/api/v1/accounts/{id}`.
@@ -384,12 +395,12 @@ pub async fn resolve_account(
     match mirror.account(account_id_or_alias).await {
         Ok(_) => Ok(HederaAccountResolution {
             exists: true,
-            is_alias: !super::types::is_entity_id(account_id_or_alias),
+            is_alias: !super::account::is_entity_id(account_id_or_alias),
         }),
         Err(HederaMirrorError::Http(msg)) if msg.contains("status 404") => {
             Ok(HederaAccountResolution {
                 exists: false,
-                is_alias: !super::types::is_entity_id(account_id_or_alias),
+                is_alias: !super::account::is_entity_id(account_id_or_alias),
             })
         }
         Err(err) => Err(err),

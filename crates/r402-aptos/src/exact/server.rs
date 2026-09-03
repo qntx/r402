@@ -4,15 +4,16 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse, V2};
+use r402_protocol::scheme::ExactScheme;
+use r402_server::{
     PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
     SchemePaymentRequiredContext,
 };
 
 use crate::chain::{AptosAddress, AptosTokenDeployment};
-use crate::exact::{AptosExact, AptosExtra, ExactScheme};
+use crate::exact::{AptosExact, AptosExtra};
 
 fn aptos_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
     static FLOWS: LazyLock<HashMap<String, PaymentFlowConfig>> = LazyLock::new(|| {
@@ -40,7 +41,7 @@ impl SchemeNetworkServer for AptosExact {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | apply_aptos_fee_payer(req, ctx.supported)
@@ -61,9 +62,9 @@ impl AptosExact {
     pub fn price_tag<A: Into<AptosAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<u64, AptosTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -71,14 +72,11 @@ impl AptosExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
-fn apply_aptos_fee_payer(
-    req: &mut wire::PaymentRequirements,
-    capabilities: &wire::SupportedResponse,
-) -> bool {
+fn apply_aptos_fee_payer(req: &mut PaymentRequirements, capabilities: &SupportedResponse) -> bool {
     if req.scheme.as_str() != ExactScheme::VALUE || req.extra.is_some() {
         return false;
     }
@@ -95,12 +93,12 @@ fn apply_aptos_fee_payer(
 }
 
 fn matching_kind_extra<'a>(
-    capabilities: &'a wire::SupportedResponse,
+    capabilities: &'a SupportedResponse,
     scheme: &str,
     network: &str,
 ) -> Option<&'a serde_json::Value> {
     capabilities.kinds.iter().find_map(|kind| {
-        (wire::V2 == kind.x402_version
+        (V2 == kind.x402_version
             && kind.scheme.as_str() == scheme
             && kind.network.as_str() == network)
             .then_some(kind.extra.as_ref())

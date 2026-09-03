@@ -1,9 +1,9 @@
 //! Solidity ABI bindings for the contracts Tron facilitators call into.
 //!
-//! These generate [`alloy_sol_types::SolCall`] encoders/decoders (function
-//! selector + calldata), used to build the `data` field of a TronGrid
-//! `triggersmartcontract` request. This is distinct from the TIP-712
-//! *struct* definitions in [`crate::exact::types`], which are used for
+//! These generate [`alloy_sol_types::SolCall`] encoders/decoders. `TronGrid`
+//! `function_selector` is the textual ABI signature (`SolCall::SIGNATURE`);
+//! `parameter` is hex of `abi_encode_raw`. Distinct from the TIP-712
+//! *struct* definitions in [`crate::exact::payload`], which are used for
 //! typed-data signing rather than calldata encoding.
 
 use alloy_sol_types::sol;

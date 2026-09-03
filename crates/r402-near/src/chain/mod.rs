@@ -6,8 +6,8 @@
 //! - [`NearChainProvider`] — facilitator relayer + JSON-RPC (feature `facilitator`)
 
 /// Core NEAR chain types (addresses, references, token deployments).
-pub mod types;
-pub use types::*;
+pub mod account;
+pub use account::*;
 
 /// NEAR chain provider implementation.
 #[cfg(feature = "facilitator")]

@@ -1,6 +1,7 @@
 //! Facilitator-side NEAR chain provider: relayer keys + JSON-RPC.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::str::FromStr;
 
 use near_crypto::{InMemorySigner, SecretKey, Signer};
@@ -11,13 +12,13 @@ use near_primitives::hash::CryptoHash;
 use near_primitives::transaction::{SignedTransaction, Transaction, TransactionV0};
 use near_primitives::types::{AccountId, BlockReference, Finality};
 use near_primitives::views::{QueryRequest, TxExecutionStatus};
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 
+use super::DEFAULT_MAX_SPONSORED_GAS;
+use super::account::NearChainReference;
 use super::rpc::{
     NearJsonRpc, NearRpc, NearRpcError, NearSettlementOutcome, interpret_settlement_outcome,
 };
-use super::types::NearChainReference;
-use crate::DEFAULT_MAX_SPONSORED_GAS;
 
 /// A relayer account this facilitator controls.
 #[derive(Clone)]

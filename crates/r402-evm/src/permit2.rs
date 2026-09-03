@@ -29,7 +29,12 @@ use alloy_primitives::{Bytes, U256};
 #[cfg(feature = "client")]
 use alloy_sol_types::{SolCall, sol};
 #[cfg(feature = "client")]
-use r402_core::error::ClientError;
+use r402_protocol::error::ClientError;
+
+/// Object-safe future for [`Permit2Approver::estimate_fees_per_gas`].
+#[cfg(feature = "client")]
+type GasSponsoringFeeFut<'a> =
+    Pin<Box<dyn Future<Output = Result<(u128, u128), ClientError>> + Send + 'a>>;
 
 /// Abstraction for on-chain interactions needed by the Permit2 auto-approve flow.
 ///
@@ -58,6 +63,49 @@ pub trait Permit2Approver: Send + Sync {
         token: Address,
         owner: Address,
     ) -> Pin<Box<dyn Future<Output = Result<(), ClientError>> + Send + '_>>;
+
+    /// Whether this approver can read EIP-2612 nonces and tx metadata.
+    ///
+    /// Official `trySign*` no-ops without `readContract`. Default `false`.
+    fn supports_gas_sponsoring_rpc(&self) -> bool {
+        false
+    }
+
+    /// Reads `token.nonces(owner)` for an EIP-2612 permit.
+    fn eip2612_nonce(
+        &self,
+        token: Address,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+        let _ = (token, owner);
+        Box::pin(async {
+            Err(ClientError::PreConditionFailed(
+                "eip2612 nonce read is not supported by this approver".into(),
+            ))
+        })
+    }
+
+    /// Reads `eth_getTransactionCount` for ERC-20 approval gas sponsoring.
+    fn transaction_count(
+        &self,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<u64, ClientError>> + Send + '_>> {
+        let _ = owner;
+        Box::pin(async {
+            Err(ClientError::PreConditionFailed(
+                "transaction count is not supported by this approver".into(),
+            ))
+        })
+    }
+
+    /// Estimates EIP-1559 fees `(max_fee_per_gas, max_priority_fee_per_gas)`.
+    fn estimate_fees_per_gas(&self) -> GasSponsoringFeeFut<'_> {
+        Box::pin(async {
+            Err(ClientError::PreConditionFailed(
+                "fee estimation is not supported by this approver".into(),
+            ))
+        })
+    }
 }
 
 /// Built-in [`Permit2Approver`] backed by an Alloy provider.
@@ -116,6 +164,53 @@ where
             Ok(())
         })
     }
+
+    fn supports_gas_sponsoring_rpc(&self) -> bool {
+        true
+    }
+
+    fn eip2612_nonce(
+        &self,
+        token: Address,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<U256, ClientError>> + Send + '_>> {
+        Box::pin(async move {
+            let call = IEip2612Nonces::noncesCall { owner };
+            let tx = alloy_rpc_types_eth::TransactionRequest::default()
+                .to(token)
+                .input(call.abi_encode().into());
+            let result = self.provider.call(tx).await.map_err(|e| {
+                ClientError::PreConditionFailed(format!("EIP-2612 nonce read failed: {e}"))
+            })?;
+            Ok(U256::from_be_slice(&result))
+        })
+    }
+
+    fn transaction_count(
+        &self,
+        owner: Address,
+    ) -> Pin<Box<dyn Future<Output = Result<u64, ClientError>> + Send + '_>> {
+        Box::pin(async move {
+            self.provider
+                .get_transaction_count(owner)
+                .await
+                .map_err(|e| {
+                    ClientError::PreConditionFailed(format!("transaction count failed: {e}"))
+                })
+        })
+    }
+
+    fn estimate_fees_per_gas(&self) -> GasSponsoringFeeFut<'_> {
+        Box::pin(async move {
+            match self.provider.estimate_eip1559_fees().await {
+                Ok(fees) => Ok((fees.max_fee_per_gas, fees.max_priority_fee_per_gas)),
+                Err(_) => Ok((
+                    crate::erc20_approval::DEFAULT_MAX_FEE_PER_GAS,
+                    crate::erc20_approval::DEFAULT_MAX_PRIORITY_FEE_PER_GAS,
+                )),
+            }
+        })
+    }
 }
 
 #[cfg(feature = "client")]
@@ -125,6 +220,12 @@ sol! {
     interface IPermit2Approval {
         function allowance(address owner, address spender) external view returns (uint256);
         function approve(address spender, uint256 amount) external returns (bool);
+    }
+
+    /// EIP-2612 `nonces(address)` used when signing a gas-sponsored permit.
+    #[allow(missing_docs, reason = "sol! generated interface")]
+    interface IEip2612Nonces {
+        function nonces(address owner) external view returns (uint256);
     }
 }
 

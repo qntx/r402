@@ -1,27 +1,88 @@
-#![cfg_attr(docsrs, feature(doc_cfg))]
-
 //! HTTP transport layer for the x402 payment protocol.
-//!
-//! This crate provides HTTP middleware for both client and server roles
-//! in the x402 payment protocol.
 //!
 //! # Feature Flags
 //!
-//! - `server` — Axum/Tower middleware for payment gating
-//! - `client` — reqwest-middleware for automatic 402 handling
-//! - `telemetry` — Tracing instrumentation
+//! - `client` — reqwest-middleware buyer: 402 → `Payment-Signature` retry
+//! - `server` — Axum layer / Sequential resource-server gate
 
-// `compact_str` is consumed by the server paygate's wire types; silence the
-// linter when the server feature is disabled.
-#[cfg(not(feature = "server"))]
-use compact_str as _;
-#[cfg(test)]
-use tokio as _;
-#[cfg(test)]
-use wiremock as _;
+#![cfg_attr(docsrs, feature(doc_cfg))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::indexing_slicing,
+        clippy::panic,
+        reason = "unit tests panic on assertion failure"
+    )
+)]
+
+#[cfg(any(feature = "client", feature = "server"))]
+pub mod headers;
+
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub mod buyer;
 
 #[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub mod server;
 
 #[cfg(feature = "client")]
-pub mod client;
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use buyer::{WithPayments, X402Client, parse_payment_required, payment_signature_headers};
+#[cfg(any(feature = "client", feature = "server"))]
+pub use headers::{
+    EXTENSION_RESPONSES, PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X,
+    X402_ALLOW_HEADERS, X402_EXPOSED_HEADERS, ensure_expose_headers, merge_private, set_no_store,
+};
+#[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
+pub use server::{SettlementMode, X402Middleware};
+
+#[cfg(test)]
+mod _dev_deps {
+    use alloy_network as _;
+    use alloy_primitives as _;
+    use alloy_provider as _;
+    use alloy_signer as _;
+    use alloy_signer_local as _;
+    use axum as _;
+    #[cfg(not(feature = "server"))]
+    use axum_core as _;
+    #[cfg(not(feature = "server"))]
+    use compact_str as _;
+    #[cfg(not(any(feature = "client", feature = "server")))]
+    use http as _;
+    #[cfg(not(feature = "client"))]
+    use r402_client as _;
+    use r402_evm as _;
+    #[cfg(not(feature = "server"))]
+    use r402_facilitator as _;
+    #[cfg(not(any(feature = "client", feature = "server")))]
+    use r402_protocol as _;
+    #[cfg(not(feature = "server"))]
+    use r402_server as _;
+    #[cfg(not(feature = "client"))]
+    use reqwest as _;
+    #[cfg(not(feature = "client"))]
+    use reqwest_middleware as _;
+    #[cfg(not(any(feature = "client", feature = "server")))]
+    use serde_json as _;
+    use tokio as _;
+    #[cfg(not(feature = "server"))]
+    use tower as _;
+    #[cfg(not(feature = "server"))]
+    use url as _;
+    use wiremock as _;
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn crate_loads() {
+        assert_eq!(
+            env!("CARGO_PKG_NAME"),
+            "r402-http",
+            "package name must match the crate directory"
+        );
+    }
+}

@@ -7,7 +7,6 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 description = "TON (TVM) chain support for the x402 payment protocol."
-readme = "README.md"
 keywords = ["x402", "payment", "ton", "tvm", "usdt"]
 categories = [
     "api-bindings",
@@ -22,16 +21,23 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = []
-telemetry = ["dep:tracing", "dep:tracing-core", "r402-core/telemetry"]
-client = ["dep:ed25519-dalek", "dep:reqwest", "dep:tokio", "dep:url"]
-server = []
-facilitator = [
+telemetry = ["dep:tracing", "dep:tracing-core"]
+client = [
     "dep:ed25519-dalek",
+    "dep:r402-client",
     "dep:rand",
     "dep:reqwest",
     "dep:tokio",
     "dep:url",
-    "r402-core/cache",
+]
+server = ["dep:r402-server"]
+facilitator = [
+    "dep:ed25519-dalek",
+    "dep:r402-facilitator",
+    "dep:rand",
+    "dep:reqwest",
+    "dep:tokio",
+    "dep:url",
 ]
 full = ["telemetry", "client", "server", "facilitator"]
 
@@ -41,7 +47,7 @@ compact_str = { workspace = true }
 hex = { workspace = true }
 num-bigint = "0.4"
 num-traits = "0.2"
-r402-core = { workspace = true }
+r402-protocol = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -49,6 +55,9 @@ thiserror = { workspace = true }
 tonlib-core = { workspace = true }
 
 ed25519-dalek = { workspace = true, optional = true }
+r402-client = { workspace = true, optional = true }
+r402-facilitator = { workspace = true, optional = true }
+r402-server = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true, features = ["sync", "time"] }
@@ -58,8 +67,10 @@ url = { workspace = true, optional = true }
 
 [dev-dependencies]
 ed25519-dalek = { workspace = true }
+r402-facilitator = { workspace = true }
+r402-protocol = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "time"] }
-wiremock = { workspace = true }
 
 [lints]
 workspace = true

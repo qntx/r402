@@ -3,11 +3,11 @@
 //! Client signs ERC-3009 `ReceiveWithAuthorization` or Permit2
 //! `PermitTransferFrom` with a nonce derived from the payer-agnostic
 //! `PaymentInfo` hash. The facilitator verifies off-chain then calls
-//! `AuthCaptureEscrow.authorize` or `.charge`.
+//! `AuthCaptureEscrow.authorize`.
 //!
 //! Spec: `specs/schemes/auth-capture/scheme_auth_capture_evm.md`.
 
-use r402_core::scheme::{AuthCaptureScheme, SchemeId, Sealed};
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "client")]
 pub mod client;
@@ -15,9 +15,9 @@ pub mod client;
 pub mod facilitator;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub mod nonce;
+pub mod payload;
 #[cfg(feature = "server")]
 pub mod server;
-pub mod types;
 #[cfg(any(feature = "facilitator", feature = "client"))]
 pub mod verify;
 
@@ -27,15 +27,10 @@ pub use client::{Eip155AuthCaptureClient, sign_auth_capture};
 pub use facilitator::Eip155AuthCaptureFacilitator;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub use nonce::compute_payer_agnostic_payment_info_hash;
-pub use types::{
-    AUTH_CAPTURE_CLOCK_SKEW_SECS, AUTH_CAPTURE_ESCROW_ADDRESS, AuthCaptureEip3009Authorization,
-    AuthCaptureEip3009Payload, AuthCaptureExtra, AuthCapturePayload,
-    AuthCapturePermit2Authorization, AuthCapturePermit2Payload, EIP3009_TOKEN_COLLECTOR_ADDRESS,
-    PERMIT2_TOKEN_COLLECTOR_ADDRESS, PaymentInfo,
-};
+pub use payload::*;
 
-/// EIP-155 auth-capture scheme marker / blueprint.
-#[derive(Debug, Clone, Copy, Default)]
+/// EIP-155 auth-capture scheme marker.
+#[derive(Debug, Clone, Copy)]
 pub struct Eip155AuthCapture;
 
 impl SchemeId for Eip155AuthCapture {
@@ -47,8 +42,6 @@ impl SchemeId for Eip155AuthCapture {
         AuthCaptureScheme.as_ref()
     }
 }
-
-impl Sealed for Eip155AuthCapture {}
 
 #[cfg(test)]
 mod tests {
@@ -62,36 +55,21 @@ mod tests {
 }
 
 #[cfg(test)]
+#[cfg(feature = "client")]
 mod client_verify_tests {
-    #[cfg(feature = "client")]
     use alloy_primitives::{Address, U256};
-    #[cfg(feature = "client")]
     use alloy_signer_local::PrivateKeySigner;
-    #[cfg(feature = "client")]
-    use r402_core::error::VerificationError;
-    #[cfg(feature = "client")]
-    use r402_core::scheme::AuthCaptureScheme;
-    #[cfg(feature = "client")]
-    use r402_core::wire::PaymentPayload;
+    use r402_protocol::error::VerificationError;
+    use r402_protocol::payment::PaymentPayload;
+    use r402_protocol::scheme::AuthCaptureScheme;
 
-    #[cfg(feature = "client")]
     use super::client::sign_auth_capture;
-    #[cfg(feature = "client")]
-    use super::types::v2;
-    #[cfg(feature = "client")]
-    use super::types::{AuthCaptureExtra, AuthCapturePayload};
-    #[cfg(feature = "client")]
+    use super::payload::{AuthCaptureExtra, AuthCapturePayload, v2};
     use super::verify::verify_offchain;
-    #[cfg(feature = "client")]
     use crate::chain::{ChecksummedAddress, TokenAmount};
 
-    #[cfg(feature = "client")]
-    #[tokio::test]
-    async fn eip3009_sign_then_verify() {
-        let signer = PrivateKeySigner::random();
-        let payer = signer.address();
-        let now = r402_core::wire::UnixTimestamp::now().as_secs();
-        let extra = AuthCaptureExtra {
+    fn extra(now: u64) -> AuthCaptureExtra {
+        AuthCaptureExtra {
             name: "USD Coin".into(),
             version: "2".into(),
             capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
@@ -102,7 +80,33 @@ mod client_verify_tests {
             max_fee_bps: 1000,
             auto_capture: Some(false),
             asset_transfer_method: None,
-        };
+            auth_capture_escrow: None,
+        }
+    }
+
+    fn requirements(
+        extra: AuthCaptureExtra,
+        amount: U256,
+        pay_to: Address,
+        asset: Address,
+    ) -> v2::PaymentRequirements {
+        v2::PaymentRequirements::new(
+            AuthCaptureScheme,
+            "eip155:8453".parse().expect("chain"),
+            TokenAmount::from(amount),
+            ChecksummedAddress(pay_to),
+            ChecksummedAddress(asset),
+            300,
+        )
+        .with_extra(extra)
+    }
+
+    #[tokio::test]
+    async fn eip3009_sign_then_verify() {
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let extra = extra(now);
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);
@@ -111,38 +115,17 @@ mod client_verify_tests {
             .expect("sign");
         assert!(matches!(scheme_payload, AuthCapturePayload::Eip3009(_)));
 
-        let requirements = v2::PaymentRequirements::new(
-            AuthCaptureScheme,
-            "eip155:8453".parse().unwrap(),
-            TokenAmount::from(amount),
-            ChecksummedAddress(pay_to),
-            ChecksummedAddress(asset),
-            300,
-        )
-        .with_extra(extra);
+        let requirements = requirements(extra, amount, pay_to, asset);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
         let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");
         assert_eq!(recovered, payer);
     }
 
-    /// 64-byte signatures are not recovered; reject them.
-    #[cfg(feature = "client")]
     #[tokio::test]
     async fn eip3009_rejects_64_byte_signature() {
         let signer = PrivateKeySigner::random();
-        let now = r402_core::wire::UnixTimestamp::now().as_secs();
-        let extra = AuthCaptureExtra {
-            name: "USD Coin".into(),
-            version: "2".into(),
-            capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
-            capture_deadline: now + 3600,
-            refund_deadline: now + 86400,
-            fee_recipient: ChecksummedAddress(Address::repeat_byte(0x22)),
-            min_fee_bps: 0,
-            max_fee_bps: 1000,
-            auto_capture: Some(false),
-            asset_transfer_method: None,
-        };
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let extra = extra(now);
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);
@@ -153,22 +136,14 @@ mod client_verify_tests {
         let mut p = match scheme_payload {
             AuthCapturePayload::Eip3009(p) => p,
             AuthCapturePayload::Permit2(_) => {
-                unreachable!("sign_auth_capture with default extra is Eip3009")
+                panic!("sign_auth_capture with default extra is Eip3009")
             }
         };
         p.authorization.from = Address::repeat_byte(0xCC);
         p.signature = alloy_primitives::Bytes::from(vec![0u8; 64]);
         let forged = AuthCapturePayload::Eip3009(p);
 
-        let requirements = v2::PaymentRequirements::new(
-            AuthCaptureScheme,
-            "eip155:8453".parse().unwrap(),
-            TokenAmount::from(amount),
-            ChecksummedAddress(pay_to),
-            ChecksummedAddress(asset),
-            300,
-        )
-        .with_extra(extra);
+        let requirements = requirements(extra, amount, pay_to, asset);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
 
         assert!(
@@ -180,24 +155,11 @@ mod client_verify_tests {
         );
     }
 
-    /// Signatures longer than 65 bytes are not recovered; reject them.
-    #[cfg(feature = "client")]
     #[tokio::test]
     async fn eip3009_rejects_66_byte_signature() {
         let signer = PrivateKeySigner::random();
-        let now = r402_core::wire::UnixTimestamp::now().as_secs();
-        let extra = AuthCaptureExtra {
-            name: "USD Coin".into(),
-            version: "2".into(),
-            capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
-            capture_deadline: now + 3600,
-            refund_deadline: now + 86400,
-            fee_recipient: ChecksummedAddress(Address::repeat_byte(0x22)),
-            min_fee_bps: 0,
-            max_fee_bps: 1000,
-            auto_capture: Some(false),
-            asset_transfer_method: None,
-        };
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let extra = extra(now);
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);
@@ -208,22 +170,14 @@ mod client_verify_tests {
         let mut p = match scheme_payload {
             AuthCapturePayload::Eip3009(p) => p,
             AuthCapturePayload::Permit2(_) => {
-                unreachable!("sign_auth_capture with default extra is Eip3009")
+                panic!("sign_auth_capture with default extra is Eip3009")
             }
         };
         p.authorization.from = Address::repeat_byte(0xCC);
         p.signature = alloy_primitives::Bytes::from(vec![0u8; 66]);
         let forged = AuthCapturePayload::Eip3009(p);
 
-        let requirements = v2::PaymentRequirements::new(
-            AuthCaptureScheme,
-            "eip155:8453".parse().unwrap(),
-            TokenAmount::from(amount),
-            ChecksummedAddress(pay_to),
-            ChecksummedAddress(asset),
-            300,
-        )
-        .with_extra(extra);
+        let requirements = requirements(extra, amount, pay_to, asset);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
 
         assert!(
@@ -235,24 +189,11 @@ mod client_verify_tests {
         );
     }
 
-    /// A valid EOA signature plus a trailing byte must not be truncated and recovered.
-    #[cfg(feature = "client")]
     #[tokio::test]
     async fn eip3009_rejects_trailing_byte_on_valid_signature() {
         let signer = PrivateKeySigner::random();
-        let now = r402_core::wire::UnixTimestamp::now().as_secs();
-        let extra = AuthCaptureExtra {
-            name: "USD Coin".into(),
-            version: "2".into(),
-            capture_authorizer: ChecksummedAddress(Address::repeat_byte(0x11)),
-            capture_deadline: now + 3600,
-            refund_deadline: now + 86400,
-            fee_recipient: ChecksummedAddress(Address::repeat_byte(0x22)),
-            min_fee_bps: 0,
-            max_fee_bps: 1000,
-            auto_capture: Some(false),
-            asset_transfer_method: None,
-        };
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let extra = extra(now);
         let asset = Address::repeat_byte(0xAA);
         let pay_to = Address::repeat_byte(0xBB);
         let amount = U256::from(1_000_000_u64);
@@ -263,7 +204,7 @@ mod client_verify_tests {
         let mut p = match scheme_payload {
             AuthCapturePayload::Eip3009(p) => p,
             AuthCapturePayload::Permit2(_) => {
-                unreachable!("sign_auth_capture with default extra is Eip3009")
+                panic!("sign_auth_capture with default extra is Eip3009")
             }
         };
         let mut longer = p.signature.to_vec();
@@ -271,15 +212,7 @@ mod client_verify_tests {
         p.signature = alloy_primitives::Bytes::from(longer);
         let forged = AuthCapturePayload::Eip3009(p);
 
-        let requirements = v2::PaymentRequirements::new(
-            AuthCaptureScheme,
-            "eip155:8453".parse().unwrap(),
-            TokenAmount::from(amount),
-            ChecksummedAddress(pay_to),
-            ChecksummedAddress(asset),
-            300,
-        )
-        .with_extra(extra);
+        let requirements = requirements(extra, amount, pay_to, asset);
         let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), forged);
 
         assert!(
@@ -288,6 +221,97 @@ mod client_verify_tests {
                 Err(VerificationError::InvalidSignature(_))
             ),
             "a 65-byte signature with a trailing byte must not verify off-chain",
+        );
+    }
+
+    #[tokio::test]
+    async fn permit2_sign_then_verify() {
+        use crate::asset::AssetTransferMethod;
+
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.asset_transfer_method = Some(AssetTransferMethod::Permit2);
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+        assert!(matches!(scheme_payload, AuthCapturePayload::Permit2(_)));
+
+        let requirements = requirements(extra, amount, pay_to, asset);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
+        let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");
+        assert_eq!(recovered, payer);
+    }
+
+    #[tokio::test]
+    async fn unknown_escrow_is_invalid_extra() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auth_capture_escrow = Some(Address::repeat_byte(0x99).to_checksum(None));
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        assert!(
+            sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+                .await
+                .is_err(),
+            "unknown authCaptureEscrow must not sign"
+        );
+    }
+
+    #[tokio::test]
+    async fn v1_0_escrow_sign_then_verify() {
+        use super::payload::AUTH_CAPTURE_ESCROW_V1_0_ADDRESS;
+        use super::payload::EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS;
+
+        let signer = PrivateKeySigner::random();
+        let payer = signer.address();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auth_capture_escrow = Some(AUTH_CAPTURE_ESCROW_V1_0_ADDRESS.to_checksum(None));
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+        match &scheme_payload {
+            AuthCapturePayload::Eip3009(p) => {
+                assert_eq!(p.authorization.to, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS);
+            }
+            AuthCapturePayload::Permit2(_) => panic!("default method is eip3009"),
+        }
+        let requirements = requirements(extra, amount, pay_to, asset);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
+        let recovered = verify_offchain(&payment, &requirements, 8453).expect("verify");
+        assert_eq!(recovered, payer);
+    }
+
+    #[tokio::test]
+    async fn auto_capture_true_is_invalid_format() {
+        let signer = PrivateKeySigner::random();
+        let now = r402_protocol::payment::UnixTimestamp::now().as_secs();
+        let mut extra = extra(now);
+        extra.auto_capture = Some(true);
+        let asset = Address::repeat_byte(0xAA);
+        let pay_to = Address::repeat_byte(0xBB);
+        let amount = U256::from(1_000_000_u64);
+        let scheme_payload = sign_auth_capture(&signer, 8453, asset, pay_to, amount, 300, &extra)
+            .await
+            .expect("sign");
+        let requirements = requirements(extra, amount, pay_to, asset);
+        let payment: v2::PaymentPayload = PaymentPayload::new(requirements.clone(), scheme_payload);
+        assert!(
+            matches!(
+                verify_offchain(&payment, &requirements, 8453),
+                Err(VerificationError::InvalidFormat(_))
+            ),
+            "autoCapture true is an unsupported payment flow"
         );
     }
 }

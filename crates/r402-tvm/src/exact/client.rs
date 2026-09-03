@@ -1,33 +1,31 @@
 //! Client-side payment signing for the TON `"exact"` scheme.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ed25519_dalek::{Signer, SigningKey};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::ChainId;
+use r402_protocol::error::ClientError;
+use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo};
+use r402_protocol::scheme::SchemeId;
 use tonlib_core::TonAddress;
 use tonlib_core::cell::Cell;
 
-use crate::chain::rpc::TvmRpc;
-use crate::chain::{TvmAddress, TvmChainReference};
-use crate::codecs::common::{BocError, encode_base64_boc};
-use crate::codecs::jetton::build_jetton_transfer_body;
-use crate::codecs::w5::{
+use crate::chain::codec::cell::{BocError, encode_base64_boc};
+use crate::chain::codec::jetton::build_jetton_transfer_body;
+use crate::chain::codec::w5::{
     StateInitCells, address_from_state_init, build_external_message, build_internal_message,
     build_w5r1_state_init, make_w5r1_wallet_id, pack_w5_signed_body, parse_w5_init_data,
     serialize_out_list, serialize_send_msg_action, unsigned_w5_body,
 };
-use crate::exact::types;
-use crate::exact::{ExactTvmPayload, TvmExact};
-use crate::trace::{
-    normalize_address_or_null, parse_trace_transactions, trace_transaction_compute_fees,
+use crate::chain::rpc::{
+    TvmRpc, normalize_address_or_null, parse_trace_transactions, trace_transaction_compute_fees,
     trace_transaction_fwd_fees, trace_transaction_storage_fees, transaction_succeeded,
 };
+use crate::chain::{TvmAddress, TvmChainReference};
+use crate::exact::{ExactTvmPayload, TvmExact, payload};
 use crate::{
     DEFAULT_JETTON_WALLET_MESSAGE_AMOUNT, DEFAULT_TONCENTER_EMULATION_TIMEOUT_SECONDS,
     DEFAULT_TVM_EMULATION_ADDRESS, DEFAULT_TVM_EMULATION_RELAY_AMOUNT, DEFAULT_TVM_EMULATION_SEQNO,
@@ -216,8 +214,6 @@ impl<S, R> SchemeId for TvmExactClient<S, R> {
     }
 }
 
-impl<S, R> r402_core::scheme::Sealed for TvmExactClient<S, R> {}
-
 impl<S, R> SchemeClient for TvmExactClient<S, R>
 where
     S: AsRef<TvmW5Signer> + Send + Sync + Clone + 'static,
@@ -228,7 +224,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "tvm" {
                     return None;
@@ -265,7 +261,7 @@ impl AsRef<Self> for TvmW5Signer {
 struct V2PayloadSigner<S, R> {
     signer: S,
     rpc: R,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -274,11 +270,13 @@ where
     S: AsRef<TvmW5Signer> + Send + Sync,
     R: TvmRpc,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>> {
         Box::pin(async move {
             let boc =
                 create_settlement_boc(self.signer.as_ref(), &self.rpc, &self.requirements).await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactTvmPayload {
                     settlement_boc: boc,
@@ -302,7 +300,7 @@ where
 pub async fn create_settlement_boc<R: TvmRpc>(
     signer: &TvmW5Signer,
     rpc: &R,
-    requirements: &types::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
 ) -> Result<String, ClientError> {
     let chain = TvmChainReference::try_from(requirements.network.clone())
         .map_err(|e| ClientError::Signing(e.to_string()))?;

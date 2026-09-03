@@ -10,8 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use keetanetwork_block::{AccountRef, Block, BlockHash, Hashable};
 use keetanetwork_client::{Network, TransmitOptions, UserClient};
-#[cfg(test)]
-use r402_core::facilitator::BoxFuture;
+use r402_facilitator::BoxFuture;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
@@ -59,13 +58,11 @@ impl Drop for EnqueueGuard {
     }
 }
 
-#[cfg(test)]
 type SubmitFn =
     Arc<dyn Fn(String, Block) -> BoxFuture<'static, Result<String, String>> + Send + Sync>;
 
 enum Backend {
     Live(Network),
-    #[cfg(test)]
     Mock(SubmitFn),
 }
 
@@ -107,7 +104,8 @@ impl SettlementQueue {
     }
 
     /// Creates a queue that invokes `submit` instead of the network.
-    #[cfg(test)]
+    ///
+    /// In-process tests inject transmit without a live representative.
     #[must_use]
     pub fn mock<F>(fee_payer_addrs: Vec<String>, submit: F) -> Self
     where
@@ -222,7 +220,6 @@ impl SettlementQueue {
                     live_worker(rx, account, network).await;
                 })
             }
-            #[cfg(test)]
             Backend::Mock(submit) => {
                 let submit = Arc::clone(submit);
                 tokio::spawn(async move {
@@ -285,7 +282,6 @@ async fn live_worker(mut rx: mpsc::Receiver<Job>, fee_payer: AccountRef, network
     }
 }
 
-#[cfg(test)]
 async fn mock_worker(mut rx: mpsc::Receiver<Job>, addr: String, submit: SubmitFn) {
     while let Some(job) = rx.recv().await {
         let result = submit(addr.clone(), job.block.clone()).await;

@@ -1,14 +1,10 @@
 //! EIP-2612 gas-sponsoring extension wire types (exact + upto).
 //!
-//! Official key: `eip2612GasSponsoring`. Client `info` fields match
-//! `specs/extensions/eip2612_gas_sponsoring.md`:
-//! `from`, `asset`, `spender`, `amount`, `nonce`, `deadline`, `signature`, `version`.
-//!
-//! Facilitators consume this for `settleWithPermit` on both exact and upto
-//! Permit2 proxies.
+//! Official key: `eip2612GasSponsoring`. Facilitators consume this for
+//! `settleWithPermit` on Permit2 proxies.
 
 use alloy_primitives::{Address, Bytes};
-use r402_core::wire::{ExtensionEntry, Extensions};
+use r402_protocol::payment::{ExtensionEntry, Extensions};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -112,7 +108,7 @@ impl Eip2612SignedPermit {
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, Bytes, U256};
-    use r402_core::wire::{ExtensionEntry, Extensions};
+    use r402_protocol::payment::{ExtensionEntry, Extensions};
     use serde_json::json;
 
     use super::*;

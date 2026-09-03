@@ -6,8 +6,8 @@
 //! - [`HederaChainProvider`] — facilitator fee payer + Mirror REST (feature `facilitator`)
 
 /// Core Hedera chain types (addresses, references, token deployments).
-pub mod types;
-pub use types::*;
+pub mod account;
+pub use account::*;
 
 /// Hedera chain provider implementation.
 #[cfg(feature = "facilitator")]

@@ -1,9 +1,9 @@
 //! Facilitator settlement for the Hedera exact scheme.
 
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_facilitator::{Duplicate, SettlementCache};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
 use super::verify::verify_request_json;
@@ -25,14 +25,19 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
 
     let verified = verify_request_json(provider, alias_policy, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid {
             payer,
             reason,
             message,
             ..
         } => {
-            return settle_failure(reason, message, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                message,
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -75,7 +80,7 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
         .await
     {
         Ok(transaction_id) => SettleResponse::Success {
-            payer: payer.unwrap_or_else(|| CompactString::from(fee_payer)),
+            payer: payer.or_else(|| Some(CompactString::from(fee_payer))),
             transaction: transaction_id.into(),
             network: network.into(),
             amount: request
@@ -84,6 +89,7 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
         Err(err) => settle_failure(
@@ -108,6 +114,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

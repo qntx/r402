@@ -1,7 +1,7 @@
 //! Facilitator verification for the Hedera exact scheme.
 
 use compact_str::CompactString;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
 use super::{AliasPolicy, HederaFacilitatorOps};
@@ -9,7 +9,7 @@ use crate::chain::tx::{
     InspectedHederaTransaction, asset_transfers, get_positive_receivers, has_negative_transfer,
     infer_payers, inspect_hedera_transaction, sum_transfers,
 };
-use crate::chain::types::{
+use crate::chain::{
     hedera_account_ids_equal, is_entity_id, is_hbar_asset, is_hedera_network, is_valid_asset,
 };
 use crate::exact::error::{HederaInvalid, invalid};
@@ -68,6 +68,11 @@ async fn verify_inner<P: HederaFacilitatorOps>(
         return Err(invalid("network_mismatch"));
     }
     if !is_hedera_network(req_network) {
+        return Err(invalid("network_mismatch"));
+    }
+    // Entity ids collide across Hedera networks; this provider's Mirror and
+    // fee-payer keys belong to one CAIP-2 chain.
+    if req_network != provider.chain_id().to_string() {
         return Err(invalid("network_mismatch"));
     }
 

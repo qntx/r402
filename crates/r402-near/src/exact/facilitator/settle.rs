@@ -1,11 +1,13 @@
 //! Facilitator settlement for the NEAR exact scheme.
 
+use std::future::Future;
+
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
+use super::settlement_cache::{SettlementCache, settlement_cache_key};
 use super::verify::{decode_signed_delegate, verify_request_json};
 use crate::chain::rpc::{NearReceiptStatus, NearRpc, NearRpcError, NearSettlementOutcome};
 
@@ -17,6 +19,7 @@ pub async fn settle_request<R, F, Fut>(
     relayer_ids: &[String],
     cache: &SettlementCache,
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
     submit: F,
 ) -> SettleResponse
@@ -32,11 +35,22 @@ where
         .unwrap_or("")
         .to_owned();
 
-    let verified = verify_request_json(rpc, relayer_ids, max_sponsored_gas, request).await;
+    let verified = verify_request_json(
+        rpc,
+        relayer_ids,
+        max_sponsored_gas,
+        expected_network,
+        request,
+    )
+    .await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -68,22 +82,28 @@ where
         );
     };
 
-    if decode_signed_delegate(signed_b64).is_err() {
+    let Ok(decoded) = decode_signed_delegate(signed_b64) else {
         return settle_failure(
             ErrorReason::from_wire("invalid_exact_near_payload_signed_delegate_action"),
             &network,
             payer,
         );
-    }
-
-    if cache.reserve(signed_b64) == Duplicate::Yes {
+    };
+    let Some(cache_key) = settlement_cache_key(signed_b64) else {
+        return settle_failure(
+            ErrorReason::from_wire("invalid_exact_near_payload_signed_delegate_action"),
+            &network,
+            payer,
+        );
+    };
+    if cache.is_duplicate(&cache_key, decoded.delegate_action.max_block_height) {
         return settle_failure(ErrorReason::DuplicateSettlement, &network, payer);
     }
 
-    match submit(relayer_id, signed_b64.to_owned()).await {
+    let response = match submit(relayer_id, signed_b64.to_owned()).await {
         Ok(outcome) => match outcome.inner_receipt {
             NearReceiptStatus::Success { .. } => SettleResponse::Success {
-                payer: payer.unwrap_or_default(),
+                payer,
                 transaction: outcome.transaction.into(),
                 network: network.into(),
                 amount: request
@@ -92,6 +112,7 @@ where
                     .and_then(Value::as_str)
                     .map(CompactString::from),
                 extensions: Extensions::new(),
+                extension_responses: Extensions::new(),
                 extra: None,
             },
             NearReceiptStatus::Failure { error } => SettleResponse::Failure {
@@ -101,6 +122,7 @@ where
                 payer,
                 network: network.into(),
                 extensions: Extensions::new(),
+                extension_responses: Extensions::new(),
                 extra: None,
             },
         },
@@ -111,9 +133,12 @@ where
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
-    }
+    };
+    cache.release(&cache_key);
+    response
 }
 
 fn settle_failure(
@@ -128,6 +153,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

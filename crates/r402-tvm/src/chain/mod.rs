@@ -14,17 +14,24 @@
 )]
 
 /// Core TON chain types (addresses, references, token deployments).
-pub mod types;
-pub use types::*;
+pub mod account;
+pub use account::*;
 
-/// TON chain provider implementation.
-#[cfg(feature = "facilitator")]
-pub mod provider;
-#[cfg(feature = "facilitator")]
-pub use provider::*;
+/// Exact-scheme constants (opcodes, timeouts, well-known minters).
+pub mod defaults;
+pub use defaults::*;
+
+/// Cell / BoC codecs for W5R1, TEP-74, and Highload V3.
+pub mod codec;
 
 /// REST client abstraction for TON.
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub mod rpc;
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub use rpc::*;
+
+/// TON REST backends and Highload V3 facilitator wallet.
+#[cfg(any(feature = "client", feature = "facilitator"))]
+pub mod provider;
+#[cfg(any(feature = "client", feature = "facilitator"))]
+pub use provider::*;

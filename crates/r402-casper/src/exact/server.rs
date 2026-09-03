@@ -1,28 +1,22 @@
 //! Server-side price tag generation for the Casper exact scheme.
-//!
-//! A resource server uses this to turn a wCSPR amount into the
-//! `accepts[]` entry advertised in a `402 Payment Required` response.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag, SupportedResponse, V2};
+use r402_protocol::scheme::ExactScheme;
+use r402_server::{
     PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer,
     SchemePaymentRequiredContext,
 };
 
+use crate::chain::motes::Motes;
 use crate::chain::{Address, CasperTokenDeployment};
-use crate::exact::{CasperExact, CasperPaymentRequirementsExtra, ExactScheme};
-use crate::motes::Motes;
+use crate::exact::{CasperExact, CasperPaymentRequirementsExtra};
 
 /// Default `maxTimeoutSeconds` advertised for Casper payments.
-///
-/// Casper finalises in well under a minute; five minutes leaves ample room
-/// for a buyer to sign and for the facilitator to land the settlement
-/// transaction, and matches the value used by the other chain crates.
 pub const DEFAULT_MAX_TIMEOUT_SECONDS: u64 = 300;
 
 fn casper_exact_payment_flows() -> &'static HashMap<String, PaymentFlowConfig> {
@@ -51,7 +45,7 @@ impl SchemeNetworkServer for CasperExact {
     fn enrich_payment_required_response<'a>(
         &'a self,
         ctx: &'a SchemePaymentRequiredContext<'a>,
-    ) -> impl Future<Output = Option<Vec<wire::PaymentRequirements>>> + Send + 'a {
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | apply_casper_fee_payer(req, ctx.supported)
@@ -64,8 +58,9 @@ impl CasperExact {
     /// Creates a price tag for a Casper CEP-18 token payment.
     ///
     /// The `extra` block carries the token's EIP-712 domain (`name`,
-    /// `version`, `symbol`, `decimals`) — without it the buyer cannot compute
-    /// the digest the CEP-18 contract will verify.
+    /// `version`, `decimals`) — without it the buyer cannot compute the
+    /// digest the CEP-18 contract will verify.
+    #[must_use]
     #[allow(
         clippy::needless_pass_by_value,
         reason = "DeployedTokenAmount is consumed for its fields"
@@ -73,11 +68,11 @@ impl CasperExact {
     pub fn price_tag<A: Into<Address>>(
         pay_to: A,
         asset: DeployedTokenAmount<Motes, CasperTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let extra = CasperPaymentRequirementsExtra::new(asset.token.name, asset.token.version)
             .with_decimals(asset.token.decimals);
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -87,16 +82,13 @@ impl CasperExact {
         )
         .with_optional_extra(serde_json::to_value(extra).ok());
 
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
 /// Copies the facilitator's advertised `feePayer` into `requirements.extra`
 /// while preserving the EIP-712 domain fields the seller already set.
-fn apply_casper_fee_payer(
-    req: &mut wire::PaymentRequirements,
-    capabilities: &wire::SupportedResponse,
-) -> bool {
+fn apply_casper_fee_payer(req: &mut PaymentRequirements, capabilities: &SupportedResponse) -> bool {
     if req.scheme.as_str() != ExactScheme::VALUE {
         return false;
     }
@@ -105,7 +97,7 @@ fn apply_casper_fee_payer(
         .kinds
         .iter()
         .find(|kind| {
-            wire::V2 == kind.x402_version
+            V2 == kind.x402_version
                 && kind.scheme.as_str() == ExactScheme.as_ref()
                 && kind.network.as_str() == network
         })
@@ -133,6 +125,7 @@ fn apply_casper_fee_payer(
 #[cfg(test)]
 mod tests {
     use compact_str::CompactString;
+    use r402_protocol::payment::SupportedPaymentKind;
 
     use super::*;
     use crate::chain::CasperChainReference;
@@ -179,10 +172,10 @@ mod tests {
         );
     }
 
-    fn capabilities(fee_payer: &str) -> wire::SupportedResponse {
-        let mut supported = wire::SupportedResponse::default();
+    fn capabilities(fee_payer: &str) -> SupportedResponse {
+        let mut supported = SupportedResponse::default();
         supported.kinds.push(
-            wire::SupportedPaymentKind::new(2, "exact", "casper:casper-test")
+            SupportedPaymentKind::new(2, "exact", "casper:casper-test")
                 .with_extra(serde_json::json!({ "feePayer": fee_payer })),
         );
         supported
@@ -203,9 +196,9 @@ mod tests {
     #[test]
     fn enrich_ignores_other_networks() {
         let mut tag = CasperExact::price_tag(payee(), WCSPR::casper_test().amount(1));
-        let mut supported = wire::SupportedResponse::default();
+        let mut supported = SupportedResponse::default();
         supported.kinds.push(
-            wire::SupportedPaymentKind::new(2, "exact", "casper:casper")
+            SupportedPaymentKind::new(2, "exact", "casper:casper")
                 .with_extra(serde_json::json!({ "feePayer": PAYEE })),
         );
         assert!(!apply_casper_fee_payer(&mut tag.requirements, &supported));
@@ -222,7 +215,7 @@ mod tests {
 
     #[test]
     fn enrich_populates_extra_when_absent() {
-        let mut req = wire::PaymentRequirements::new(
+        let mut req = PaymentRequirements::new(
             CompactString::from("exact"),
             CasperChainReference::CASPER_TEST.into(),
             CompactString::from("1"),

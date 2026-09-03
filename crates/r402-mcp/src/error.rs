@@ -1,12 +1,13 @@
 //! Errors for MCP × x402 (Go `PaymentRequiredError` + client errors).
 
-use r402_core::wire::PaymentRequired;
+use r402_protocol::{ClientError, PaymentRequired};
 use serde_json::Value;
 
 use crate::MCP_PAYMENT_REQUIRED_CODE;
 
 /// Go `PaymentRequiredError` — JSON-RPC style code **402** with payment data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{message}")]
 pub struct PaymentRequiredError {
     /// Always [`MCP_PAYMENT_REQUIRED_CODE`] (402).
     pub code: i32,
@@ -28,20 +29,14 @@ impl PaymentRequiredError {
     }
 }
 
-impl std::fmt::Display for PaymentRequiredError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for PaymentRequiredError {}
-
 /// Failure from an MCP `tools/call`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum McpCallError {
     /// Transport or non-RPC service failure.
+    #[error("{0}")]
     Transport(String),
     /// JSON-RPC error from `rmcp` `ServiceError::McpError`.
+    #[error("{code}: {message}{}", fmt_rpc_data(data))]
     Rpc {
         /// JSON-RPC error code.
         code: i32,
@@ -52,26 +47,14 @@ pub enum McpCallError {
     },
 }
 
-impl std::fmt::Display for McpCallError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Transport(msg) => f.write_str(msg),
-            Self::Rpc {
-                code,
-                message,
-                data,
-            } => {
-                write!(f, "{code}: {message}")?;
-                if let Some(data) = data {
-                    write!(f, "({data})")?;
-                }
-                Ok(())
-            }
-        }
-    }
+#[allow(
+    clippy::ref_option,
+    reason = "thiserror interpolates Option fields as &Option"
+)]
+fn fmt_rpc_data(data: &Option<Value>) -> String {
+    data.as_ref()
+        .map_or_else(String::new, |value| format!("({value})"))
 }
-
-impl std::error::Error for McpCallError {}
 
 /// Maps [`rmcp::ServiceError`] from an rmcp tool call into [`McpCallError`].
 #[cfg(feature = "client")]
@@ -97,12 +80,9 @@ pub enum McpClientError {
     #[error("payment creation: {0}")]
     Payment(String),
     /// Server still required payment after a signed attempt.
-    ///
-    /// Carries the corrective challenge (when present) and whether
-    /// `on_payment_response` requested recovery so callers can retry.
     #[error("payment still required after attempt")]
     StillRequired {
-        /// Corrective `PaymentRequired` from the tool result or a JSON-RPC `402` / `-32042` error, if parsed.
+        /// Corrective `PaymentRequired` from the tool result or a JSON-RPC `402` / `-32042` error.
         payment_required: Option<Box<PaymentRequired>>,
         /// `true` when payment-response hooks signalled recovery.
         recovery_requested: bool,
@@ -124,48 +104,8 @@ impl From<McpCallError> for McpClientError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use serde_json::json;
-
-    use super::*;
-
-    #[test]
-    fn rpc_display_includes_data() {
-        let data = json!({"mode": "url"});
-        let err = McpCallError::Rpc {
-            code: -32042,
-            message: "elicit".into(),
-            data: Some(data.clone()),
-        };
-        assert_eq!(
-            err.to_string(),
-            format!("-32042: elicit({data})"),
-            "Display keeps JSON-RPC data like rmcp ErrorData"
-        );
-        match McpClientError::from(err) {
-            McpClientError::Transport(s) => {
-                assert_eq!(
-                    s,
-                    format!("-32042: elicit({data})"),
-                    "From keeps JSON-RPC data"
-                );
-            }
-            other => panic!("expected Transport, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rpc_display_omits_missing_data() {
-        let err = McpCallError::Rpc {
-            code: -32603,
-            message: "internal".into(),
-            data: None,
-        };
-        assert_eq!(
-            err.to_string(),
-            "-32603: internal",
-            "no empty parentheses when data is absent"
-        );
+impl From<ClientError> for McpClientError {
+    fn from(value: ClientError) -> Self {
+        Self::Payment(value.to_string())
     }
 }

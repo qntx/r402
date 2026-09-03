@@ -16,25 +16,24 @@
     reason = "exact client/facilitator follow the TS checklist"
 )]
 
-use r402_core::scheme::SchemeId;
-
-#[cfg(feature = "server")]
-pub mod server;
-
-#[cfg(feature = "facilitator")]
-pub mod facilitator;
+use r402_protocol::scheme::SchemeId;
 
 #[cfg(feature = "client")]
 pub mod client;
 
-#[cfg(feature = "facilitator")]
-pub mod settlement_batcher;
-
 pub mod error;
 pub use error::*;
 
-pub mod types;
-pub use types::*;
+#[cfg(feature = "facilitator")]
+pub mod facilitator;
+#[cfg(feature = "facilitator")]
+pub use facilitator::TvmExactFacilitator;
+
+pub mod payload;
+pub use payload::*;
+
+#[cfg(feature = "server")]
+pub mod server;
 
 /// TON exact scheme identifier.
 ///

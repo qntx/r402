@@ -1,38 +1,61 @@
 //! Facilitator-side payment verification and settlement for the NEAR exact scheme.
 
 mod settle;
+mod settlement_cache;
 mod verify;
 
 use std::collections::HashMap;
 use std::future::Future;
 
 use compact_str::CompactString;
-use r402_core::cache::SettlementCache;
-use r402_core::chain::ChainProvider;
-use r402_core::error::FacilitatorError;
-use r402_core::facilitator::{DynFacilitator, Facilitator};
-use r402_core::scheme::{SchemeBuilder, SchemeId};
-use r402_core::wire;
-use serde::Deserialize;
+use r402_facilitator::Facilitator;
+use r402_protocol::error::FacilitatorError;
+use r402_protocol::network::ChainProvider;
+use r402_protocol::payment::{
+    SettleRequest, SettleResponse, SupportedPaymentKind, SupportedResponse, V2, VerifyRequest,
+    VerifyResponse,
+};
+use r402_protocol::scheme::SchemeId;
 pub use settle::settle_request;
+pub use settlement_cache::{SettlementCache, settlement_cache_key};
 pub use verify::{decode_signed_delegate, default_max_sponsored_gas, verify_request_json};
 
-#[cfg(test)]
-mod tests;
-
 use crate::chain::NearChainProvider;
+use crate::chain::rpc::{NearRpc, NearRpcError, NearSettlementOutcome};
 use crate::exact::{ExactScheme, NearExact};
 
-/// Optional JSON config for [`NearExact`] [`SchemeBuilder`].
-#[derive(Debug, Clone, Copy, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NearExactFacilitatorConfig {
+/// Operations the exact facilitator needs from a chain provider.
+pub trait NearFacilitatorOps: NearRpc + ChainProvider + Clone + Send + Sync {
+    /// Relayer account IDs this facilitator will sign for.
+    fn relayer_ids(&self) -> Vec<String>;
+
     /// Maximum sponsored gas in gas units.
-    ///
-    /// When omitted, [`NearExact`] [`SchemeBuilder`] uses
-    /// [`crate::chain::NearChainProvider::max_sponsored_gas`].
-    #[serde(default)]
-    pub max_sponsored_gas: Option<u64>,
+    fn max_sponsored_gas(&self) -> u64;
+
+    /// Wrap a signed delegate in an outer relayer transaction and wait.
+    fn submit_signed_delegate(
+        &self,
+        relayer_id: &str,
+        signed_delegate_b64: &str,
+    ) -> impl Future<Output = Result<NearSettlementOutcome, NearRpcError>> + Send;
+}
+
+impl NearFacilitatorOps for NearChainProvider {
+    fn relayer_ids(&self) -> Vec<String> {
+        Self::relayer_ids(self)
+    }
+
+    fn max_sponsored_gas(&self) -> u64 {
+        Self::max_sponsored_gas(self)
+    }
+
+    fn submit_signed_delegate(
+        &self,
+        relayer_id: &str,
+        signed_delegate_b64: &str,
+    ) -> impl Future<Output = Result<NearSettlementOutcome, NearRpcError>> + Send {
+        Self::submit_signed_delegate(self, relayer_id, signed_delegate_b64)
+    }
 }
 
 /// Facilitator for NEAR exact scheme payments.
@@ -43,6 +66,26 @@ pub struct NearExactFacilitator<P> {
 }
 
 impl<P> NearExactFacilitator<P> {
+    /// Constructs a facilitator from a chain provider.
+    ///
+    /// Copies [`NearFacilitatorOps::max_sponsored_gas`] and uses a default
+    /// [`SettlementCache`].
+    ///
+    /// # Errors
+    ///
+    /// Currently infallible. [`Result`] so `try_new(provider)?` compiles.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "Result so try_new(provider)? compiles"
+    )]
+    pub fn try_new(provider: P) -> Result<Self, FacilitatorError>
+    where
+        P: NearFacilitatorOps,
+    {
+        let gas = provider.max_sponsored_gas();
+        Ok(Self::new(provider, gas))
+    }
+
     /// Creates a facilitator with the default in-memory settlement cache.
     pub fn new(provider: P, max_sponsored_gas: u64) -> Self {
         Self::with_settlement_cache(provider, max_sponsored_gas, SettlementCache::new())
@@ -70,47 +113,22 @@ impl<P> std::fmt::Debug for NearExactFacilitator<P> {
     }
 }
 
-impl SchemeBuilder<NearChainProvider> for NearExact {
-    fn build(
-        &self,
-        provider: NearChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        let parsed = config
-            .map(serde_json::from_value::<NearExactFacilitatorConfig>)
-            .transpose()?
-            .unwrap_or_default();
-        let gas = parsed
-            .max_sponsored_gas
-            .unwrap_or_else(|| provider.max_sponsored_gas());
-        Ok(Box::new(NearExactFacilitator::new(provider, gas)))
-    }
-}
-
-impl SchemeBuilder<&NearChainProvider> for NearExact {
-    fn build(
-        &self,
-        provider: &NearChainProvider,
-        config: Option<serde_json::Value>,
-    ) -> Result<Box<dyn DynFacilitator>, Box<dyn std::error::Error + Send + Sync>> {
-        SchemeBuilder::<NearChainProvider>::build(self, provider.clone(), config)
-    }
-}
-
-impl Facilitator for NearExactFacilitator<NearChainProvider> {
+impl<P> Facilitator for NearExactFacilitator<P>
+where
+    P: NearFacilitatorOps + ChainProvider,
+{
     #[cfg_attr(
         feature = "telemetry",
         tracing::instrument(name = "r402_near::exact::verify", skip_all)
     )]
-    async fn verify(
-        &self,
-        request: wire::VerifyRequest,
-    ) -> Result<wire::VerifyResponse, FacilitatorError> {
+    async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
+        let expected_network = self.provider.chain_id().to_string();
         Ok(verify_request_json(
             &self.provider,
             &self.provider.relayer_ids(),
             self.max_sponsored_gas,
+            &expected_network,
             &json,
         )
         .await)
@@ -120,18 +138,17 @@ impl Facilitator for NearExactFacilitator<NearChainProvider> {
         feature = "telemetry",
         tracing::instrument(name = "r402_near::exact::settle", skip_all)
     )]
-    async fn settle(
-        &self,
-        request: wire::SettleRequest,
-    ) -> Result<wire::SettleResponse, FacilitatorError> {
+    async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let relayer_ids = self.provider.relayer_ids();
+        let expected_network = self.provider.chain_id().to_string();
         let provider = self.provider.clone();
         Ok(settle_request(
             &self.provider,
             &relayer_ids,
             &self.settlement_cache,
             self.max_sponsored_gas,
+            &expected_network,
             &json,
             move |relayer_id, signed_b64| async move {
                 provider
@@ -144,10 +161,10 @@ impl Facilitator for NearExactFacilitator<NearChainProvider> {
 
     fn supported(
         &self,
-    ) -> impl Future<Output = Result<wire::SupportedResponse, FacilitatorError>> + Send {
+    ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
         let chain_id = self.provider.chain_id();
-        let kinds = vec![wire::SupportedPaymentKind::new(
-            wire::V2.into(),
+        let kinds = vec![SupportedPaymentKind::new(
+            V2.into(),
             ExactScheme.to_string(),
             chain_id.to_string(),
         )];
@@ -160,7 +177,7 @@ impl Facilitator for NearExactFacilitator<NearChainProvider> {
                 .map(CompactString::from)
                 .collect(),
         );
-        std::future::ready(Ok(wire::SupportedResponse::new()
+        std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
             .with_signers(signers)))
     }

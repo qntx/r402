@@ -10,9 +10,9 @@ use keetanetwork_account::{
 use keetanetwork_block::{AccountRef, Amount, BaseFlag, BlockHash};
 use keetanetwork_client::{ClientError as KeetaClientError, UserClient};
 use keetanetwork_crypto::prelude::IntoSecret;
-use r402_core::chain::{ChainId, ChainProvider};
+use r402_protocol::network::{ChainId, ChainProvider};
 
-use super::types::{KeetaChainReference, account_has_private_key};
+use super::account::{KeetaChainReference, account_has_private_key};
 
 /// A fee-payer account this facilitator controls.
 #[derive(Clone)]

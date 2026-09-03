@@ -1,28 +1,19 @@
 //! CEP-3009 / Casper EIP-712 digest construction.
 //!
-//! Domain and message encoding match `@casper-ecosystem/casper-eip-712` and
-//! the JS/Go Casper x402 clients:
-//!
-//! - Domain type:
-//!   `EIP712Domain(string name,string version,string chain_name,bytes32 contract_package_hash)`
-//! - Message type:
-//!   `TransferWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)`
-//! - Casper `address` fields are encoded as `keccak256(tag ‖ hash33)`.
-//! - Final digest: `keccak256(0x19 ‖ 0x01 ‖ domainSeparator ‖ hashStruct(message))`.
+//! Domain and message encoding match `@casper-ecosystem/casper-eip-712`:
+//! Casper `address` fields are `keccak256(tag ‖ hash33)`, not 20-byte
+//! Ethereum addresses.
 
 use sha3::{Digest as _, Keccak256};
 
+use crate::chain::motes::Motes;
 use crate::chain::{Address, ContractPackageHash};
-use crate::exact::types::ExactCasperAuthorization;
-use crate::motes::Motes;
+use crate::exact::payload::ExactCasperAuthorization;
 
 /// EIP-712 primary type name.
 pub const PRIMARY_TYPE: &str = "TransferWithAuthorization";
 
 /// The EIP-712 domain a Casper CEP-18 contract binds its authorisations to.
-///
-/// Field names match `@casper-ecosystem/casper-eip-712` `buildDomain`:
-/// `name`, `version`, `chain_name` (CAIP-2 network), `contract_package_hash`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Eip712Domain {
     /// Token contract name, from `requirements.extra.name`.
@@ -56,43 +47,40 @@ pub fn transfer_with_authorization_digest(
 /// Hashes the Casper EIP-712 domain separator.
 #[must_use]
 pub fn hash_domain_separator(domain: &Eip712Domain) -> [u8; 32] {
-    let type_hash = keccak256(CASPER_DOMAIN_TYPE.as_bytes());
-    let mut encoded = [0u8; 32 * 5];
-    encoded[0..32].copy_from_slice(&type_hash);
-    encoded[32..64].copy_from_slice(&encode_string(&domain.name));
-    encoded[64..96].copy_from_slice(&encode_string(&domain.version));
-    encoded[96..128].copy_from_slice(&encode_string(&domain.network));
-    encoded[128..160].copy_from_slice(domain.verifying_contract.as_bytes());
-    keccak256(&encoded)
+    keccak256_concat(&[
+        &keccak256(CASPER_DOMAIN_TYPE.as_bytes()),
+        &encode_string(&domain.name),
+        &encode_string(&domain.version),
+        &encode_string(&domain.network),
+        domain.verifying_contract.as_bytes(),
+    ])
 }
 
 /// Hashes the `TransferWithAuthorization` struct.
 #[must_use]
 pub fn hash_transfer_with_authorization(auth: &ExactCasperAuthorization) -> [u8; 32] {
-    let type_hash = keccak256(TRANSFER_WITH_AUTHORIZATION_TYPE.as_bytes());
-    let mut encoded = [0u8; 32 * 7];
-    encoded[0..32].copy_from_slice(&type_hash);
-    encoded[32..64].copy_from_slice(&encode_casper_address(auth.from));
-    encoded[64..96].copy_from_slice(&encode_casper_address(auth.to));
-    encoded[96..128].copy_from_slice(&encode_motes(auth.value));
-    encoded[128..160].copy_from_slice(&encode_u64(auth.valid_after));
-    encoded[160..192].copy_from_slice(&encode_u64(auth.valid_before));
     // Nonce is already 32 bytes when well-formed; fall back to zero on
     // malformed input — callers validate before signing.
     let nonce = auth.nonce_bytes().unwrap_or([0u8; 32]);
-    encoded[192..224].copy_from_slice(&nonce);
-    keccak256(&encoded)
+    keccak256_concat(&[
+        &keccak256(TRANSFER_WITH_AUTHORIZATION_TYPE.as_bytes()),
+        &encode_casper_address(auth.from),
+        &encode_casper_address(auth.to),
+        &encode_motes(auth.value),
+        &encode_u64(auth.valid_after.as_secs()),
+        &encode_u64(auth.valid_before.as_secs()),
+        &nonce,
+    ])
 }
 
 /// Final EIP-712 digest: `\x19\x01 ‖ domainSeparator ‖ hashStruct`.
 #[must_use]
 pub fn hash_typed_data(domain_separator: &[u8; 32], struct_hash: &[u8; 32]) -> [u8; 32] {
-    let mut data = [0u8; 66];
-    data[0] = 0x19;
-    data[1] = 0x01;
-    data[2..34].copy_from_slice(domain_separator);
-    data[34..66].copy_from_slice(struct_hash);
-    keccak256(&data)
+    keccak256_concat(&[
+        &[0x19, 0x01],
+        domain_separator.as_slice(),
+        struct_hash.as_slice(),
+    ])
 }
 
 /// Builds the domain descriptor from requirements fields.
@@ -121,13 +109,19 @@ fn encode_motes(value: Motes) -> [u8; 32] {
 
 fn encode_u128(value: u128) -> [u8; 32] {
     let mut out = [0u8; 32];
-    out[16..].copy_from_slice(&value.to_be_bytes());
+    let be = value.to_be_bytes();
+    for (dst, byte) in out.iter_mut().skip(16).zip(be) {
+        *dst = byte;
+    }
     out
 }
 
 fn encode_u64(value: u64) -> [u8; 32] {
     let mut out = [0u8; 32];
-    out[24..].copy_from_slice(&value.to_be_bytes());
+    let be = value.to_be_bytes();
+    for (dst, byte) in out.iter_mut().skip(24).zip(be) {
+        *dst = byte;
+    }
     out
 }
 
@@ -141,12 +135,22 @@ fn keccak256(input: &[u8]) -> [u8; 32] {
     hasher.finalize().into()
 }
 
+fn keccak256_concat(parts: &[&[u8]]) -> [u8; 32] {
+    let mut hasher = Keccak256::new();
+    for part in parts {
+        hasher.update(part);
+    }
+    hasher.finalize().into()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::exact::types::ExactCasperAuthorization;
+    use r402_protocol::UnixTimestamp;
 
-    /// Spec example from `scheme_exact_casper.md`.
+    use super::*;
+    use crate::chain::codec;
+    use crate::exact::payload::ExactCasperAuthorization;
+
     fn spec_authorization() -> ExactCasperAuthorization {
         ExactCasperAuthorization {
             from: "0076d080b4e769f0b29c77fc6472d6e425710840c2f46a4506e5544d2ce34f43a3"
@@ -156,8 +160,8 @@ mod tests {
                 .parse()
                 .unwrap(),
             value: Motes::new(7_500_000_000),
-            valid_after: 1_782_725_469,
-            valid_before: 1_782_729_069,
+            valid_after: UnixTimestamp::from_secs(1_782_725_469),
+            valid_before: UnixTimestamp::from_secs(1_782_729_069),
             nonce: "6505daf8ee30b4bf90db8e4ef3849ea869945ba0638853f6194704e8c9001115".to_owned(),
         }
     }
@@ -208,13 +212,11 @@ mod tests {
         );
     }
 
-    /// Regression snapshot of the spec-example digest. Pinning this value
-    /// catches accidental encoding drift against casper-eip-712 / JS clients.
     #[test]
     fn spec_example_digest_snapshot() {
         let digest = transfer_with_authorization_digest(&spec_domain(), &spec_authorization());
         assert_eq!(
-            crate::hex::encode(&digest),
+            codec::encode(&digest),
             "bde9e6f18cef29a20bc794094e610cfe21de36c83a5e3ae156353a033fed8bd8"
         );
     }

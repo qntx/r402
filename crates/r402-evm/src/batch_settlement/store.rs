@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use alloy_primitives::B256;
 
-use super::types::ChannelState;
+use super::payload::ChannelState;
 use crate::chain::TokenAmount;
 
 /// Read/write channel accounting keyed by channel id.
@@ -22,8 +22,6 @@ pub trait ChannelStore: Send + Sync {
     /// Atomically reserves a charge: requires
     /// `max_claimable >= charged_cumulative + charge` and then
     /// `charged_cumulative += charge`.
-    ///
-    /// # Errors
     ///
     /// Returns `false` when the voucher ceiling is insufficient.
     fn try_charge(

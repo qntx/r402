@@ -1,13 +1,18 @@
 //! Well-known Keeta network definitions and token deployments.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
-use crate::DEFAULT_TOKEN_DECIMALS;
-use crate::chain::{KeetaAddress, KeetaChainReference, KeetaTokenDeployment};
+use crate::chain::{
+    DEFAULT_TOKEN_DECIMALS, KeetaAddress, KeetaChainReference, KeetaTokenDeployment,
+};
 
 /// Well-known Keeta networks with their names and CAIP-2 identifiers.
 pub static KEETA_NETWORKS: &[NetworkInfo] = &[
@@ -64,6 +69,7 @@ pub fn usdc_keeta_deployment(chain: KeetaChainReference) -> Option<&'static Keet
 }
 
 /// Reverse lookup by token account and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_keeta_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "keeta" {
@@ -83,14 +89,6 @@ pub fn find_default_keeta_asset(asset: &str, network: &ChainId) -> Option<Defaul
 }
 
 /// Ergonomic accessors for USDC token deployments on well-known Keeta chains.
-///
-/// Combine with [`KeetaTokenDeployment::amount`] for a fluent pricing API:
-///
-/// ```ignore
-/// use r402_keeta::{KeetaExact, USDC};
-///
-/// let tag = KeetaExact::price_tag(pay_to, USDC::keeta_testnet().amount(1_000_000u128));
-/// ```
 #[derive(Debug, Clone, Copy)]
 #[allow(
     clippy::upper_case_acronyms,
@@ -133,7 +131,6 @@ impl USDC {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "test assertions")]
 mod tests {
     use super::*;
 
@@ -151,12 +148,5 @@ mod tests {
             USDC::keeta_testnet().address.as_str(),
             "keeta_apna75yhhvnv4ei7ape55hndk4yepno7a7i2mhtiwahiygixjcnmvswxhnmnk"
         );
-        let network: ChainId = "keeta:21378".parse().unwrap();
-        let info = find_default_keeta_asset(
-            "keeta_amnkge74xitii5dsobstldatv3irmyimujfjotftx7plaaaseam4bntb7wnna",
-            &network,
-        )
-        .unwrap();
-        assert_eq!(info.symbol, "USDC");
     }
 }

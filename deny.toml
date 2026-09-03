@@ -1,6 +1,9 @@
 # cargo-deny policy for the r402 workspace.
 # Run: cargo deny check all
 
+[graph]
+all-features = true
+
 [advisories]
 yanked = "warn"
 unmaintained = "none"
@@ -35,4 +38,4 @@ wildcards = "allow"
 unknown-registry = "warn"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = ["https://github.com/qntx/siwx"]

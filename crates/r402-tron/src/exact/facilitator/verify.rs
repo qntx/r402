@@ -4,20 +4,18 @@
 //! composite [`verify_payment`] / [`verify_permit2_payment`] functions.
 
 use alloy_primitives::{Address as EvmAddress, U256};
-use alloy_sol_types::{Eip712Domain, SolCall, SolStruct, eip712_domain};
-use r402_core::chain::ChainId;
-use r402_core::error::VerificationError;
-use r402_core::wire::UnixTimestamp;
+use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
+use r402_protocol::error::VerificationError;
+use r402_protocol::network::ChainId;
+use r402_protocol::payment::UnixTimestamp;
 
 use super::signature::{SignedMessage, TronSignatureError};
 use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::TronChainReference;
 use crate::chain::contracts::eip3009;
-use crate::exact::TronExactError;
-use crate::exact::types;
 use crate::exact::{
-    Eip3009Payload, PaymentRequirementsExtra, Permit2Payload, TronPermitWitnessTransferFrom,
-    TronTokenPermissions, TronWitness,
+    Eip3009Payload, PaymentRequirementsExtra, Permit2Payload, TronExactError,
+    TronPermitWitnessTransferFrom, TronTokenPermissions, TronWitness, payload,
 };
 
 /// Validates that the current time is within the `validAfter` and `validBefore` bounds.
@@ -39,10 +37,10 @@ pub(crate) fn assert_time(
 }
 
 /// Validates that `accepted` satisfies `requirements` via
-/// [`r402_core::wire::PaymentRequirements::matches_payload_accepted`].
+/// [`r402_protocol::payment::PaymentRequirements::matches_payload_accepted`].
 pub(super) fn assert_requirements_match(
-    accepted: &types::v2::PaymentRequirements,
-    requirements: &types::v2::PaymentRequirements,
+    accepted: &payload::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
 ) -> Result<(), VerificationError> {
     if requirements.matches_payload_accepted(accepted) {
         Ok(())
@@ -97,8 +95,8 @@ pub(super) async fn assert_valid_payment(
     provider: &crate::chain::TronChainProvider,
     chain: &TronChainReference,
     eip3009: &Eip3009Payload,
-    payload: &types::v2::PaymentPayload,
-    requirements: &types::v2::PaymentRequirements,
+    payload: &payload::v2::PaymentPayload,
+    requirements: &payload::v2::PaymentRequirements,
     clock_skew_tolerance: u64,
 ) -> Result<(Eip3009Payment, Eip712Domain), TronExactError> {
     let accepted = &payload.accepted;
@@ -156,14 +154,9 @@ async fn assert_nonce_unused(
     nonce: alloy_primitives::B256,
 ) -> Result<(), TronExactError> {
     let call = eip3009::authorizationStateCall { authorizer, nonce };
-    let calldata = eip3009::authorizationStateCall::abi_encode(&call);
     let result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            token,
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), token, &call)
         .await?;
     let padded: [u8; 32] = result
         .get(..32)
@@ -215,18 +208,13 @@ pub(super) async fn verify_payment(
         nonce: payment.nonce,
         signature: payment.signature.clone(),
     };
-    let calldata = eip3009::transferWithAuthorizationCall::abi_encode(&call);
     let token = eip712_domain
         .verifying_contract
         .ok_or(TronExactError::MissingTip712Domain)?;
 
     let _result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            token,
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), token, &call)
         .await
         .map_err(|e| {
             TronExactError::TronGrid(format!("transferWithAuthorization simulation failed: {e}"))
@@ -240,8 +228,8 @@ pub(super) async fn assert_valid_permit2_payment(
     provider: &crate::chain::TronChainProvider,
     chain: &TronChainReference,
     permit2: &Permit2Payload,
-    payload: &types::v2::PaymentPayload,
-    requirements: &types::v2::PaymentRequirements,
+    payload: &payload::v2::PaymentPayload,
+    requirements: &payload::v2::PaymentRequirements,
     clock_skew_tolerance: u64,
 ) -> Result<(Permit2Payment, Eip712Domain), TronExactError> {
     let accepted = &payload.accepted;
@@ -386,14 +374,9 @@ pub(super) async fn verify_permit2_payment(
         },
         signature: payment.signature.clone(),
     };
-    let calldata = crate::chain::contracts::x402_exact_permit2_proxy::settleCall::abi_encode(&call);
     let _result = provider
         .grid()
-        .trigger_constant_contract(
-            provider.signer_address(),
-            proxy_addr.as_evm(),
-            &alloy_primitives::Bytes::from(calldata),
-        )
+        .trigger_constant_contract(provider.signer_address(), proxy_addr.as_evm(), &call)
         .await
         .map_err(|e| TronExactError::TronGrid(format!("permit2 settle simulation failed: {e}")))?;
 
@@ -433,7 +416,7 @@ mod tests {
     fn sample_requirements(
         timeout: u64,
         extra: &serde_json::Value,
-    ) -> types::v2::PaymentRequirements {
+    ) -> payload::v2::PaymentRequirements {
         serde_json::from_value(serde_json::json!({
             "scheme": "exact",
             "network": "tron:0x2b6653dc",

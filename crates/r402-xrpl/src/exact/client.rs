@@ -1,12 +1,12 @@
 //! Client-side payment signing for the XRPL `"exact"` scheme.
 
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use std::future::Future;
+use std::pin::Pin;
+
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::error::ClientError;
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ChainId, PaymentRequired, ResourceInfo};
 use serde_json::{Value, json};
 use xrpl::core::keypairs::{derive_classic_address, derive_keypair};
 
@@ -14,12 +14,11 @@ use crate::chain::codec::{
     invoice_id_to_field, max_last_ledger_sequence, sign_transaction, signed_tx_hash,
 };
 use crate::chain::rpc::{XrplRpc, extract_created_ticket_sequences, submit_and_wait};
-use crate::chain::types::{
+use crate::chain::{
     XrplChainReference, is_decimal_string, is_integer_string, is_xrpl_network,
     parse_xrpl_network_id,
 };
-use crate::exact::types;
-use crate::exact::{ExactXrplPayload, XrplAssetTransferMethod, XrplExact, XrplExtra};
+use crate::exact::{ExactXrplPayload, XrplAssetTransferMethod, XrplExact, XrplExtra, payload};
 use crate::{DEFAULT_MAX_FEE_DROPS, MAX_ACCOUNT_TICKETS};
 
 /// Local XRPL signer wrapping a hex key pair derived from a family seed.
@@ -87,7 +86,7 @@ pub struct XrplClientOptions {
 pub async fn create_signed_payment<R: XrplRpc>(
     signer: &XrplSigner,
     rpc: &R,
-    requirements: &types::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
     options: &XrplClientOptions,
 ) -> Result<String, ClientError> {
     validate_requirements(requirements)?;
@@ -101,7 +100,9 @@ pub async fn create_signed_payment<R: XrplRpc>(
         .map_err(|e| ClientError::Signing(e.to_string()))
 }
 
-fn validate_requirements(requirements: &types::v2::PaymentRequirements) -> Result<(), ClientError> {
+fn validate_requirements(
+    requirements: &payload::v2::PaymentRequirements,
+) -> Result<(), ClientError> {
     if !is_xrpl_network(&requirements.network.to_string()) {
         return Err(ClientError::Signing(format!(
             "unsupported xrpl network: {}",
@@ -149,7 +150,7 @@ fn validate_requirements(requirements: &types::v2::PaymentRequirements) -> Resul
 
 fn build_payment_json(
     signer: &XrplSigner,
-    requirements: &types::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
     extra: Option<&XrplExtra>,
 ) -> Result<Value, ClientError> {
     let network_id = parse_xrpl_network_id(&requirements.network.to_string())
@@ -198,7 +199,7 @@ async fn fill_ledger_fields<R: XrplRpc>(
     tx: &mut Value,
     signer: &XrplSigner,
     rpc: &R,
-    requirements: &types::v2::PaymentRequirements,
+    requirements: &payload::v2::PaymentRequirements,
     method: XrplAssetTransferMethod,
     options: &XrplClientOptions,
 ) -> Result<(), ClientError> {
@@ -379,8 +380,6 @@ impl<S, R> SchemeId for XrplExactClient<S, R> {
     }
 }
 
-impl<S, R> r402_core::scheme::Sealed for XrplExactClient<S, R> {}
-
 impl<S, R> SchemeClient for XrplExactClient<S, R>
 where
     S: AsRef<XrplSigner> + Send + Sync + Clone + 'static,
@@ -391,7 +390,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "xrpl" {
                     return None;
@@ -431,7 +430,7 @@ struct V2PayloadSigner<S, R> {
     signer: S,
     rpc: R,
     options: XrplClientOptions,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -440,7 +439,9 @@ where
     S: AsRef<XrplSigner> + Send + Sync,
     R: XrplRpc,
 {
-    fn sign_payment(&self) -> r402_core::facilitator::BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let blob = create_signed_payment(
                 self.signer.as_ref(),
@@ -449,7 +450,7 @@ where
                 &self.options,
             )
             .await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactXrplPayload {
                     signed_tx_blob: blob,

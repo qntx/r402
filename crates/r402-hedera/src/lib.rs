@@ -1,35 +1,36 @@
+//! Hedera chain support for the x402 payment protocol.
+//!
+//! Exact scheme: a payer-signed `TransferTransaction` that credits `payTo`.
+//! The facilitator is the fee payer: it verifies via Mirror Node, adds its
+//! signature, and submits. `aliasPolicy` is facilitator config (default
+//! reject), not wire extra.
+//!
+//! # Features
+//!
+//! - `server` — [`HederaExact::price_tag`]
+//! - `client` — [`HederaExactClient`] transfer construction
+//! - `facilitator` — in-process [`HederaExactFacilitator::try_new`]
+//! - `telemetry` — tracing spans on verify/settle
+
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(
     test,
     allow(
         unknown_lints,
+        clippy::indexing_slicing,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::missing_assert_message,
         clippy::unused_async_trait_impl,
-        reason = "in-crate mock impls of AFIT traits have no .await"
+        reason = "unit tests panic on assertion failure; mock AFIT impls have no .await"
     )
 )]
 
-//! Hedera chain support for the x402 payment protocol.
-//!
-//! This crate implements the x402 `"exact"` scheme for Hedera: the buyer
-//! signs a `TransferTransaction` that credits `payTo`, and a facilitator
-//! fee payer submits it after Mirror Node preflight.
-//!
-//! # Features
-//!
-//! - **CAIP-2 Addressing**: `hedera:mainnet` and `hedera:testnet`
-//! - **HBAR and HTS**: native tinybars (`0.0.0`) and USDC token ids
-//! - **Fee-payer sponsorship**: `extra.feePayer` is copied from `/supported`
-//! - **In-process facilitator**: verify and settle via Hiero SDK
-//!
-//! # Feature Flags
-//!
-//! - `server` — server-side price tag generation
-//! - `client` — client-side transfer signing
-//! - `facilitator` — facilitator-side payment verification and settlement
-//! - `telemetry` — `tracing` instrumentation
-
 #[cfg(not(any(feature = "client", feature = "facilitator")))]
 use base64 as _;
+#[cfg(not(any(feature = "client", feature = "facilitator")))]
+use serde_json as _;
 #[cfg(feature = "telemetry")]
 use tracing_core as _;
 
@@ -47,6 +48,7 @@ pub mod chain;
 pub mod exact;
 
 mod networks;
+
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub use chain::inspect_hedera_transaction;
 #[cfg(feature = "facilitator")]
@@ -55,5 +57,17 @@ pub use exact::HederaExact;
 #[cfg(feature = "client")]
 pub use exact::client::{HederaExactClient, HederaSigner};
 #[cfg(feature = "facilitator")]
-pub use exact::facilitator::{AliasPolicy, HederaExactFacilitator, HederaExactFacilitatorConfig};
+pub use exact::facilitator::{AliasPolicy, HederaExactFacilitator};
 pub use networks::*;
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn crate_loads() {
+        assert_eq!(
+            env!("CARGO_PKG_NAME"),
+            "r402-hedera",
+            "package name must match the crate directory"
+        );
+    }
+}

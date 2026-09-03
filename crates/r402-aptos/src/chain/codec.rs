@@ -397,8 +397,7 @@ mod tests {
     use aptos_sdk::types::ChainId;
 
     use super::*;
-    use crate::DEFAULT_CLIENT_MAX_GAS;
-    use crate::chain::USDC_TESTNET_FA;
+    use crate::chain::{DEFAULT_CLIENT_MAX_GAS, USDC_TESTNET_FA};
 
     fn sample_payment() -> (SimpleTransaction, AccountAuthenticator) {
         let sender = Ed25519Account::generate();
@@ -469,7 +468,7 @@ mod tests {
 
     fn ts_fixture(name: &str) -> (String, serde_json::Value) {
         let root: serde_json::Value = serde_json::from_str(include_str!(
-            "../exact/fixtures/ts_encode_aptos_payload.json"
+            "../../../../tests/fixtures/aptos/ts_encode_aptos_payload.json"
         ))
         .unwrap();
         let entry = root.get(name).unwrap();

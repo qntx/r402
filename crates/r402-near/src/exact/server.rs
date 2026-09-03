@@ -3,9 +3,9 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, DeployedTokenAmount};
-use r402_core::wire;
-use r402_core::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
+use r402_protocol::network::{ChainId, DeployedTokenAmount};
+use r402_protocol::payment::{PaymentRequirements, PriceTag};
+use r402_server::{PaymentFlowConfig, SDK_DEFAULT_ASSET_TRANSFER_METHOD, SchemeNetworkServer};
 
 use crate::chain::{NearAddress, NearTokenDeployment};
 use crate::exact::{ExactScheme, NearExact};
@@ -47,9 +47,9 @@ impl NearExact {
     pub fn price_tag<A: Into<NearAddress>>(
         pay_to: A,
         asset: DeployedTokenAmount<u128, NearTokenDeployment>,
-    ) -> wire::PriceTag {
+    ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let requirements = wire::PaymentRequirements::new(
+        let requirements = PaymentRequirements::new(
             ExactScheme.to_string().into(),
             chain_id,
             asset.amount.to_string().into(),
@@ -57,7 +57,7 @@ impl NearExact {
             asset.token.address.to_string().into(),
             300,
         );
-        wire::PriceTag::new(requirements)
+        PriceTag::new(requirements)
     }
 }
 
@@ -82,12 +82,20 @@ mod tests {
 
     #[test]
     fn payment_flows_use_default_authorization_and_upfront() {
+        use r402_server::PaymentFlowName;
+
         let scheme = NearExact;
+        assert_eq!(scheme.scheme(), "exact");
         assert_eq!(
-            scheme
-                .payment_flows()
-                .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD),
-            Some(&PaymentFlowConfig::authorization_and_upfront())
+            scheme.default_asset_transfer_method(),
+            SDK_DEFAULT_ASSET_TRANSFER_METHOD
         );
+        let row = scheme
+            .payment_flows()
+            .get(SDK_DEFAULT_ASSET_TRANSFER_METHOD)
+            .expect("default ATM");
+        assert_eq!(*row, PaymentFlowConfig::authorization_and_upfront());
+        assert_eq!(row.default, PaymentFlowName::Authorization);
+        assert!(scheme.dynamic_extra_fields().is_empty());
     }
 }

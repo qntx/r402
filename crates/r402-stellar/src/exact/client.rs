@@ -1,13 +1,11 @@
 //! Client-side payment signing for the Stellar `"exact"` scheme.
 
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::facilitator::BoxFuture;
-use r402_core::scheme::SchemeId;
-use r402_core::scheme::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
-use r402_core::wire::Base64Bytes;
-use r402_core::wire::PaymentRequired;
-use r402_core::wire::ResourceInfo;
+use std::future::Future;
+use std::pin::Pin;
+
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::scheme::SchemeId;
+use r402_protocol::{Base64Bytes, ChainId, ClientError, PaymentRequired, ResourceInfo};
 use stellar_xdr::TransactionExt;
 
 use crate::chain::rpc::StellarRpc;
@@ -18,8 +16,7 @@ use crate::chain::xdr::{
     invoke_host_function_op_mut,
 };
 use crate::chain::{StellarChainReference, parse_contract_address};
-use crate::exact::types;
-use crate::exact::{ExactStellarPayload, StellarExact, StellarExtra};
+use crate::exact::{ExactStellarPayload, StellarExact, StellarExtra, payload};
 use crate::{BASE_FEE_STROOPS, DEFAULT_TIMEOUT_SECONDS, NULL_ACCOUNT, timeout_ledgers};
 
 /// Builds a base64 transaction XDR with signed auth entries only.
@@ -194,8 +191,6 @@ impl<S, R> SchemeId for StellarExactClient<S, R> {
     }
 }
 
-impl<S, R> r402_core::scheme::Sealed for StellarExactClient<S, R> {}
-
 impl<S, R> SchemeClient for StellarExactClient<S, R>
 where
     S: AsRef<StellarSigner> + Send + Sync + Clone + 'static,
@@ -206,7 +201,7 @@ where
             .accepts
             .iter()
             .filter_map(|v| {
-                let requirements: types::v2::PaymentRequirements = v.as_concrete()?;
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
                 let chain_id = requirements.network.clone();
                 if chain_id.namespace() != "stellar" {
                     return None;
@@ -239,7 +234,7 @@ struct V2PayloadSigner<S, R> {
     signer: S,
     rpc: R,
     chain: StellarChainReference,
-    requirements: types::v2::PaymentRequirements,
+    requirements: payload::v2::PaymentRequirements,
     resource: ResourceInfo,
 }
 
@@ -248,7 +243,9 @@ where
     S: AsRef<StellarSigner> + Send + Sync,
     R: StellarRpc,
 {
-    fn sign_payment(&self) -> BoxFuture<'_, Result<String, ClientError>> {
+    fn sign_payment(
+        &self,
+    ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + '_>> {
         Box::pin(async move {
             let extra = self.requirements.extra.ok_or_else(|| {
                 ClientError::Signing("Exact scheme requires areFeesSponsored to be true".to_owned())
@@ -274,7 +271,7 @@ where
                 &extra,
             )
             .await?;
-            let payload = types::v2::PaymentPayload::new(
+            let payload = payload::v2::PaymentPayload::new(
                 self.requirements.clone(),
                 ExactStellarPayload { transaction: b64 },
             )

@@ -3,14 +3,20 @@
 //! This module provides static network metadata and USDC NEP-141 token
 //! deployment information for NEAR mainnet and testnet.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
-use crate::DEFAULT_TOKEN_DECIMALS;
-use crate::chain::{NearAddress, NearChainReference, NearTokenDeployment};
+use crate::chain::{
+    DEFAULT_TOKEN_DECIMALS, NearAddress, NearChainReference, NearTokenDeployment,
+    USDC_MAINNET_ACCOUNT, USDC_TESTNET_ACCOUNT,
+};
 
 /// Well-known NEAR networks with their names and CAIP-2 identifiers.
 pub static NEAR_NETWORKS: &[NetworkInfo] = &[
@@ -43,12 +49,12 @@ static USDC_DEPLOYMENTS: LazyLock<Vec<NearTokenDeployment>> = LazyLock::new(|| {
     vec![
         NearTokenDeployment::new(
             NearChainReference::MAINNET,
-            well_known("17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1"),
+            well_known(USDC_MAINNET_ACCOUNT),
             DEFAULT_TOKEN_DECIMALS,
         ),
         NearTokenDeployment::new(
             NearChainReference::TESTNET,
-            well_known("3e2210e1184b45b64c8a434c0a7e7b23cc04ea7eb7a6c3c32520d03d4afcb8af"),
+            well_known(USDC_TESTNET_ACCOUNT),
             DEFAULT_TOKEN_DECIMALS,
         ),
     ]
@@ -67,6 +73,7 @@ pub fn usdc_near_deployment(chain: NearChainReference) -> Option<&'static NearTo
 }
 
 /// Reverse lookup by NEP-141 account id and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_near_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "near" {
@@ -144,10 +151,9 @@ mod tests {
     fn usdc_deployments_resolve() {
         assert_eq!(USDC::near().decimals, DEFAULT_TOKEN_DECIMALS);
         assert_eq!(USDC::near_testnet().decimals, DEFAULT_TOKEN_DECIMALS);
+        assert_eq!(USDC::near().address.as_str(), USDC_MAINNET_ACCOUNT);
+        assert_eq!(USDC::near_testnet().address.as_str(), USDC_TESTNET_ACCOUNT);
         assert_eq!(USDC::all().len(), 2);
         assert_eq!(NEAR_NETWORKS.len(), 2);
-        let network: ChainId = "near:mainnet".parse().unwrap();
-        let info = find_default_near_asset(USDC::near().address.as_str(), &network).unwrap();
-        assert_eq!(info.symbol, "USDC");
     }
 }

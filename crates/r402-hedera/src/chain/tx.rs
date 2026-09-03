@@ -6,7 +6,7 @@ use std::str::FromStr;
 use base64::Engine;
 use hedera::{AccountId, AnyTransaction, Hbar, TokenId, TransferTransaction};
 
-use super::types::{hedera_account_ids_equal, is_hbar_asset};
+use super::account::{hedera_account_ids_equal, is_hbar_asset};
 
 /// A single signed transfer entry. Positive values credit, negative debit.
 #[derive(Debug, Clone, PartialEq, Eq)]

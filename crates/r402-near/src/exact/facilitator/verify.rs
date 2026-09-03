@@ -5,29 +5,41 @@ use compact_str::CompactString;
 use near_primitives::action::Action;
 use near_primitives::action::delegate::SignedDelegateAction;
 use near_primitives::gas::Gas;
-use r402_core::error::ErrorReason;
-use r402_core::wire::VerifyResponse;
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::VerifyResponse;
 use serde_json::Value;
 
 use crate::chain::rpc::{
     NearAccessKeyPermissionKind, NearRpc, NearStorageBalance, parse_ft_transfer_args,
 };
-use crate::chain::types::is_near_network;
+use crate::chain::{
+    DEFAULT_MAX_SPONSORED_GAS, FT_TRANSFER_METHOD, NONCE_RANGE_MULTIPLIER, ONE_YOCTO,
+    is_near_network, timeout_blocks,
+};
 use crate::exact::error::{NearInvalid, invalid};
-use crate::timeout_blocks;
-use crate::{DEFAULT_MAX_SPONSORED_GAS, FT_TRANSFER_METHOD, NONCE_RANGE_MULTIPLIER, ONE_YOCTO};
 
 /// Verifies a raw facilitator verify/settle request JSON.
 ///
 /// Envelope checks run on the JSON so `invalid_x402_version` /
 /// `unsupported_scheme` / `invalid_network` are emitted before typed decode.
+/// `expected_network` is the facilitator provider's CAIP-2 id; a NEP-366
+/// blob has no network field, so the request must match this provider.
 pub async fn verify_request_json<R: NearRpc>(
     rpc: &R,
     relayer_ids: &[String],
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
 ) -> VerifyResponse {
-    match verify_inner(rpc, relayer_ids, max_sponsored_gas, request).await {
+    match verify_inner(
+        rpc,
+        relayer_ids,
+        max_sponsored_gas,
+        expected_network,
+        request,
+    )
+    .await
+    {
         Ok(payer) => VerifyResponse::valid(payer),
         Err(invalid) => invalid.into_response(),
     }
@@ -42,6 +54,7 @@ async fn verify_inner<R: NearRpc>(
     rpc: &R,
     relayer_ids: &[String],
     max_sponsored_gas: u64,
+    expected_network: &str,
     request: &Value,
 ) -> Result<CompactString, NearInvalid> {
     let payload = request
@@ -51,7 +64,7 @@ async fn verify_inner<R: NearRpc>(
         .get("paymentRequirements")
         .ok_or_else(|| invalid("invalid_payment_requirements"))?;
 
-    // §1 Version, scheme, network
+    // Version, scheme, network must fail closed before typed decode.
     let payload_version = payload.get("x402Version").and_then(Value::as_u64);
     if payload_version != Some(2) {
         return Err(invalid("invalid_x402_version"));
@@ -78,8 +91,11 @@ async fn verify_inner<R: NearRpc>(
     if accepted_network != req_network {
         return Err(invalid("invalid_exact_near_network_mismatch"));
     }
+    // SignedDelegate has no CAIP-2; this provider's RPC is one chain.
+    if req_network != expected_network {
+        return Err(invalid("invalid_exact_near_network_mismatch"));
+    }
 
-    // §2 Requirement consistency
     if accepted.get("asset") != requirements.get("asset") {
         return Err(invalid("invalid_exact_near_asset_mismatch"));
     }
@@ -105,7 +121,6 @@ async fn verify_inner<R: NearRpc>(
         return Err(invalid("invalid_exact_near_payload_shape"));
     };
 
-    // §4 SignedDelegateAction integrity
     let decoded = decode_signed_delegate(signed_b64)
         .map_err(|_| invalid("invalid_exact_near_payload_signed_delegate_action"))?;
     if !decoded.verify() {
@@ -114,7 +129,6 @@ async fn verify_inner<R: NearRpc>(
     let delegate = &decoded.delegate_action;
     let payer = CompactString::from(delegate.sender_id.as_str());
 
-    // §3 Relayer sponsorship abuse prevention
     if relayer_ids.is_empty() {
         return Err(invalid("invalid_exact_near_no_relayer_configured").with_payer(payer));
     }
@@ -122,7 +136,6 @@ async fn verify_inner<R: NearRpc>(
         return Err(invalid("invalid_exact_near_relayer_cannot_be_payer").with_payer(payer));
     }
 
-    // §6 Delegated action safety
     let actions = delegate.get_actions();
     if actions.len() != 1 {
         return Err(invalid("invalid_exact_near_payload_action_count").with_payer(payer));
@@ -134,7 +147,6 @@ async fn verify_inner<R: NearRpc>(
         return Err(invalid("invalid_exact_near_payload_method_name").with_payer(payer));
     }
 
-    // §7 Token transfer intent and exactness
     let asset = requirements
         .get("asset")
         .and_then(Value::as_str)
@@ -168,7 +180,6 @@ async fn verify_inner<R: NearRpc>(
         return Err(invalid("invalid_exact_near_payload_gas_limit_exceeded").with_payer(payer));
     }
 
-    // §5 Replay and expiry
     let Ok(current_height) = rpc.current_block_height().await else {
         return Err(
             invalid("invalid_exact_near_current_block_height_unavailable").with_payer(payer),
@@ -212,7 +223,6 @@ async fn verify_inner<R: NearRpc>(
         );
     }
 
-    // §8 Access-key permission
     match access_key.permission_kind {
         NearAccessKeyPermissionKind::FunctionCall => {
             return Err(
@@ -227,7 +237,6 @@ async fn verify_inner<R: NearRpc>(
         NearAccessKeyPermissionKind::FullAccess => {}
     }
 
-    // §9 Chain-state preflight
     let Ok(sender_account) = rpc.view_account(delegate.sender_id.as_str()).await else {
         return Err(invalid("invalid_exact_near_account_lookup_failed").with_payer(payer));
     };

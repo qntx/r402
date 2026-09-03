@@ -1,40 +1,18 @@
 //! Off-chain verification for EVM `auth-capture`.
 
 use alloy_primitives::{Address, B256, U256};
-use alloy_sol_types::{SolStruct, eip712_domain, sol};
-use r402_core::error::VerificationError;
-use r402_core::wire::UnixTimestamp;
+use alloy_sol_types::{SolStruct, eip712_domain};
+use r402_protocol::error::VerificationError;
+use r402_protocol::payment::UnixTimestamp;
+use r402_protocol::scheme::AuthCaptureScheme;
 
 use super::nonce::{compute_payer_agnostic_payment_info_hash, hash_as_uint256};
-use super::types::{
-    AUTH_CAPTURE_CLOCK_SKEW_SECS, AuthCaptureExtra, AuthCapturePayload,
-    EIP3009_TOKEN_COLLECTOR_ADDRESS, PERMIT2_TOKEN_COLLECTOR_ADDRESS, PaymentInfo,
+use super::payload::{
+    AUTH_CAPTURE_CLOCK_SKEW_SECS, AuthCaptureDeployment, AuthCaptureEip3009Payload,
+    AuthCaptureExtra, AuthCapturePayload, AuthCapturePermit2Payload, PaymentInfo,
+    PermitTransferFrom, ReceiveWithAuthorization, TokenPermissions, submitted_fee_from_wire, v2,
 };
-use crate::auth_capture::types::v2;
 use crate::permit2::PERMIT2_ADDRESS;
-
-sol! {
-    struct ReceiveWithAuthorization {
-        address from;
-        address to;
-        uint256 value;
-        uint256 validAfter;
-        uint256 validBefore;
-        bytes32 nonce;
-    }
-
-    struct TokenPermissions {
-        address token;
-        uint256 amount;
-    }
-
-    struct PermitTransferFrom {
-        TokenPermissions permitted;
-        address spender;
-        uint256 nonce;
-        uint256 deadline;
-    }
-}
 
 /// Reconstructs on-chain `PaymentInfo` from requirements + payload salt/payer.
 #[must_use]
@@ -73,11 +51,10 @@ pub fn verify_offchain(
     requirements: &v2::PaymentRequirements,
     chain_id: u64,
 ) -> Result<Address, VerificationError> {
-    if requirements.scheme != r402_core::scheme::AuthCaptureScheme {
+    if requirements.scheme != AuthCaptureScheme {
         return Err(VerificationError::UnsupportedScheme);
     }
-    let accepted_scheme = payload.accepted.scheme.to_string();
-    if accepted_scheme != "auth-capture" {
+    if payload.accepted.scheme != AuthCaptureScheme {
         return Err(VerificationError::AcceptedRequirementsMismatch);
     }
     if payload.accepted.network != requirements.network {
@@ -90,9 +67,14 @@ pub fn verify_offchain(
         .ok_or_else(|| VerificationError::InvalidFormat("missing auth-capture extra".into()))?;
 
     validate_extra(extra)?;
+    let deployment = extra.require_deployment()?;
+    submitted_fee_from_wire(
+        deployment.version,
+        payload.payload.fee_bps(),
+        payload.payload.fee_amount(),
+    )?;
 
-    let method = extra.transfer_method();
-    if payload.payload.transfer_method() != method {
+    if payload.payload.transfer_method() != extra.transfer_method() {
         return Err(VerificationError::InvalidFormat(
             "payload assetTransferMethod mismatch".into(),
         ));
@@ -109,8 +91,12 @@ pub fn verify_offchain(
     }
 
     match &payload.payload {
-        AuthCapturePayload::Eip3009(p) => verify_eip3009(p, requirements, extra, chain_id, now),
-        AuthCapturePayload::Permit2(p) => verify_permit2(p, requirements, extra, chain_id, now),
+        AuthCapturePayload::Eip3009(p) => {
+            verify_eip3009(p, requirements, extra, deployment, chain_id, now)
+        }
+        AuthCapturePayload::Permit2(p) => {
+            verify_permit2(p, requirements, extra, deployment, chain_id, now)
+        }
     }
 }
 
@@ -125,20 +111,26 @@ fn validate_extra(extra: &AuthCaptureExtra) -> Result<(), VerificationError> {
             "maxFeeBps must be >= minFeeBps".into(),
         ));
     }
+    if extra.auto_capture() {
+        return Err(VerificationError::InvalidFormat(
+            "autoCapture is not supported".into(),
+        ));
+    }
     Ok(())
 }
 
 fn verify_eip3009(
-    p: &super::types::AuthCaptureEip3009Payload,
+    p: &AuthCaptureEip3009Payload,
     requirements: &v2::PaymentRequirements,
     extra: &AuthCaptureExtra,
+    deployment: AuthCaptureDeployment,
     chain_id: u64,
     now: u64,
 ) -> Result<Address, VerificationError> {
     let auth = &p.authorization;
-    if auth.to != EIP3009_TOKEN_COLLECTOR_ADDRESS {
-        return Err(VerificationError::InvalidFormat(
-            "authorization.to must be EIP3009_TOKEN_COLLECTOR_ADDRESS".into(),
+    if auth.to != deployment.eip3009_collector {
+        return Err(VerificationError::from_wire(
+            "invalid_auth_capture_evm_token_collector_mismatch",
         ));
     }
     if auth.value.0 != requirements.amount.0 {
@@ -158,7 +150,8 @@ fn verify_eip3009(
     }
 
     let info = reconstruct_payment_info(requirements, extra, auth.from, p.salt, valid_before);
-    let expected_nonce = compute_payer_agnostic_payment_info_hash(chain_id, &info);
+    let expected_nonce =
+        compute_payer_agnostic_payment_info_hash(chain_id, &info, deployment.escrow);
     if auth.nonce != expected_nonce {
         return Err(VerificationError::InvalidFormat(
             "authorization.nonce does not match PaymentInfo hash".into(),
@@ -185,16 +178,17 @@ fn verify_eip3009(
 }
 
 fn verify_permit2(
-    p: &super::types::AuthCapturePermit2Payload,
+    p: &AuthCapturePermit2Payload,
     requirements: &v2::PaymentRequirements,
     extra: &AuthCaptureExtra,
+    deployment: AuthCaptureDeployment,
     chain_id: u64,
     now: u64,
 ) -> Result<Address, VerificationError> {
     let a = &p.permit2_authorization;
-    if a.spender != PERMIT2_TOKEN_COLLECTOR_ADDRESS {
-        return Err(VerificationError::InvalidFormat(
-            "spender must be PERMIT2_TOKEN_COLLECTOR_ADDRESS".into(),
+    if a.spender != deployment.permit2_collector {
+        return Err(VerificationError::from_wire(
+            "invalid_auth_capture_evm_token_collector_mismatch",
         ));
     }
     if a.permitted.token != requirements.asset.0 {
@@ -203,7 +197,8 @@ fn verify_permit2(
     if a.permitted.amount.0 != requirements.amount.0 {
         return Err(VerificationError::InvalidPaymentAmount);
     }
-    let deadline: u64 = a.deadline.0.try_into().unwrap_or(u64::MAX);
+    let deadline = u64::try_from(a.deadline.0)
+        .map_err(|_| VerificationError::InvalidFormat("permit2 deadline exceeds u64".into()))?;
     if deadline <= now.saturating_add(AUTH_CAPTURE_CLOCK_SKEW_SECS) {
         return Err(VerificationError::Expired);
     }
@@ -214,7 +209,7 @@ fn verify_permit2(
     }
 
     let info = reconstruct_payment_info(requirements, extra, a.from, p.salt, deadline);
-    let expected = compute_payer_agnostic_payment_info_hash(chain_id, &info);
+    let expected = compute_payer_agnostic_payment_info_hash(chain_id, &info, deployment.escrow);
     if a.nonce.0 != hash_as_uint256(expected) {
         return Err(VerificationError::InvalidFormat(
             "permit2 nonce does not match PaymentInfo hash".into(),
@@ -245,8 +240,8 @@ fn recover_payer(
     signature: &alloy_primitives::Bytes,
     expected: Address,
 ) -> Result<(), VerificationError> {
-    // Off-chain /verify is the access gate. This path only recovers 65-byte
-    // EOA signatures; any other length is unchecked, so reject it.
+    // Off-chain /verify is the access gate. Non-65-byte blobs are not recovered,
+    // so accepting them would grant access without a checked signer.
     if signature.len() != 65 {
         return Err(VerificationError::InvalidSignature(
             "signature must be 65 bytes".into(),

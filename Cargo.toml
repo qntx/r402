@@ -5,10 +5,9 @@ resolver = "3"
 
 [workspace.package]
 # Fields below are shared across every member crate via `field.workspace =
-# true`. `keywords` and `categories` are deliberately *per-crate* (each
-# crate's audience is different — solana people don't search for
-# "ethereum") and so live in the individual `Cargo.toml` files.
-version = "0.17.1"
+# true`. `keywords` and `categories` stay per-crate so crates.io search
+# matches each crate's audience.
+version = "0.18.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -17,23 +16,26 @@ homepage = "https://github.com/qntx/r402"
 description = "x402 Payment Protocol SDK for Rust."
 
 [workspace.dependencies]
-# Internal crates
-r402 = { version = "0.17.1", path = "crates/r402" }
-r402-casper = { version = "0.17.1", path = "crates/r402-casper" }
-r402-core = { version = "0.17.1", path = "crates/r402-core" }
-r402-evm = { version = "0.17.1", path = "crates/r402-evm" }
-r402-http = { version = "0.17.1", path = "crates/r402-http" }
-r402-mcp = { version = "0.17.1", path = "crates/r402-mcp" }
-r402-hedera = { version = "0.17.1", path = "crates/r402-hedera" }
-r402-keeta = { version = "0.17.1", path = "crates/r402-keeta" }
-r402-near = { version = "0.17.1", path = "crates/r402-near" }
-r402-algorand = { version = "0.17.1", path = "crates/r402-algorand" }
-r402-aptos = { version = "0.17.1", path = "crates/r402-aptos" }
-r402-solana = { version = "0.17.1", path = "crates/r402-solana" }
-r402-stellar = { version = "0.17.1", path = "crates/r402-stellar" }
-r402-tron = { version = "0.17.1", path = "crates/r402-tron" }
-r402-xrpl = { version = "0.17.1", path = "crates/r402-xrpl" }
-r402-tvm = { version = "0.17.1", path = "crates/r402-tvm" }
+r402-protocol = { path = "crates/r402-protocol" }
+r402-client = { path = "crates/r402-client" }
+r402-facilitator = { path = "crates/r402-facilitator", default-features = false }
+r402-server = { path = "crates/r402-server" }
+r402-http = { path = "crates/r402-http", default-features = false }
+r402-evm = { path = "crates/r402-evm", default-features = false }
+r402-extensions = { path = "crates/r402-extensions", default-features = false }
+# CAIP-122 (SIWX). Pin git rev until v0.5.0 is tagged; crates.io 0.5 is later.
+# Never restore an absolute path.
+siwx = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-evm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-svm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+time = { version = "0.3", features = ["parsing", "formatting"] }
+bs58 = "0.5"
+r402-near = { path = "crates/r402-near", default-features = false }
+r402-concordium = { path = "crates/r402-concordium", default-features = false }
+
+# Concordium (gRPC v2). crates.io `license-file` is MPL-2.0 (already allowlisted).
+# MSRV 1.85, covered by workspace 1.95. Prefer this over hand-rolled V1 serialization.
+concordium-rust-sdk = "9.0.1"
 
 # Core
 # `async-trait` is only kept for implementing external traits (e.g. alloy
@@ -83,7 +85,9 @@ wiremock = "0.6"
 # alloy-core (primitives, sol-types) is on its own 1.x release train.
 # The upper alloy stack (network, provider, transport, signer, rpc-*)
 # is on the 2.x line as of the Glamsterdam-hardfork preparation release.
+alloy-consensus = { version = "2.1", default-features = false, features = ["std", "k256"] }
 alloy-contract = "2.1"
+alloy-eips = { version = "2.1", default-features = false, features = ["std"] }
 alloy-network = "2.1"
 alloy-primitives = { version = "1.6", features = ["k256", "serde"] }
 alloy-provider = "2.1"
@@ -188,6 +192,10 @@ metrics = "0.24"
 # pinned at the workspace root so all crates run with the same version
 # and configuration.
 proptest = "1"
+# Offer-receipt JWS (ES256 / ES256K). alloy-primitives already pulls k256;
+# pin here so r402-extensions does not take an unpinned transitive.
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
 [profile.release]
 codegen-units = 1

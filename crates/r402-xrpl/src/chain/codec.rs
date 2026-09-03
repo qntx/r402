@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256, Sha512};
 use xrpl::core::binarycodec::{decode, encode, encode_for_signing};
 use xrpl::core::keypairs::{is_valid_message, sign};
 
-use crate::chain::types::is_decimal_string;
+use crate::chain::account::is_decimal_string;
 use crate::{
     CANONICAL_SIGNING_PUB_KEY_LEN, DEFAULT_LEDGER_CLOSE_SECONDS, DEFAULT_LEDGER_TOLERANCE,
     TRANSACTION_HASH_PREFIX,

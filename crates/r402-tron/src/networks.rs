@@ -8,11 +8,15 @@
 //! Contract addresses are sourced from the `x402-chain-tron` reference
 //! implementation: <https://github.com/x402-rs/x402-rs/tree/main/crates/chains/x402-chain-tron>.
 
+#[cfg(feature = "client")]
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use r402_core::chain::{ChainId, NetworkInfo};
-use r402_core::scheme::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_client::DefaultAssetInfo;
+#[cfg(feature = "client")]
+use r402_protocol::ChainId;
+use r402_protocol::NetworkInfo;
 
 use crate::chain::{Address, TronChainReference, TronTokenDeployment};
 
@@ -138,6 +142,7 @@ pub fn usdt_tron_deployment(chain: TronChainReference) -> Option<&'static TronTo
 }
 
 /// Reverse lookup by TRC-20 address and CAIP-2 network.
+#[cfg(feature = "client")]
 #[must_use]
 pub fn find_default_tron_asset(asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
     if network.namespace() != "tron" {
@@ -163,9 +168,14 @@ pub fn find_default_tron_asset(asset: &str, network: &ChainId) -> Option<Default
 /// [`TronTokenDeployment::amount`] for a fluent pricing API:
 ///
 /// ```ignore
-/// use r402_tron::{TronExact, USDT};
+/// use alloy_primitives::U256;
+/// use r402_tron::{AssetTransferMethod, TronExact, USDT};
 ///
-/// let tag = TronExact::price_tag(pay_to, USDT::mainnet().amount(1_000_000u64), None);
+/// let tag = TronExact::price_tag(
+///     pay_to,
+///     &USDT::mainnet().amount(U256::from(1_000_000u64)),
+///     Some(AssetTransferMethod::Permit2),
+/// );
 /// ```
 #[derive(Debug, Clone, Copy)]
 #[allow(
@@ -217,10 +227,14 @@ mod tests {
         assert_eq!(USDT::mainnet().decimals, 6);
         assert_eq!(USDT::nile().decimals, 6);
         assert_eq!(USDT::all().len(), 2);
-        let network: ChainId = "tron:0x2b6653dc".parse().unwrap();
-        let info = find_default_tron_asset(&USDT::mainnet().address.to_string(), &network).unwrap();
-        assert_eq!(info.symbol, "USDT");
-        assert_eq!(info.decimals, 6);
+        #[cfg(feature = "client")]
+        {
+            let network: ChainId = "tron:0x2b6653dc".parse().unwrap();
+            let info =
+                find_default_tron_asset(&USDT::mainnet().address.to_string(), &network).unwrap();
+            assert_eq!(info.symbol, "USDT");
+            assert_eq!(info.decimals, 6);
+        }
     }
 
     #[test]

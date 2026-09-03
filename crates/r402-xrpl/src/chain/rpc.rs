@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::chain::types::XrplChainReference;
+use crate::chain::account::XrplChainReference;
 
 /// Default poll interval while waiting for a validated `tx` result.
 const SUBMIT_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -118,14 +118,25 @@ impl Debug for XrplJsonRpc {
     }
 }
 
+fn is_loopback_url(url: &str) -> bool {
+    url.contains("://127.0.0.1")
+        || url.contains("://localhost")
+        || url.contains("://[::1]")
+        || url.contains("://::1")
+}
+
 impl XrplJsonRpc {
     /// Connects to the given JSON-RPC URL.
     #[must_use]
     pub fn connect(url: impl AsRef<str>) -> Self {
-        Self {
-            url: url.as_ref().to_owned(),
-            http: reqwest::Client::new(),
+        let url = url.as_ref().to_owned();
+        let mut builder = reqwest::Client::builder();
+        if is_loopback_url(&url) {
+            // HTTP_PROXY must not capture loopback mock servers or local rippled.
+            builder = builder.no_proxy();
         }
+        let http = builder.build().unwrap_or_else(|_| reqwest::Client::new());
+        Self { url, http }
     }
 
     /// Connects using the default URL for `chain`, or `rpc_url` when set.

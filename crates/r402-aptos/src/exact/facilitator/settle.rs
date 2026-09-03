@@ -1,9 +1,9 @@
 //! Facilitator settlement for the Aptos exact scheme.
 
 use compact_str::CompactString;
-use r402_core::cache::{Duplicate, SettlementCache};
-use r402_core::error::ErrorReason;
-use r402_core::wire::{Extensions, SettleResponse, VerifyResponse};
+use r402_facilitator::{Duplicate, SettlementCache};
+use r402_protocol::error::ErrorReason;
+use r402_protocol::payment::{Extensions, SettleResponse, VerifyResponse};
 use serde_json::Value;
 
 use super::AptosFacilitatorOps;
@@ -24,9 +24,13 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
 
     let verified = verify_request_json(provider, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -65,7 +69,7 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
         .await
     {
         Ok(transaction) => SettleResponse::Success {
-            payer: payer.unwrap_or_default(),
+            payer,
             transaction: transaction.into(),
             network: network.into(),
             amount: request
@@ -74,6 +78,7 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
                 .and_then(Value::as_str)
                 .map(CompactString::from),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
         Err(err) => SettleResponse::Failure {
@@ -83,6 +88,7 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
             payer,
             network: network.into(),
             extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
             extra: None,
         },
     }
@@ -100,6 +106,7 @@ fn settle_failure(
         payer,
         network: network.into(),
         extensions: Extensions::new(),
+        extension_responses: Extensions::new(),
         extra: None,
     }
 }

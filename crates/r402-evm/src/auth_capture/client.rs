@@ -2,57 +2,33 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 
 use alloy_primitives::{Address, B256, Bytes, U256};
-use alloy_sol_types::{SolStruct, eip712_domain, sol};
-use r402_core::chain::ChainId;
-use r402_core::error::ClientError;
-use r402_core::scheme::{
-    DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient, SchemeId, Sealed,
-};
-use r402_core::wire::{Base64Bytes, PaymentRequired, UnixTimestamp};
+use alloy_sol_types::{SolStruct, eip712_domain};
+use r402_client::{DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner, SchemeClient};
+use r402_protocol::error::ClientError;
+use r402_protocol::network::ChainId;
+use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo, UnixTimestamp};
+use r402_protocol::scheme::SchemeId;
 use rand::RngExt;
 use rand::rng;
 
 use super::nonce::{compute_payer_agnostic_payment_info_hash, hash_as_uint256};
-use super::types::AuthCaptureTokenPermissions;
-use super::types::{
+use super::payload::{
     AuthCaptureEip3009Authorization, AuthCaptureEip3009Payload, AuthCaptureExtra,
     AuthCapturePayload, AuthCapturePermit2Authorization, AuthCapturePermit2Payload,
-    EIP3009_TOKEN_COLLECTOR_ADDRESS, PERMIT2_TOKEN_COLLECTOR_ADDRESS, PaymentInfo,
+    AuthCaptureTokenPermissions, PaymentInfo, PermitTransferFrom, ReceiveWithAuthorization,
+    TokenPermissions,
 };
+use super::{Eip155AuthCapture, payload};
 use crate::asset::AssetTransferMethod;
-use crate::chain::TokenAmount;
+use crate::chain::{Eip155ChainReference, TokenAmount};
 use crate::permit2::PERMIT2_ADDRESS;
 use crate::signer::SignerLike;
 
-sol! {
-    struct ReceiveWithAuthorization {
-        address from;
-        address to;
-        uint256 value;
-        uint256 validAfter;
-        uint256 validBefore;
-        bytes32 nonce;
-    }
-
-    struct TokenPermissions {
-        address token;
-        uint256 amount;
-    }
-
-    struct PermitTransferFrom {
-        TokenPermissions permitted;
-        address spender;
-        uint256 nonce;
-        uint256 deadline;
-    }
-}
-
 /// Client for signing auth-capture payments.
 pub struct Eip155AuthCaptureClient<S> {
-    signer: Arc<S>,
+    signer: S,
 }
 
 impl<S: std::fmt::Debug> std::fmt::Debug for Eip155AuthCaptureClient<S> {
@@ -65,78 +41,50 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155AuthCaptureClient<S> {
 impl<S> Eip155AuthCaptureClient<S> {
     /// Builds a client around `signer`.
     #[must_use]
-    pub fn new(signer: S) -> Self {
-        Self {
-            signer: Arc::new(signer),
-        }
-    }
-
-    /// Builds from an existing `Arc`.
-    #[must_use]
-    pub const fn from_arc(signer: Arc<S>) -> Self {
+    pub const fn new(signer: S) -> Self {
         Self { signer }
     }
 }
 
-impl<S: SignerLike + Sync + 'static> SchemeId for Eip155AuthCaptureClient<S> {
+impl<S> SchemeId for Eip155AuthCaptureClient<S> {
     fn namespace(&self) -> &'static str {
-        "eip155"
+        Eip155AuthCapture.namespace()
     }
 
-    fn scheme(&self) -> &'static str {
-        "auth-capture"
+    fn scheme(&self) -> &str {
+        Eip155AuthCapture.scheme()
     }
 }
 
-impl<S: SignerLike + Sync + 'static> Sealed for Eip155AuthCaptureClient<S> {}
-
-impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155AuthCaptureClient<S> {
+impl<S> SchemeClient for Eip155AuthCaptureClient<S>
+where
+    S: SignerLike + Clone + Send + Sync + 'static,
+{
     fn accept(&self, payment_required: &PaymentRequired) -> Vec<PaymentCandidate> {
-        let mut out = Vec::new();
-        for req in &payment_required.accepts {
-            if req.scheme.as_str() != "auth-capture" {
-                continue;
-            }
-            if !req.network.namespace().eq_ignore_ascii_case("eip155") {
-                continue;
-            }
-            let Some(extra_val) = req.extra.clone() else {
-                continue;
-            };
-            let Ok(extra) = serde_json::from_value::<AuthCaptureExtra>(extra_val) else {
-                continue;
-            };
-            let Ok(amount) = req.amount.parse::<U256>() else {
-                continue;
-            };
-            let Ok(pay_to) = req.pay_to.parse::<Address>() else {
-                continue;
-            };
-            let Ok(asset) = req.asset.parse::<Address>() else {
-                continue;
-            };
-            let Ok(chain_id) = req.network.reference().parse::<u64>() else {
-                continue;
-            };
-            out.push(PaymentCandidate {
-                chain_id: req.network.clone(),
-                asset: req.asset.clone(),
-                amount: req.amount.clone(),
-                scheme: "auth-capture".into(),
-                pay_to: req.pay_to.clone(),
-                requirements: req.clone(),
-                signer: Box::new(AuthCaptureCandidateSigner {
-                    signer: Arc::clone(&self.signer),
-                    chain_id,
-                    asset,
-                    pay_to,
-                    amount,
-                    max_timeout: req.max_timeout_seconds,
-                    extra,
-                }),
-            });
-        }
-        out
+        payment_required
+            .accepts
+            .iter()
+            .filter_map(|v| {
+                let requirements: payload::v2::PaymentRequirements = v.as_concrete()?;
+                let extra = requirements.extra.clone()?;
+                let chain_reference = Eip155ChainReference::try_from(&requirements.network).ok()?;
+                Some(PaymentCandidate {
+                    chain_id: requirements.network.clone(),
+                    asset: requirements.asset.to_string().into(),
+                    amount: requirements.amount.0.to_string().into(),
+                    scheme: self.scheme().into(),
+                    pay_to: requirements.pay_to.to_string().into(),
+                    requirements: v.clone(),
+                    signer: Box::new(AuthCaptureCandidateSigner {
+                        signer: self.signer.clone(),
+                        resource_info: Some(payment_required.resource.clone()),
+                        chain_id: chain_reference.inner(),
+                        requirements,
+                        extra,
+                    }),
+                })
+            })
+            .collect()
     }
 
     fn find_default_asset(&self, asset: &str, network: &ChainId) -> Option<DefaultAssetInfo> {
@@ -145,32 +93,36 @@ impl<S: SignerLike + Sync + 'static> SchemeClient for Eip155AuthCaptureClient<S>
 }
 
 struct AuthCaptureCandidateSigner<S> {
-    signer: Arc<S>,
+    signer: S,
+    resource_info: Option<ResourceInfo>,
     chain_id: u64,
-    asset: Address,
-    pay_to: Address,
-    amount: U256,
-    max_timeout: u64,
+    requirements: payload::v2::PaymentRequirements,
     extra: AuthCaptureExtra,
 }
 
-impl<S: SignerLike + Sync + 'static> PaymentCandidateSigner for AuthCaptureCandidateSigner<S> {
+impl<S> PaymentCandidateSigner for AuthCaptureCandidateSigner<S>
+where
+    S: SignerLike + Sync,
+{
     fn sign_payment<'a>(
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<String, ClientError>> + Send + 'a>> {
         Box::pin(async move {
-            let payload = sign_auth_capture(
-                self.signer.as_ref(),
+            let scheme_payload = sign_auth_capture(
+                &self.signer,
                 self.chain_id,
-                self.asset,
-                self.pay_to,
-                self.amount,
-                self.max_timeout,
+                self.requirements.asset.0,
+                self.requirements.pay_to.0,
+                self.requirements.amount.0,
+                self.requirements.max_timeout_seconds,
                 &self.extra,
             )
             .await?;
-            let json = serde_json::to_vec(&payload).map_err(ClientError::Json)?;
-            Ok(Base64Bytes::encode(json).to_string())
+            let payload =
+                payload::v2::PaymentPayload::new(self.requirements.clone(), scheme_payload)
+                    .with_optional_resource(self.resource_info.clone());
+            let json = serde_json::to_vec(&payload)?;
+            Ok(Base64Bytes::encode(&json).to_string())
         })
     }
 }
@@ -194,6 +146,9 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
             "auth-capture extra.name and extra.version are required".into(),
         ));
     }
+    let deployment = extra.deployment().ok_or_else(|| {
+        ClientError::Signing("Invalid authCaptureEscrow in payment requirements extra".into())
+    })?;
     let now = UnixTimestamp::now().as_secs();
     let pre_approval_expiry = now.saturating_add(max_timeout_seconds);
     let salt_bytes: [u8; 32] = rng().random();
@@ -214,18 +169,22 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
         fee_receiver: extra.fee_recipient.0,
         salt: salt_u256,
     };
-    let nonce = compute_payer_agnostic_payment_info_hash(chain_id, &payment_info);
+    let nonce =
+        compute_payer_agnostic_payment_info_hash(chain_id, &payment_info, deployment.escrow);
 
     match extra.transfer_method() {
         AssetTransferMethod::Permit2 => {
             sign_permit2_auth_capture(
                 signer,
-                chain_id,
-                asset,
-                amount,
-                pre_approval_expiry,
-                nonce,
-                salt,
+                Permit2SignParams {
+                    chain_id,
+                    asset,
+                    amount,
+                    pre_approval_expiry,
+                    nonce,
+                    salt,
+                    spender: deployment.permit2_collector,
+                },
             )
             .await
         }
@@ -239,6 +198,7 @@ pub async fn sign_auth_capture<S: SignerLike + Sync>(
                     pre_approval_expiry,
                     nonce,
                     salt,
+                    to: deployment.eip3009_collector,
                 },
                 extra,
             )
@@ -255,6 +215,18 @@ struct Eip3009SignParams {
     pre_approval_expiry: u64,
     nonce: B256,
     salt: B256,
+    to: Address,
+}
+
+/// Inputs for a Permit2 auth-capture signature.
+struct Permit2SignParams {
+    chain_id: u64,
+    asset: Address,
+    amount: U256,
+    pre_approval_expiry: u64,
+    nonce: B256,
+    salt: B256,
+    spender: Address,
 }
 
 async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
@@ -269,6 +241,7 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
         pre_approval_expiry,
         nonce,
         salt,
+        to,
     } = params;
     let domain = eip712_domain! {
         name: extra.name.clone(),
@@ -278,7 +251,7 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
     };
     let authorization = AuthCaptureEip3009Authorization {
         from: signer.address(),
-        to: EIP3009_TOKEN_COLLECTOR_ADDRESS,
+        to,
         value: TokenAmount::from(amount),
         valid_after: UnixTimestamp::from_secs(0),
         valid_before: UnixTimestamp::from_secs(pre_approval_expiry),
@@ -301,18 +274,24 @@ async fn sign_eip3009_auth_capture<S: SignerLike + Sync>(
         authorization,
         signature: Bytes::from(signature.as_bytes().to_vec()),
         salt,
+        fee_bps: None,
+        fee_amount: None,
     }))
 }
 
 async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
     signer: &S,
-    chain_id: u64,
-    asset: Address,
-    amount: U256,
-    pre_approval_expiry: u64,
-    nonce: B256,
-    salt: B256,
+    params: Permit2SignParams,
 ) -> Result<AuthCapturePayload, ClientError> {
+    let Permit2SignParams {
+        chain_id,
+        asset,
+        amount,
+        pre_approval_expiry,
+        nonce,
+        salt,
+        spender,
+    } = params;
     let domain = eip712_domain! {
         name: "Permit2",
         chain_id: chain_id,
@@ -325,7 +304,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
             token: asset,
             amount: TokenAmount::from(amount),
         },
-        spender: PERMIT2_TOKEN_COLLECTOR_ADDRESS,
+        spender,
         nonce: TokenAmount::from(nonce_u256),
         deadline: TokenAmount::from(U256::from(pre_approval_expiry)),
     };
@@ -334,7 +313,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
             token: asset,
             amount,
         },
-        spender: PERMIT2_TOKEN_COLLECTOR_ADDRESS,
+        spender,
         nonce: nonce_u256,
         deadline: U256::from(pre_approval_expiry),
     };
@@ -347,5 +326,7 @@ async fn sign_permit2_auth_capture<S: SignerLike + Sync>(
         permit2_authorization,
         signature: Bytes::from(signature.as_bytes().to_vec()),
         salt,
+        fee_bps: None,
+        fee_amount: None,
     }))
 }
