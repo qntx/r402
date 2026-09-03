@@ -118,7 +118,10 @@ impl<TSelector> X402Client<TSelector>
 where
     TSelector: PaymentSelector,
 {
-    /// Creates `Payment-Signature` headers from a 402 response.
+    /// Creates `Payment-Signature` plus advertised extension headers from a 402.
+    ///
+    /// `SIGN-IN-WITH-X` is included when a registered extension's `key` is in
+    /// `PaymentRequired.extensions`.
     ///
     /// # Errors
     ///
