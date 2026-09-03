@@ -213,9 +213,13 @@ fn with_memo_always_appends_memo() {
     assert_eq!(declared[1].program_id, SPL_MEMO_PROGRAM);
     assert_eq!(declared[1].data, b"order-123");
 
-    let random = with_memo(transfer, None).expect("random");
+    let random = with_memo(transfer.clone(), None).expect("random");
     assert_eq!(random.len(), 2);
     assert_eq!(random[1].program_id, SPL_MEMO_PROGRAM);
     assert_eq!(random[1].data.len(), 32);
     assert!(random[1].data.iter().all(u8::is_ascii_hexdigit));
+
+    let empty = with_memo(transfer, Some("")).expect("empty");
+    assert_eq!(empty[1].data.len(), 32);
+    assert!(empty[1].data.iter().all(u8::is_ascii_hexdigit));
 }

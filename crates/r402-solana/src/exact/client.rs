@@ -219,9 +219,9 @@ pub fn memo_instruction(memo: &str) -> Result<Instruction, ClientError> {
 
 /// Transfer instruction plus a Memo instruction (spec §3.1).
 ///
-/// Uses `extra.memo` when set (≤256 bytes). Otherwise a 16-byte random nonce
-/// encoded as 32 lowercase hex characters so two identical transfers still
-/// produce distinct messages.
+/// Uses `extra.memo` when set and non-empty (≤256 bytes). Empty/absent memo
+/// becomes a 16-byte random nonce encoded as 32 lowercase hex characters
+/// (official TS `if (sellerMemo)`).
 ///
 /// # Errors
 ///
@@ -230,7 +230,7 @@ pub fn with_memo(
     transfer: Instruction,
     extra_memo: Option<&str>,
 ) -> Result<Vec<Instruction>, ClientError> {
-    let memo_ix = if let Some(memo) = extra_memo {
+    let memo_ix = if let Some(memo) = extra_memo.filter(|m| !m.is_empty()) {
         memo_instruction(memo)?
     } else {
         let mut nonce = [0u8; 16];
@@ -543,5 +543,14 @@ mod tests {
     fn with_memo_rejects_over_256_bytes() {
         assert!(with_memo(dummy_transfer(), Some(&"a".repeat(257))).is_err());
         assert!(with_memo(dummy_transfer(), Some(&"a".repeat(256))).is_ok());
+    }
+
+    #[test]
+    fn empty_extra_memo_is_treated_as_absent() {
+        let ixs = with_memo(dummy_transfer(), Some("")).expect("ixs");
+        assert_eq!(ixs.len(), 2);
+        assert_eq!(ixs[1].program_id, SPL_MEMO_PROGRAM);
+        assert_eq!(ixs[1].data.len(), 32);
+        assert!(ixs[1].data.iter().all(u8::is_ascii_hexdigit));
     }
 }

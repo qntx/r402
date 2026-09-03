@@ -12,7 +12,9 @@ use solana_client::rpc_client::SerializableTransaction;
 use solana_client::rpc_config::{
     RpcSendTransactionConfig, RpcSignatureSubscribeConfig, RpcSimulateTransactionConfig,
 };
-use solana_client::rpc_response::{RpcSignatureResult, TransactionError, UiTransactionError};
+use solana_client::rpc_response::{
+    RpcSignatureResult, TransactionConfirmationStatus, TransactionError, UiTransactionError,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::{Keypair, Signer};
 use solana_pubkey::Pubkey;
@@ -206,6 +208,17 @@ impl ChainProvider for SolanaChainProvider {
     }
 }
 
+/// Result of waiting for a broadcast signature (official `getSignatureStatuses`).
+#[derive(Debug, Clone)]
+pub enum SignatureConfirm {
+    /// Confirmed/finalized with no on-chain `err`.
+    Confirmed,
+    /// Confirmed/finalized with `entry.err` (official `TransactionOnchainFailureError`).
+    OnchainFailure(UiTransactionError),
+    /// Never observed as confirmed/finalized before the wait budget.
+    TimedOut,
+}
+
 /// Trait for Solana chain provider operations.
 ///
 /// This trait abstracts the core operations needed for x402 payment processing
@@ -263,6 +276,13 @@ pub trait SolanaChainProviderLike: Sync {
         &self,
         tx: &VersionedTransaction,
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send;
+
+    /// Polls `getSignatureStatuses` until confirmed/finalized, on-chain `err`, or timeout.
+    fn confirm_signature(
+        &self,
+        signature: &Signature,
+        commitment_config: CommitmentConfig,
+    ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send;
 }
 
 impl SolanaChainProviderLike for SolanaChainProvider {
@@ -419,6 +439,53 @@ impl SolanaChainProviderLike for SolanaChainProvider {
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
         Self::send(self, tx)
     }
+
+    async fn confirm_signature(
+        &self,
+        signature: &Signature,
+        _commitment_config: CommitmentConfig,
+    ) -> Result<SignatureConfirm, SolanaChainProviderError> {
+        const MAX_CONFIRM_TIMEOUT: Duration = Duration::from_mins(1);
+        const POLL_INTERVAL: Duration = Duration::from_millis(200);
+        let deadline = tokio::time::Instant::now() + MAX_CONFIRM_TIMEOUT;
+        loop {
+            if let Ok(response) = self.rpc_client.get_signature_statuses(&[*signature]).await
+                && let Some(outcome) =
+                    response
+                        .value
+                        .first()
+                        .and_then(Option::as_ref)
+                        .and_then(|entry| {
+                            classify_signature_status(
+                                entry.confirmation_status.as_ref(),
+                                entry.err.clone(),
+                            )
+                        })
+            {
+                return Ok(outcome);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(SignatureConfirm::TimedOut);
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+    }
+}
+
+fn classify_signature_status(
+    confirmation_status: Option<&TransactionConfirmationStatus>,
+    err: Option<TransactionError>,
+) -> Option<SignatureConfirm> {
+    let committed = matches!(
+        confirmation_status,
+        Some(TransactionConfirmationStatus::Confirmed | TransactionConfirmationStatus::Finalized)
+    );
+    if !committed {
+        return None;
+    }
+    Some(err.map_or(SignatureConfirm::Confirmed, |e| {
+        SignatureConfirm::OnchainFailure(UiTransactionError::from(e))
+    }))
 }
 
 impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
@@ -477,6 +544,14 @@ impl<T: SolanaChainProviderLike + Send> SolanaChainProviderLike for Arc<T> {
         tx: &VersionedTransaction,
     ) -> impl Future<Output = Result<Signature, SolanaChainProviderError>> + Send {
         (**self).send(tx)
+    }
+
+    fn confirm_signature(
+        &self,
+        signature: &Signature,
+        commitment_config: CommitmentConfig,
+    ) -> impl Future<Output = Result<SignatureConfirm, SolanaChainProviderError>> + Send {
+        (**self).confirm_signature(signature, commitment_config)
     }
 }
 
