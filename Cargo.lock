@@ -4300,6 +4300,25 @@ dependencies = [
 [[package]]
 name = "r402-algorand"
 version = "0.18.0"
+dependencies = [
+ "base64 0.23.1",
+ "compact_str",
+ "data-encoding",
+ "ed25519-dalek 3.0.0",
+ "r402-client",
+ "r402-facilitator",
+ "r402-protocol",
+ "r402-server",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "tracing-core",
+ "wiremock",
+]
 
 [[package]]
 name = "r402-aptos"
