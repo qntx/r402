@@ -48,7 +48,7 @@ pub fn snapshot_settle_response_core(result: &SettleResponse) -> SettleResponseC
             transaction: transaction.clone(),
             network: network.clone(),
             amount: amount.clone(),
-            payer: Some(payer.clone()),
+            payer: payer.clone(),
             error_reason: None,
             error_message: None,
         },
@@ -143,7 +143,7 @@ mod tests {
 
     fn success_settle() -> SettleResponse {
         SettleResponse::Success {
-            payer: "0xpayer".into(),
+            payer: Some("0xpayer".into()),
             transaction: "0xtx".into(),
             network: "eip155:8453".into(),
             amount: None,

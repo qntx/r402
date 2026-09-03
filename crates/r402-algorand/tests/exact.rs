@@ -383,7 +383,9 @@ mod verify_settle {
 
     fn reason(resp: &VerifyResponse) -> String {
         match resp {
-            VerifyResponse::Invalid { reason, .. } => reason.as_str().to_owned(),
+            VerifyResponse::Invalid { reason, .. } => {
+                reason.as_ref().map_or("", |r| r.as_str()).to_owned()
+            }
             VerifyResponse::Valid { .. } => "valid".to_owned(),
             _ => "other".to_owned(),
         }

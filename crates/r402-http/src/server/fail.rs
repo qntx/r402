@@ -126,7 +126,8 @@ impl GateError {
         }
     }
 
-    pub(crate) fn from_invalid_verify(reason: ErrorReason, message: Option<&str>) -> Self {
+    pub(crate) fn from_invalid_verify(reason: Option<ErrorReason>, message: Option<&str>) -> Self {
+        let reason = reason.unwrap_or(ErrorReason::UnexpectedVerifyError);
         Self::VerificationFailed {
             message: message.map_or_else(|| reason.to_string(), ToOwned::to_owned),
             reason,

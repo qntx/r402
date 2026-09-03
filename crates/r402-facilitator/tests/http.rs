@@ -475,7 +475,7 @@ async fn settle_4xx_with_success_json_is_not_transport() {
 async fn settle_4xx_success_json_is_transport() {
     let mock_server = MockServer::start().await;
     let body = SettleResponse::Success {
-        payer: "0xabc".into(),
+        payer: Some("0xabc".into()),
         transaction: "0xabc".into(),
         network: "eip155:8453".into(),
         amount: None,
@@ -514,6 +514,71 @@ async fn settle_2xx_missing_transaction_is_malformed() {
         .await
         .unwrap_err();
     assert_transport(&err, FacilitatorTransportKind::MalformedSuccessBody);
+}
+
+#[tokio::test]
+async fn settle_2xx_empty_transaction_with_payer_is_success() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/settle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "transaction": "",
+            "network": "eip155:8453",
+            "payer": "0xabc"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = test_client(&mock_server.uri())
+        .settle(&dummy_settle())
+        .await
+        .expect("empty success transaction is legal");
+    match response {
+        SettleResponse::Success {
+            transaction,
+            payer,
+            network,
+            ..
+        } => {
+            assert!(transaction.is_empty());
+            assert_eq!(payer.as_deref(), Some("0xabc"));
+            assert_eq!(network, "eip155:8453");
+        }
+        other => panic!("expected Success, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn settle_2xx_empty_transaction_omitted_payer_is_success() {
+    let mock_server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/settle"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "success": true,
+            "transaction": "",
+            "network": "eip155:8453"
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let response = test_client(&mock_server.uri())
+        .settle(&dummy_settle())
+        .await
+        .expect("omitted payer on empty-tx success is legal");
+    match response {
+        SettleResponse::Success {
+            transaction,
+            payer,
+            network,
+            ..
+        } => {
+            assert!(transaction.is_empty());
+            assert!(payer.is_none());
+            assert_eq!(network, "eip155:8453");
+        }
+        other => panic!("expected Success, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -567,7 +632,7 @@ async fn extension_responses_attach_on_settle_without_touching_extensions() {
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(SettleResponse::Success {
-                    payer: "0xabc".into(),
+                    payer: Some("0xabc".into()),
                     transaction: "0xabc".into(),
                     network: "eip155:8453".into(),
                     amount: None,
@@ -642,7 +707,7 @@ async fn body_extensions_stay_independent_from_header() {
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(SettleResponse::Success {
-                    payer: "0xabc".into(),
+                    payer: Some("0xabc".into()),
                     transaction: "0xabc".into(),
                     network: "eip155:8453".into(),
                     amount: None,
@@ -687,7 +752,7 @@ async fn malformed_extension_responses_are_ignored() {
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(SettleResponse::Success {
-                    payer: "0xabc".into(),
+                    payer: Some("0xabc".into()),
                     transaction: "0xabc".into(),
                     network: "eip155:8453".into(),
                     amount: None,

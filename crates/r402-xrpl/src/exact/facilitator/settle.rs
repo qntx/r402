@@ -107,9 +107,13 @@ where
 
     let verified = verify_request_json(rpc, max_fee_drops, expected_network, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -169,7 +173,7 @@ where
     match submit(signed_blob.to_owned(), last_ledger).await {
         Ok(outcome) if outcome.validated && outcome.result_code == "tesSUCCESS" => {
             SettleResponse::Success {
-                payer: payer.unwrap_or_default(),
+                payer,
                 transaction: outcome.hash.into(),
                 network: network.into(),
                 amount: request

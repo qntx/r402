@@ -424,7 +424,9 @@ mod verify_settle {
 
     fn reason(response: &VerifyResponse) -> String {
         match response {
-            VerifyResponse::Invalid { reason, .. } => reason.as_str().to_owned(),
+            VerifyResponse::Invalid { reason, .. } => {
+                reason.as_ref().map_or("", |r| r.as_str()).to_owned()
+            }
             VerifyResponse::Valid { .. } => "valid".to_owned(),
             _ => "other".to_owned(),
         }
@@ -458,7 +460,7 @@ mod verify_settle {
             reason(&response)
         );
         match response {
-            VerifyResponse::Valid { payer, .. } => assert_eq!(payer, SENDER),
+            VerifyResponse::Valid { payer, .. } => assert_eq!(payer.as_deref(), Some(SENDER)),
             _ => panic!("expected valid"),
         }
     }

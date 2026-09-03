@@ -81,7 +81,7 @@ fn skip_handler_tool_result(directive: &SkipHandlerDirective) -> CallToolResult 
 
 fn empty_success_settle(requirements: &PaymentRequirements) -> SettleResponse {
     SettleResponse::Success {
-        payer: String::new().into(),
+        payer: None,
         transaction: String::new().into(),
         network: requirements.network.to_string().into(),
         amount: None,

@@ -410,7 +410,7 @@ mod tests {
         assert!(matches!(
             response,
             VerifyResponse::Invalid {
-                reason: ErrorReason::InsufficientFunds,
+                reason: Some(ErrorReason::InsufficientFunds),
                 ..
             }
         ));

@@ -96,8 +96,8 @@ where
 pub enum SettleResponse {
     /// Settlement succeeded.
     Success {
-        /// Payer address on the target chain.
-        payer: CompactString,
+        /// Payer address on the target chain, if the facilitator included it.
+        payer: Option<CompactString>,
         /// On-chain transaction hash / signature.
         transaction: CompactString,
         /// CAIP-2 chain identifier the transaction landed on.
@@ -243,7 +243,6 @@ struct SettleResponseWire {
     error_message: Option<CompactString>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     payer: Option<CompactString>,
-    #[serde(default)]
     transaction: CompactString,
     network: CompactString,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -269,7 +268,7 @@ impl From<SettleResponse> for SettleResponseWire {
                 success: true,
                 error_reason: None,
                 error_message: None,
-                payer: Some(payer),
+                payer,
                 transaction,
                 network,
                 amount,
@@ -304,9 +303,8 @@ impl TryFrom<SettleResponseWire> for SettleResponse {
     type Error = String;
     fn try_from(wire: SettleResponseWire) -> Result<Self, Self::Error> {
         if wire.success {
-            let payer = wire.payer.ok_or("missing field: payer")?;
             Ok(Self::Success {
-                payer,
+                payer: wire.payer,
                 transaction: wire.transaction,
                 network: wire.network,
                 amount: wire.amount,
@@ -394,7 +392,7 @@ mod tests {
     #[test]
     fn settle_success_with_amount_roundtrip() {
         let response = SettleResponse::Success {
-            payer: "0xABC".into(),
+            payer: Some("0xABC".into()),
             transaction: "0xTX".into(),
             network: "eip155:8453".into(),
             amount: Some("1000000".into()),
@@ -413,7 +411,7 @@ mod tests {
     #[test]
     fn settle_success_without_amount_is_valid() {
         let response = SettleResponse::Success {
-            payer: "0xABC".into(),
+            payer: Some("0xABC".into()),
             transaction: "0xTX".into(),
             network: "eip155:1".into(),
             amount: None,
@@ -438,8 +436,33 @@ mod tests {
         let back: SettleResponse = serde_json::from_value(json).unwrap();
         assert!(matches!(
             back,
-            SettleResponse::Success { ref transaction, .. } if transaction.is_empty()
+            SettleResponse::Success {
+                ref transaction,
+                payer: Some(ref payer),
+                ..
+            } if transaction.is_empty() && payer == "0xABC"
         ));
+    }
+
+    #[test]
+    fn settle_success_empty_transaction_omitted_payer() {
+        let json = json!({
+            "success": true,
+            "transaction": "",
+            "network": "eip155:1"
+        });
+        let back: SettleResponse = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            back,
+            SettleResponse::Success {
+                ref transaction,
+                payer: None,
+                ..
+            } if transaction.is_empty()
+        ));
+        let encoded = serde_json::to_value(&back).unwrap();
+        assert_eq!(encoded["transaction"], "");
+        assert!(encoded.get("payer").is_none());
     }
 
     #[test]
@@ -518,7 +541,7 @@ mod tests {
     fn verify_and_settle_extra_roundtrip() {
         let extra = json!({"assetTransferMethod": "eip3009"});
         let settle = SettleResponse::Success {
-            payer: "0xABC".into(),
+            payer: Some("0xABC".into()),
             transaction: "0xTX".into(),
             network: "eip155:1".into(),
             amount: None,
@@ -588,7 +611,7 @@ mod tests {
     #[test]
     fn settle_encode_base64_only_for_success() {
         let success = SettleResponse::Success {
-            payer: "0xA".into(),
+            payer: Some("0xA".into()),
             transaction: "0xT".into(),
             network: "eip155:1".into(),
             amount: None,
@@ -615,7 +638,7 @@ mod tests {
     #[test]
     fn encode_base64_strips_extension_responses() {
         let mut success = SettleResponse::Success {
-            payer: "0xA".into(),
+            payer: Some("0xA".into()),
             transaction: "0xT".into(),
             network: "eip155:1".into(),
             amount: None,

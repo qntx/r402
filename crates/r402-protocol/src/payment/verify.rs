@@ -89,8 +89,8 @@ impl From<serde_json::Value> for VerifyRequest {
 pub enum VerifyResponse {
     /// Payload passed all verification checks.
     Valid {
-        /// Address of the verified payer.
-        payer: CompactString,
+        /// Address of the verified payer, if the facilitator included it.
+        payer: Option<CompactString>,
         /// Facilitator-attached extension data (JSON body).
         extensions: Extensions,
         /// Facilitator `EXTENSION-RESPONSES` sidechannel. Not buyer wire.
@@ -100,8 +100,8 @@ pub enum VerifyResponse {
     },
     /// Payload was well-formed but failed verification.
     Invalid {
-        /// Wire-level reason code.
-        reason: ErrorReason,
+        /// Wire-level reason code, if the facilitator included it.
+        reason: Option<ErrorReason>,
         /// Optional human-readable message.
         message: Option<CompactString>,
         /// Optional payer address if identifiable from the payload.
@@ -120,7 +120,7 @@ impl VerifyResponse {
     #[must_use]
     pub fn valid(payer: impl Into<CompactString>) -> Self {
         Self::Valid {
-            payer: payer.into(),
+            payer: Some(payer.into()),
             extensions: Extensions::new(),
             extension_responses: Extensions::new(),
             extra: None,
@@ -131,7 +131,7 @@ impl VerifyResponse {
     #[must_use]
     pub fn invalid(payer: Option<CompactString>, reason: ErrorReason) -> Self {
         Self::Invalid {
-            reason,
+            reason: Some(reason),
             message: None,
             payer,
             extensions: Extensions::new(),
@@ -148,7 +148,7 @@ impl VerifyResponse {
         message: impl Into<CompactString>,
     ) -> Self {
         Self::Invalid {
-            reason,
+            reason: Some(reason),
             message: Some(message.into()),
             payer,
             extensions: Extensions::new(),
@@ -200,7 +200,7 @@ impl VerifyResponse {
     pub fn from_facilitator_error(error: &FacilitatorError) -> Option<Self> {
         let problem = error.as_payment_problem()?;
         Some(Self::Invalid {
-            reason: problem.reason(),
+            reason: Some(problem.reason()),
             message: Some(CompactString::from(problem.details())),
             payer: None,
             extensions: Extensions::new(),
@@ -236,7 +236,7 @@ impl From<VerifyResponse> for VerifyResponseWire {
                 extension_responses: _,
             } => Self {
                 is_valid: true,
-                payer: Some(payer),
+                payer,
                 invalid_reason: None,
                 invalid_message: None,
                 extensions,
@@ -252,7 +252,7 @@ impl From<VerifyResponse> for VerifyResponseWire {
             } => Self {
                 is_valid: false,
                 payer,
-                invalid_reason: Some(reason),
+                invalid_reason: reason,
                 invalid_message: message,
                 extensions,
                 extra,
@@ -266,14 +266,14 @@ impl TryFrom<VerifyResponseWire> for VerifyResponse {
     fn try_from(wire: VerifyResponseWire) -> Result<Self, Self::Error> {
         if wire.is_valid {
             Ok(Self::Valid {
-                payer: wire.payer.ok_or("missing field: payer")?,
+                payer: wire.payer,
                 extensions: wire.extensions,
                 extension_responses: Extensions::new(),
                 extra: wire.extra,
             })
         } else {
             Ok(Self::Invalid {
-                reason: wire.invalid_reason.ok_or("missing field: invalidReason")?,
+                reason: wire.invalid_reason,
                 message: wire.invalid_message,
                 payer: wire.payer,
                 extensions: wire.extensions,
@@ -348,7 +348,7 @@ mod tests {
             ExtensionEntry::info(json!({"id": "order-123"})),
         );
         let response = VerifyResponse::Valid {
-            payer: "0xABC".into(),
+            payer: Some("0xABC".into()),
             extensions,
             extension_responses: Extensions::new(),
             extra: None,
@@ -403,5 +403,31 @@ mod tests {
             "extraTypo": {"k": 1}
         });
         assert!(serde_json::from_value::<VerifyResponse>(verify_typo).is_err());
+    }
+
+    #[test]
+    fn verify_valid_omitted_payer() {
+        let json = json!({ "isValid": true });
+        let back: VerifyResponse = serde_json::from_value(json).unwrap();
+        assert!(matches!(back, VerifyResponse::Valid { payer: None, .. }));
+        let encoded = serde_json::to_value(&back).unwrap();
+        assert!(encoded.get("payer").is_none());
+    }
+
+    #[test]
+    fn verify_invalid_omitted_reason_and_payer() {
+        let json = json!({ "isValid": false });
+        let back: VerifyResponse = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            back,
+            VerifyResponse::Invalid {
+                reason: None,
+                payer: None,
+                ..
+            }
+        ));
+        let encoded = serde_json::to_value(&back).unwrap();
+        assert!(encoded.get("invalidReason").is_none());
+        assert!(encoded.get("payer").is_none());
     }
 }

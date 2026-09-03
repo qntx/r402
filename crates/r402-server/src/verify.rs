@@ -1,7 +1,7 @@
 //! Verify-payment orchestration.
 
 use r402_facilitator::{DynFacilitator, FailureRecovery};
-use r402_protocol::error::{FacilitatorError, VerificationError};
+use r402_protocol::error::{ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
     PaymentRequirements, TypedVerifyRequest, V2, VerifyRequest, VerifyResponse,
 };
@@ -191,6 +191,7 @@ fn facilitator_error_from_invalid(invalid: &VerifyResponse) -> FacilitatorError 
         VerifyResponse::Invalid {
             reason, message, ..
         } => {
+            let reason = reason.clone().unwrap_or(ErrorReason::UnexpectedVerifyError);
             let detail = message
                 .as_ref()
                 .map_or_else(|| reason.to_string(), |m| format!("{reason}: {m}"));

@@ -63,7 +63,7 @@ where
 
     if result.success {
         SettleResponse::Success {
-            payer,
+            payer: Some(payer),
             transaction: result.transaction.unwrap_or_default().into(),
             network: network.into(),
             amount: request

@@ -426,24 +426,12 @@ fn parse_settle_body(raw: &RawHttpResponse) -> Result<SettleResponse, Facilitato
         Err(_) => return Err(status_transport(raw.status)),
     };
     if raw.status.is_success() {
-        if settle_success_missing_transaction(&parsed) {
-            return Err(FacilitatorError::transport(
-                FacilitatorTransportKind::MalformedSuccessBody,
-            ));
-        }
         return Ok(attach_settle(parsed, &raw.headers));
     }
     if parsed.is_success() {
         return Err(status_transport(raw.status));
     }
     Ok(attach_settle(parsed, &raw.headers))
-}
-
-fn settle_success_missing_transaction(response: &SettleResponse) -> bool {
-    match response {
-        SettleResponse::Success { transaction, .. } => transaction.is_empty(),
-        _ => false,
-    }
 }
 
 fn parse_supported_body(raw: &RawHttpResponse) -> Result<SupportedResponse, FacilitatorError> {

@@ -88,7 +88,7 @@ async fn create_payment_required_writes_escrow_payment_flow() {
             _request: SettleRequest,
         ) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send {
             std::future::ready(Ok(SettleResponse::Success {
-                payer: "payer".into(),
+                payer: Some("payer".into()),
                 transaction: "sig".into(),
                 network: "solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1".into(),
                 amount: Some("10000".into()),

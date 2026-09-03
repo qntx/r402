@@ -59,7 +59,7 @@ where
     let payer = verification.payer.to_string();
     let tx_sig = settle_transaction(&facilitator.provider, verification).await?;
     Ok(SettleResponse::Success {
-        payer: payer.into(),
+        payer: Some(payer.into()),
         transaction: tx_sig.to_string().into(),
         network: facilitator.provider.chain_id().to_string().into(),
         amount: Some(amount.into()),

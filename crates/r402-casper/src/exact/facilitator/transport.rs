@@ -1,8 +1,7 @@
 //! Default HTTP transport for [`super::CasperExactFacilitator`].
 //!
 //! Status mapping matches [`r402_facilitator`] `FacilitatorClient`: non-2xx
-//! Valid/Success is Transport (502), not paid; 2xx Success with an empty
-//! `transaction` is `MalformedSuccessBody`.
+//! Valid/Success is Transport (502), not paid.
 
 use std::time::Duration;
 
@@ -178,24 +177,12 @@ pub(super) fn parse_settle_body(
         Err(_) => return Err(status_transport(raw.status)),
     };
     if is_success(raw.status) {
-        if settle_success_missing_transaction(&parsed) {
-            return Err(FacilitatorError::transport(
-                FacilitatorTransportKind::MalformedSuccessBody,
-            ));
-        }
         return Ok(attach_settle(parsed, raw));
     }
     if parsed.is_success() {
         return Err(status_transport(raw.status));
     }
     Ok(attach_settle(parsed, raw))
-}
-
-fn settle_success_missing_transaction(response: &SettleResponse) -> bool {
-    match response {
-        SettleResponse::Success { transaction, .. } => transaction.is_empty(),
-        _ => false,
-    }
 }
 
 pub(super) fn parse_supported_body(

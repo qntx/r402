@@ -266,7 +266,7 @@ pub(super) fn success(
     payer: &str,
 ) -> SettleResponse {
     SettleResponse::Success {
-        payer: payer.into(),
+        payer: Some(payer.into()),
         transaction: signature.to_string().into(),
         network: network.into(),
         amount: Some(amount.into()),

@@ -60,9 +60,11 @@ where
         Err(invalid) => {
             let response = invalid.into_response();
             return match response {
-                VerifyResponse::Invalid { reason, payer, .. } => {
-                    settle_failure(reason, &network, payer)
-                }
+                VerifyResponse::Invalid { reason, payer, .. } => settle_failure(
+                    reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                    &network,
+                    payer,
+                ),
                 _ => settle_failure(
                     ErrorReason::from_wire("unexpected_verify_error"),
                     &network,
@@ -94,7 +96,7 @@ where
             if confirm.status == "SUCCESS" {
                 let hash = confirm.tx_hash.unwrap_or_default();
                 SettleResponse::Success {
-                    payer,
+                    payer: Some(payer),
                     transaction: hash.into(),
                     network: network.into(),
                     amount: request

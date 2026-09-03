@@ -248,9 +248,11 @@ impl Facilitator for TronExactFacilitator {
                 .await?;
                 let tx_hash = settle_payment(&self.provider, &payment, &eip712_domain).await?;
                 Ok(wire::SettleResponse::Success {
-                    payer: crate::chain::Address::from_evm(payment.from)
-                        .to_string()
-                        .into(),
+                    payer: Some(
+                        crate::chain::Address::from_evm(payment.from)
+                            .to_string()
+                            .into(),
+                    ),
                     transaction: tx_hash.into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
@@ -271,9 +273,11 @@ impl Facilitator for TronExactFacilitator {
                 .await?;
                 let tx_hash = settle_permit2_payment(&self.provider, &chain, &payment).await?;
                 Ok(wire::SettleResponse::Success {
-                    payer: crate::chain::Address::from_evm(payment.from)
-                        .to_string()
-                        .into(),
+                    payer: Some(
+                        crate::chain::Address::from_evm(payment.from)
+                            .to_string()
+                            .into(),
+                    ),
                     transaction: tx_hash.into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),

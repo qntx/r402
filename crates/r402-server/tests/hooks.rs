@@ -101,7 +101,7 @@ fn mock_ok() -> Arc<MockFacilitator> {
 
 fn success_settle(transaction: &str) -> SettleResponse {
     SettleResponse::Success {
-        payer: "0xpayer".into(),
+        payer: Some("0xpayer".into()),
         transaction: transaction.into(),
         network: "eip155:8453".into(),
         amount: None,
@@ -744,7 +744,7 @@ fn failure_path_failed_cancel_includes_deposit_recovery() {
         SettlePhase::BeforeHandler,
         PaymentFlowName::Escrow,
         SettleResponse::Success {
-            payer: "0xpayer".into(),
+            payer: Some("0xpayer".into()),
             transaction: "0xdeposit".into(),
             network: "eip155:8453".into(),
             amount: Some("1000".into()),

@@ -104,10 +104,11 @@ impl Gate {
 
     fn record_siwx_success(&self, path: &str, settlement: &SettleResponse) {
         #[cfg(feature = "siwx")]
-        if let (Some(siwx), SettleResponse::Success { payer, .. }) = (&self.siwx, settlement)
-            && !payer.is_empty()
-        {
-            siwx.record_success(path, payer);
+        if let (Some(siwx), SettleResponse::Success { payer, .. }) = (&self.siwx, settlement) {
+            let payer = payer.as_deref().unwrap_or("");
+            if !payer.is_empty() {
+                siwx.record_success(path, payer);
+            }
         }
         #[cfg(not(feature = "siwx"))]
         {
@@ -598,7 +599,7 @@ fn echo_or_empty(
         return completed.result.clone();
     }
     SettleResponse::Success {
-        payer: compact_str::CompactString::default(),
+        payer: None,
         transaction: compact_str::CompactString::default(),
         network: verified.requirements().network.to_string().into(),
         amount: None,

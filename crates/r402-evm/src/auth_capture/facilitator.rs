@@ -229,7 +229,7 @@ where
 
         let tx_hash = receipt.transaction_hash;
         Ok(wire::SettleResponse::Success {
-            payer: format!("{payer:#x}").into(),
+            payer: Some(format!("{payer:#x}").into()),
             transaction: format!("{tx_hash:#x}").into(),
             network: requirements.network.to_string().into(),
             amount: Some(requirements.amount.0.to_string().into()),

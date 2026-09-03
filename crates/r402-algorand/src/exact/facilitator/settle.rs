@@ -36,9 +36,13 @@ where
 
     let verified = verify_request_json(rpc, facilitator_addresses, request, &mut sign).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -133,7 +137,7 @@ where
     }
 
     SettleResponse::Success {
-        payer: payer.unwrap_or_default(),
+        payer,
         transaction: payment_txid.into(),
         network: network.into(),
         amount: request

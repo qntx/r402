@@ -154,7 +154,7 @@ fn null_payload_body_rejected() {
 #[test]
 fn attach_and_extract_settle_response() {
     let settle = SettleResponse::Success {
-        payer: "0xpayer".into(),
+        payer: Some("0xpayer".into()),
         transaction: "0xtx".into(),
         network: "eip155:1".into(),
         amount: Some("1".into()),

@@ -419,7 +419,7 @@ mod tests {
                 Err(FacilitatorError::Onchain("mock".into()))
             } else {
                 Ok(SettleResponse::Success {
-                    payer: "0xPAYER".into(),
+                    payer: Some("0xPAYER".into()),
                     transaction: "0xTX".into(),
                     network: "eip155:1".into(),
                     amount: None,
@@ -483,7 +483,7 @@ mod tests {
             _: &FacilitatorError,
         ) -> impl Future<Output = FailureRecovery<SettleResponse>> + Send + 'a {
             std::future::ready(FailureRecovery::Recovered(SettleResponse::Success {
-                payer: "0xREC".into(),
+                payer: Some("0xREC".into()),
                 transaction: "0xREC_TX".into(),
                 network: "eip155:1".into(),
                 amount: None,
@@ -625,7 +625,7 @@ mod tests {
         let response = hooked.verify(dummy_verify()).await.unwrap();
         match response {
             VerifyResponse::Invalid { reason, .. } => {
-                assert_eq!(reason, ErrorReason::InvalidPayload);
+                assert_eq!(reason, Some(ErrorReason::InvalidPayload));
             }
             VerifyResponse::Valid { .. } => panic!("expected invalid"),
             _ => panic!("unexpected verify variant"),

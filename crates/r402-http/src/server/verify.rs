@@ -2,7 +2,7 @@
 
 use http::HeaderMap;
 use r402_facilitator::DynFacilitator;
-use r402_protocol::error::FacilitatorError;
+use r402_protocol::error::{FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::payment::{
     Base64Bytes, Extensions, PaymentRequired, PaymentRequirements, SettleResponse,
     SettlementOverrides, VerifyResponse,
@@ -56,12 +56,18 @@ impl Gate {
     ///
     /// # Errors
     ///
-    /// [`GateError::PaymentRequiredBuild`] when the pipeline fails closed.
+    /// [`GateError::Transport`] when `/supported` fails or returns no kinds.
+    /// [`GateError::PaymentRequiredBuild`] when 402 construction fails.
     pub async fn build_payment_required(&mut self) -> Result<(), GateError> {
         let facilitator = self.server.facilitator();
         let supported = DynFacilitator::supported(facilitator.as_ref())
             .await
-            .unwrap_or_default();
+            .map_err(GateError::from_verify_facilitator)?;
+        if supported.kinds.is_empty() {
+            return Err(GateError::from_verify_facilitator(
+                FacilitatorError::transport(FacilitatorTransportKind::MalformedSuccessBody),
+            ));
+        }
         let reqs: Vec<_> = self
             .accepts
             .iter()

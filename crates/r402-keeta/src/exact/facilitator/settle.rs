@@ -28,9 +28,14 @@ pub async fn settle_request<P: KeetaPreflight>(
 
     let verified = verify_request_json(preflight, fee_payer_ids, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, None, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                None,
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -71,7 +76,7 @@ pub async fn settle_request<P: KeetaPreflight>(
 
     match queue.enqueue(block).await {
         Ok(transaction) => SettleResponse::Success {
-            payer: payer.unwrap_or_default(),
+            payer,
             transaction: transaction.into(),
             network: network.into(),
             amount: request

@@ -286,7 +286,9 @@ mod verify_settle {
 
     fn reason(response: &VerifyResponse) -> String {
         match response {
-            VerifyResponse::Invalid { reason, .. } => reason.to_string(),
+            VerifyResponse::Invalid { reason, .. } => reason
+                .as_ref()
+                .map_or_else(String::new, ToString::to_string),
             other => panic!("expected invalid, got {other:?}"),
         }
     }

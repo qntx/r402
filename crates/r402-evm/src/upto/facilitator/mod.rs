@@ -164,7 +164,7 @@ where
         };
 
         Ok(wire::SettleResponse::Success {
-            payer: payer.to_string().into(),
+            payer: Some(payer.to_string().into()),
             transaction,
             network: network.into(),
             amount: Some(actual_amount.to_string().into()),

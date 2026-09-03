@@ -306,7 +306,7 @@ where
                 let tx_hash =
                     settle_payment(&self.provider, &contract, &payment, &eip712_domain).await?;
                 Ok(wire::SettleResponse::Success {
-                    payer: payment.from.to_string().into(),
+                    payer: Some(payment.from.to_string().into()),
                     transaction: tx_hash.to_string().into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),
@@ -327,7 +327,7 @@ where
                 .await?;
                 let tx_hash = settle_permit2_payment(&self.provider, &payment).await?;
                 Ok(wire::SettleResponse::Success {
-                    payer: payment.from.to_string().into(),
+                    payer: Some(payment.from.to_string().into()),
                     transaction: tx_hash.to_string().into(),
                     network: payload.accepted.network.to_string().into(),
                     amount: Some(requirements.amount.0.to_string().into()),

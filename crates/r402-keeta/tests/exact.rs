@@ -381,7 +381,7 @@ mod verify_settle {
 
     fn reason(resp: &VerifyResponse) -> &str {
         match resp {
-            VerifyResponse::Invalid { reason, .. } => reason.as_str(),
+            VerifyResponse::Invalid { reason, .. } => reason.as_ref().map_or("", |r| r.as_str()),
             other => panic!("expected invalid, got {other:?}"),
         }
     }
@@ -410,7 +410,7 @@ mod verify_settle {
         .await;
         match resp {
             VerifyResponse::Valid { payer, .. } => {
-                assert_eq!(payer, actors.payer.to_string());
+                assert_eq!(payer.as_deref(), Some(actors.payer.to_string().as_str()));
             }
             other => panic!("expected valid, got {other:?}"),
         }
@@ -963,7 +963,7 @@ mod verify_settle {
                 transaction, payer, ..
             } => {
                 assert!(!transaction.is_empty());
-                assert_eq!(payer, actors.payer.to_string());
+                assert_eq!(payer.as_deref(), Some(actors.payer.to_string().as_str()));
             }
             other => panic!("expected success, got {other:?}"),
         }

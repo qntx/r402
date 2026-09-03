@@ -32,7 +32,7 @@ use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKi
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{
     Base64Bytes, Extensions, PaymentPayload, PaymentRequirements, PriceTag, SettleRequest,
-    SettleResponse, SupportedResponse, VerifyRequest, VerifyResponse,
+    SettleResponse, SupportedPaymentKind, SupportedResponse, VerifyRequest, VerifyResponse,
 };
 use r402_server::{
     AfterVerifyDecision, BeforeOpDecision, PaymentFlowConfig, PaymentFlowName, PaymentHookContext,
@@ -101,12 +101,20 @@ pub enum SettleScript {
     Transport,
 }
 
+#[derive(Clone, Copy)]
+pub enum SupportedScript {
+    Ok,
+    Empty,
+    Transport,
+}
+
 pub struct FakeFacilitator {
     pub verifies: AtomicUsize,
     pub settles: AtomicUsize,
     pub last_settle_amount: Mutex<Option<String>>,
     pub verify: Mutex<VerifyScript>,
     pub settle: Mutex<SettleScript>,
+    pub supported: Mutex<SupportedScript>,
     pub settle_hold: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
@@ -118,6 +126,7 @@ impl FakeFacilitator {
             last_settle_amount: Mutex::new(None),
             verify: Mutex::new(VerifyScript::Valid),
             settle: Mutex::new(SettleScript::Ok),
+            supported: Mutex::new(SupportedScript::Ok),
             settle_hold: Mutex::new(None),
         }
     }
@@ -171,7 +180,7 @@ impl Facilitator for FakeFacilitator {
         *self.last_settle_amount.lock().unwrap() = amount;
         let out = match *self.settle.lock().unwrap() {
             SettleScript::Ok => Ok(SettleResponse::Success {
-                payer: "0xpayer".into(),
+                payer: Some("0xpayer".into()),
                 transaction: "0xtx".into(),
                 network: "eip155:1".into(),
                 amount: Some("1000000".into()),
@@ -205,7 +214,20 @@ impl Facilitator for FakeFacilitator {
     fn supported(
         &self,
     ) -> impl Future<Output = Result<SupportedResponse, FacilitatorError>> + Send {
-        std::future::ready(Ok(SupportedResponse::new()))
+        let out = match *self.supported.lock().unwrap() {
+            SupportedScript::Ok => {
+                let mut signers = HashMap::new();
+                signers.insert("eip155:1".into(), vec!["0xfeePayer".into()]);
+                Ok(SupportedResponse::new()
+                    .with_kinds(vec![SupportedPaymentKind::new(2, "exact", "eip155:1")])
+                    .with_signers(signers))
+            }
+            SupportedScript::Empty => Ok(SupportedResponse::new()),
+            SupportedScript::Transport => Err(FacilitatorError::transport(
+                FacilitatorTransportKind::Timeout,
+            )),
+        };
+        std::future::ready(out)
     }
 }
 

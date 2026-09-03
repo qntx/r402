@@ -25,14 +25,19 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
 
     let verified = verify_request_json(provider, alias_policy, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid {
             payer,
             reason,
             message,
             ..
         } => {
-            return settle_failure(reason, message, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                message,
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -75,7 +80,7 @@ pub async fn settle_request<P: HederaFacilitatorOps>(
         .await
     {
         Ok(transaction_id) => SettleResponse::Success {
-            payer: payer.unwrap_or_else(|| CompactString::from(fee_payer)),
+            payer: payer.or_else(|| Some(CompactString::from(fee_payer))),
             transaction: transaction_id.into(),
             network: network.into(),
             amount: request

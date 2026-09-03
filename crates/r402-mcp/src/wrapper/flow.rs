@@ -93,7 +93,15 @@ impl PaymentWrapper {
                 let reason = match out.response {
                     VerifyResponse::Invalid {
                         reason, message, ..
-                    } => message.map_or_else(|| reason.to_string(), |m| m.to_string()),
+                    } => message.map_or_else(
+                        || {
+                            reason.map_or_else(
+                                || "unexpected_verify_error".to_owned(),
+                                |r| r.to_string(),
+                            )
+                        },
+                        |m| m.to_string(),
+                    ),
                     _ => "Payment verification failed".into(),
                 };
                 Err(self

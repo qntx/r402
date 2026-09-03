@@ -122,7 +122,7 @@ fn mock_settle_success(n: usize) -> SettleResponse {
         ("0xrefund", "0")
     };
     SettleResponse::Success {
-        payer: "0xpayer".into(),
+        payer: Some("0xpayer".into()),
         transaction: transaction.into(),
         network: "eip155:1".into(),
         amount: Some(amount.into()),

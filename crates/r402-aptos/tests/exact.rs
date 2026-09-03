@@ -428,7 +428,9 @@ mod verify_settle {
 
     fn reason(resp: &VerifyResponse) -> String {
         match resp {
-            VerifyResponse::Invalid { reason, .. } => reason.as_str().to_owned(),
+            VerifyResponse::Invalid { reason, .. } => {
+                reason.as_ref().map_or("", |r| r.as_str()).to_owned()
+            }
             other => panic!("expected invalid, got {other:?}"),
         }
     }
@@ -545,7 +547,10 @@ mod verify_settle {
         let result = verify(&provider, &request(&reqs, &sample.encoded)).await;
         match result {
             VerifyResponse::Valid { payer, .. } => {
-                assert_eq!(payer, sample.sender.address().to_long_string());
+                assert_eq!(
+                    payer.as_deref(),
+                    Some(sample.sender.address().to_long_string().as_str())
+                );
             }
             other => panic!("expected valid, got {other:?}"),
         }
@@ -648,7 +653,10 @@ mod verify_settle {
                 transaction, payer, ..
             } => {
                 assert!(transaction.starts_with("0x"));
-                assert_eq!(payer, sample.sender.address().to_long_string());
+                assert_eq!(
+                    payer.as_deref(),
+                    Some(sample.sender.address().to_long_string().as_str())
+                );
             }
             other => panic!("expected success, got {other:?}"),
         }

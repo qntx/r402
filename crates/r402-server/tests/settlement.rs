@@ -36,7 +36,7 @@ use r402_server::{
 
 fn success(tx: &str) -> SettleResponse {
     SettleResponse::Success {
-        payer: "0xpayer".into(),
+        payer: Some("0xpayer".into()),
         transaction: tx.into(),
         network: "eip155:8453".into(),
         amount: None,

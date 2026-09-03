@@ -12,29 +12,117 @@
     reason = "idiomatic test-code patterns"
 )]
 
-//! Header names, CORS expose, Cache-Control.
+//! Header names, CORS expose, Cache-Control. Production constants vs `headers.json`.
 
 mod harness;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use http::StatusCode;
 use http::header::{ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL};
-use r402_http::server::{PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X};
-use r402_http::{X402_EXPOSED_HEADERS, merge_private, set_no_store};
+use r402_http::headers::{
+    EXTENSION_RESPONSES, PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X,
+    X402_EXPOSED_HEADERS,
+};
+use r402_http::{merge_private, set_no_store};
+use serde_json::Value;
 
 use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, call_layer, eip155_requirements, eip155_tag, middleware,
     payment_request, unpaid_request,
 };
 
+fn headers_fixture() -> Value {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/contract/headers.json");
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|err| panic!("missing fixture {}: {err}", path.display()));
+    serde_json::from_slice(&bytes)
+        .unwrap_or_else(|err| panic!("invalid JSON in fixture {}: {err}", path.display()))
+}
+
+fn require<'a>(value: &'a Value, keys: &[&str]) -> &'a Value {
+    let mut current = value;
+    for key in keys {
+        current = current
+            .get(*key)
+            .unwrap_or_else(|| panic!("missing key {} in headers.json", keys.join(".")));
+    }
+    current
+}
+
+fn require_str<'a>(value: &'a Value, keys: &[&str]) -> &'a str {
+    require(value, keys)
+        .as_str()
+        .unwrap_or_else(|| panic!("{} must be a string", keys.join(".")))
+}
+
+fn require_u16(value: &Value, keys: &[&str]) -> u16 {
+    require(value, keys)
+        .as_u64()
+        .and_then(|n| u16::try_from(n).ok())
+        .unwrap_or_else(|| panic!("{} must be a u16 status", keys.join(".")))
+}
+
 #[test]
 fn header_names() {
-    assert_eq!(PAYMENT_SIGNATURE, "Payment-Signature");
-    assert_eq!(PAYMENT_REQUIRED, "Payment-Required");
-    assert_eq!(PAYMENT_RESPONSE, "Payment-Response");
-    assert_eq!(SIGN_IN_WITH_X, "SIGN-IN-WITH-X");
-    assert_eq!(X402_EXPOSED_HEADERS, "Payment-Required, Payment-Response");
+    let value = headers_fixture();
+    assert_eq!(
+        PAYMENT_SIGNATURE,
+        require_str(&value, &["payment_signature"])
+    );
+    assert_eq!(PAYMENT_REQUIRED, require_str(&value, &["payment_required"]));
+    assert_eq!(PAYMENT_RESPONSE, require_str(&value, &["payment_response"]));
+    assert_eq!(SIGN_IN_WITH_X, require_str(&value, &["sign_in_with_x"]));
+    assert_eq!(
+        EXTENSION_RESPONSES,
+        require_str(&value, &["extension_responses"])
+    );
+    assert_eq!(
+        X402_EXPOSED_HEADERS,
+        require_str(&value, &["expose_headers"])
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "unpaid"]),
+        StatusCode::PAYMENT_REQUIRED.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "malformed_payment"]),
+        StatusCode::PAYMENT_REQUIRED.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "permit2_allowance"]),
+        StatusCode::PRECONDITION_FAILED.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "facilitator_transport"]),
+        StatusCode::BAD_GATEWAY.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "missing_scheme"]),
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "incompatible_mode"]),
+        StatusCode::INTERNAL_SERVER_ERROR.as_u16()
+    );
+    assert_eq!(
+        require_u16(&value, &["status", "ok"]),
+        StatusCode::OK.as_u16()
+    );
+    assert_eq!(
+        require_str(&value, &["cache_control", "payment_required"]),
+        "no-store"
+    );
+    assert_eq!(
+        require_str(&value, &["cache_control", "settle_failure"]),
+        "no-store"
+    );
+    assert_eq!(
+        require_str(&value, &["cache_control", "ok_with_receipt"]),
+        "private"
+    );
 }
 
 #[tokio::test]

@@ -157,7 +157,7 @@ fn arb_verify_response() -> impl Strategy<Value = VerifyResponse> {
         (arb_compact_string(), arb_extensions(), arb_extra()).prop_map(
             |(payer, extensions, extra)| {
                 VerifyResponse::Valid {
-                    payer,
+                    payer: Some(payer),
                     extensions,
                     extra,
                     extension_responses: Extensions::new(),
@@ -173,7 +173,7 @@ fn arb_verify_response() -> impl Strategy<Value = VerifyResponse> {
         )
             .prop_map(|(reason, message, payer, extensions, extra)| {
                 VerifyResponse::Invalid {
-                    reason,
+                    reason: Some(reason),
                     message,
                     payer,
                     extensions,
@@ -200,7 +200,7 @@ fn arb_settle_response() -> impl Strategy<Value = SettleResponse> {
         )
             .prop_map(|(payer, transaction, network, amount, extensions, extra)| {
                 SettleResponse::Success {
-                    payer,
+                    payer: Some(payer),
                     transaction,
                     network,
                     amount,

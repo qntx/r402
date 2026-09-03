@@ -18,12 +18,12 @@ mod harness;
 use std::sync::Arc;
 
 use http::{HeaderValue, StatusCode};
-use r402_http::server::{PAYMENT_SIGNATURE, SettlementMode, X402Middleware};
+use r402_http::server::{PAYMENT_REQUIRED, PAYMENT_SIGNATURE, SettlementMode, X402Middleware};
 use r402_protocol::error::ErrorReason;
 use r402_protocol::network::ChainIdPattern;
 
 use crate::harness::{
-    FakeFacilitator, FlowScheme, OkInner, SettleScript, VerifyScript, call_layer,
+    FakeFacilitator, FlowScheme, OkInner, SettleScript, SupportedScript, VerifyScript, call_layer,
     eip155_requirements, eip155_tag, middleware, payment_request, unpaid_request, upfront_tag,
 };
 
@@ -124,6 +124,30 @@ async fn background_upfront_is_500() {
         .with_settlement_mode(SettlementMode::Background);
     let response = call_layer(layer, OkInner, unpaid_request()).await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+#[tokio::test]
+async fn supported_empty_kinds_is_502_without_payment_required() {
+    let fac = Arc::new(FakeFacilitator::new());
+    *fac.supported.lock().unwrap() = SupportedScript::Empty;
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
+}
+
+#[tokio::test]
+async fn supported_transport_is_502_without_payment_required() {
+    let fac = Arc::new(FakeFacilitator::new());
+    *fac.supported.lock().unwrap() = SupportedScript::Transport;
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    assert!(response.headers().get(PAYMENT_REQUIRED).is_none());
 }
 
 #[tokio::test]

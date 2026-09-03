@@ -24,9 +24,13 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
 
     let verified = verify_request_json(provider, request).await;
     let payer = match verified {
-        VerifyResponse::Valid { payer, .. } => Some(payer),
+        VerifyResponse::Valid { payer, .. } => payer,
         VerifyResponse::Invalid { payer, reason, .. } => {
-            return settle_failure(reason, &network, payer);
+            return settle_failure(
+                reason.unwrap_or(ErrorReason::UnexpectedVerifyError),
+                &network,
+                payer,
+            );
         }
         _ => {
             return settle_failure(
@@ -65,7 +69,7 @@ pub async fn settle_request<P: AptosFacilitatorOps>(
         .await
     {
         Ok(transaction) => SettleResponse::Success {
-            payer: payer.unwrap_or_default(),
+            payer,
             transaction: transaction.into(),
             network: network.into(),
             amount: request

@@ -116,7 +116,7 @@ where
 
         let payer = typed.payment_payload.payload.channel_config().payer;
         Ok(wire::SettleResponse::Success {
-            payer: format!("{payer:#x}").into(),
+            payer: Some(format!("{payer:#x}").into()),
             // Off-chain accounting settle — no tx until claim batch is submitted.
             transaction: String::new().into(),
             network: typed.payment_requirements.network.to_string().into(),
