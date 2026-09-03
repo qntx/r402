@@ -200,6 +200,56 @@ impl SiwxProof {
             .await
     }
 
+    /// Encodes this proof as a `SIGN-IN-WITH-X` header value (base64 JSON).
+    ///
+    /// # Errors
+    ///
+    /// [`SiwxProofError::InvalidJson`] when the proof cannot be serialized.
+    pub fn encode_header(&self) -> Result<String, SiwxProofError> {
+        let mut body = serde_json::Map::new();
+        let _ = body.insert("domain".into(), Value::String(self.domain.to_string()));
+        let _ = body.insert("address".into(), Value::String(self.address.to_string()));
+        let _ = body.insert("uri".into(), Value::String(self.uri.to_string()));
+        let _ = body.insert("version".into(), Value::String(self.version.to_string()));
+        let _ = body.insert("chainId".into(), Value::String(self.chain_id.to_string()));
+        let _ = body.insert(
+            "type".into(),
+            Value::String(self.signature_type.to_string()),
+        );
+        let _ = body.insert("nonce".into(), Value::String(self.nonce.to_string()));
+        let _ = body.insert("issuedAt".into(), Value::String(self.issued_at.to_string()));
+        let _ = body.insert(
+            "signature".into(),
+            Value::String(self.signature.to_string()),
+        );
+        if let Some(statement) = &self.statement {
+            let _ = body.insert("statement".into(), Value::String(statement.to_string()));
+        }
+        if let Some(expiration) = &self.expiration_time {
+            let _ = body.insert(
+                "expirationTime".into(),
+                Value::String(expiration.to_string()),
+            );
+        }
+        if let Some(not_before) = &self.not_before {
+            let _ = body.insert("notBefore".into(), Value::String(not_before.to_string()));
+        }
+        if let Some(request_id) = &self.request_id {
+            let _ = body.insert("requestId".into(), Value::String(request_id.to_string()));
+        }
+        if !self.resources.is_empty() {
+            let resources = self
+                .resources
+                .iter()
+                .map(|r| Value::String(r.to_string()))
+                .collect();
+            let _ = body.insert("resources".into(), Value::Array(resources));
+        }
+        let bytes =
+            serde_json::to_vec(&Value::Object(body)).map_err(|_| SiwxProofError::InvalidJson)?;
+        Ok(Base64Bytes::encode(bytes).to_string())
+    }
+
     async fn verify_signature(&self) -> Result<(), SiwxError> {
         let (chain_name, chain_ref) = chain_profile(&self.chain_id)?;
         let raw = format_caip122(self, chain_name, chain_ref);

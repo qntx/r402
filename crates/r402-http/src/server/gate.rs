@@ -1,6 +1,9 @@
 //! Three Gate entries. Verify (steps 1–5) lives in [`super::verify`].
 
 use std::convert::Infallible;
+use std::future::Future;
+#[cfg(feature = "siwx")]
+use std::pin::Pin;
 use std::sync::Arc;
 
 use axum_core::extract::Request;
@@ -104,11 +107,8 @@ impl Gate {
 
     fn record_siwx_success(&self, path: &str, settlement: &SettleResponse) {
         #[cfg(feature = "siwx")]
-        if let (Some(siwx), SettleResponse::Success { payer, .. }) = (&self.siwx, settlement) {
-            let payer = payer.as_deref().unwrap_or("");
-            if !payer.is_empty() {
-                siwx.record_success(path, payer);
-            }
+        if let Some(siwx) = self.siwx.as_ref() {
+            record_paid_address(siwx, path, settlement);
         }
         #[cfg(not(feature = "siwx"))]
         {
@@ -273,6 +273,7 @@ impl Gate {
         S: Service<Request, Response = Response, Error = Infallible> + Send,
         S::Future: Send,
     {
+        let path = req.uri().path().to_owned();
         match self.prepare(&mut req).await? {
             Prepared::Skipped(response) => Ok(response),
             Prepared::Ready {
@@ -280,11 +281,12 @@ impl Gate {
                 before_handler,
             } => {
                 background_after_verify(
+                    self,
+                    &path,
                     inner,
                     req,
                     *verified,
                     before_handler.map(|b| *b),
-                    self.settlement_tracker.clone(),
                 )
                 .await
             }
@@ -398,11 +400,12 @@ where
 }
 
 async fn background_after_verify<S>(
+    gate: &Gate,
+    path: &str,
     inner: S,
     req: Request,
     verified: VerifiedPayment,
     before_handler: Option<CompletedSettlement>,
-    tracker: Option<BackgroundSettlementTracker>,
 ) -> Result<Response, GateError>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Send,
@@ -415,7 +418,7 @@ where
             flow: err.flow,
         }
     })?;
-    let scheduled = match tracker {
+    let scheduled = match gate.settlement_tracker.clone() {
         Some(tracker) => scheduled.with_tracker(tracker),
         None => scheduled,
     };
@@ -426,9 +429,48 @@ where
     }
 
     let cancel = cancellation_guard(&verified, before_handler.as_ref());
-    let settle = after_handler_settle(verified.clone());
+    let settle = wrap_background_siwx(gate, path, after_handler_settle(verified.clone()));
     let outcome = run(scheduled, background_handler(inner, req), settle).await;
     map_background_outcome(outcome, cancel).await
+}
+
+/// Spawned settle success is otherwise invisible to `PaidAddressStore`.
+#[cfg(feature = "siwx")]
+fn wrap_background_siwx(
+    gate: &Gate,
+    path: &str,
+    settle: impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send + 'static,
+) -> Pin<Box<dyn Future<Output = Result<SettleResponse, FacilitatorError>> + Send>> {
+    let siwx = gate.siwx.clone();
+    let path = path.to_owned();
+    Box::pin(async move {
+        let result = settle.await;
+        if let (Some(siwx), Ok(settlement)) = (siwx.as_ref(), result.as_ref()) {
+            record_paid_address(siwx, &path, settlement);
+        }
+        result
+    })
+}
+
+#[cfg(not(feature = "siwx"))]
+fn wrap_background_siwx(
+    _gate: &Gate,
+    _path: &str,
+    settle: impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send + 'static,
+) -> impl Future<Output = Result<SettleResponse, FacilitatorError>> + Send + 'static {
+    settle
+}
+
+#[cfg(feature = "siwx")]
+fn record_paid_address(siwx: &super::SiwxGate, path: &str, settlement: &SettleResponse) {
+    let SettleResponse::Success { payer, .. } = settlement else {
+        return;
+    };
+    let payer = payer.as_deref().unwrap_or("");
+    if payer.is_empty() {
+        return;
+    }
+    siwx.record_success(path, payer);
 }
 
 async fn after_handler_settle(

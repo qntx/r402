@@ -26,16 +26,14 @@ pub mod buyer;
 #[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub mod server;
 
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use buyer::{WithPayments, X402Client, parse_payment_required, payment_signature_headers};
 #[cfg(any(feature = "client", feature = "server"))]
 pub use headers::{
     EXTENSION_RESPONSES, PAYMENT_REQUIRED, PAYMENT_RESPONSE, PAYMENT_SIGNATURE, SIGN_IN_WITH_X,
     X402_ALLOW_HEADERS, X402_EXPOSED_HEADERS, ensure_expose_headers, merge_private, set_no_store,
 };
-
-#[cfg(feature = "client")]
-#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
-pub use buyer::{WithPayments, X402Client, parse_payment_required, payment_signature_headers};
-
 #[cfg(feature = "server")]
 #[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub use server::{SettlementMode, X402Middleware};

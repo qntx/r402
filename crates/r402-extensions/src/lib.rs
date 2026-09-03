@@ -77,8 +77,9 @@ pub use payment_id::{
 };
 #[cfg(feature = "siwx")]
 pub use siwx::{
-    InMemoryPaidAddressStore, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension,
-    SiwxOrigin, SiwxOriginError, SiwxProof, SiwxProofError,
+    InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY, SiwxChain,
+    SiwxClientExtension, SiwxError, SiwxExtension, SiwxOrigin, SiwxOriginError, SiwxProof,
+    SiwxProofError, SiwxSigner,
 };
 
 #[cfg(test)]

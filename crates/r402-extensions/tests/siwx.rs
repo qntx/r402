@@ -13,14 +13,20 @@
     reason = "idiomatic test-code patterns"
 )]
 
+use std::future::Future;
+use std::pin::Pin;
+
 use alloy_signer::Signer;
 use alloy_signer_local::PrivateKeySigner;
+use compact_str::CompactString;
+use r402_client::ClientExtension;
 use r402_extensions::siwx::{
-    InMemoryPaidAddressStore, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension,
-    SiwxOrigin, SiwxOriginError, SiwxProof,
+    InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY, SiwxChain,
+    SiwxClientExtension, SiwxError, SiwxExtension, SiwxOrigin, SiwxOriginError, SiwxProof,
+    SiwxSigner,
 };
 use r402_protocol::extension::Extension;
-use r402_protocol::payment::Base64Bytes;
+use r402_protocol::payment::{Base64Bytes, ExtensionEntry, PaymentRequired, ResourceInfo};
 use serde_json::json;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -381,4 +387,131 @@ async fn solana_malformed_signature() {
         proof.verify(&origin, "/premium-data").await.unwrap_err(),
         SiwxError::MalformedSignature
     );
+}
+
+struct FixtureEvm(PrivateKeySigner);
+
+impl SiwxSigner for FixtureEvm {
+    fn signature_type(&self) -> &'static str {
+        "eip191"
+    }
+
+    fn address(&self) -> CompactString {
+        format!("{}", self.0.address()).into()
+    }
+
+    fn sign_message<'a>(
+        &'a self,
+        message: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<CompactString, SiwxError>> + Send + 'a>> {
+        Box::pin(async move {
+            let sig = self
+                .0
+                .sign_message(message.as_bytes())
+                .await
+                .map_err(|_| SiwxError::Signature)?;
+            Ok(format!("{sig}").into())
+        })
+    }
+}
+
+fn advertised_required(origin: &SiwxOrigin, path: &str) -> PaymentRequired {
+    let entry = SiwxExtension::new(origin.clone())
+        .with_chain(SiwxChain::eip191("eip155:8453"))
+        .challenge_now(path)
+        .unwrap();
+    let mut required = PaymentRequired::new(ResourceInfo::new(origin.uri(path)));
+    required.extensions.insert(SIWX_KEY, entry);
+    required
+}
+
+#[tokio::test]
+async fn client_extension_sets_sign_in_with_x_from_configured_origin() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let required = advertised_required(&origin, "/premium-data");
+    let headers = ext.on_payment_required(&required).await;
+    let header = headers
+        .get(SIWX_HTTP_HEADER)
+        .expect("SIGN-IN-WITH-X")
+        .to_str()
+        .unwrap();
+    let proof = SiwxProof::parse_header(header).unwrap();
+    assert_eq!(proof.domain, "api.example.com");
+    assert_eq!(proof.uri, "https://api.example.com/premium-data");
+    proof.verify(&origin, "/premium-data").await.unwrap();
+}
+
+#[tokio::test]
+async fn client_extension_does_not_enrich_payload() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let required = advertised_required(&origin, "/premium-data");
+    let enriched = ext
+        .enrich_payment_payload("c2lnbmVk", &required)
+        .await
+        .unwrap();
+    assert_eq!(enriched, "c2lnbmVk");
+}
+
+#[tokio::test]
+async fn client_extension_skips_host_shaped_resource() {
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let mut required = PaymentRequired::new(ResourceInfo::new("evil.example"));
+    required.extensions.insert(
+        SIWX_KEY,
+        ExtensionEntry::raw(json!({
+            "info": {
+                "domain": "evil.example",
+                "uri": "https://evil.example/paid",
+                "version": "1",
+                "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+                "issuedAt": "2024-01-15T10:30:00.000Z"
+            },
+            "supportedChains": [{"chainId": "eip155:8453", "type": "eip191"}]
+        })),
+    );
+    let headers = ext.on_payment_required(&required).await;
+    assert!(headers.get(SIWX_HTTP_HEADER).is_none());
+}
+
+#[tokio::test]
+async fn client_extension_skips_incompatible_signer() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let entry = SiwxExtension::new(origin.clone())
+        .with_chain(SiwxChain::ed25519(
+            "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
+        ))
+        .challenge_now("/premium-data")
+        .unwrap();
+    let mut required = PaymentRequired::new(ResourceInfo::new(origin.uri("/premium-data")));
+    required.extensions.insert(SIWX_KEY, entry);
+    let headers = ext.on_payment_required(&required).await;
+    assert!(headers.get(SIWX_HTTP_HEADER).is_none());
+}
+
+#[test]
+fn proof_encode_header_roundtrips() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let body = json!({
+        "domain": origin.domain(),
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": origin.uri("/premium-data"),
+        "version": "1",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let proof = SiwxProof::parse_header(&header).unwrap();
+    let encoded = proof.encode_header().unwrap();
+    let again = SiwxProof::parse_header(&encoded).unwrap();
+    assert_eq!(again, proof);
 }

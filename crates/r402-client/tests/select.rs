@@ -16,12 +16,14 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use http::{HeaderMap, HeaderValue};
 use r402_client::{
-    ClientHooks, DefaultAssetInfo, FirstMatch, HookDecision, MaxAmount, MaxAmountPolicy,
-    NetworkPolicy, PaymentCandidate, PaymentCandidateSigner, PaymentClient, PaymentCreationContext,
-    PaymentPolicy, PaymentResponseContext, PaymentResponseResult, PaymentSelector, PreferChain,
-    SchemeClient, SchemePolicy,
+    ClientExtension, ClientHooks, DefaultAssetInfo, FirstMatch, HookDecision, MaxAmount,
+    MaxAmountPolicy, NetworkPolicy, PaymentCandidate, PaymentCandidateSigner, PaymentClient,
+    PaymentCreationContext, PaymentPolicy, PaymentResponseContext, PaymentResponseResult,
+    PaymentSelector, PreferChain, SchemeClient, SchemePolicy,
 };
+use r402_protocol::payment::ExtensionEntry;
 use r402_protocol::{
     ChainId, ClientError, PaymentRequired, PaymentRequirements, ResourceInfo, SchemeId,
 };
@@ -104,6 +106,37 @@ impl ClientHooks for RecoverHook {
         _: &PaymentResponseContext,
     ) -> impl Future<Output = PaymentResponseResult> + Send + 'a {
         std::future::ready(PaymentResponseResult::recovered())
+    }
+}
+
+struct PrefixExt;
+impl ClientExtension for PrefixExt {
+    fn key(&self) -> &'static str {
+        "builder-code"
+    }
+
+    fn enrich_payment_payload<'a>(
+        &'a self,
+        payload_b64: &'a str,
+        _: &'a PaymentRequired,
+    ) -> impl Future<Output = Result<String, ClientError>> + Send + 'a {
+        std::future::ready(Ok(format!("x{payload_b64}")))
+    }
+}
+
+struct HeaderExt;
+impl ClientExtension for HeaderExt {
+    fn key(&self) -> &'static str {
+        "sign-in-with-x"
+    }
+
+    fn on_payment_required<'a>(
+        &'a self,
+        _: &'a PaymentRequired,
+    ) -> impl Future<Output = HeaderMap> + Send + 'a {
+        let mut headers = HeaderMap::new();
+        let _ = headers.insert("SIGN-IN-WITH-X", HeaderValue::from_static("cHJvb2Y="));
+        std::future::ready(headers)
     }
 }
 
@@ -406,4 +439,35 @@ fn first_match_returns_first() {
     let refs: Vec<&PaymentCandidate> = candidates.iter().collect();
     let picked = FirstMatch.select(&refs).unwrap();
     assert_eq!(picked.amount, "1", "FirstMatch must keep list order");
+}
+
+#[tokio::test]
+async fn enrich_runs_after_sign() {
+    let client = PaymentClient::new()
+        .disable_spend_controls()
+        .register(StubScheme::bare())
+        .with_extension(PrefixExt);
+    let created = client.create_payment(&sample_required()).await.unwrap();
+    assert_eq!(created.signed_payload, "xc2lnbmVk");
+}
+
+#[tokio::test]
+async fn extension_headers_require_declaration() {
+    let client = PaymentClient::new().with_extension(HeaderExt);
+    let empty = client.extension_headers(&sample_required()).await;
+    assert!(
+        empty.is_empty(),
+        "undeclared extension must not emit headers"
+    );
+
+    let mut declared = sample_required();
+    declared.extensions.insert(
+        "sign-in-with-x",
+        ExtensionEntry::info(serde_json::json!({})),
+    );
+    let headers = client.extension_headers(&declared).await;
+    assert_eq!(
+        headers.get("SIGN-IN-WITH-X").map(HeaderValue::as_bytes),
+        Some(b"cHJvb2Y=".as_slice())
+    );
 }

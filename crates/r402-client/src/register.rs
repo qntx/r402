@@ -10,6 +10,7 @@ use serde_json as _;
 use tokio as _;
 
 use crate::candidate::SchemeClient;
+use crate::extension::{ClientExtension, DynClientExtension};
 use crate::hooks::{
     ClientHooks, CreatedPayment, DynClientHooks, FailureRecovery, HookDecision,
     PaymentCreationContext,
@@ -24,6 +25,7 @@ pub struct PaymentClient<S = FirstMatch> {
     pub(crate) selector: S,
     pub(crate) policies: Vec<Arc<dyn PaymentPolicy>>,
     pub(crate) hooks: Vec<Arc<dyn DynClientHooks>>,
+    pub(crate) extensions: Vec<Arc<dyn DynClientExtension>>,
     pub(crate) spend_controls: Option<SpendControls>,
 }
 
@@ -42,6 +44,7 @@ impl Default for PaymentClient<FirstMatch> {
             selector: FirstMatch,
             policies: Vec::new(),
             hooks: Vec::new(),
+            extensions: Vec::new(),
             spend_controls: Some(SpendControls::default()),
         }
     }
@@ -53,6 +56,7 @@ impl<S> Debug for PaymentClient<S> {
             .field("schemes", &self.schemes.len())
             .field("policies", &self.policies.len())
             .field("hooks", &self.hooks.len())
+            .field("extensions", &self.extensions.len())
             .finish_non_exhaustive()
     }
 }
@@ -73,6 +77,7 @@ impl<S> PaymentClient<S> {
             selector,
             policies: self.policies,
             hooks: self.hooks,
+            extensions: self.extensions,
             spend_controls: self.spend_controls,
         }
     }
@@ -105,6 +110,13 @@ impl<S> PaymentClient<S> {
         self
     }
 
+    /// Registers a client extension (enrich and/or HTTP 402 header hook).
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl ClientExtension + 'static) -> Self {
+        self.extensions.push(Arc::new(extension));
+        self
+    }
+
     /// Number of registered scheme clients.
     #[must_use]
     pub fn scheme_count(&self) -> usize {
@@ -115,6 +127,12 @@ impl<S> PaymentClient<S> {
     #[must_use]
     pub fn hook_count(&self) -> usize {
         self.hooks.len()
+    }
+
+    /// Number of registered client extensions.
+    #[must_use]
+    pub fn extension_count(&self) -> usize {
+        self.extensions.len()
     }
 }
 
@@ -196,6 +214,9 @@ impl<S: PaymentSelector> PaymentClient<S> {
         let candidates = self.candidates(payment_required);
         let selected = self.select_candidate(&candidates)?;
         let signed_payload = selected.sign().await?;
+        let signed_payload = self
+            .enrich_signed_payload(&signed_payload, payment_required)
+            .await?;
         Ok(CreatedPayment::new(
             signed_payload,
             payment_required.clone(),

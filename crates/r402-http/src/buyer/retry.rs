@@ -4,8 +4,8 @@ use std::fmt::{self, Debug, Formatter};
 
 use http::{Extensions, HeaderMap, StatusCode};
 use r402_client::{
-    ClientHooks, CreatedPayment, FirstMatch, PaymentClient, PaymentPolicy, PaymentResponseContext,
-    PaymentSelector, SchemeClient, SpendControls,
+    ClientExtension, ClientHooks, CreatedPayment, FirstMatch, PaymentClient, PaymentPolicy,
+    PaymentResponseContext, PaymentSelector, SchemeClient, SpendControls,
 };
 use r402_protocol::ClientError;
 use r402_protocol::payment::PaymentRequired;
@@ -92,6 +92,13 @@ impl<TSelector> X402Client<TSelector> {
         self
     }
 
+    /// Adds a client extension (HTTP 402 header hook and payload enrich).
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl ClientExtension + 'static) -> Self {
+        self.inner = self.inner.with_extension(extension);
+        self
+    }
+
     /// Enables spend controls with the given configuration.
     #[must_use]
     pub fn with_spend_controls(mut self, controls: SpendControls) -> Self {
@@ -121,7 +128,9 @@ where
             .await
             .ok_or_else(|| ClientError::Parse("Invalid 402 response".to_owned()))?;
         let created = self.inner.create_payment(&payment_required).await?;
-        payment_signature_headers(&created)
+        let mut headers = payment_signature_headers(&created)?;
+        headers.extend(self.inner.extension_headers(&payment_required).await);
+        Ok(headers)
     }
 
     /// Creates a payment for an already-parsed challenge.
@@ -207,7 +216,10 @@ where
             .create_payment(&payment_required)
             .await
             .map_err(middleware_err)?;
-        let paid = clone_with_payment(&template, &created).map_err(middleware_err)?;
+        let paid =
+            clone_with_payment_and_extensions(&template, &created, &payment_required, &self.inner)
+                .await
+                .map_err(middleware_err)?;
         let response = next.clone().run(paid, extensions).await?;
 
         let Some(recovered) = self
@@ -218,7 +230,14 @@ where
             return Ok(response);
         };
 
-        let second = clone_with_payment(&template, &recovered).map_err(middleware_err)?;
+        let second = clone_with_payment_and_extensions(
+            &template,
+            &recovered,
+            &recovered.payment_required,
+            &self.inner,
+        )
+        .await
+        .map_err(middleware_err)?;
         let second_response = next.run(second, extensions).await?;
         let ctx = build_response_context(&payment_required, &recovered, &second_response);
         if ctx.settle_response.is_some() || ctx.corrective_payment_required.is_some() {
@@ -251,6 +270,18 @@ impl<TSelector: PaymentSelector> X402Client<TSelector> {
         let fresh = self.inner.create_payment(challenge).await?;
         Ok(Some(fresh))
     }
+}
+
+async fn clone_with_payment_and_extensions<TSelector: PaymentSelector>(
+    template: &Request,
+    created: &CreatedPayment,
+    payment_required: &PaymentRequired,
+    client: &PaymentClient<TSelector>,
+) -> Result<Request, ClientError> {
+    let mut paid = clone_with_payment(template, created)?;
+    paid.headers_mut()
+        .extend(client.extension_headers(payment_required).await);
+    Ok(paid)
 }
 
 fn build_response_context(

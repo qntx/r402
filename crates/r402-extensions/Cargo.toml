@@ -58,6 +58,8 @@ siwx = [
     "dep:hex",
     "dep:rand",
     "dep:bs58",
+    "dep:r402-client",
+    "dep:http",
 ]
 all-extensions = [
     "ext-bazaar",
@@ -73,7 +75,9 @@ compact_str = { workspace = true }
 r402-protocol = { workspace = true }
 serde_json = { workspace = true }
 
+r402-client = { workspace = true, optional = true }
 r402-facilitator = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 siwx = { workspace = true, optional = true }
@@ -97,7 +101,10 @@ serde_json = { workspace = true }
 alloy-signer = { workspace = true }
 alloy-signer-local = { workspace = true }
 bs58 = { workspace = true }
+compact_str = { workspace = true }
 ed25519-dalek = { workspace = true }
+http = { workspace = true }
+r402-client = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [[test]]

@@ -2,19 +2,25 @@
 //!
 //! Challenge advertisement, origin binding, paid-address/nonce storage, and
 //! CAIP-122 verification. HTTP `GrantAccess` lives in `r402-http`.
+//! Client proof is the `SIGN-IN-WITH-X` header, not `PaymentPayload.extensions`.
 
 pub mod advertise;
+pub mod client;
 pub mod origin;
 pub mod paid;
 pub mod proof;
 
 pub use advertise::{SiwxChain, SiwxExtension};
+pub use client::{SiwxClientExtension, SiwxSigner};
 pub use origin::{SiwxOrigin, SiwxOriginError};
 pub use paid::{InMemoryPaidAddressStore, PaidAddressStore};
 pub use proof::{SiwxProof, SiwxProofError};
 
 /// Wire key for the Sign-In with X extension.
 pub const SIWX_KEY: &str = "sign-in-with-x";
+
+/// HTTP request header carrying a SIWX proof. Never emit as a response header.
+pub const SIWX_HTTP_HEADER: &str = "SIGN-IN-WITH-X";
 
 /// Default `issuedAt` age accepted during field validation.
 pub const DEFAULT_MAX_ISSUED_AGE: time::Duration = time::Duration::minutes(5);

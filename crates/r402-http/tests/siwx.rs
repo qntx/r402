@@ -16,23 +16,29 @@
 
 mod harness;
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use alloy_signer::Signer;
 use alloy_signer_local::PrivateKeySigner;
 use axum_core::body::Body;
 use axum_core::extract::Request;
+use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
+use r402_client::ClientExtension;
 use r402_http::server::{
-    InMemoryPaidAddressStore, PAYMENT_REQUIRED, PAYMENT_RESPONSE, PaidAddressStore, SIGN_IN_WITH_X,
-    SIWX_KEY, SettlementMode, SiwxChain, SiwxGate, SiwxOrigin, SiwxProof,
+    BackgroundSettlementTracker, InMemoryPaidAddressStore, PAYMENT_REQUIRED, PAYMENT_RESPONSE,
+    PaidAddressStore, SIGN_IN_WITH_X, SIWX_KEY, SettlementMode, SiwxChain, SiwxClientExtension,
+    SiwxError, SiwxGate, SiwxOrigin, SiwxProof, SiwxSigner,
 };
-use r402_protocol::payment::Base64Bytes;
+use r402_protocol::payment::{Base64Bytes, PaymentRequired};
 use serde_json::Value;
 
 use crate::harness::{
-    FakeFacilitator, FlowScheme, OkInner, call_layer, eip155_requirements, eip155_tag, middleware,
-    payment_request, unpaid_request,
+    FakeFacilitator, FlowScheme, OkInner, SettleScript, call_layer, eip155_requirements,
+    eip155_tag, middleware, payment_request, unpaid_request,
 };
 
 const FIXTURE_KEY: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -307,4 +313,147 @@ async fn settle_success_records_payer() {
     assert_eq!(response.status(), StatusCode::OK);
     assert!(response.headers().get(PAYMENT_RESPONSE).is_some());
     assert!(store.contains(origin().store_key("/paid").as_str(), "0xpayer"));
+}
+
+#[tokio::test]
+async fn background_settle_success_records_payer() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let tracker = BackgroundSettlementTracker::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store.clone()))
+        .with_price_tag(eip155_tag())
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Background)
+        .with_settlement_tracker(tracker.clone());
+    let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        response.headers().get(PAYMENT_RESPONSE).is_none(),
+        "Background must not attach Payment-Response"
+    );
+    tracker
+        .wait_for_drain(Duration::from_secs(1))
+        .await
+        .expect("background settle drains");
+    assert!(
+        store.contains(origin().store_key("/paid").as_str(), "0xpayer"),
+        "spawned settle Success must record PaidAddressStore"
+    );
+}
+
+#[tokio::test]
+async fn background_settle_failure_does_not_record() {
+    let fac = Arc::new(FakeFacilitator::new());
+    *fac.settle.lock().unwrap() = SettleScript::Fail;
+    let store = InMemoryPaidAddressStore::new();
+    let tracker = BackgroundSettlementTracker::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store.clone()))
+        .with_price_tag(eip155_tag())
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Background)
+        .with_settlement_tracker(tracker.clone());
+    let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    tracker
+        .wait_for_drain(Duration::from_secs(1))
+        .await
+        .expect("failed background settle drains");
+    assert!(!store.contains(origin().store_key("/paid").as_str(), "0xpayer"));
+}
+
+struct FixtureEvm(PrivateKeySigner);
+
+impl SiwxSigner for FixtureEvm {
+    fn signature_type(&self) -> &'static str {
+        "eip191"
+    }
+
+    fn address(&self) -> CompactString {
+        format!("{}", self.0.address()).into()
+    }
+
+    fn sign_message<'a>(
+        &'a self,
+        message: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<CompactString, SiwxError>> + Send + 'a>> {
+        Box::pin(async move {
+            let sig = self
+                .0
+                .sign_message(message.as_bytes())
+                .await
+                .map_err(|_| SiwxError::Signature)?;
+            Ok(format!("{sig}").into())
+        })
+    }
+}
+
+#[tokio::test]
+async fn client_extension_signs_configured_origin_not_host() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store.clone()))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let mut challenge_req = unpaid_request();
+    let _ = challenge_req
+        .headers_mut()
+        .insert("host", HeaderValue::from_static("evil.example"));
+    let challenge = call_layer(layer.clone(), OkInner, challenge_req).await;
+    assert_eq!(challenge.status(), StatusCode::PAYMENT_REQUIRED);
+    let required: PaymentRequired = serde_json::from_slice(
+        &Base64Bytes::from(
+            challenge
+                .headers()
+                .get(PAYMENT_REQUIRED)
+                .unwrap()
+                .as_bytes(),
+        )
+        .decode()
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        required.extensions.get(SIWX_KEY).unwrap().to_value()["info"]["domain"],
+        "api.example.com"
+    );
+
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let address = format!("{}", signer.address());
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let headers = ext.on_payment_required(&required).await;
+    let header = headers.get(SIGN_IN_WITH_X).expect("SIGN-IN-WITH-X").clone();
+    store.record_success(origin().store_key("/paid").as_str(), &address);
+    let response = call_layer(layer, OkInner, siwx_request(header, "evil.example")).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(fac.verify_count(), 0);
+}
+
+#[tokio::test]
+async fn client_extension_skips_origin_mismatch() {
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let mut required = PaymentRequired::new(r402_protocol::payment::ResourceInfo::new(
+        "https://api.example.com/paid",
+    ));
+    required.extensions.insert(
+        SIWX_KEY,
+        r402_protocol::payment::ExtensionEntry::raw(serde_json::json!({
+            "info": {
+                "domain": "evil.example.com",
+                "uri": "https://evil.example.com/paid",
+                "version": "1",
+                "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+                "issuedAt": "2024-01-15T10:30:00.000Z"
+            },
+            "supportedChains": [{"chainId": "eip155:8453", "type": "eip191"}]
+        })),
+    );
+    let headers = ext.on_payment_required(&required).await;
+    assert!(
+        headers.get(SIGN_IN_WITH_X).is_none(),
+        "mismatched challenge origin must not sign"
+    );
 }

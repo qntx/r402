@@ -26,8 +26,9 @@ pub use overrides::{
 pub use pricing::{DynamicPriceTags, PriceTagSource, StaticPriceTags};
 #[cfg(feature = "siwx")]
 pub use r402_extensions::siwx::{
-    InMemoryPaidAddressStore, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxOrigin,
-    SiwxOriginError, SiwxProof, SiwxProofError,
+    InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY, SiwxChain,
+    SiwxClientExtension, SiwxError, SiwxOrigin, SiwxOriginError, SiwxProof, SiwxProofError,
+    SiwxSigner,
 };
 pub use r402_facilitator::{Facilitator, FacilitatorClient, FacilitatorClientError};
 pub use r402_server::{

@@ -29,6 +29,10 @@ use r402_http::server::{
     BackgroundSettlementTracker, PAYMENT_RESPONSE, SettlementMode, SettlementOverrides,
     UptoActualAmount, set_settlement_overrides, settlement_overrides_header_name,
 };
+#[cfg(feature = "siwx")]
+use r402_http::server::{
+    InMemoryPaidAddressStore, PaidAddressStore, SiwxChain, SiwxGate, SiwxOrigin,
+};
 use tower::Service;
 
 use crate::harness::{
@@ -233,4 +237,30 @@ async fn settle_failure_is_non_fatal() {
         .wait_for_drain(Duration::from_secs(1))
         .await
         .expect("failed background settle still drains");
+}
+
+#[cfg(feature = "siwx")]
+#[tokio::test]
+async fn spawned_settle_success_records_paid_address() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let tracker = BackgroundSettlementTracker::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(
+            SiwxGate::new(origin.clone(), store.clone())
+                .with_chain(SiwxChain::eip191("eip155:8453")),
+        )
+        .with_price_tag(eip155_tag())
+        .unwrap()
+        .with_settlement_mode(SettlementMode::Background)
+        .with_settlement_tracker(tracker.clone());
+    let response = call_layer(layer, OkInner, payment_request(&eip155_requirements())).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(response.headers().get(PAYMENT_RESPONSE).is_none());
+    tracker
+        .wait_for_drain(Duration::from_secs(1))
+        .await
+        .expect("background settle drains");
+    assert!(store.contains(origin.store_key("/paid").as_str(), "0xpayer"));
 }

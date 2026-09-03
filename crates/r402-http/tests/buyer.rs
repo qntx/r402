@@ -16,12 +16,15 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use http::{HeaderMap, HeaderValue};
 use r402_client::{
-    ClientHooks, DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner,
+    ClientExtension, ClientHooks, DefaultAssetInfo, PaymentCandidate, PaymentCandidateSigner,
     PaymentResponseContext, PaymentResponseResult, SchemeClient,
 };
-use r402_http::{PAYMENT_REQUIRED, PAYMENT_SIGNATURE, WithPayments, X402Client};
-use r402_protocol::payment::{Base64Bytes, PaymentRequired, PaymentRequirements, ResourceInfo};
+use r402_http::{PAYMENT_REQUIRED, PAYMENT_SIGNATURE, SIGN_IN_WITH_X, WithPayments, X402Client};
+use r402_protocol::payment::{
+    Base64Bytes, ExtensionEntry, PaymentRequired, PaymentRequirements, ResourceInfo,
+};
 use r402_protocol::{ChainId, ClientError, SchemeId};
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -78,6 +81,22 @@ impl ClientHooks for RecoverHook {
     }
 }
 
+struct SignInHeaderExt;
+impl ClientExtension for SignInHeaderExt {
+    fn key(&self) -> &'static str {
+        "sign-in-with-x"
+    }
+
+    fn on_payment_required<'a>(
+        &'a self,
+        _: &'a PaymentRequired,
+    ) -> impl Future<Output = HeaderMap> + Send + 'a {
+        let mut headers = HeaderMap::new();
+        let _ = headers.insert(SIGN_IN_WITH_X, HeaderValue::from_static("cHJvb2Y="));
+        std::future::ready(headers)
+    }
+}
+
 fn sample_required() -> PaymentRequired {
     PaymentRequired::new(ResourceInfo::new("https://example.com/paid")).with_accepts(vec![
         PaymentRequirements::new(
@@ -89,6 +108,18 @@ fn sample_required() -> PaymentRequired {
             60,
         ),
     ])
+}
+
+fn sample_required_with_siwx() -> PaymentRequired {
+    let mut required = sample_required();
+    required.extensions.insert(
+        "sign-in-with-x",
+        ExtensionEntry::raw(serde_json::json!({
+            "info": { "domain": "example.com" },
+            "supportedChains": []
+        })),
+    );
+    required
 }
 
 fn b64_json(value: &PaymentRequired) -> String {
@@ -262,5 +293,81 @@ async fn recovered_corrective_402_retries_once() {
         response.status(),
         200,
         "corrective 402 with recovered hook must retry once more"
+    );
+}
+
+#[tokio::test]
+async fn retries_402_merges_extension_headers() {
+    let server = MockServer::start().await;
+    let challenge = b64_json(&sample_required_with_siwx());
+
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .and(header(PAYMENT_SIGNATURE, SIGNED))
+        .and(header(SIGN_IN_WITH_X, "cHJvb2Y="))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let buyer = paid_buyer().with_extension(SignInHeaderExt);
+    let client = http_client().with_payments(buyer);
+    let response = client
+        .get(format!("{}/paid", server.uri()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        200,
+        "402 retry must merge SIGN-IN-WITH-X onto the paid request"
+    );
+}
+
+#[tokio::test]
+async fn omits_extension_headers_when_not_declared() {
+    let server = MockServer::start().await;
+    let challenge = b64_json(&sample_required());
+
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .and(header(PAYMENT_SIGNATURE, SIGNED))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let buyer = paid_buyer().with_extension(SignInHeaderExt);
+    let client = http_client().with_payments(buyer);
+    let response = client
+        .get(format!("{}/paid", server.uri()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    let received = server.received_requests().await.unwrap();
+    let paid = received
+        .iter()
+        .find(|req| req.headers.get(PAYMENT_SIGNATURE).is_some())
+        .expect("paid retry");
+    assert!(
+        paid.headers.get(SIGN_IN_WITH_X).is_none(),
+        "undeclared SIWX must not set SIGN-IN-WITH-X"
     );
 }

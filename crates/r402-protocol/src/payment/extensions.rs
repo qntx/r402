@@ -89,17 +89,22 @@ where
 
 /// Payload attached to a single extension key.
 ///
-/// Structured form is `{info, schema?}`. Raw form is forwarded verbatim.
+/// Structured form is `{info, schema?, …}`. Sibling keys such as SIWX
+/// `supportedChains` are preserved on deserialize so buyers can read them.
+/// Raw form is forwarded verbatim.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ExtensionEntry {
-    /// Canonical `{info, schema?}` envelope.
+    /// Canonical `{info, schema?}` envelope plus any sibling fields.
     Structured {
         /// Extension-specific payload.
         info: Value,
         /// Optional JSON Schema for client-submitted fields.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         schema: Option<Value>,
+        /// Sibling keys (`supportedChains`, …). Empty when absent.
+        #[serde(default, flatten)]
+        extra: serde_json::Map<String, Value>,
     },
     /// Raw JSON payload, forwarded as-is.
     Raw(Value),
@@ -108,16 +113,21 @@ pub enum ExtensionEntry {
 impl ExtensionEntry {
     /// Structured entry with only `info`.
     #[must_use]
-    pub const fn info(info: Value) -> Self {
-        Self::Structured { info, schema: None }
+    pub fn info(info: Value) -> Self {
+        Self::Structured {
+            info,
+            schema: None,
+            extra: serde_json::Map::new(),
+        }
     }
 
     /// Structured entry with `info` and `schema`.
     #[must_use]
-    pub const fn with_schema(info: Value, schema: Value) -> Self {
+    pub fn with_schema(info: Value, schema: Value) -> Self {
         Self::Structured {
             info,
             schema: Some(schema),
+            extra: serde_json::Map::new(),
         }
     }
 
@@ -149,8 +159,12 @@ impl ExtensionEntry {
     #[must_use]
     pub fn to_value(&self) -> Value {
         match self {
-            Self::Structured { info, schema } => {
-                let mut obj = serde_json::Map::new();
+            Self::Structured {
+                info,
+                schema,
+                extra,
+            } => {
+                let mut obj = extra.clone();
                 let _ = obj.insert("info".to_owned(), info.clone());
                 if let Some(schema) = schema {
                     let _ = obj.insert("schema".to_owned(), schema.clone());
@@ -216,5 +230,20 @@ mod tests {
             EXTENSION_RESPONSE_LOG_FIELDS,
             ["status", "rejectedReason", "reason", "code"]
         );
+    }
+
+    #[test]
+    fn structured_preserves_sibling_fields() {
+        let encoded = json!({
+            "sign-in-with-x": {
+                "info": {"domain": "api.example.com"},
+                "supportedChains": [{"chainId": "eip155:8453", "type": "eip191"}]
+            }
+        });
+        let decoded: Extensions = serde_json::from_value(encoded).unwrap();
+        let value = decoded.get("sign-in-with-x").unwrap().to_value();
+        assert_eq!(value["info"]["domain"], "api.example.com");
+        assert_eq!(value["supportedChains"][0]["chainId"], "eip155:8453");
+        assert_eq!(value["supportedChains"][0]["type"], "eip191");
     }
 }
