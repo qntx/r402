@@ -82,10 +82,14 @@ pub fn settlement_ttl(max_timeout_seconds: u64) -> Duration {
 }
 
 /// Settles a verified XRPL payment by submitting the signed blob.
+///
+/// `expected_network` is the facilitator provider's CAIP-2 id; see
+/// [`super::verify::verify_request_json`].
 pub async fn settle_request<R, F, Fut>(
     rpc: &R,
     cache: &XrplSettlementCache,
     max_fee_drops: u64,
+    expected_network: &str,
     request: &Value,
     submit: F,
 ) -> SettleResponse
@@ -101,7 +105,7 @@ where
         .unwrap_or("")
         .to_owned();
 
-    let verified = verify_request_json(rpc, max_fee_drops, request).await;
+    let verified = verify_request_json(rpc, max_fee_drops, expected_network, request).await;
     let payer = match verified {
         VerifyResponse::Valid { payer, .. } => Some(payer),
         VerifyResponse::Invalid { payer, reason, .. } => {

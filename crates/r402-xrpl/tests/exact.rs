@@ -122,7 +122,7 @@ mod verify_settle {
     use r402_facilitator::Facilitator;
     use r402_protocol::error::ErrorReason;
     use r402_protocol::network::ChainProvider;
-    use r402_protocol::payment::{SettleResponse, VerifyResponse};
+    use r402_protocol::payment::{SettleResponse, VerifyRequest, VerifyResponse};
     use r402_xrpl::DEFAULT_MAX_FEE_DROPS;
     use r402_xrpl::chain::codec::{invoice_id_to_field, sign_transaction};
     use r402_xrpl::chain::rpc::{
@@ -296,8 +296,13 @@ mod verify_settle {
         let blob = sign_payment(json!({}));
         let reqs = base_requirements();
         let rpc = MockRpc::default();
-        let response =
-            verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await;
+        let response = verify_request_json(
+            &rpc,
+            DEFAULT_MAX_FEE_DROPS,
+            "xrpl:1",
+            &request(&blob, &reqs, &reqs),
+        )
+        .await;
         assert!(response.is_valid(), "{response:?}");
     }
 
@@ -310,7 +315,7 @@ mod verify_settle {
         let mut payload = request(&blob, &reqs, &reqs);
         payload["paymentPayload"]["x402Version"] = json!(1);
         assert!(
-            reason(&verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &payload).await)
+            reason(&verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, "xrpl:1", &payload).await)
                 .contains("x402_version")
         );
 
@@ -321,6 +326,7 @@ mod verify_settle {
                 &verify_request_json(
                     &rpc,
                     DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
                     &request(&blob, &reqs, &reqs_bad)
                 )
                 .await
@@ -335,6 +341,7 @@ mod verify_settle {
                 &verify_request_json(
                     &rpc,
                     DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
                     &request(&blob, &reqs, &reqs_net)
                 )
                 .await
@@ -351,8 +358,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("fees_sponsored")
         );
@@ -366,8 +378,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("destination")
         );
@@ -383,6 +400,7 @@ mod verify_settle {
                 &verify_request_json(
                     &rpc,
                     DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
                     &request(&flags_blob, &reqs, &reqs)
                 )
                 .await
@@ -395,6 +413,7 @@ mod verify_settle {
                 &verify_request_json(
                     &rpc,
                     DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
                     &request(&paths_blob, &reqs, &reqs)
                 )
                 .await
@@ -430,8 +449,13 @@ mod verify_settle {
         for (overrides, needle) in cases {
             let blob = sign_payment(overrides);
             let got = reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await,
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs),
+                )
+                .await,
             );
             assert!(got.contains(needle), "expected {needle} in {got}");
         }
@@ -444,8 +468,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("sequence_not_current")
         );
@@ -458,8 +487,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("ticket_sequence_not_allowed")
         );
@@ -473,8 +507,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("ticket_not_available")
         );
@@ -490,8 +529,13 @@ mod verify_settle {
         };
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("simulation_failed")
         );
@@ -504,8 +548,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("lastledgersequence_too_large")
         );
@@ -518,8 +567,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("fee_too_high")
         );
@@ -532,8 +586,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("invoice_id_mismatch")
         );
@@ -571,8 +630,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("sendmax_required")
         );
@@ -610,8 +674,13 @@ mod verify_settle {
             }
         });
         let rpc = MockRpc::default();
-        let response =
-            verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await;
+        let response = verify_request_json(
+            &rpc,
+            DEFAULT_MAX_FEE_DROPS,
+            "xrpl:1",
+            &request(&blob, &reqs, &reqs),
+        )
+        .await;
         assert!(response.is_valid(), "{response:?}");
     }
 
@@ -626,6 +695,7 @@ mod verify_settle {
             &rpc,
             &cache,
             DEFAULT_MAX_FEE_DROPS,
+            "xrpl:1",
             &req,
             |_blob, _ll| async {
                 Ok(XrplTxResult {
@@ -642,6 +712,7 @@ mod verify_settle {
             &rpc,
             &cache,
             DEFAULT_MAX_FEE_DROPS,
+            "xrpl:1",
             &req,
             |_blob, _ll| async { panic!("duplicate must not submit") },
         )
@@ -661,8 +732,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("network_id_for_standard_network")
         );
@@ -678,8 +754,13 @@ mod verify_settle {
         };
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("signer_not_authorized")
         );
@@ -691,7 +772,13 @@ mod verify_settle {
         let reqs = base_requirements();
         let rpc = MockRpc::default();
         let result = reason(
-            &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs)).await,
+            &verify_request_json(
+                &rpc,
+                DEFAULT_MAX_FEE_DROPS,
+                "xrpl:1",
+                &request(&blob, &reqs, &reqs),
+            )
+            .await,
         );
         assert!(
             result.contains("lastledgersequence_missing") || result.contains("payload"),
@@ -718,8 +805,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("iou_amount")
         );
@@ -734,8 +826,13 @@ mod verify_settle {
         let rpc = MockRpc::default();
         assert!(
             reason(
-                &verify_request_json(&rpc, DEFAULT_MAX_FEE_DROPS, &request(&blob, &reqs, &reqs))
-                    .await
+                &verify_request_json(
+                    &rpc,
+                    DEFAULT_MAX_FEE_DROPS,
+                    "xrpl:1",
+                    &request(&blob, &reqs, &reqs)
+                )
+                .await
             )
             .contains("iou_issuer_missing")
         );
@@ -757,5 +854,27 @@ mod verify_settle {
         assert_eq!(kind.network, "xrpl:1");
         assert_eq!(kind.x402_version, 2);
         assert_eq!(kind.extra.as_ref().unwrap()["areFeesSponsored"], false);
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_mainnet_payload_on_testnet_provider() {
+        let provider = XrplChainProvider::new(
+            XrplChainReference::TESTNET,
+            Some("http://127.0.0.1:1".to_owned()),
+        )
+        .unwrap();
+        assert_eq!(provider.chain_id().to_string(), "xrpl:1");
+        let fac = XrplExactFacilitator::try_new(provider).expect("try_new");
+        let blob = sign_payment(json!({}));
+        let mut reqs = base_requirements();
+        reqs["network"] = json!("xrpl:0");
+        let response = fac
+            .verify(VerifyRequest::from(request(&blob, &reqs, &reqs)))
+            .await
+            .expect("verify");
+        assert!(
+            reason(&response).contains("network_mismatch"),
+            "{response:?}"
+        );
     }
 }

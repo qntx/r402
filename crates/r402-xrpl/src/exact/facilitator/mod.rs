@@ -92,7 +92,8 @@ where
     )]
     async fn verify(&self, request: VerifyRequest) -> Result<VerifyResponse, FacilitatorError> {
         let json = request.into_json();
-        Ok(verify_request_json(&self.provider, self.max_fee_drops, &json).await)
+        let expected_network = self.provider.chain_id().to_string();
+        Ok(verify_request_json(&self.provider, self.max_fee_drops, &expected_network, &json).await)
     }
 
     #[cfg_attr(
@@ -102,10 +103,12 @@ where
     async fn settle(&self, request: SettleRequest) -> Result<SettleResponse, FacilitatorError> {
         let json = request.into_json();
         let rpc = self.provider.clone();
+        let expected_network = self.provider.chain_id().to_string();
         Ok(settle_request(
             &self.provider,
             &self.settlement_cache,
             self.max_fee_drops,
+            &expected_network,
             &json,
             move |blob, last_ledger| async move {
                 let hash = crate::chain::codec::signed_tx_hash(&blob)

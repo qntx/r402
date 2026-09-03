@@ -16,12 +16,17 @@ use crate::exact::payload::XrplAssetTransferMethod;
 use crate::{DEFAULT_MAX_FEE_DROPS, TF_PARTIAL_PAYMENT};
 
 /// Verifies a raw facilitator verify/settle request JSON.
+///
+/// `expected_network` is the facilitator provider's CAIP-2 id. A payload
+/// whose `paymentRequirements.network` differs is rejected even when accepted
+/// matches requirements — the RPC handle is bound to one chain.
 pub async fn verify_request_json<R: XrplRpc>(
     rpc: &R,
     max_fee_drops: u64,
+    expected_network: &str,
     request: &Value,
 ) -> VerifyResponse {
-    match verify_inner(rpc, max_fee_drops, request).await {
+    match verify_inner(rpc, max_fee_drops, expected_network, request).await {
         Ok(payer) => VerifyResponse::valid(payer),
         Err(invalid) => invalid.into_response(),
     }
@@ -35,6 +40,7 @@ pub async fn verify_request_json<R: XrplRpc>(
 async fn verify_inner<R: XrplRpc>(
     rpc: &R,
     max_fee_drops: u64,
+    expected_network: &str,
     request: &Value,
 ) -> Result<CompactString, XrplInvalid> {
     let payload = request
@@ -44,7 +50,7 @@ async fn verify_inner<R: XrplRpc>(
         .get("paymentRequirements")
         .ok_or_else(|| invalid("invalid_payment_requirements"))?;
 
-    envelope_checks(payload, requirements)?;
+    envelope_checks(payload, requirements, expected_network)?;
 
     let method = resolve_asset_transfer_method(payload, requirements)?;
 
@@ -104,7 +110,11 @@ async fn verify_inner<R: XrplRpc>(
     Ok(payer)
 }
 
-fn envelope_checks(payload: &Value, requirements: &Value) -> Result<(), XrplInvalid> {
+fn envelope_checks(
+    payload: &Value,
+    requirements: &Value,
+    expected_network: &str,
+) -> Result<(), XrplInvalid> {
     if payload.get("x402Version").and_then(Value::as_u64) != Some(2) {
         return Err(invalid("invalid_x402_version"));
     }
@@ -127,7 +137,7 @@ fn envelope_checks(payload: &Value, requirements: &Value) -> Result<(), XrplInva
     if !is_xrpl_network(req_network) || !is_xrpl_network(accepted_network) {
         return Err(invalid("invalid_network"));
     }
-    if accepted_network != req_network {
+    if accepted_network != req_network || req_network != expected_network {
         return Err(invalid("invalid_exact_xrpl_network_mismatch"));
     }
     if accepted.get("asset") != requirements.get("asset") {
