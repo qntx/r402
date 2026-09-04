@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-04
+
+### Breaking
+
+- `ClientExtension::on_payment_required` and
+  `PaymentClient::extension_headers` take the 402 response URL
+  (`request_url: &str`).
+- `SiwxExtension::new` is no longer `const fn` (default challenge
+  statement).
+
 ### Added
 
 - Feature `siwx-eip1271` on `r402-extensions` and `r402-http` enables
@@ -19,6 +29,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Changed
 
+- Workspace version **0.20.0**. Path workspace deps use `version = "0.20"`.
 - README / rustdoc: `SettlementMode` is the after-handler settle scheduler
   for `paymentFlow = authorization`, not a fourth `paymentFlow`. Concurrent
   and Background overlap that settle with the handler; `upfront` / `escrow`
@@ -30,7 +41,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   facade to evm+http+concordium only.
 - `crates/README.md` crate graph is a mermaid flowchart (solid = always,
   dashed = feature-gated).
-- `siwx` / `siwx-evm` / `siwx-svm` are crates.io **0.6**. Git source
+- `siwx` / `siwx-evm` / `siwx-svm` are crates.io **0.6.1**. Git source
   `https://github.com/qntx/siwx` is gone. `deny.toml` `allow-git` is empty.
 - SIWX signing string is `Verifier::format_message` (siwx 0.6). The
   handwritten CAIP-122 renderer is gone. No-statement messages use
@@ -44,18 +55,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - `SiwxProof::verify_at` takes `&EvmVerifier`. `SiwxGate` stores the
   verifier and calls `verify_at`; `verify` remains an EOA helper.
 - SIWX 402 challenges include `statement` `"Sign in to access this
-  resource"` (`DEFAULT_STATEMENT`). `SiwxExtension::new` is no longer
-  `const fn`.
-- `ClientExtension::on_payment_required` and
-  `PaymentClient::extension_headers` take the 402 response URL
-  (`request_url: &str`).
+  resource"` (`DEFAULT_STATEMENT`).
+- Workspace `Cargo.lock` refreshed (`cargo update`).
 
 ### Fixed
 
-- Path members in `[workspace.dependencies]` now carry `version = "0.19"`
-  so `cargo publish` can rewrite them to crates.io. Tag `v0.19.1` uploaded
-  only `r402-protocol`; `r402-client` died on a missing version. Do not
-  yank `r402-protocol 0.19.1`. Next complete graph is 0.19.2.
+- Path members in `[workspace.dependencies]` carry `version = "0.20"`
+  so `cargo publish` can rewrite them to crates.io. Tag `v0.19.1`
+  uploaded only `r402-protocol`; `r402-client` died on a missing version.
+  Do not yank `r402-protocol 0.19.1`. 0.20.0 is the first complete graph.
 - SIWX client origin bind uses the 402 response URL after redirects, not
   `PaymentRequired.resource.url`.
 
@@ -712,6 +720,7 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.20.0]: https://github.com/qntx/r402/releases/tag/v0.20.0
 [0.19.1]: https://github.com/qntx/r402/releases/tag/v0.19.1
 [0.19.0]: https://github.com/qntx/r402/releases/tag/v0.19.0
 [0.17.1]: https://github.com/qntx/r402/releases/tag/v0.17.1
