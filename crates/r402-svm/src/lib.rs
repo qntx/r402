@@ -24,6 +24,8 @@ use r402_server as _;
 use serde_json as _;
 #[cfg(all(test, not(any(feature = "server", feature = "facilitator"))))]
 use solana_keypair as _;
+#[cfg(all(test, not(any(feature = "client", feature = "facilitator"))))]
+use solana_message as _;
 #[cfg(all(
     test,
     not(any(feature = "client", feature = "server", feature = "facilitator"))
@@ -34,6 +36,8 @@ use solana_signature as _;
     not(any(feature = "client", feature = "server", feature = "facilitator"))
 ))]
 use solana_signer as _;
+#[cfg(all(test, not(any(feature = "client", feature = "facilitator"))))]
+use solana_transaction as _;
 #[cfg(all(test, not(any(feature = "facilitator", feature = "server"))))]
 use tokio as _;
 

@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-09-04
+
+### Fixed
+
+- `r402-svm` lib tests compile under default features. `hex` was only
+  on the `client` feature; `voucher_message_matches_cross_language_golden`
+  used it unconditionally. `cargo test --workspace` (publish.yml Test, no
+  `--all-features`) failed compiling `r402-svm`. crates.io never received
+  0.19.0. GitHub tag `v0.19.0` is unchanged.
+- EVM HTTP RPC client is HTTP/1.1-only and ignores env/system proxies.
+  Workspace unification enables `reqwest/{http2,system-proxy}` via other
+  crates; HTTP/2 or a macOS system proxy against loopback JSON-RPC
+  (wiremock) mapped to `rpc_read_failed` / bad signatures.
+  `Eip155ChainProviderError::HttpClient` added.
+
 ## [0.19.0] — 2026-09-04
 
 ### Breaking
@@ -644,6 +659,8 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.19.1]: https://github.com/qntx/r402/releases/tag/v0.19.1
+[0.19.0]: https://github.com/qntx/r402/releases/tag/v0.19.0
 [0.17.1]: https://github.com/qntx/r402/releases/tag/v0.17.1
 [0.17.0]: https://github.com/qntx/r402/releases/tag/v0.17.0
 [0.16.0]: https://github.com/qntx/r402/releases/tag/v0.16.0
