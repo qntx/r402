@@ -1,7 +1,7 @@
 # r402-tron
 
-**Experimental / not an x402 protocol mechanism.** Not re-exported from
-umbrella `r402` (no `tron` feature).
+**Experimental / not an x402 protocol mechanism.** Umbrella feature
+`tron`; not in `full`.
 
 Tron chain support, part of the [`r402`](../r402) workspace.
 

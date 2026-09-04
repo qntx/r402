@@ -1,10 +1,13 @@
 # Crates
 
 Workspace **0.19.1**. Path dependencies match the graph below. Umbrella
-`default = ["evm", "http"]`. Concordium is opt-in (`r402` feature `concordium`),
-not default. **[`r402-contract`](r402-contract/)** is an unpublished workspace
-member — not on crates.io, not in `publish.yml`. crates.io **`r402-core` 0.17.1**
-is not yanked.
+`default = ["evm", "http"]`. Other production chains and MCP are umbrella
+features (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`,
+`stellar`, `concordium`, `mcp`). `full` enables those plus `client` /
+`server` / `facilitator` / `telemetry`. `tron` and `casper` are opt-in,
+not in `full`. **[`r402-contract`](r402-contract/)** is an unpublished
+workspace member — not on crates.io, not in `publish.yml`. crates.io
+**`r402-core` 0.17.1** is not yanked.
 
 SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 `https://github.com/qntx/siwx` at rev `85cf7bf0e9b867088813781b5cd03a640441c583`.
@@ -14,12 +17,12 @@ SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
 | **[`r402`](r402/)** | [![crates.io][r402-crate]][r402-crate-url] [![docs.rs][r402-doc]][r402-doc-url] | Umbrella crate — feature-gated re-exports of the crates below |
 | **[`r402-protocol`](r402-protocol/)** | [![crates.io][r402-protocol-crate]][r402-protocol-crate-url] [![docs.rs][r402-protocol-doc]][r402-protocol-doc-url] | Wire types, CAIP-2, scheme markers, money, metrics names |
 | **[`r402-client`](r402-client/)** | [![crates.io][r402-client-crate]][r402-client-crate-url] [![docs.rs][r402-client-doc]][r402-client-doc-url] | Buyer register / select / spendControls |
-| **[`r402-server`](r402-server/)** | [![crates.io][r402-server-crate]][r402-server-crate-url] [![docs.rs][r402-server-doc]][r402-server-doc-url] | Resource server, paymentFlow, SettlementMode scheduler |
+| **[`r402-server`](r402-server/)** | [![crates.io][r402-server-crate]][r402-server-crate-url] [![docs.rs][r402-server-doc]][r402-server-doc-url] | Resource server, paymentFlow, authorization SettlementMode scheduler |
 | **[`r402-facilitator`](r402-facilitator/)** | [![crates.io][r402-facilitator-crate]][r402-facilitator-crate-url] [![docs.rs][r402-facilitator-doc]][r402-facilitator-doc-url] | Facilitator trait, cache, pending settlement, remote HTTP client |
 | **[`r402-extensions`](r402-extensions/)** | [![crates.io][r402-extensions-crate]][r402-extensions-crate-url] [![docs.rs][r402-extensions-doc]][r402-extensions-doc-url] | Protocol extension implementations |
 | **[`r402-evm`](r402-evm/)** | [![crates.io][r402-evm-crate]][r402-evm-crate-url] [![docs.rs][r402-evm-doc]][r402-evm-doc-url] | EVM (EIP-155) — `exact` / `upto` / `auth-capture` / `batch-settlement` |
 | **[`r402-svm`](r402-svm/)** | [![crates.io][r402-svm-crate]][r402-svm-crate-url] [![docs.rs][r402-svm-doc]][r402-svm-doc-url] | SVM (Solana) — SPL Token / Token-2022 exact + upto escrow |
-| **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | **Experimental / not an x402 protocol mechanism.** TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid. Not re-exported from the umbrella |
+| **[`r402-tron`](r402-tron/)** | [![crates.io][r402-tron-crate]][r402-tron-crate-url] [![docs.rs][r402-tron-doc]][r402-tron-doc-url] | **Experimental / not an x402 protocol mechanism.** TIP-712 / EIP-3009 + SUN.io Permit2 via TronGrid. Umbrella feature `tron`, not in `full` |
 | **[`r402-casper`](r402-casper/)** | [![crates.io][r402-casper-crate]][r402-casper-crate-url] [![docs.rs][r402-casper-doc]][r402-casper-doc-url] | Casper — CEP-18 exact (local preflight + remote facilitator) |
 | **[`r402-near`](r402-near/)** | [![crates.io][r402-near-crate]][r402-near-crate-url] [![docs.rs][r402-near-doc]][r402-near-doc-url] | NEAR — NEP-141 / NEP-366 exact transfers |
 | **[`r402-xrpl`](r402-xrpl/)** | [![crates.io][r402-xrpl-crate]][r402-xrpl-crate-url] [![docs.rs][r402-xrpl-doc]][r402-xrpl-doc-url] | XRPL — XRP / RLUSD exact transfers |
@@ -52,28 +55,100 @@ See also **[`facilitator`](https://github.com/qntx/facilitator)** — a producti
 | [`r402-keeta`](r402-keeta/) | `keeta:21378`, `keeta:1413829460` | `exact` | In-process via `keetanetwork-client` (fee-payer sponsored) |
 | [`r402-tvm`](r402-tvm/) | `tvm:-239`, `tvm:-3` | `exact` | In-process via REST (Highload V3 relay) |
 | [`r402-stellar`](r402-stellar/) | `stellar:pubnet`, `stellar:testnet` | `exact` | In-process via stellar-rpc-client 27 (fee-sponsored) |
-| [`r402-concordium`](r402-concordium/) | `ccd:9dd9ca4d19e9393877d2c44b70f89acb`, `ccd:4221332d34e1694168c2a0c0b3fd0f27` | `exact` | In-process via concordium-rust-sdk 9 (sponsored V1, not umbrella default) |
+| [`r402-concordium`](r402-concordium/) | `ccd:9dd9ca4d19e9393877d2c44b70f89acb`, `ccd:4221332d34e1694168c2a0c0b3fd0f27` | `exact` | In-process via concordium-rust-sdk 9 (sponsored V1). Umbrella feature `concordium`, in `full`, not default |
 
 ## Dependency graph
 
-```text
-client        → protocol
-facilitator   → protocol
-server        → protocol, facilitator
-extensions    → protocol, facilitator
-http          → protocol, client, server, facilitator, extensions
-mcp           → protocol, client, server, facilitator
-chain crates  → protocol, client, server, facilitator
-umbrella      → r402-evm, r402-http, r402-concordium (feature-gated)
-contract      → (no r402 path dependency)
+Arrow means Cargo `depends on`. Solid = always. Dashed = feature-gated (`client` / `server` / `facilitator` / `siwx` / umbrella chain features). `r402-evm` always depends on `r402-client`; other chains only do when `client` is on.
+
+```mermaid
+flowchart TB
+  umbrella["r402"]
+  contract["r402-contract"]
+
+  subgraph transports["Transports"]
+    http["r402-http"]
+    mcp["r402-mcp"]
+  end
+
+  subgraph chains["Chain crates"]
+    evm["r402-evm"]
+    svm["r402-svm"]
+    prod["near · xrpl · hedera · avm<br/>aptos · keeta · tvm · stellar · concordium"]
+    extra["r402-tron · r402-casper"]
+  end
+
+  subgraph roles["Buyer / resource / facilitator"]
+    client["r402-client"]
+    server["r402-server"]
+    facilitator["r402-facilitator"]
+    extensions["r402-extensions"]
+  end
+
+  protocol["r402-protocol"]
+  siwx["siwx git"]
+
+  client --> protocol
+  facilitator --> protocol
+  server --> protocol
+  server --> facilitator
+  extensions --> protocol
+  extensions -.-> facilitator
+  extensions -.-> client
+  extensions -.-> siwx
+
+  evm --> protocol
+  evm --> client
+  evm -.-> server
+  evm -.-> facilitator
+  evm -.-> extensions
+
+  svm --> protocol
+  svm -.-> client
+  svm -.-> server
+  svm -.-> facilitator
+
+  prod --> protocol
+  prod -.-> client
+  prod -.-> server
+  prod -.-> facilitator
+
+  extra --> protocol
+  extra -.-> client
+  extra -.-> server
+  extra -.-> facilitator
+
+  http -.-> protocol
+  http -.-> client
+  http -.-> server
+  http -.-> facilitator
+  http -.-> extensions
+
+  mcp --> protocol
+  mcp --> client
+  mcp --> server
+  mcp --> facilitator
+
+  umbrella --> protocol
+  umbrella -.-> http
+  umbrella -.-> mcp
+  umbrella -.-> evm
+  umbrella -.-> svm
+  umbrella -.-> prod
+  umbrella -.-> extra
 ```
+
+`r402-contract` has no r402 path dependency. SIWX is a git pin, not a workspace crate.
 
 Publish order (crates.io): `r402-protocol` → `r402-client` → `r402-facilitator` → `r402-server` → `r402-extensions` → chain crates → `r402-http` / `r402-mcp` → `r402`. **`r402-contract` is not published.**
 
 ## Feature flags
 
-Umbrella `default = ["evm", "http"]` opens each of those crates' `client` and
-`server` features. There is no `tron` umbrella feature.
+Umbrella `default = ["evm", "http"]` opens those crates' `client` and
+`server` features. Other chains: `r402` features of the same name (`svm`,
+not `solana`; `avm`, not `algorand`). `full` = production chains + `http` +
+`mcp` + role overlays. `tron` / `casper` exist and stay out of `full`.
+`r402-contract` is never an umbrella feature.
 
 Chain crates: `client` / `server` / `facilitator` / `telemetry` / `full`
 (default empty).

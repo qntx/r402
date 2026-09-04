@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Changed
+
+- README / rustdoc: `SettlementMode` is the after-handler settle scheduler
+  for `paymentFlow = authorization`, not a fourth `paymentFlow`. Concurrent
+  and Background overlap that settle with the handler; `upfront` / `escrow`
+  reject them.
+- Umbrella `r402` re-exports every chain crate and MCP behind features
+  (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`,
+  `stellar`, `concordium`, `mcp`, plus `tron` / `casper`). `full` is the
+  production set. Default stays `["evm", "http"]`. 0.19 had dropped this
+  facade to evm+http+concordium only.
+- `crates/README.md` crate graph is a mermaid flowchart (solid = always,
+  dashed = feature-gated).
+
 ### Fixed
 
 - Path members in `[workspace.dependencies]` now carry `version = "0.19"`

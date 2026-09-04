@@ -1,7 +1,10 @@
-//! `SettlementMode` scheduler: when after-handler settle runs relative to the handler.
+//! `SettlementMode` scheduler: when `authorization`'s after-handler settle
+//! runs relative to the handler.
 //!
-//! Orthogonal to [`crate::PaymentFlowName`]. Concurrent and Background are
-//! illegal when the flow settles before the handler (upfront / escrow).
+//! Orthogonal to [`crate::PaymentFlowName`]. Sequential is spec
+//! `authorization`. Concurrent and Background overlap that after-handler
+//! settle with the handler; they are illegal when the flow already settles
+//! before the handler (`upfront` / `escrow`).
 
 mod tracker;
 
@@ -14,15 +17,18 @@ pub use tracker::BackgroundSettlementTracker;
 
 use crate::payment_flow::{PaymentFlowName, PaymentFlowPhases};
 
-/// When on-chain settlement runs relative to the resource handler (authorization after-handler).
+/// After-handler settle scheduler for [`PaymentFlowName::Authorization`].
+///
+/// Not a [`PaymentFlowName`]. Sequential is the spec path. Concurrent and
+/// Background overlap that settle with the handler (async I/O).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum SettlementMode {
-    /// Settlement runs after the handler completes.
+    /// Spec `authorization`: settle after the handler, then attach a receipt.
     #[default]
     Sequential,
-    /// Settlement runs concurrently with the handler; the caller waits for both.
+    /// Overlap settle with the handler; still wait and attach a receipt.
     Concurrent,
-    /// Settlement is fire-and-forget; the caller does not wait or attach a receipt.
+    /// Fire-and-forget settle; do not wait or attach a receipt.
     Background,
 }
 
