@@ -496,7 +496,9 @@ async fn client_extension_sets_sign_in_with_x_from_configured_origin() {
     let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
     let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
     let required = advertised_required(&origin, "/premium-data");
-    let headers = ext.on_payment_required(&required).await;
+    let headers = ext
+        .on_payment_required(&required, "https://api.example.com/premium-data")
+        .await;
     let header = headers
         .get(SIWX_HTTP_HEADER)
         .expect("SIGN-IN-WITH-X")
@@ -522,25 +524,111 @@ async fn client_extension_does_not_enrich_payload() {
 }
 
 #[tokio::test]
-async fn client_extension_skips_host_shaped_resource() {
+async fn client_extension_skips_host_shaped_request_url() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
     let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
     let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
-    let mut required = PaymentRequired::new(ResourceInfo::new("evil.example"));
+    let required = advertised_required(&origin, "/premium-data");
+    let headers = ext.on_payment_required(&required, "evil.example").await;
+    assert!(headers.get(SIWX_HTTP_HEADER).is_none());
+}
+
+fn raw_challenge(
+    resource_url: &str,
+    domain: &str,
+    uri: &str,
+    resources: &[&str],
+) -> PaymentRequired {
+    let mut required = PaymentRequired::new(ResourceInfo::new(resource_url));
     required.extensions.insert(
         SIWX_KEY,
         ExtensionEntry::raw(json!({
             "info": {
-                "domain": "evil.example",
-                "uri": "https://evil.example/paid",
+                "domain": domain,
+                "uri": uri,
                 "version": "1",
                 "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
-                "issuedAt": "2024-01-15T10:30:00.000Z"
+                "issuedAt": "2024-01-15T10:30:00.000Z",
+                "resources": resources,
             },
             "supportedChains": [{"chainId": "eip155:8453", "type": "eip191"}]
         })),
     );
-    let headers = ext.on_payment_required(&required).await;
-    assert!(headers.get(SIWX_HTTP_HEADER).is_none());
+    required
+}
+
+fn evm_client() -> SiwxClientExtension {
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    SiwxClientExtension::new().with_signer(FixtureEvm(signer))
+}
+
+async fn signs_siwx(required: &PaymentRequired, request_url: &str) -> bool {
+    evm_client()
+        .on_payment_required(required, request_url)
+        .await
+        .get(SIWX_HTTP_HEADER)
+        .is_some()
+}
+
+#[tokio::test]
+async fn client_extension_binds_to_request_url_not_resource_url() {
+    let matching = raw_challenge(
+        "https://evil.example/paid",
+        "api.example.com",
+        "https://api.example.com/premium-data",
+        &[],
+    );
+    assert!(
+        signs_siwx(&matching, "https://api.example.com/premium-data").await,
+        "challenge matching the 402 URL must sign even when resource.url is another origin"
+    );
+
+    let resource_only = raw_challenge(
+        "https://evil.example/paid",
+        "evil.example",
+        "https://evil.example/paid",
+        &[],
+    );
+    assert!(
+        !signs_siwx(&resource_only, "https://api.example.com/premium-data").await,
+        "challenge matching resource.url only must not sign"
+    );
+}
+
+#[tokio::test]
+async fn client_extension_skips_domain_mismatch() {
+    let required = raw_challenge(
+        "https://api.example.com/premium-data",
+        "evil.example",
+        "https://api.example.com/premium-data",
+        &[],
+    );
+    assert!(!signs_siwx(&required, "https://api.example.com/premium-data").await);
+}
+
+#[tokio::test]
+async fn client_extension_skips_uri_origin_mismatch() {
+    let required = raw_challenge(
+        "https://api.example.com/premium-data",
+        "api.example.com",
+        "https://evil.example/paid",
+        &[],
+    );
+    assert!(!signs_siwx(&required, "https://api.example.com/premium-data").await);
+}
+
+#[tokio::test]
+async fn client_extension_allows_cross_origin_resources() {
+    let required = raw_challenge(
+        "https://evil.example/paid",
+        "api.example.com",
+        "https://api.example.com/other",
+        &["https://cdn.other.example/asset.png"],
+    );
+    assert!(
+        signs_siwx(&required, "https://api.example.com/premium-data").await,
+        "resources may be cross-origin; uri path need not match the 402 path"
+    );
 }
 
 #[tokio::test]
@@ -556,7 +644,9 @@ async fn client_extension_skips_incompatible_signer() {
         .unwrap();
     let mut required = PaymentRequired::new(ResourceInfo::new(origin.uri("/premium-data")));
     required.extensions.insert(SIWX_KEY, entry);
-    let headers = ext.on_payment_required(&required).await;
+    let headers = ext
+        .on_payment_required(&required, "https://api.example.com/premium-data")
+        .await;
     assert!(headers.get(SIWX_HTTP_HEADER).is_none());
 }
 
@@ -751,7 +841,9 @@ async fn proof_from_info_copies_chain_signature_scheme() {
             }]
         })),
     );
-    let headers = ext.on_payment_required(&required).await;
+    let headers = ext
+        .on_payment_required(&required, "https://api.example.com/premium-data")
+        .await;
     let header = headers
         .get(SIWX_HTTP_HEADER)
         .expect("SIGN-IN-WITH-X")

@@ -1,7 +1,7 @@
 //! Client `SIGN-IN-WITH-X` header. Official `createSIWxClientExtension`.
 //!
 //! Uses `ClientExtension::on_payment_required`, not `enrich_payment_payload`.
-//! Origin is the 402 challenge (configured public origin). Never `Host`.
+//! Origin is the 402 response URL after redirects. Never `Host`.
 
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
@@ -75,8 +75,12 @@ impl ClientExtension for SiwxClientExtension {
         SIWX_KEY
     }
 
-    async fn on_payment_required(&self, payment_required: &PaymentRequired) -> HeaderMap {
-        sign_header(self, payment_required)
+    async fn on_payment_required(
+        &self,
+        payment_required: &PaymentRequired,
+        request_url: &str,
+    ) -> HeaderMap {
+        sign_header(self, payment_required, request_url)
             .await
             .map_or_else(HeaderMap::new, |encoded| siwx_header_map(&encoded))
     }
@@ -94,9 +98,10 @@ fn siwx_header_map(encoded: &str) -> HeaderMap {
 async fn sign_header(
     extension: &SiwxClientExtension,
     payment_required: &PaymentRequired,
+    request_url: &str,
 ) -> Option<String> {
     let declaration = payment_required.extensions.get(SIWX_KEY)?.to_value();
-    if !challenge_bound_to_resource(&declaration, payment_required.resource.url.as_str()) {
+    if !challenge_bound_to_origin(&declaration, request_url) {
         return None;
     }
     let info = declaration.get("info")?;
@@ -130,9 +135,8 @@ async fn sign_header(
     None
 }
 
-/// Domain/URI origin must match `PaymentRequired.resource.url` (configured
-/// public origin). Never `Host`.
-fn challenge_bound_to_resource(declaration: &Value, resource_url: &str) -> bool {
+/// Domain and URI origin must match `request_url` after redirects.
+fn challenge_bound_to_origin(declaration: &Value, request_url: &str) -> bool {
     let Some(info) = declaration.get("info") else {
         return false;
     };
@@ -142,13 +146,13 @@ fn challenge_bound_to_resource(declaration: &Value, resource_url: &str) -> bool 
     let Some(uri) = info.get("uri").and_then(Value::as_str) else {
         return false;
     };
-    let Ok(resource_origin) = SiwxOrigin::parse(resource_url) else {
+    let Ok(request_origin) = SiwxOrigin::parse(request_url) else {
         return false;
     };
     let Ok(uri_origin) = SiwxOrigin::parse(uri) else {
         return false;
     };
-    domain == resource_origin.domain() && uri_origin.as_str() == resource_origin.as_str()
+    domain == request_origin.domain() && uri_origin.as_str() == request_origin.as_str()
 }
 
 fn matching_chain(

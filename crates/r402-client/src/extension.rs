@@ -33,11 +33,12 @@ pub trait ClientExtension: Send + Sync {
 
     /// Official `transportHooks.http.onPaymentRequired`. Default empty.
     ///
-    /// SIWX returns `SIGN-IN-WITH-X` here. Origin is the configured public
-    /// origin on the 402 challenge, never `Host`.
+    /// `request_url` is the 402 response URL after redirects. SIWX returns
+    /// `SIGN-IN-WITH-X` here and binds challenge origin to that URL.
     fn on_payment_required<'a>(
         &'a self,
         _payment_required: &'a PaymentRequired,
+        _request_url: &'a str,
     ) -> impl Future<Output = HeaderMap> + Send + 'a {
         std::future::ready(HeaderMap::new())
     }
@@ -59,6 +60,7 @@ pub trait DynClientExtension: Send + Sync {
     fn on_payment_required<'a>(
         &'a self,
         payment_required: &'a PaymentRequired,
+        request_url: &'a str,
     ) -> BoxFuture<'a, HeaderMap>;
 }
 
@@ -82,10 +84,12 @@ impl<T: ClientExtension + ?Sized> DynClientExtension for T {
     fn on_payment_required<'a>(
         &'a self,
         payment_required: &'a PaymentRequired,
+        request_url: &'a str,
     ) -> BoxFuture<'a, HeaderMap> {
         Box::pin(<Self as ClientExtension>::on_payment_required(
             self,
             payment_required,
+            request_url,
         ))
     }
 }
@@ -114,15 +118,24 @@ impl<S: PaymentSelector> PaymentClient<S> {
 
     /// Merges [`ClientExtension::on_payment_required`] headers for advertised keys.
     ///
-    /// Unadvertised keys are skipped (official HTTP client only invokes a
-    /// transport hook when `extension.key` is in `paymentRequired.extensions`).
-    pub async fn extension_headers(&self, payment_required: &PaymentRequired) -> HeaderMap {
+    /// `request_url` is the 402 response URL after redirects. Unadvertised keys
+    /// are skipped (official HTTP client only invokes a transport hook when
+    /// `extension.key` is in `paymentRequired.extensions`).
+    pub async fn extension_headers(
+        &self,
+        payment_required: &PaymentRequired,
+        request_url: &str,
+    ) -> HeaderMap {
         let mut headers = HeaderMap::new();
         for extension in &self.extensions {
             if payment_required.extensions.get(extension.key()).is_none() {
                 continue;
             }
-            headers.extend(extension.on_payment_required(payment_required).await);
+            headers.extend(
+                extension
+                    .on_payment_required(payment_required, request_url)
+                    .await,
+            );
         }
         headers
     }

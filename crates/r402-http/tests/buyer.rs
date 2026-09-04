@@ -15,6 +15,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use http::{HeaderMap, HeaderValue};
 use r402_client::{
@@ -90,9 +91,53 @@ impl ClientExtension for SignInHeaderExt {
     fn on_payment_required<'a>(
         &'a self,
         _: &'a PaymentRequired,
+        _: &'a str,
     ) -> impl Future<Output = HeaderMap> + Send + 'a {
         let mut headers = HeaderMap::new();
         let _ = headers.insert(SIGN_IN_WITH_X, HeaderValue::from_static("cHJvb2Y="));
+        std::future::ready(headers)
+    }
+}
+
+struct CaptureUrlExt {
+    urls: Arc<Mutex<Vec<String>>>,
+}
+
+impl ClientExtension for CaptureUrlExt {
+    fn key(&self) -> &'static str {
+        "sign-in-with-x"
+    }
+
+    fn on_payment_required<'a>(
+        &'a self,
+        _: &'a PaymentRequired,
+        request_url: &'a str,
+    ) -> impl Future<Output = HeaderMap> + Send + 'a {
+        self.urls.lock().unwrap().push(request_url.to_owned());
+        let mut headers = HeaderMap::new();
+        let _ = headers.insert(SIGN_IN_WITH_X, HeaderValue::from_static("cHJvb2Y="));
+        std::future::ready(headers)
+    }
+}
+
+struct OriginBindExt {
+    origin: String,
+}
+
+impl ClientExtension for OriginBindExt {
+    fn key(&self) -> &'static str {
+        "sign-in-with-x"
+    }
+
+    fn on_payment_required<'a>(
+        &'a self,
+        _: &'a PaymentRequired,
+        request_url: &'a str,
+    ) -> impl Future<Output = HeaderMap> + Send + 'a {
+        let mut headers = HeaderMap::new();
+        if request_url.starts_with(self.origin.as_str()) {
+            let _ = headers.insert(SIGN_IN_WITH_X, HeaderValue::from_static("cHJvb2Y="));
+        }
         std::future::ready(headers)
     }
 }
@@ -369,5 +414,148 @@ async fn omits_extension_headers_when_not_declared() {
     assert!(
         paid.headers.get(SIGN_IN_WITH_X).is_none(),
         "undeclared SIWX must not set SIGN-IN-WITH-X"
+    );
+}
+
+fn evil_resource_required() -> PaymentRequired {
+    let mut required = sample_required_with_siwx();
+    required.resource.url = "https://evil.example/paid".into();
+    required
+}
+
+async fn wrap_origin_bind_emits_siwx(bind: impl FnOnce(&str) -> String) -> bool {
+    let server = MockServer::start().await;
+    let challenge = b64_json(&evil_resource_required());
+
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .and(header(PAYMENT_SIGNATURE, SIGNED))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let buyer = paid_buyer().with_extension(OriginBindExt {
+        origin: bind(server.uri().as_str()),
+    });
+    let client = http_client().with_payments(buyer);
+    let _ = client
+        .get(format!("{}/paid", server.uri()))
+        .send()
+        .await
+        .unwrap();
+    let received = server.received_requests().await.unwrap();
+    received
+        .iter()
+        .any(|req| req.headers.get(SIGN_IN_WITH_X).is_some())
+}
+
+#[tokio::test]
+async fn middleware_siwx_binds_response_url_not_resource_url() {
+    assert!(
+        wrap_origin_bind_emits_siwx(str::to_owned).await,
+        "402 URL origin must sign even when resource.url is another origin"
+    );
+    assert!(
+        !wrap_origin_bind_emits_siwx(|_| "https://evil.example".to_owned()).await,
+        "resource.url origin must not sign"
+    );
+}
+
+#[tokio::test]
+async fn make_payment_headers_passes_response_url() {
+    let server = MockServer::start().await;
+    let challenge = b64_json(&evil_resource_required());
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let urls = Arc::new(Mutex::new(Vec::new()));
+    let buyer = paid_buyer().with_extension(CaptureUrlExt {
+        urls: Arc::clone(&urls),
+    });
+    let res = http_client()
+        .get(format!("{}/paid", server.uri()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 402);
+    let headers = buyer.make_payment_headers(res).await.unwrap();
+    assert!(headers.get(SIGN_IN_WITH_X).is_some());
+    assert_eq!(
+        *urls.lock().unwrap(),
+        vec![format!("{}/paid", server.uri())]
+    );
+}
+
+#[tokio::test]
+async fn middleware_recovery_uses_paid_attempt_url() {
+    let server = MockServer::start().await;
+    let challenge = b64_json(&sample_required_with_siwx());
+    let other = format!("{}/other", server.uri());
+    let urls = Arc::new(Mutex::new(Vec::new()));
+
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .and(header(PAYMENT_SIGNATURE, SIGNED))
+        .respond_with(ResponseTemplate::new(302).insert_header("location", other.as_str()))
+        .up_to_n_times(1)
+        .expect(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .and(header(PAYMENT_SIGNATURE, SIGNED))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/other"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/paid"))
+        .respond_with(
+            ResponseTemplate::new(402).insert_header(PAYMENT_REQUIRED, challenge.as_str()),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let buyer = paid_buyer()
+        .with_hook(RecoverHook)
+        .with_extension(CaptureUrlExt {
+            urls: Arc::clone(&urls),
+        });
+    let client = http_client().with_payments(buyer);
+    let response = client
+        .get(format!("{}/paid", server.uri()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(
+        *urls.lock().unwrap(),
+        vec![format!("{}/paid", server.uri()), other]
     );
 }

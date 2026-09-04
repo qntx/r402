@@ -133,6 +133,7 @@ impl ClientExtension for HeaderExt {
     fn on_payment_required<'a>(
         &'a self,
         _: &'a PaymentRequired,
+        _: &'a str,
     ) -> impl Future<Output = HeaderMap> + Send + 'a {
         let mut headers = HeaderMap::new();
         let _ = headers.insert("SIGN-IN-WITH-X", HeaderValue::from_static("cHJvb2Y="));
@@ -454,7 +455,9 @@ async fn enrich_runs_after_sign() {
 #[tokio::test]
 async fn extension_headers_require_declaration() {
     let client = PaymentClient::new().with_extension(HeaderExt);
-    let empty = client.extension_headers(&sample_required()).await;
+    let empty = client
+        .extension_headers(&sample_required(), "https://example.com/")
+        .await;
     assert!(
         empty.is_empty(),
         "undeclared extension must not emit headers"
@@ -465,7 +468,9 @@ async fn extension_headers_require_declaration() {
         "sign-in-with-x",
         ExtensionEntry::info(serde_json::json!({})),
     );
-    let headers = client.extension_headers(&declared).await;
+    let headers = client
+        .extension_headers(&declared, "https://example.com/")
+        .await;
     assert_eq!(
         headers.get("SIGN-IN-WITH-X").map(HeaderValue::as_bytes),
         Some(b"cHJvb2Y=".as_slice())

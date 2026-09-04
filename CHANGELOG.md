@@ -35,6 +35,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 - SIWX 402 challenges include `statement` `"Sign in to access this
   resource"` (`DEFAULT_STATEMENT`). `SiwxExtension::new` is no longer
   `const fn`.
+- `ClientExtension::on_payment_required` and
+  `PaymentClient::extension_headers` take the 402 response URL
+  (`request_url: &str`).
 
 ### Fixed
 
@@ -42,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   so `cargo publish` can rewrite them to crates.io. Tag `v0.19.1` uploaded
   only `r402-protocol`; `r402-client` died on a missing version. Do not
   yank `r402-protocol 0.19.1`. Next complete graph is 0.19.2.
+- SIWX client origin bind uses the 402 response URL after redirects, not
+  `PaymentRequired.resource.url`.
 
 ## [0.19.1] — 2026-09-04
 
