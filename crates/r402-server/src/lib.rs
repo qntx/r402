@@ -1,4 +1,4 @@
-//! Resource server, `paymentFlow`, and `SettlementMode` scheduler for the x402 payment protocol.
+//! Resource server, `paymentFlow`, and `authorization` `SettlementMode` scheduler.
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(

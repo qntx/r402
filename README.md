@@ -32,9 +32,13 @@ Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, SVM (
 ```toml
 [dependencies]
 r402 = { version = "0.19", features = ["evm", "http"] }
+# SVM + MCP, same crate:
+# r402 = { version = "0.19", features = ["evm", "svm", "http", "mcp"] }
+# Every production chain + HTTP + MCP:
+# r402 = { version = "0.19", features = ["full"] }
 ```
 
-`default = ["evm", "http"]`. Concordium is opt-in (`concordium`). SVM (Solana) is crate `r402-svm`. AVM (Algorand) is crate `r402-avm`.
+`default = ["evm", "http"]` so a first `r402` dep does not compile Solana, protobuf, or gRPC. Enable chains as features (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`, `stellar`, `concordium`). `tron` and `casper` are opt-in and not in `full`. Individual `r402-*` crates remain for binaries that want one crate and no facade.
 
 Full feature matrix and crate list: **[`crates/README.md`](crates/README.md)**.
 
@@ -79,11 +83,16 @@ let res = client.get("https://api.example.com/paid").send().await?;
 
 ## Settlement Modes
 
+`SettlementMode` is **not** a `paymentFlow`. Spec `paymentFlow` (`authorization` / `upfront` / `escrow`) is the on-wire ordering of verify and settle around the handler. Sequential / Concurrent / Background are a resource-server scheduler for the **after-handler settle of `authorization`**: whether this HTTP response waits for that settle. Facilitators and clients never see the knob; it is not written into `PAYMENT-REQUIRED`.
+
+- **Sequential** (default) is spec `authorization`: verify → handler → settle → respond with `Payment-Response`.
+- **Concurrent** and **Background** overlap that after-handler settle with the handler (async I/O). They are not a fourth flow. `upfront` / `escrow` reject them (`IncompatibleSettlementMode`) because those flows already settle before the handler.
+
 Configurable via [`with_settlement_mode()`](https://docs.rs/r402-http/latest/r402_http/server/struct.X402Layer.html#method.with_settlement_mode) after `with_price_tag`.
 
 ### Sequential (default)
 
-Verify → execute → settle. The safest mode — on-chain settlement only occurs after the handler succeeds, and the `Payment-Response` header is included in the same HTTP response.
+Verify → execute → settle. Spec `authorization`. On-chain settlement only after the handler succeeds; `Payment-Response` is on the same HTTP response.
 
 ```mermaid
 sequenceDiagram
@@ -106,7 +115,7 @@ sequenceDiagram
 
 ### Concurrent
 
-Verify → (settle ∥ execute) → await both. Reduces total latency by overlapping on-chain settlement with handler execution, saving one facilitator round-trip. On handler error the settlement task is detached (fire-and-forget).
+Verify → (settle ∥ execute) → await both. Still `authorization` on the wire. Overlaps the after-handler settle RPC with the handler so total latency is verify + max(handler, settle). The response still waits and still carries `Payment-Response`. On handler error the settlement task is detached — the payer may be charged even if the handler failed.
 
 ```mermaid
 sequenceDiagram
@@ -131,7 +140,7 @@ sequenceDiagram
 
 ### Background
 
-Verify → spawn settle (fire-and-forget) → execute → return. Settlement runs entirely in the background — the response is returned to the client as soon as the handler completes, without waiting for on-chain confirmation. Ideal for **streaming responses** (SSE, LLM token streams) where the client should start receiving data immediately. Settlement errors are logged but do not propagate to the caller. **Trade-off:** the `Payment-Response` header is not attached since settlement may still be in progress when the response is sent.
+Verify → spawn settle (fire-and-forget) → execute → return. Still `authorization` on the wire. The HTTP response does not wait for on-chain confirmation, so SSE / LLM streams can start before settle finishes. Settlement errors are logged and do not fail the request. **Trade-off:** `Payment-Response` is omitted — headers are already on the way out — and the payer may be charged if the handler later fails.
 
 ```mermaid
 sequenceDiagram
@@ -153,13 +162,15 @@ sequenceDiagram
 
 ### Comparison
 
+Applies only to `paymentFlow = authorization`. `upfront` / `escrow` stay Sequential.
+
 | Mode | Total latency | Safety | `Payment-Response` | Best for |
 | --- | --- | --- | --- | --- |
-| **Sequential** | verify + handler + settle | Settlement only on handler success | Included | Standard request/response APIs |
-| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | Included | Latency-sensitive endpoints |
-| **Background** | verify + handler | Settlement errors are non-fatal (logged) | Not attached | SSE / LLM streaming responses |
+| **Sequential** | verify + handler + settle | Settlement only on handler success | Included | Spec `authorization`; buffered responses |
+| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | Included | Overlap settle with a slow handler |
+| **Background** | verify + handler | Settlement errors are non-fatal (logged) | Not attached | SSE / LLM streaming (headers must leave before the body) |
 
-> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`. Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
+> **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`. Concurrent and Background start settlement before the handler returns and therefore charge the signed maximum. They cannot meter a stream.
 
 ## Acknowledgments
 

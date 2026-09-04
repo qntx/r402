@@ -1,4 +1,4 @@
-//! Axum/Tower payment gate (Sequential / Concurrent / Background).
+//! Axum/Tower payment gate. `SettlementMode` schedules `authorization`'s after-handler settle.
 
 mod builder;
 mod fail;

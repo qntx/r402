@@ -92,7 +92,13 @@ impl X402Layer<StaticPriceTags> {
         Ok(self)
     }
 
-    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
+    /// After-handler settle scheduler for the `authorization` payment flow.
+    ///
+    /// Not a `paymentFlow`. Sequential (default) is spec `authorization`:
+    /// settle after the handler, then attach `Payment-Response`. Concurrent
+    /// overlaps that settle with the handler and still waits. Background does
+    /// not wait and does not attach a receipt. Concurrent and Background are
+    /// illegal with `upfront` / `escrow`.
     ///
     /// # Errors
     ///
@@ -149,7 +155,11 @@ impl X402Layer<StaticPriceTags> {
 }
 
 impl X402Layer<DynamicPriceTags> {
-    /// Settlement scheduler: Sequential (default), Concurrent, or Background.
+    /// After-handler settle scheduler for the `authorization` payment flow.
+    ///
+    /// Same semantics as [`X402Layer<StaticPriceTags>::with_settlement_mode`].
+    /// Dynamic tags are resolved per request; incompatible `upfront` /
+    /// `escrow` combinations fail at request time, not here.
     ///
     /// # Errors
     ///

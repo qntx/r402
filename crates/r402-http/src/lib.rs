@@ -3,7 +3,7 @@
 //! # Feature Flags
 //!
 //! - `client` — reqwest-middleware buyer: 402 → `Payment-Signature` retry
-//! - `server` — Axum layer / Sequential / Concurrent / Background resource-server gate
+//! - `server` — Axum layer; `authorization` `SettlementMode` (Sequential / Concurrent / Background)
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(

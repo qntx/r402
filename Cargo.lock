@@ -6567,9 +6567,22 @@ version = "0.19.1"
 dependencies = [
  "alloy-primitives",
  "axum 0.8.9",
+ "r402-aptos",
+ "r402-avm",
+ "r402-casper",
  "r402-concordium",
  "r402-evm",
+ "r402-hedera",
  "r402-http",
+ "r402-keeta",
+ "r402-mcp",
+ "r402-near",
+ "r402-protocol",
+ "r402-stellar",
+ "r402-svm",
+ "r402-tron",
+ "r402-tvm",
+ "r402-xrpl",
 ]
 
 [[package]]

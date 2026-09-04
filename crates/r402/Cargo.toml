@@ -19,15 +19,135 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default    = ["evm", "http"]
-evm        = ["dep:r402-evm", "r402-evm/client", "r402-evm/server"]
-http       = ["dep:r402-http", "r402-http/client", "r402-http/server"]
-concordium = ["dep:r402-concordium", "r402-concordium/client", "r402-concordium/server"]
+default = ["evm", "http"]
+
+# Transports
+http = ["dep:r402-http", "r402-http/client", "r402-http/server"]
+mcp  = ["dep:r402-mcp", "r402-mcp/client", "r402-mcp/server"]
+
+# Production chain crates. A chain feature opens that crate's client + server.
+evm         = ["dep:r402-evm", "r402-evm/client", "r402-evm/server"]
+svm         = ["dep:r402-svm", "r402-svm/client", "r402-svm/server"]
+near        = ["dep:r402-near", "r402-near/client", "r402-near/server"]
+xrpl        = ["dep:r402-xrpl", "r402-xrpl/client", "r402-xrpl/server"]
+hedera      = ["dep:r402-hedera", "r402-hedera/client", "r402-hedera/server"]
+avm         = ["dep:r402-avm", "r402-avm/client", "r402-avm/server"]
+aptos       = ["dep:r402-aptos", "r402-aptos/client", "r402-aptos/server"]
+keeta       = ["dep:r402-keeta", "r402-keeta/client", "r402-keeta/server"]
+tvm         = ["dep:r402-tvm", "r402-tvm/client", "r402-tvm/server"]
+stellar     = ["dep:r402-stellar", "r402-stellar/client", "r402-stellar/server"]
+concordium  = ["dep:r402-concordium", "r402-concordium/client", "r402-concordium/server"]
+# Not x402 protocol mechanisms. Not in `full`.
+tron        = ["dep:r402-tron", "r402-tron/client", "r402-tron/server"]
+casper      = ["dep:r402-casper", "r402-casper/client", "r402-casper/server"]
+
+# Role overlays: enable the matching feature on every *selected* crate.
+client = [
+    "r402-evm?/client",
+    "r402-svm?/client",
+    "r402-near?/client",
+    "r402-xrpl?/client",
+    "r402-hedera?/client",
+    "r402-avm?/client",
+    "r402-aptos?/client",
+    "r402-keeta?/client",
+    "r402-tvm?/client",
+    "r402-stellar?/client",
+    "r402-concordium?/client",
+    "r402-tron?/client",
+    "r402-casper?/client",
+    "r402-http?/client",
+    "r402-mcp?/client",
+]
+server = [
+    "r402-evm?/server",
+    "r402-svm?/server",
+    "r402-near?/server",
+    "r402-xrpl?/server",
+    "r402-hedera?/server",
+    "r402-avm?/server",
+    "r402-aptos?/server",
+    "r402-keeta?/server",
+    "r402-tvm?/server",
+    "r402-stellar?/server",
+    "r402-concordium?/server",
+    "r402-tron?/server",
+    "r402-casper?/server",
+    "r402-http?/server",
+    "r402-mcp?/server",
+]
+facilitator = [
+    "r402-evm?/facilitator",
+    "r402-svm?/facilitator",
+    "r402-near?/facilitator",
+    "r402-xrpl?/facilitator",
+    "r402-hedera?/facilitator",
+    "r402-avm?/facilitator",
+    "r402-aptos?/facilitator",
+    "r402-keeta?/facilitator",
+    "r402-tvm?/facilitator",
+    "r402-stellar?/facilitator",
+    "r402-concordium?/facilitator",
+    "r402-tron?/facilitator",
+    "r402-casper?/facilitator",
+    "r402-mcp?/facilitator",
+]
+telemetry = [
+    "r402-evm?/telemetry",
+    "r402-svm?/telemetry",
+    "r402-near?/telemetry",
+    "r402-xrpl?/telemetry",
+    "r402-hedera?/telemetry",
+    "r402-avm?/telemetry",
+    "r402-aptos?/telemetry",
+    "r402-keeta?/telemetry",
+    "r402-tvm?/telemetry",
+    "r402-stellar?/telemetry",
+    "r402-concordium?/telemetry",
+    "r402-tron?/telemetry",
+    "r402-casper?/telemetry",
+    "r402-mcp?/telemetry",
+]
+
+# Production chains + HTTP + MCP. Tron and Casper stay opt-in.
+full = [
+    "evm",
+    "svm",
+    "near",
+    "xrpl",
+    "hedera",
+    "avm",
+    "aptos",
+    "keeta",
+    "tvm",
+    "stellar",
+    "concordium",
+    "http",
+    "mcp",
+    "client",
+    "server",
+    "facilitator",
+    "telemetry",
+]
 
 [dependencies]
-r402-evm        = { workspace = true, optional = true }
-r402-http       = { workspace = true, optional = true }
-r402-concordium = { workspace = true, optional = true }
+r402-protocol = { workspace = true }
+
+r402-http        = { workspace = true, optional = true }
+r402-mcp         = { workspace = true, optional = true }
+r402-evm         = { workspace = true, optional = true }
+r402-svm         = { workspace = true, optional = true }
+r402-near        = { workspace = true, optional = true }
+r402-xrpl        = { workspace = true, optional = true }
+r402-hedera      = { workspace = true, optional = true }
+r402-avm         = { workspace = true, optional = true }
+r402-aptos       = { workspace = true, optional = true }
+r402-keeta       = { workspace = true, optional = true }
+r402-tvm         = { workspace = true, optional = true }
+r402-stellar     = { workspace = true, optional = true }
+r402-concordium  = { workspace = true, optional = true }
+r402-tron        = { workspace = true, optional = true }
+r402-casper      = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true }
