@@ -18,7 +18,7 @@ mod harness;
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use alloy_signer::Signer;
@@ -36,6 +36,9 @@ use r402_http::server::{
 };
 use r402_protocol::payment::{Base64Bytes, PaymentRequired};
 use serde_json::Value;
+use tracing::field::{Field, Visit};
+use tracing::span::{Attributes, Id, Record};
+use tracing::{Event, Metadata, Subscriber};
 
 use crate::harness::{
     FakeFacilitator, FlowScheme, OkInner, SettleScript, call_layer, eip155_requirements,
@@ -520,4 +523,327 @@ async fn client_extension_skips_origin_mismatch() {
         headers.get(SIGN_IN_WITH_X).is_none(),
         "mismatched challenge origin must not sign"
     );
+}
+
+#[derive(Clone, Debug, Default)]
+struct LogCapture {
+    events: Arc<Mutex<Vec<CapturedEvent>>>,
+}
+
+#[derive(Debug)]
+struct CapturedEvent {
+    message: String,
+    fields: Vec<(String, String)>,
+}
+
+#[derive(Debug)]
+struct FieldVisitor {
+    message: String,
+    fields: Vec<(String, String)>,
+}
+
+impl Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let rendered = format!("{value:?}");
+        if field.name() == "message" {
+            rendered.trim_matches('"').clone_into(&mut self.message);
+        } else {
+            self.fields.push((field.name().to_owned(), rendered));
+        }
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "message" {
+            value.clone_into(&mut self.message);
+        } else {
+            self.fields
+                .push((field.name().to_owned(), value.to_owned()));
+        }
+    }
+}
+
+impl LogCapture {
+    fn dump(&self) -> String {
+        let events = self.events.lock().expect("log capture lock");
+        events
+            .iter()
+            .map(|event| {
+                let fields = event
+                    .fields
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if fields.is_empty() {
+                    event.message.clone()
+                } else {
+                    format!("{} {fields}", event.message)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn messages(&self) -> Vec<String> {
+        self.events
+            .lock()
+            .expect("log capture lock")
+            .iter()
+            .map(|event| event.message.clone())
+            .collect()
+    }
+}
+
+impl Subscriber for LogCapture {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.target() == "r402_http::server::siwx"
+    }
+
+    fn new_span(&self, _span: &Attributes<'_>) -> Id {
+        Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        let mut visitor = FieldVisitor {
+            message: String::new(),
+            fields: Vec::new(),
+        };
+        event.record(&mut visitor);
+        self.events
+            .lock()
+            .expect("log capture lock")
+            .push(CapturedEvent {
+                message: visitor.message,
+                fields: visitor.fields,
+            });
+    }
+
+    fn enter(&self, _span: &Id) {}
+
+    fn exit(&self, _span: &Id) {}
+}
+
+fn assert_no_proof_leak(dump: &str, header: &str) {
+    assert!(
+        !dump.contains(header),
+        "must not log SIGN-IN-WITH-X header: {dump}"
+    );
+    assert!(
+        !dump.contains("https://") && !dump.contains("http://"),
+        "must not log URL: {dump}"
+    );
+}
+
+#[tokio::test]
+async fn parse_denied_logs_error_not_header() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let header = "not-valid-base64!!!";
+    let req = siwx_request(HeaderValue::from_static(header), "api.example.com");
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let response = call_layer(layer, OkInner, req).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "parse fail must fail-open to 402"
+    );
+    assert_eq!(fac.verify_count(), 0, "parse fail must skip /verify");
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx parse denied".to_owned()],
+        "parse fail logs once"
+    );
+    let dump = capture.dump();
+    assert!(
+        dump.contains("InvalidEncoding"),
+        "parse deny must Debug the proof error: {dump}"
+    );
+    assert_no_proof_leak(&dump, header);
+}
+
+#[tokio::test]
+async fn invalid_field_parse_denied_logs_error() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let body = serde_json::json!({
+        "domain": "api.example.com",
+        "address": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+        "uri": "https://api.example.com/paid",
+        "version": "2",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let encoded = Base64Bytes::encode(serde_json::to_vec(&body).unwrap());
+    let header = encoded.to_string();
+    let req = siwx_request(
+        HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
+        "api.example.com",
+    );
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let response = call_layer(layer, OkInner, req).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "invalid version must fail-open to 402"
+    );
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx parse denied".to_owned()],
+        "version reject is a parse deny"
+    );
+    let dump = capture.dump();
+    assert!(
+        dump.contains("InvalidField"),
+        "parse deny must Debug InvalidField: {dump}"
+    );
+    assert_no_proof_leak(&dump, &header);
+}
+
+#[tokio::test]
+async fn verify_denied_logs_spec_code() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_auth_only(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let challenge = call_layer(layer.clone(), OkInner, unpaid_request()).await;
+    let mut info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
+    info["address"] = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266".into();
+    info["chainId"] = "eip155:8453".into();
+    info["type"] = "eip191".into();
+    info["signature"] = "0x1111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111".into();
+    let encoded = Base64Bytes::encode(serde_json::to_vec(&info).unwrap());
+    let header = encoded.to_string();
+    let req = siwx_request(
+        HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
+        "api.example.com",
+    );
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let response = call_layer(layer, OkInner, req).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "bad signature must fail-open to 402"
+    );
+    assert_eq!(fac.verify_count(), 0, "bad signature must skip /verify");
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx denied".to_owned()],
+        "post-parse verify fail logs once"
+    );
+    let dump = capture.dump();
+    assert!(
+        dump.contains("code=invalid_siwx_"),
+        "deny must log spec code: {dump}"
+    );
+    assert_no_proof_leak(&dump, &header);
+}
+
+#[tokio::test]
+async fn valid_unpaid_logs_unpaid() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let challenge = call_layer(layer.clone(), OkInner, unpaid_request()).await;
+    let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
+    let (_, header) = sign_challenge(&info).await;
+    let header_str = header.to_str().unwrap().to_owned();
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let response = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "valid unpaid must fail-open to 402"
+    );
+    assert_eq!(fac.verify_count(), 0, "valid unpaid must skip /verify");
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx valid unpaid".to_owned()],
+        "store miss after verify logs unpaid"
+    );
+    assert_no_proof_leak(&capture.dump(), &header_str);
+}
+
+#[tokio::test]
+async fn nonce_replay_logs_replay() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_auth_only(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let challenge = call_layer(layer.clone(), OkInner, unpaid_request()).await;
+    let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
+    let (_, header) = sign_challenge(&info).await;
+    let first = call_layer(
+        layer.clone(),
+        OkInner,
+        siwx_request(header.clone(), "api.example.com"),
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::OK, "first consume must grant");
+    let header_str = header.to_str().unwrap().to_owned();
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let second = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
+    assert_eq!(
+        second.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "replay must fail-open to 402"
+    );
+    assert_eq!(fac.verify_count(), 0, "replay must skip /verify");
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx nonce replay".to_owned()],
+        "second consume logs replay"
+    );
+    assert_no_proof_leak(&capture.dump(), &header_str);
+}
+
+#[tokio::test]
+async fn grant_logs_granted() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_auth_only(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let challenge = call_layer(layer.clone(), OkInner, unpaid_request()).await;
+    let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
+    let (_, header) = sign_challenge(&info).await;
+    let header_str = header.to_str().unwrap().to_owned();
+    let capture = LogCapture::default();
+    let _guard = tracing::subscriber::set_default(capture.clone());
+    let response = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
+    assert_eq!(response.status(), StatusCode::OK, "auth_only must grant");
+    assert_eq!(fac.verify_count(), 0, "grant must skip /verify");
+    assert_eq!(
+        capture.messages(),
+        vec!["siwx granted".to_owned()],
+        "successful consume logs grant"
+    );
+    assert_no_proof_leak(&capture.dump(), &header_str);
 }
