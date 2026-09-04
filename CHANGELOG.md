@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Added
+
+- Feature `siwx-eip1271` on `r402-extensions` and `r402-http` enables
+  siwx-evm `eip1271` + `eip6492`. `SiwxGate::with_evm_rpc_map` takes a
+  server-configured chain-id → RPC URL map and optional timeout. Chains
+  missing from the map stay EIP-191. RPC URLs are never read from proof
+  JSON.
+
 ### Changed
 
 - README / rustdoc: `SettlementMode` is the after-handler settle scheduler

@@ -19,8 +19,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = []
-client  = [
+default      = []
+client       = [
     "dep:async-trait",
     "dep:http",
     "dep:r402-client",
@@ -29,7 +29,7 @@ client  = [
     "dep:reqwest-middleware",
     "dep:serde_json",
 ]
-server  = [
+server       = [
     "dep:axum-core",
     "dep:compact_str",
     "dep:http",
@@ -41,7 +41,8 @@ server  = [
     "dep:tower",
     "dep:url",
 ]
-siwx    = ["server", "dep:r402-extensions", "r402-extensions/siwx", "dep:time"]
+siwx         = ["server", "dep:r402-extensions", "r402-extensions/siwx", "dep:time"]
+siwx-eip1271 = ["siwx", "r402-extensions/siwx-eip1271"]
 
 [dependencies]
 async-trait        = { workspace = true, optional = true }
@@ -125,6 +126,10 @@ required-features = ["server"]
 [[test]]
 name              = "siwx"
 required-features = ["server", "siwx"]
+
+[[test]]
+name              = "siwx_eip1271"
+required-features = ["siwx-eip1271"]
 
 [[test]]
 name              = "e2e_exact_evm"
