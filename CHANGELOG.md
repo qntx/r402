@@ -19,14 +19,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   facade to evm+http+concordium only.
 - `crates/README.md` crate graph is a mermaid flowchart (solid = always,
   dashed = feature-gated).
+- `siwx` / `siwx-evm` / `siwx-svm` are crates.io **0.6**. Git source
+  `https://github.com/qntx/siwx` is gone. `deny.toml` `allow-git` is empty.
+- SIWX signing string is `Verifier::format_message` (siwx 0.6). The
+  handwritten CAIP-122 renderer is gone. No-statement messages use
+  EIP-4361 `address\\n\\n\\nURI:`. Timestamp originals are preserved.
+- SIWX proof `type` must match `chainId` prefix (`eip155` ⇔ `eip191`,
+  `solana` ⇔ `ed25519`). `version` other than `"1"` is
+  `SiwxProofError::InvalidField` at parse and `invalid_siwx_signature`
+  on hand-built structs. `eip155:0` and leading-zero chain ids
+  (`eip155:01`) are `invalid_siwx_chain_id`. Optional `signatureScheme`
+  is echoed.
+- `SiwxProof::verify_at` takes `&EvmVerifier`. `SiwxGate` stores the
+  verifier and calls `verify_at`; `verify` remains an EOA helper.
 
 ### Fixed
 
 - Path members in `[workspace.dependencies]` now carry `version = "0.19"`
   so `cargo publish` can rewrite them to crates.io. Tag `v0.19.1` uploaded
   only `r402-protocol`; `r402-client` died on a missing version. Do not
-  yank `r402-protocol 0.19.1`. Next complete graph is 0.19.2, after
-  `siwx` 0.5.0 is on crates.io.
+  yank `r402-protocol 0.19.1`. Next complete graph is 0.19.2.
 
 ## [0.19.1] — 2026-09-04
 

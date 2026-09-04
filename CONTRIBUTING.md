@@ -89,7 +89,7 @@ so `cargo publish` can rewrite them to crates.io. **Patch** bumps
 `publish.yml` Test is `cargo test --workspace` with **default features**,
 not `--all-features`. Before tagging, also run that command (CI `just test`
 uses `--all-features`). Path deps without a version still fail
-`cargo package`; after SIWX is crates.io `0.5`, package every crate in
+`cargo package`. SIWX is crates.io `0.6`; package every crate in
 `publish.yml`.
 
 ## Pull Request Workflow

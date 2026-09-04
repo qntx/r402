@@ -10,9 +10,11 @@ use std::sync::Arc;
 use axum_core::body::Body;
 use http::Request;
 use r402_extensions::siwx::{
-    PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension, SiwxOrigin, SiwxProof,
+    EvmVerifier, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension, SiwxOrigin,
+    SiwxProof,
 };
 use r402_protocol::payment::ExtensionEntry;
+use time::OffsetDateTime;
 
 use super::hooks::{GateHooks, ProtectedRequestOutcome};
 use crate::headers::SIGN_IN_WITH_X;
@@ -22,6 +24,7 @@ pub struct SiwxGate {
     extension: SiwxExtension,
     store: Arc<dyn PaidAddressStore>,
     auth_only: bool,
+    evm: EvmVerifier,
 }
 
 impl Clone for SiwxGate {
@@ -30,6 +33,7 @@ impl Clone for SiwxGate {
             extension: self.extension.clone(),
             store: Arc::clone(&self.store),
             auth_only: self.auth_only,
+            evm: self.evm,
         }
     }
 }
@@ -53,6 +57,7 @@ impl SiwxGate {
             extension: SiwxExtension::new(origin),
             store: Arc::new(store),
             auth_only: false,
+            evm: EvmVerifier::new(),
         }
     }
 
@@ -120,7 +125,16 @@ impl SiwxGate {
         let Ok(proof) = SiwxProof::parse_header(header) else {
             return false;
         };
-        if proof.verify(self.extension.origin(), path).await.is_err() {
+        if proof
+            .verify_at(
+                self.extension.origin(),
+                path,
+                OffsetDateTime::now_utc(),
+                &self.evm,
+            )
+            .await
+            .is_err()
+        {
             return false;
         }
         let key = self.extension.origin().store_key(path);

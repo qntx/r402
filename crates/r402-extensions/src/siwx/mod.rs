@@ -15,6 +15,7 @@ pub use client::{SiwxClientExtension, SiwxSigner};
 pub use origin::{SiwxOrigin, SiwxOriginError};
 pub use paid::{InMemoryPaidAddressStore, PaidAddressStore};
 pub use proof::{SiwxProof, SiwxProofError};
+pub use siwx_evm::EvmVerifier;
 
 /// Wire key for the Sign-In with X extension.
 pub const SIWX_KEY: &str = "sign-in-with-x";
