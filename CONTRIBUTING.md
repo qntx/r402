@@ -80,16 +80,16 @@ format check.
 Crate version is `[workspace.package].version`. The git tag is `v` plus
 that string.
 
-Path workspace deps use the **minor** (`version = "0.19"`, i.e. `^0.19`)
+Path workspace deps use the **minor** (`version = "0.20"`, i.e. `^0.20`)
 so `cargo publish` can rewrite them to crates.io. **Patch** bumps
-(`0.19.1` → `0.19.2`) leave path `version = "0.19"`. **Minor / major**
-(`0.19` → `0.20` or `1.0`) update that field in the **same PR** as
+(`0.20.0` → `0.20.1`) leave path `version = "0.20"`. **Minor / major**
+(`0.20` → `0.21` or `1.0`) update that field in the **same PR** as
 `workspace.package.version`.
 
 `publish.yml` Test is `cargo test --workspace` with **default features**,
 not `--all-features`. Before tagging, also run that command (CI `just test`
 uses `--all-features`). Path deps without a version still fail
-`cargo package`. SIWX is crates.io `0.6`; package every crate in
+`cargo package`. SIWX is crates.io `0.6.1`; package every crate in
 `publish.yml`.
 
 ## Pull Request Workflow

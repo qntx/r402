@@ -1,6 +1,6 @@
 # Crates
 
-Workspace **0.19.1**. Path dependencies match the graph below. Umbrella
+Workspace **0.20.0**. Path dependencies match the graph below. Umbrella
 `default = ["evm", "http"]`. Other production chains and MCP are umbrella
 features (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`,
 `stellar`, `concordium`, `mcp`). `full` enables those plus `client` /
@@ -9,7 +9,7 @@ not in `full`. **[`r402-contract`](r402-contract/)** is an unpublished
 workspace member — not on crates.io, not in `publish.yml`. crates.io
 **`r402-core` 0.17.1** is not yanked.
 
-SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is crates.io **0.6**.
+SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is crates.io **0.6.1**.
 
 | Crate | | Description |
 | --- | --- | --- |

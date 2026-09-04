@@ -4,9 +4,9 @@ x402 Payment Protocol SDK for Rust. Protocol version **2** only.
 
 ```toml
 [dependencies]
-r402 = { version = "0.19", features = ["evm", "http"] }
-# r402 = { version = "0.19", features = ["evm", "svm", "http"] }
-# r402 = { version = "0.19", features = ["full"] }
+r402 = { version = "0.20", features = ["evm", "http"] }
+# r402 = { version = "0.20", features = ["evm", "svm", "http"] }
+# r402 = { version = "0.20", features = ["full"] }
 ```
 
 `default = ["evm", "http"]`. Chain crates are feature-gated re-exports (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`, `stellar`, `concordium`). `full` is every production chain plus HTTP and MCP. `tron` / `casper` are opt-in, not in `full`.
