@@ -28,12 +28,19 @@ pub struct SiwxGate {
 }
 
 impl Clone for SiwxGate {
+    #[cfg_attr(
+        not(feature = "siwx-eip1271"),
+        allow(
+            clippy::clone_on_copy,
+            reason = "EvmVerifier is Copy only without eip1271"
+        )
+    )]
     fn clone(&self) -> Self {
         Self {
             extension: self.extension.clone(),
             store: Arc::clone(&self.store),
             auth_only: self.auth_only,
-            evm: self.evm,
+            evm: self.evm.clone(),
         }
     }
 }
@@ -79,6 +86,25 @@ impl SiwxGate {
     #[must_use]
     pub const fn with_auth_only(mut self) -> Self {
         self.auth_only = true;
+        self
+    }
+
+    /// Server-configured per-chain RPC for EIP-1271 / EIP-6492.
+    ///
+    /// `timeout` `None` keeps siwx-evm's 5s default. `Some` is applied after
+    /// `with_rpc_map`, which resets timeout.
+    #[cfg(feature = "siwx-eip1271")]
+    #[must_use]
+    pub fn with_evm_rpc_map(
+        mut self,
+        map: impl IntoIterator<Item = (u64, impl Into<String>)>,
+        timeout: Option<std::time::Duration>,
+    ) -> Self {
+        let mut evm = EvmVerifier::with_rpc_map(map);
+        if let Some(timeout) = timeout {
+            evm = evm.with_rpc_timeout(timeout);
+        }
+        self.evm = evm;
         self
     }
 

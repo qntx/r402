@@ -70,6 +70,7 @@ siwx                 = [
     "dep:r402-client",
     "dep:http",
 ]
+siwx-eip1271         = ["siwx", "siwx-evm/eip1271", "siwx-evm/eip6492"]
 all-extensions       = [
     "ext-bazaar",
     "ext-payment-id",
@@ -129,6 +130,10 @@ required-features = ["ext-bazaar-discovery"]
 [[test]]
 name              = "siwx"
 required-features = ["siwx"]
+
+[[test]]
+name              = "siwx_eip1271"
+required-features = ["siwx-eip1271"]
 
 [[test]]
 name              = "builder_code"
