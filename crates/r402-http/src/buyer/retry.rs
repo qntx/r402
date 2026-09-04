@@ -127,12 +127,17 @@ where
     ///
     /// Parse, selection, signing, or before-hook abort.
     pub async fn make_payment_headers(&self, res: Response) -> Result<HeaderMap, ClientError> {
+        let request_url = res.url().clone();
         let payment_required = parse_payment_required(res)
             .await
             .ok_or_else(|| ClientError::Parse("Invalid 402 response".to_owned()))?;
         let created = self.inner.create_payment(&payment_required).await?;
         let mut headers = payment_signature_headers(&created)?;
-        headers.extend(self.inner.extension_headers(&payment_required).await);
+        headers.extend(
+            self.inner
+                .extension_headers(&payment_required, request_url.as_str())
+                .await,
+        );
         Ok(headers)
     }
 
@@ -211,6 +216,7 @@ where
             return Ok(res);
         };
 
+        let request_url = res.url().clone();
         let payment_required = parse_payment_required(res)
             .await
             .ok_or_else(|| middleware_err(ClientError::Parse("Invalid 402 response".into())))?;
@@ -219,10 +225,15 @@ where
             .create_payment(&payment_required)
             .await
             .map_err(middleware_err)?;
-        let paid =
-            clone_with_payment_and_extensions(&template, &created, &payment_required, &self.inner)
-                .await
-                .map_err(middleware_err)?;
+        let paid = clone_with_payment_and_extensions(
+            &template,
+            &created,
+            &payment_required,
+            request_url.as_str(),
+            &self.inner,
+        )
+        .await
+        .map_err(middleware_err)?;
         let response = next.clone().run(paid, extensions).await?;
 
         let Some(recovered) = self
@@ -237,6 +248,7 @@ where
             &template,
             &recovered,
             &recovered.payment_required,
+            response.url().as_str(),
             &self.inner,
         )
         .await
@@ -279,11 +291,15 @@ async fn clone_with_payment_and_extensions<TSelector: PaymentSelector>(
     template: &Request,
     created: &CreatedPayment,
     payment_required: &PaymentRequired,
+    request_url: &str,
     client: &PaymentClient<TSelector>,
 ) -> Result<Request, ClientError> {
     let mut paid = clone_with_payment(template, created)?;
-    paid.headers_mut()
-        .extend(client.extension_headers(payment_required).await);
+    paid.headers_mut().extend(
+        client
+            .extension_headers(payment_required, request_url)
+            .await,
+    );
     Ok(paid)
 }
 

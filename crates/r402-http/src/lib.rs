@@ -56,6 +56,8 @@ mod _dev_deps {
     #[cfg(not(feature = "client"))]
     use r402_client as _;
     use r402_evm as _;
+    #[cfg(not(feature = "siwx"))]
+    use r402_extensions as _;
     #[cfg(not(feature = "server"))]
     use r402_facilitator as _;
     #[cfg(not(any(feature = "client", feature = "server")))]

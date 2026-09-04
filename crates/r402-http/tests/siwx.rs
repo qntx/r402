@@ -462,7 +462,7 @@ async fn client_extension_signs_configured_origin_not_host() {
         .insert("host", HeaderValue::from_static("evil.example"));
     let challenge = call_layer(layer.clone(), OkInner, challenge_req).await;
     assert_eq!(challenge.status(), StatusCode::PAYMENT_REQUIRED);
-    let required: PaymentRequired = serde_json::from_slice(
+    let mut required: PaymentRequired = serde_json::from_slice(
         &Base64Bytes::from(
             challenge
                 .headers()
@@ -482,7 +482,10 @@ async fn client_extension_signs_configured_origin_not_host() {
     let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
     let address = format!("{}", signer.address());
     let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
-    let headers = ext.on_payment_required(&required).await;
+    required.resource.url = "https://evil.example/paid".into();
+    let headers = ext
+        .on_payment_required(&required, "https://api.example.com/paid")
+        .await;
     let header = headers.get(SIGN_IN_WITH_X).expect("SIGN-IN-WITH-X").clone();
     store.record_success(origin().store_key("/paid").as_str(), &address);
     let response = call_layer(layer, OkInner, siwx_request(header, "evil.example")).await;
@@ -510,7 +513,9 @@ async fn client_extension_skips_origin_mismatch() {
             "supportedChains": [{"chainId": "eip155:8453", "type": "eip191"}]
         })),
     );
-    let headers = ext.on_payment_required(&required).await;
+    let headers = ext
+        .on_payment_required(&required, "https://api.example.com/paid")
+        .await;
     assert!(
         headers.get(SIGN_IN_WITH_X).is_none(),
         "mismatched challenge origin must not sign"
