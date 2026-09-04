@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   server-configured chain-id → RPC URL map and optional timeout. Chains
   missing from the map stay EIP-191. RPC URLs are never read from proof
   JSON.
+- `r402-http` `siwx` debug-logs parse denials, `invalid_siwx_*` codes,
+  valid unpaid proofs, nonce replays, and grants. Optional `tracing`
+  is enabled by `siwx`; there is no crate-level `telemetry` feature.
 
 ### Changed
 

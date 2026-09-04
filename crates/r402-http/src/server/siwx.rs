@@ -11,7 +11,7 @@ use axum_core::body::Body;
 use http::Request;
 use r402_extensions::siwx::{
     EvmVerifier, PaidAddressStore, SIWX_KEY, SiwxChain, SiwxError, SiwxExtension, SiwxOrigin,
-    SiwxProof,
+    SiwxProof, SiwxProofError,
 };
 use r402_protocol::payment::ExtensionEntry;
 use time::OffsetDateTime;
@@ -148,10 +148,11 @@ impl SiwxGate {
     }
 
     pub(crate) async fn try_grant(&self, header: &str, path: &str) -> bool {
-        let Ok(proof) = SiwxProof::parse_header(header) else {
-            return false;
+        let proof = match SiwxProof::parse_header(header) {
+            Ok(proof) => proof,
+            Err(err) => return log_parse_denied(err),
         };
-        if proof
+        if let Err(err) = proof
             .verify_at(
                 self.extension.origin(),
                 path,
@@ -159,18 +160,45 @@ impl SiwxGate {
                 &self.evm,
             )
             .await
-            .is_err()
         {
-            return false;
+            return log_denied(err);
         }
         let key = self.extension.origin().store_key(path);
         if !(self.auth_only || self.store.contains(&key, &proof.address)) {
-            return false;
+            return log_valid_unpaid();
         }
         // After verify: dummy proofs never insert. Concurrent valid
         // replays: one insert-if-absent wins; the loser is a replay.
-        self.store.consume_nonce(&proof.nonce)
+        if !self.store.consume_nonce(&proof.nonce) {
+            return log_nonce_replay();
+        }
+        log_granted()
     }
+}
+
+fn log_parse_denied(err: SiwxProofError) -> bool {
+    tracing::debug!(error = ?err, "siwx parse denied");
+    false
+}
+
+fn log_denied(err: SiwxError) -> bool {
+    tracing::debug!(code = err.as_str(), "siwx denied");
+    false
+}
+
+fn log_valid_unpaid() -> bool {
+    tracing::debug!("siwx valid unpaid");
+    false
+}
+
+fn log_nonce_replay() -> bool {
+    tracing::debug!("siwx nonce replay");
+    false
+}
+
+fn log_granted() -> bool {
+    tracing::debug!("siwx granted");
+    true
 }
 
 impl GateHooks for SiwxGate {
