@@ -618,6 +618,28 @@ async fn client_extension_skips_uri_origin_mismatch() {
 }
 
 #[tokio::test]
+async fn client_extension_skips_http_https_scheme_mismatch() {
+    let required = raw_challenge(
+        "https://api.example.com/paid",
+        "api.example.com",
+        "http://api.example.com/paid",
+        &[],
+    );
+    assert!(!signs_siwx(&required, "https://api.example.com/paid").await);
+}
+
+#[tokio::test]
+async fn client_extension_skips_unparseable_challenge_uri() {
+    let required = raw_challenge(
+        "https://api.example.com/paid",
+        "api.example.com",
+        "not-a-url",
+        &[],
+    );
+    assert!(!signs_siwx(&required, "https://api.example.com/paid").await);
+}
+
+#[tokio::test]
 async fn client_extension_allows_cross_origin_resources() {
     let required = raw_challenge(
         "https://evil.example/paid",

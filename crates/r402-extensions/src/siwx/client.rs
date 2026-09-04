@@ -1,7 +1,7 @@
 //! Client `SIGN-IN-WITH-X` header. Official `createSIWxClientExtension`.
 //!
 //! Uses `ClientExtension::on_payment_required`, not `enrich_payment_payload`.
-//! Origin is the 402 response URL after redirects. Never `Host`.
+//! Origin is `SiwxOrigin::parse(request_url)` (402 response URL after redirects).
 
 use std::fmt::{self, Debug, Formatter};
 use std::future::Future;
