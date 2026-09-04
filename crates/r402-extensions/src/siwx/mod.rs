@@ -29,6 +29,9 @@ pub const DEFAULT_MAX_ISSUED_AGE: time::Duration = time::Duration::minutes(5);
 /// Default challenge `expirationTime` offset from `issuedAt`.
 pub const DEFAULT_CHALLENGE_TTL: time::Duration = time::Duration::minutes(5);
 
+/// Default CAIP-122 `statement` advertised on SIWX challenges.
+pub const DEFAULT_STATEMENT: &str = "Sign in to access this resource";
+
 /// Spec `invalid_siwx_*` failure codes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]

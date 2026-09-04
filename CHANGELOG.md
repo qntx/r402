@@ -32,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   is echoed.
 - `SiwxProof::verify_at` takes `&EvmVerifier`. `SiwxGate` stores the
   verifier and calls `verify_at`; `verify` remains an EOA helper.
+- SIWX 402 challenges include `statement` `"Sign in to access this
+  resource"` (`DEFAULT_STATEMENT`). `SiwxExtension::new` is no longer
+  `const fn`.
 
 ### Fixed
 
