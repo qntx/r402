@@ -1,14 +1,13 @@
 [package]
-name = "r402-facilitator"
-version.workspace = true
-edition.workspace = true
+name                   = "r402-facilitator"
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-description = "Facilitator trait, cache, pending settlement, and remote HTTP client for the x402 payment protocol."
-keywords = ["x402", "payment", "facilitator", "http-402"]
-categories = [
+license.workspace      = true
+repository.workspace   = true
+description            = "Facilitator trait, cache, pending settlement, and remote HTTP client for the x402 payment protocol."
+keywords               = ["x402", "payment", "facilitator", "http-402"]
+categories             = [
     "api-bindings",
     "web-programming",
     "cryptography::cryptocurrencies",
@@ -20,7 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["http-client"]
+default     = ["http-client"]
 http-client = [
     "dep:http",
     "dep:httpdate",
@@ -30,32 +29,32 @@ http-client = [
     "dep:tokio",
     "dep:url",
 ]
-telemetry = ["http-client", "dep:tracing"]
-metrics = ["dep:metrics"]
+telemetry   = ["http-client", "dep:tracing"]
+metrics     = ["dep:metrics"]
 
 [dependencies]
-compact_str = { workspace = true }
-moka = { workspace = true }
+compact_str   = { workspace = true }
+moka          = { workspace = true }
 r402-protocol = { workspace = true }
 
-http = { workspace = true, optional = true }
-httpdate = { workspace = true, optional = true }
-metrics = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
+http       = { workspace = true, optional = true }
+httpdate   = { workspace = true, optional = true }
+metrics    = { workspace = true, optional = true }
+reqwest    = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-tokio = { workspace = true, features = ["sync", "time"], optional = true }
-tracing = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
+thiserror  = { workspace = true, optional = true }
+tokio      = { workspace = true, features = ["sync", "time"], optional = true }
+tracing    = { workspace = true, optional = true }
+url        = { workspace = true, optional = true }
 
 [dev-dependencies]
 r402-protocol = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
-wiremock = { workspace = true }
+serde_json    = { workspace = true }
+tokio         = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+wiremock      = { workspace = true }
 
 [[test]]
-name = "http"
+name              = "http"
 required-features = ["http-client"]
 
 [lints]

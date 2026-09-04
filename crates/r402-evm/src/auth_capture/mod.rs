@@ -266,8 +266,9 @@ mod client_verify_tests {
 
     #[tokio::test]
     async fn v1_0_escrow_sign_then_verify() {
-        use super::payload::AUTH_CAPTURE_ESCROW_V1_0_ADDRESS;
-        use super::payload::EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS;
+        use super::payload::{
+            AUTH_CAPTURE_ESCROW_V1_0_ADDRESS, EIP3009_TOKEN_COLLECTOR_V1_0_ADDRESS,
+        };
 
         let signer = PrivateKeySigner::random();
         let payer = signer.address();

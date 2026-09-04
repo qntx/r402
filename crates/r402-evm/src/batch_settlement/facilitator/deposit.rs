@@ -11,14 +11,13 @@ use r402_protocol::error::{FacilitatorError, VerificationError};
 use r402_protocol::network::ChainProvider;
 use r402_protocol::payment::{SettleResponse, VerifyResponse};
 
-use super::Eip155BatchSettlementFacilitator;
 use super::contract::IBatchSettlement;
 use super::deposit_eip3009::{self, Counterfactual};
-use super::deposit_permit2;
 use super::encoding::{to_sol_config, u128_amount};
 use super::response::{facilitator_err_to_settle, settle_failure, verify_err_to_settle};
 use super::send::{Broadcast, simulate_and_broadcast};
 use super::validate::validate_channel_config;
+use super::{Eip155BatchSettlementFacilitator, deposit_permit2};
 use crate::asset::AssetTransferMethod;
 use crate::batch_settlement::errors::{
     CUMULATIVE_BELOW_CLAIMED, CUMULATIVE_EXCEEDS_BALANCE, DEPOSIT_SIMULATION_FAILED,

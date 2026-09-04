@@ -1,14 +1,13 @@
 [package]
-name = "r402-mcp"
-version.workspace = true
-edition.workspace = true
+name                   = "r402-mcp"
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-description = "MCP transport for the x402 payment protocol (official rmcp SDK)."
-keywords = ["x402", "payment", "mcp", "ai", "http-402"]
-categories = [
+license.workspace      = true
+repository.workspace   = true
+description            = "MCP transport for the x402 payment protocol (official rmcp SDK)."
+keywords               = ["x402", "payment", "mcp", "ai", "http-402"]
+categories             = [
     "api-bindings",
     "web-programming",
     "asynchronous",
@@ -19,27 +18,27 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["client", "server"]
-client = ["dep:rmcp", "rmcp/client"]
-server = ["dep:rmcp"]
+default     = ["client", "server"]
+client      = ["dep:rmcp", "rmcp/client"]
+server      = ["dep:rmcp"]
 facilitator = ["r402-facilitator/http-client"]
-telemetry = ["dep:tracing", "r402-server/telemetry", "r402-facilitator/telemetry"]
-cache = ["r402-facilitator/http-client"]
-metrics = ["r402-server/metrics", "r402-facilitator/metrics"]
+telemetry   = ["dep:tracing", "r402-server/telemetry", "r402-facilitator/telemetry"]
+cache       = ["r402-facilitator/http-client"]
+metrics     = ["r402-server/metrics", "r402-facilitator/metrics"]
 
 [dependencies]
-r402-client = { workspace = true }
+r402-client      = { workspace = true }
 r402-facilitator = { workspace = true }
-r402-protocol = { workspace = true }
-r402-server = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-rmcp = { workspace = true, optional = true, default-features = false }
-tracing = { workspace = true, optional = true }
+r402-protocol    = { workspace = true }
+r402-server      = { workspace = true }
+serde_json       = { workspace = true }
+thiserror        = { workspace = true }
+rmcp             = { workspace = true, optional = true, default-features = false }
+tracing          = { workspace = true, optional = true }
 
 [dev-dependencies]
 compact_str = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio       = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

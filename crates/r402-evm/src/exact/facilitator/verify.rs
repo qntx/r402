@@ -11,8 +11,7 @@ use alloy_provider::Provider;
 use alloy_sol_types::{Eip712Domain, SolStruct, eip712_domain};
 use r402_protocol::error::VerificationError;
 use r402_protocol::network::ChainId;
-use r402_protocol::payment::Extensions;
-use r402_protocol::payment::UnixTimestamp;
+use r402_protocol::payment::{Extensions, UnixTimestamp};
 #[cfg(feature = "telemetry")]
 use tracing::instrument;
 

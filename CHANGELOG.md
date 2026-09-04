@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Fixed
+
+- Path members in `[workspace.dependencies]` now carry `version = "0.19"`
+  so `cargo publish` can rewrite them to crates.io. Tag `v0.19.1` uploaded
+  only `r402-protocol`; `r402-client` died on a missing version. Do not
+  yank `r402-protocol 0.19.1`. Next complete graph is 0.19.2, after
+  `siwx` 0.5.0 is on crates.io.
+
 ## [0.19.1] — 2026-09-04
 
 ### Fixed

@@ -10,8 +10,7 @@ use r402_protocol::error::ClientError;
 use r402_protocol::network::ChainId;
 use r402_protocol::payment::{Base64Bytes, PaymentRequired, ResourceInfo, UnixTimestamp};
 use r402_protocol::scheme::SchemeId;
-use rand::RngExt;
-use rand::rng;
+use rand::{RngExt, rng};
 
 use super::nonce::{compute_payer_agnostic_payment_info_hash, hash_as_uint256};
 use super::payload::{

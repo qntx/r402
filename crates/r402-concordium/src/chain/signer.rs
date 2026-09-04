@@ -59,7 +59,7 @@ impl ConcordiumSigner {
     ///
     /// # Panics
     ///
-    /// Never: threshold `1` is a valid [`AccountThreshold`].
+    /// Never: threshold `1` is a valid signature threshold.
     #[must_use]
     pub fn keys(&self) -> AccountKeys {
         Self::keys_from_seed(self.seed)
@@ -69,7 +69,7 @@ impl ConcordiumSigner {
     ///
     /// # Panics
     ///
-    /// Never: threshold `1` is a valid [`AccountThreshold`].
+    /// Never: threshold `1` is a valid signature threshold.
     #[must_use]
     pub fn keys_from_seed(seed: [u8; 32]) -> AccountKeys {
         let signing = SigningKey::from_bytes(&seed);

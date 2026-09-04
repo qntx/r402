@@ -11,7 +11,8 @@
 //! ```
 //!
 //! HTTP maps [`FacilitatorError::Transport`] to 502. Well-formed verify/settle
-//! JSON on 4xx/5xx stays [`Self::Verification`] / [`Self::Settlement`] (402).
+//! JSON on 4xx/5xx stays [`FacilitatorError::Verification`] /
+//! [`FacilitatorError::Settlement`] (402).
 
 mod problem;
 mod reason;

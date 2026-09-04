@@ -25,7 +25,7 @@ pub use account::{
     parse_token_program_hint, resolve_payment_channel_config, resolve_token_program,
     stablecoin_token_program,
 };
-pub use codec::{ChannelSplit, OpenArgs, decode_open_args, encode_open_args};
+pub use codec::{ChannelSplit, CodecError, OpenArgs, decode_open_args, encode_open_args};
 #[cfg(any(feature = "client", feature = "facilitator"))]
 pub use instructions::{
     DistributeInstructionArgs, build_distribute_instruction, build_ed25519_verify_instruction,
