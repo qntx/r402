@@ -28,6 +28,7 @@ use axum_core::extract::Request;
 use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
 use r402_client::ClientExtension;
+use r402_extensions::siwx::DEFAULT_STATEMENT;
 use r402_http::server::{
     BackgroundSettlementTracker, BuildError, InMemoryPaidAddressStore, PAYMENT_REQUIRED,
     PAYMENT_RESPONSE, PaidAddressStore, SIGN_IN_WITH_X, SIWX_KEY, SettlementMode, SiwxChain,
@@ -104,8 +105,24 @@ async fn unpaid_402_carries_challenge_from_configured_origin() {
     let info = &body["extensions"][SIWX_KEY]["info"];
     assert_eq!(info["domain"], "api.example.com");
     assert_eq!(info["uri"], "https://api.example.com/paid");
+    assert_eq!(info["statement"], DEFAULT_STATEMENT);
     let nonce = info["nonce"].as_str().unwrap();
     assert_eq!(nonce.len(), 32);
+    assert_eq!(fac.verify_count(), 0);
+}
+
+#[tokio::test]
+async fn challenge_statement_is_default() {
+    let fac = Arc::new(FakeFacilitator::new());
+    let store = InMemoryPaidAddressStore::new();
+    let layer = middleware(Arc::clone(&fac), FlowScheme::authorization())
+        .with_siwx(gate(store))
+        .with_price_tag(eip155_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
+    let info = &decode_required(&response)["extensions"][SIWX_KEY]["info"];
+    assert_eq!(info["statement"], DEFAULT_STATEMENT);
     assert_eq!(fac.verify_count(), 0);
 }
 

@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
-use super::{DEFAULT_CHALLENGE_TTL, SIWX_KEY, SiwxError, SiwxOrigin};
+use super::{DEFAULT_CHALLENGE_TTL, DEFAULT_STATEMENT, SIWX_KEY, SiwxError, SiwxOrigin};
 
 /// One entry in `supportedChains`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,12 +51,14 @@ pub struct SiwxExtension {
 
 impl SiwxExtension {
     /// Constructs an extension bound to a configured public origin.
+    ///
+    /// Challenges include [`super::DEFAULT_STATEMENT`] until [`Self::with_statement`].
     #[must_use]
-    pub const fn new(origin: SiwxOrigin) -> Self {
+    pub fn new(origin: SiwxOrigin) -> Self {
         Self {
             origin,
             supported_chains: Vec::new(),
-            statement: None,
+            statement: Some(CompactString::from(DEFAULT_STATEMENT)),
         }
     }
 

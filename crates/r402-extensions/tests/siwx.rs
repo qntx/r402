@@ -21,9 +21,9 @@ use alloy_signer_local::PrivateKeySigner;
 use compact_str::CompactString;
 use r402_client::ClientExtension;
 use r402_extensions::siwx::{
-    InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY, SiwxChain,
-    SiwxClientExtension, SiwxError, SiwxExtension, SiwxOrigin, SiwxOriginError, SiwxProof,
-    SiwxProofError, SiwxSigner,
+    DEFAULT_STATEMENT, InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY,
+    SiwxChain, SiwxClientExtension, SiwxError, SiwxExtension, SiwxOrigin, SiwxOriginError,
+    SiwxProof, SiwxProofError, SiwxSigner,
 };
 use r402_protocol::extension::Extension;
 use r402_protocol::payment::{Base64Bytes, ExtensionEntry, PaymentRequired, ResourceInfo};
@@ -120,9 +120,7 @@ fn paid_store_clone_shares_records() {
 #[test]
 fn challenge_uses_configured_origin_not_host() {
     let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
-    let ext = SiwxExtension::new(origin)
-        .with_chain(SiwxChain::eip191("eip155:8453"))
-        .with_statement("Sign in to access premium data");
+    let ext = SiwxExtension::new(origin).with_chain(SiwxChain::eip191("eip155:8453"));
     assert_eq!(ext.id(), SIWX_KEY);
     let entry = ext
         .challenge(
@@ -135,8 +133,40 @@ fn challenge_uses_configured_origin_not_host() {
     let value = entry.to_value();
     assert_eq!(value["info"]["domain"], "api.example.com");
     assert_eq!(value["info"]["uri"], "https://api.example.com/premium-data");
+    assert_eq!(value["info"]["statement"], DEFAULT_STATEMENT);
     assert_eq!(value["supportedChains"][0]["chainId"], "eip155:8453");
     assert_eq!(value["supportedChains"][0]["type"], "eip191");
+}
+
+#[test]
+fn challenge_includes_default_statement() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let value = SiwxExtension::new(origin)
+        .challenge(
+            "/premium-data",
+            "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+            "2024-01-15T10:30:00.000Z",
+            "2024-01-15T10:35:00.000Z",
+        )
+        .unwrap()
+        .to_value();
+    assert_eq!(value["info"]["statement"], DEFAULT_STATEMENT);
+}
+
+#[test]
+fn with_statement_overrides_default() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let value = SiwxExtension::new(origin)
+        .with_statement("Sign in to access premium data")
+        .challenge(
+            "/premium-data",
+            "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+            "2024-01-15T10:30:00.000Z",
+            "2024-01-15T10:35:00.000Z",
+        )
+        .unwrap()
+        .to_value();
+    assert_eq!(value["info"]["statement"], "Sign in to access premium data");
 }
 
 #[test]
@@ -216,6 +246,7 @@ fn challenge_now_uses_32_hex_nonce() {
     assert_eq!(nonce.len(), 32);
     assert!(nonce.chars().all(|c| c.is_ascii_hexdigit()));
     assert_eq!(value["info"]["domain"], "api.example.com");
+    assert_eq!(value["info"]["statement"], DEFAULT_STATEMENT);
 }
 
 fn sample_proof_at(issued_at: &str, expiration: Option<&str>) -> SiwxProof {
