@@ -386,7 +386,7 @@ async fn solana_malformed_signature() {
     let issued = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
     let body = json!({
         "domain": origin.domain(),
-        "address": "11111111111111111111111111111111",
+        "address": "GwAF45zjfyGzUbd3i3hXxzGeuchzEZXwpRYHZM5912F1",
         "uri": origin.uri("/premium-data"),
         "version": "1",
         "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
@@ -399,6 +399,26 @@ async fn solana_malformed_signature() {
     let proof = SiwxProof::parse_header(&header).unwrap();
     assert_eq!(
         proof.verify(&origin, "/premium-data").await.unwrap_err(),
+        SiwxError::MalformedSignature
+    );
+}
+
+#[test]
+fn solana_identity_address_is_malformed_signature() {
+    let mut proof = unsigned_proof("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "ed25519");
+    proof.address = "11111111111111111111111111111111".into();
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
+        SiwxError::MalformedSignature
+    );
+}
+
+#[test]
+fn evm_non_eip55_address_is_malformed_signature() {
+    let mut proof = unsigned_proof("eip155:8453", "eip191");
+    proof.address = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045".into();
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
         SiwxError::MalformedSignature
     );
 }
