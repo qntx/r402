@@ -1,6 +1,8 @@
 //! MCP transport for the x402 payment protocol (official [`rmcp`] SDK).
 //!
-//! `_meta` keys live in [`meta`]. MCP v1 does not expose [`r402_server::SettlementMode`].
+//! `_meta` keys are crate-level constants ([`MCP_PAYMENT_META_KEY`],
+//! [`MCP_PAYMENT_RESPONSE_META_KEY`]). MCP v1 does not expose
+//! [`r402_server::SettlementMode`].
 
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(

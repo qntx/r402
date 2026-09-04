@@ -155,45 +155,11 @@ sequenceDiagram
 
 | Mode | Total latency | Safety | `Payment-Response` | Best for |
 | --- | --- | --- | --- | --- |
-| **Sequential** | verify + handler + settle | Settlement only on handler success | ✅ Included | Standard request/response APIs |
-| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | ✅ Included | Latency-sensitive endpoints |
-| **Background** | verify + handler | Settlement errors are non-fatal (logged) | ❌ Not attached | SSE / LLM streaming responses |
+| **Sequential** | verify + handler + settle | Settlement only on handler success | Included | Standard request/response APIs |
+| **Concurrent** | verify + max(handler, settle) | Settlement may occur on handler failure | Included | Latency-sensitive endpoints |
+| **Background** | verify + handler | Settlement errors are non-fatal (logged) | Not attached | SSE / LLM streaming responses |
 
 > **Note:** `UptoActualAmount` is honoured only by `SettlementMode::Sequential`. Concurrent and background modes start settlement before the handler returns and therefore charge the signed maximum.
-
-## `upto`
-
-EVM `upto` (Permit2 witness: verify = max, settle = actual ≤ max) and Solana `upto` (escrow). `Eip155Upto::price_tag(pay_to, asset)` takes two arguments (the max amount). Handlers opt in with `UptoActualAmount` on Sequential responses.
-
-## Wire
-
-| Item | Contract |
-| --- | --- |
-| Version | `x402Version: 2` |
-| 402 challenge | `Payment-Required` (base64, Title-Case) |
-| Retry | `Payment-Signature` |
-| Receipt | `Payment-Response` |
-| JSON | camelCase, `deny_unknown_fields` |
-
-| Situation | Status |
-| --- | --- |
-| Unpaid / verify fail / settle fail / malformed header | 402 |
-| Permit2 allowance | 412 |
-| Incompatible mode / missing scheme | 500 |
-| Facilitator transport | 502 |
-| Success | 200 |
-
-## Design
-
-- **Chains** — EVM (EIP-155), SVM (Solana), NEAR, TON, XRPL, Hedera, Algorand, Aptos, Keeta, Stellar, Concordium. Tron is experimental / not an x402 protocol mechanism. Casper is extra / not an x402 protocol mechanism.
-- **Schemes** — `exact` (all chains) + `upto` (EVM Permit2 witness, Solana escrow)
-- **Transfer methods** — ERC-3009 / Permit2 (EVM, Tron); SPL (SVM); CEP-18 (Casper); NEP-141 / NEP-366 (NEAR); TEP-74 / W5R1 (TON); XRP / RLUSD Payment (XRPL); HBAR / HTS (Hedera); ASA (Algorand); FA (Aptos); SEND (Keeta); SEP-41 (Stellar); CCD / PLT (Concordium)
-- **Wire** — V2-only (CAIP-2 chain IDs, `Payment-*` headers)
-- **Smart wallets** — EIP-6492 (counterfactual) + EIP-1271 (deployed) + ERC-2098 (compact)
-
-## Crates
-
-See **[`crates/README.md`](crates/README.md)** for the crate table, chain matrix, and feature flags.
 
 ## Acknowledgments
 

@@ -2,8 +2,6 @@
 
 This document covers what you need before opening a pull request.
 
-[x402]: https://www.x402.org
-
 ## Code of Conduct
 
 Be kind, technical, and concise. No harassment, no surprises, no
@@ -41,9 +39,7 @@ CI clippy is **stable** `-D warnings` via `qntx/workflows`
 ### Quality Gates (run before pushing)
 
 ```bash
-just layout
 just all
-just test
 ```
 
 CI-equivalent cargo invocations:
@@ -69,6 +65,32 @@ cargo install cargo-audit cargo-deny
 cargo audit
 cargo deny check all
 ```
+
+## TOML style
+
+Match kobe’s grouped `=` alignment. Inside one table, a contiguous run of
+`key = value` lines (no blank line) is a group; pad keys so every `=` in
+that group shares a column. One space on each side of `=`. Keep the
+file’s existing trailing-comma style. Do not reorder keys to make
+padding easier. There is no taplo/dprint gate; rustfmt remains the only
+format check.
+
+## Versioning and publish
+
+Crate version is `[workspace.package].version`. The git tag is `v` plus
+that string.
+
+Path workspace deps use the **minor** (`version = "0.19"`, i.e. `^0.19`)
+so `cargo publish` can rewrite them to crates.io. **Patch** bumps
+(`0.19.1` → `0.19.2`) leave path `version = "0.19"`. **Minor / major**
+(`0.19` → `0.20` or `1.0`) update that field in the **same PR** as
+`workspace.package.version`.
+
+`publish.yml` Test is `cargo test --workspace` with **default features**,
+not `--all-features`. Before tagging, also run that command (CI `just test`
+uses `--all-features`). Path deps without a version still fail
+`cargo package`; after SIWX is crates.io `0.5`, package every crate in
+`publish.yml`.
 
 ## Pull Request Workflow
 

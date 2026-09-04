@@ -1,14 +1,13 @@
 [package]
-name = "r402-extensions"
-version.workspace = true
-edition.workspace = true
+name                   = "r402-extensions"
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-description = "Protocol extension implementations for the x402 payment protocol."
-keywords = ["x402", "payment", "extensions", "http-402"]
-categories = [
+license.workspace      = true
+repository.workspace   = true
+description            = "Protocol extension implementations for the x402 payment protocol."
+keywords               = ["x402", "payment", "extensions", "http-402"]
+categories             = [
     "api-bindings",
     "web-programming",
     "cryptography::cryptocurrencies",
@@ -20,7 +19,7 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = [
+default              = [
     "ext-bazaar",
     "ext-payment-id",
     "ext-eip2612",
@@ -29,8 +28,8 @@ default = [
     "ext-offer-receipt",
 ]
 # TtlSet lives in r402-facilitator; only payment-identifier needs it.
-cache = ["dep:r402-facilitator"]
-ext-bazaar = []
+cache                = ["dep:r402-facilitator"]
+ext-bazaar           = []
 # Off by default: facilitator GET /discovery client, not advertise.
 ext-bazaar-discovery = [
     "ext-bazaar",
@@ -41,11 +40,11 @@ ext-bazaar-discovery = [
     "dep:serde",
     "dep:url",
 ]
-ext-payment-id = ["cache", "dep:thiserror"]
-ext-eip2612 = []
-ext-erc20-approval = []
-ext-builder-code = ["dep:thiserror", "dep:r402-client"]
-ext-offer-receipt = [
+ext-payment-id       = ["cache", "dep:thiserror"]
+ext-eip2612          = []
+ext-erc20-approval   = []
+ext-builder-code     = ["dep:thiserror", "dep:r402-client"]
+ext-offer-receipt    = [
     "dep:thiserror",
     "dep:serde",
     "dep:base64",
@@ -58,7 +57,7 @@ ext-offer-receipt = [
     "dep:alloy-sol-types",
     "dep:alloy-signer",
 ]
-siwx = [
+siwx                 = [
     "dep:thiserror",
     "dep:url",
     "dep:siwx",
@@ -71,7 +70,7 @@ siwx = [
     "dep:r402-client",
     "dep:http",
 ]
-all-extensions = [
+all-extensions       = [
     "ext-bazaar",
     "ext-payment-id",
     "ext-eip2612",
@@ -81,62 +80,62 @@ all-extensions = [
 ]
 
 [dependencies]
-compact_str = { workspace = true }
+compact_str   = { workspace = true }
 r402-protocol = { workspace = true }
-serde_json = { workspace = true }
+serde_json    = { workspace = true }
 
-r402-client = { workspace = true, optional = true }
+r402-client      = { workspace = true, optional = true }
 r402-facilitator = { workspace = true, optional = true }
-http = { workspace = true, optional = true }
-thiserror = { workspace = true, optional = true }
-url = { workspace = true, optional = true }
-reqwest = { workspace = true, optional = true }
-siwx = { workspace = true, optional = true }
-siwx-evm = { workspace = true, optional = true }
-siwx-svm = { workspace = true, optional = true }
-time = { workspace = true, optional = true }
-hex = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
-bs58 = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-base64 = { workspace = true, optional = true }
-p256 = { workspace = true, optional = true }
-k256 = { workspace = true, optional = true }
-ed25519-dalek = { workspace = true, optional = true }
+http             = { workspace = true, optional = true }
+thiserror        = { workspace = true, optional = true }
+url              = { workspace = true, optional = true }
+reqwest          = { workspace = true, optional = true }
+siwx             = { workspace = true, optional = true }
+siwx-evm         = { workspace = true, optional = true }
+siwx-svm         = { workspace = true, optional = true }
+time             = { workspace = true, optional = true }
+hex              = { workspace = true, optional = true }
+rand             = { workspace = true, optional = true }
+bs58             = { workspace = true, optional = true }
+serde            = { workspace = true, optional = true }
+base64           = { workspace = true, optional = true }
+p256             = { workspace = true, optional = true }
+k256             = { workspace = true, optional = true }
+ed25519-dalek    = { workspace = true, optional = true }
 alloy-primitives = { workspace = true, optional = true }
-alloy-sol-types = { workspace = true, optional = true }
-alloy-signer = { workspace = true, optional = true }
+alloy-sol-types  = { workspace = true, optional = true }
+alloy-signer     = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
-alloy-signer = { workspace = true }
+serde_json         = { workspace = true }
+alloy-signer       = { workspace = true }
 alloy-signer-local = { workspace = true }
-bs58 = { workspace = true }
-compact_str = { workspace = true }
-ed25519-dalek = { workspace = true }
-http = { workspace = true }
-r402-client = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
-wiremock = { workspace = true }
+bs58               = { workspace = true }
+compact_str        = { workspace = true }
+ed25519-dalek      = { workspace = true }
+http               = { workspace = true }
+r402-client        = { workspace = true }
+tokio              = { workspace = true, features = ["macros", "rt"] }
+wiremock           = { workspace = true }
 
 [[test]]
-name = "bazaar"
+name              = "bazaar"
 required-features = ["ext-bazaar"]
 
 [[test]]
-name = "bazaar_discovery"
+name              = "bazaar_discovery"
 required-features = ["ext-bazaar-discovery"]
 
 [[test]]
-name = "siwx"
+name              = "siwx"
 required-features = ["siwx"]
 
 [[test]]
-name = "builder_code"
+name              = "builder_code"
 required-features = ["ext-builder-code"]
 
 [[test]]
-name = "offer_receipt"
+name              = "offer_receipt"
 required-features = ["ext-offer-receipt"]
 
 [lints]

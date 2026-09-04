@@ -6872,6 +6872,7 @@ dependencies = [
  "r402-facilitator",
  "r402-protocol",
  "r402-server",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha2 0.10.9",

@@ -143,10 +143,29 @@ impl Debug for NearJsonRpc {
 
 impl NearJsonRpc {
     /// Connects to the given RPC URL.
+    ///
+    /// The HTTP client is HTTP/1.1-only and ignores env/system proxies.
+    /// Workspace unification turns on `reqwest/{http2,system-proxy}` via
+    /// other crates; HTTP/2 or a macOS system proxy against loopback
+    /// JSON-RPC (wiremock) surfaces as `NearRpcError::Rpc`.
+    ///
+    /// # Panics
+    ///
+    /// Never: `reqwest` client builder with `http1_only` + `no_proxy` has no
+    /// TLS backend to initialize.
     #[must_use]
+    #[allow(
+        clippy::expect_used,
+        reason = "reqwest builder with http1_only+no_proxy has no TLS backend to fail"
+    )]
     pub fn connect(url: impl AsRef<str>) -> Self {
+        let http = reqwest::Client::builder()
+            .http1_only()
+            .no_proxy()
+            .build()
+            .expect("reqwest Client");
         Self {
-            client: JsonRpcClient::connect(url.as_ref()),
+            client: JsonRpcClient::with(http).connect(url.as_ref()),
         }
     }
 

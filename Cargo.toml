@@ -1,37 +1,34 @@
 [workspace]
-members = ["crates/*"]
+members         = ["crates/*"]
 default-members = ["crates/r402"]
-resolver = "3"
+resolver        = "3"
 
 [workspace.package]
 # Fields below are shared across every member crate via `field.workspace =
 # true`. `keywords` and `categories` stay per-crate so crates.io search
 # matches each crate's audience.
-version = "0.19.1"
-edition = "2024"
+version      = "0.19.1"
+edition      = "2024"
 rust-version = "1.95"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/qntx/r402"
-homepage = "https://github.com/qntx/r402"
-description = "x402 Payment Protocol SDK for Rust."
+license      = "MIT OR Apache-2.0"
+repository   = "https://github.com/qntx/r402"
 
 [workspace.dependencies]
-r402-protocol = { path = "crates/r402-protocol" }
-r402-client = { path = "crates/r402-client" }
-r402-facilitator = { path = "crates/r402-facilitator", default-features = false }
-r402-server = { path = "crates/r402-server" }
-r402-http = { path = "crates/r402-http", default-features = false }
-r402-evm = { path = "crates/r402-evm", default-features = false }
-r402-extensions = { path = "crates/r402-extensions", default-features = false }
+r402-protocol    = { version = "0.19", path = "crates/r402-protocol" }
+r402-client      = { version = "0.19", path = "crates/r402-client" }
+r402-facilitator = { version = "0.19", path = "crates/r402-facilitator", default-features = false }
+r402-server      = { version = "0.19", path = "crates/r402-server" }
+r402-http        = { version = "0.19", path = "crates/r402-http", default-features = false }
+r402-evm         = { version = "0.19", path = "crates/r402-evm", default-features = false }
+r402-extensions  = { version = "0.19", path = "crates/r402-extensions", default-features = false }
 # CAIP-122 (SIWX). Pin git rev until v0.5.0 is tagged; crates.io 0.5 is later.
 # Never restore an absolute path.
-siwx = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
-siwx-evm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
-siwx-svm = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
-time = { version = "0.3", features = ["parsing", "formatting"] }
-bs58 = "0.5"
-r402-near = { path = "crates/r402-near", default-features = false }
-r402-concordium = { path = "crates/r402-concordium", default-features = false }
+siwx             = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-evm         = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+siwx-svm         = { git = "https://github.com/qntx/siwx", rev = "85cf7bf0e9b867088813781b5cd03a640441c583" }
+time             = { version = "0.3", features = ["parsing", "formatting"] }
+bs58             = "0.5"
+r402-concordium  = { version = "0.19", path = "crates/r402-concordium", default-features = false }
 
 # Concordium (gRPC v2). crates.io `license-file` is MPL-2.0 (already allowlisted).
 # MSRV 1.85, covered by workspace 1.95. Prefer this over hand-rolled V1 serialization.
@@ -42,61 +39,61 @@ concordium-rust-sdk = "9.0.1"
 # `NonceManager`, `reqwest_middleware::Middleware`) that pre-date AFIT.
 # All internal traits use native `async fn` in traits (AFIT).
 async-trait = "0.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["raw_value"] }
-serde_with = "3"
-thiserror = "2"
+serde       = { version = "1", features = ["derive"] }
+serde_json  = { version = "1", features = ["raw_value"] }
+serde_with  = "3"
+thiserror   = "2"
 
 # Runtime
 futures-util = "0.3"
-tokio = { version = "1", features = ["sync", "rt-multi-thread"] }
+tokio        = { version = "1", features = ["sync", "rt-multi-thread"] }
 
 # Web
-axum-core = "0.5"
-http = "1.5"
-httpdate = "1"
-reqwest = { version = "0.13", features = ["json"] }
+axum-core          = "0.5"
+http               = "1.5"
+httpdate           = "1"
+reqwest            = { version = "0.13", features = ["json"] }
 reqwest-middleware = "0.5"
-tower = "0.5"
-url = { version = "2", features = ["serde"] }
+tower              = "0.5"
+url                = { version = "2", features = ["serde"] }
 
 # Official Model Context Protocol Rust SDK (modelcontextprotocol/rust-sdk).
 # Used by r402-mcp the same way Go uses modelcontextprotocol/go-sdk.
 rmcp = { version = "3.1", default-features = false }
 
 # Utility
-base64 = "0.23"
-hex = { version = "0.4", default-features = false, features = ["alloc"] }
-blake2 = "0.11"
-sha3 = "0.12"
+base64       = "0.23"
+hex          = { version = "0.4", default-features = false, features = ["alloc"] }
+blake2       = "0.11"
+sha3         = "0.12"
 # Solana's entire ecosystem still ships bincode 1 (legacy serde wire
 # format). Upgrading to bincode 3 here would split the workspace across
 # two incompatible serialization stacks — keep v1 until upstream moves.
-bincode = "1"
-compact_str = { version = "0.10", features = ["serde"] }
-dashmap = "6"
-moka = { version = "0.12", features = ["sync"] }
-rand = "0.10"
+bincode      = "1"
+compact_str  = { version = "0.10", features = ["serde"] }
+dashmap      = "6"
+moka         = { version = "0.12", features = ["sync"] }
+rand         = "0.10"
 rust_decimal = "1"
-wiremock = "0.6"
+wiremock     = "0.6"
 
 # Alloy (EVM)
 #
 # alloy-core (primitives, sol-types) is on its own 1.x release train.
 # The upper alloy stack (network, provider, transport, signer, rpc-*)
 # is on the 2.x line as of the Glamsterdam-hardfork preparation release.
-alloy-consensus = { version = "2.1", default-features = false, features = ["std", "k256"] }
-alloy-contract = "2.1"
-alloy-eips = { version = "2.1", default-features = false, features = ["std"] }
-alloy-network = "2.1"
-alloy-primitives = { version = "1.6", features = ["k256", "serde"] }
-alloy-provider = "2.1"
-alloy-rpc-client = "2.1"
-alloy-rpc-types-eth = "2.1"
-alloy-signer = "2.1"
-alloy-signer-local = "2.1"
-alloy-sol-types = "1.6"
-alloy-transport = { version = "2.1", features = ["throttle"] }
+alloy-consensus      = { version = "2.1", default-features = false, features = ["std", "k256"] }
+alloy-contract       = "2.1"
+alloy-eips           = { version = "2.1", default-features = false, features = ["std"] }
+alloy-network        = "2.1"
+alloy-primitives     = { version = "1.6", features = ["k256", "serde"] }
+alloy-provider       = "2.1"
+alloy-rpc-client     = "2.1"
+alloy-rpc-types-eth  = "2.1"
+alloy-signer         = "2.1"
+alloy-signer-local   = "2.1"
+alloy-sol-types      = "1.6"
+alloy-transport      = { version = "2.1", features = ["throttle"] }
 alloy-transport-http = "2.1"
 
 # Solana (SVM)
@@ -107,55 +104,55 @@ alloy-transport-http = "2.1"
 # `solana-message` 4.5 / `solana-transaction` 4.2 also disagree on
 # `wincode` 0.5 vs 0.6. Stay on the 3.x client/tx line until the
 # compute-budget interface publishes a matching 4.x.
-solana-account = "3"
-solana-client = "3"
-solana-commitment-config = "3"
+solana-account                  = "3"
+solana-client                   = "3"
+solana-commitment-config        = "3"
 solana-compute-budget-interface = "3"
-solana-keypair = "3"
-solana-message = "3"
-solana-pubkey = "4"
-solana-signature = "3"
-solana-signer = "3"
-solana-transaction = "3"
-spl-token = { version = "9", features = ["no-entrypoint"] }
+solana-keypair                  = "3"
+solana-message                  = "3"
+solana-pubkey                   = "4"
+solana-signature                = "3"
+solana-signer                   = "3"
+solana-transaction              = "3"
+spl-token                       = { version = "9", features = ["no-entrypoint"] }
 # Interface-only sub-crate of `spl-token-2022`. We exclusively need its
 # program ID, `Mint::unpack`, and `transfer_checked` instruction builder,
 # all of which live here without dragging in the processor (and the broken
 # `token_group/processor.rs` in `spl-token-2022 v10.0.0`), confidential
 # transfer, or ZK proof code. Drops dozens of transitive deps too.
-spl-token-2022-interface = "3.1"
+spl-token-2022-interface        = "3.1"
 
 # NEAR
 #
 # near-jsonrpc-client 0.22 pulls reqwest ^0.12. Workspace reqwest stays
 # 0.13; multiple versions are allowed by deny.toml. Do not add workspace
 # reqwest to r402-near.
-near-jsonrpc-client = "0.22"
-near-crypto = "0.37"
-near-primitives = "0.37"
+near-jsonrpc-client     = "0.22"
+near-crypto             = "0.37"
+near-primitives         = "0.37"
 near-jsonrpc-primitives = "0.37"
-borsh = "1.3"
+borsh                   = "1.3"
 
 # XRPL
 #
 # default-features = false; crates enable core + models only. Do not enable
 # wallet, websocket, std, or json-rpc.
-xrpl-rust = { version = "1.3.0", default-features = false }
+xrpl-rust            = { version = "1.3.0", default-features = false }
 # Hedera (Hiero Rust SDK). No rust-version advertised; 0.43.x is Apache-2.0.
-hedera = "0.43"
+hedera               = "0.43"
 # Keeta
 #
 # keetanetwork-client 0.5.1 `std` enables http + tokio + reqwest/rustls.
 # Do not pin keetanetwork-ledger 0.2.1 (depends on block ^0.3.1).
-keetanetwork-client = { version = "0.5.1", default-features = false, features = ["std"] }
-keetanetwork-block = { version = "0.4.1", features = ["std", "rasn"] }
+keetanetwork-client  = { version = "0.5.1", default-features = false, features = ["std"] }
+keetanetwork-block   = { version = "0.4.1", features = ["std", "rasn"] }
 keetanetwork-account = { version = "0.4.0", features = ["std", "rasn"] }
-keetanetwork-crypto = { version = "0.3", features = ["std"] }
+keetanetwork-crypto  = { version = "0.3", features = ["std"] }
 # TON (TVM)
 #
 # Cell/BoC only. Never depend on tonlib-client or tonlib-sys.
-tonlib-core = { version = "0.26", default-features = false }
-ed25519-dalek = "3"
+tonlib-core          = { version = "0.26", default-features = false }
+ed25519-dalek        = "3"
 
 # Stellar
 #
@@ -163,30 +160,30 @@ ed25519-dalek = "3"
 # 1.95). Pin XDR 27.x to the same generation as the RPC client. Do not pull
 # soroban-sdk (contract wasm). Do not pin 23.x.
 stellar-rpc-client = "27.0.0"
-stellar-xdr = { version = "27", default-features = false, features = [
+stellar-xdr        = { version = "27", default-features = false, features = [
     "std",
     "serde",
     "base64",
 ] }
-stellar-strkey = "0.0.18"
-sha2 = "0.10"
+stellar-strkey     = "0.0.18"
+sha2               = "0.10"
 # Aptos (official aptos-labs/aptos-rust-sdk). rust-version 1.95.
 # default-features = false; crates enable ed25519 + SingleKey schemes.
 # Do not use git aptos-core.
-aptos-sdk = { version = "0.6.0", default-features = false, features = [
+aptos-sdk          = { version = "0.6.0", default-features = false, features = [
     "ed25519",
     "secp256k1",
     "secp256r1",
 ] }
 
 # Telemetry
-tracing = "0.1"
+tracing      = "0.1"
 tracing-core = "0.1"
 # Metrics facade — backend-agnostic instrumentation (Prometheus, StatsD,
 # OpenTelemetry, ...). Crates pull this through a `metrics` feature flag
 # so the dep stays optional for downstream consumers that don't ship a
 # recorder.
-metrics = "0.24"
+metrics      = "0.24"
 
 # Property-based testing — only consumed via dev-dependencies, but
 # pinned at the workspace root so all crates run with the same version
@@ -194,162 +191,166 @@ metrics = "0.24"
 proptest = "1"
 # Offer-receipt JWS (ES256 / ES256K). alloy-primitives already pulls k256;
 # pin here so r402-extensions does not take an unpinned transitive.
-p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
-k256 = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+p256     = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+k256     = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
-panic = "abort"
-strip = true
+lto           = "thin"
+panic         = "abort"
+strip         = true
 
 [profile.dev]
-debug = true
+debug     = true
 opt-level = 0
 
 [profile.test]
 opt-level = 2
 
 [profile.ci]
-debug = false
+debug    = false
 inherits = "dev"
 
 [profile.bench]
-debug = true
+debug    = true
 inherits = "release"
 
 [workspace.lints.rust]
-unsafe_code = "deny"
-elided_lifetimes_in_paths = "warn"
-single_use_lifetimes = "warn"
-unused_lifetimes = "warn"
-missing_copy_implementations = "warn"
+unsafe_code                   = "deny"
+elided_lifetimes_in_paths     = "warn"
+single_use_lifetimes          = "warn"
+unused_lifetimes              = "warn"
+missing_copy_implementations  = "warn"
 missing_debug_implementations = "warn"
-missing_docs = "warn"
-trivial_casts = "warn"
-trivial_numeric_casts = "warn"
-variant_size_differences = "warn"
-unused_qualifications = "warn"
-unused_imports = "warn"
-unused_macro_rules = "warn"
-unused_must_use = "deny"
-unreachable_pub = "warn"
-unused_crate_dependencies = "warn"
-non_ascii_idents = "deny"
-non_camel_case_types = "warn"
-non_snake_case = "warn"
-non_upper_case_globals = "warn"
-keyword_idents = { level = "warn", priority = -1 }
-macro_use_extern_crate = "warn"
-meta_variable_misuse = "warn"
-rust_2018_idioms = { level = "deny", priority = -1 }
-rust_2024_compatibility = { level = "warn", priority = -1 }
+missing_docs                  = "warn"
+trivial_casts                 = "warn"
+trivial_numeric_casts         = "warn"
+variant_size_differences      = "warn"
+unused_qualifications         = "warn"
+unused_imports                = "warn"
+unused_macro_rules            = "warn"
+unused_must_use               = "deny"
+unreachable_pub               = "warn"
+unused_crate_dependencies     = "warn"
+non_ascii_idents              = "deny"
+non_camel_case_types          = "warn"
+non_snake_case                = "warn"
+non_upper_case_globals        = "warn"
+keyword_idents                = { level = "warn", priority = -1 }
+macro_use_extern_crate        = "warn"
+meta_variable_misuse          = "warn"
+rust_2018_idioms              = { level = "deny", priority = -1 }
+rust_2024_compatibility       = { level = "warn", priority = -1 }
 
 [workspace.lints.rustdoc]
-all = { level = "warn", priority = -1 }
-broken_intra_doc_links = "warn"
-private_intra_doc_links = "warn"
-missing_crate_level_docs = "warn"
+all                          = { level = "warn", priority = -1 }
+broken_intra_doc_links       = "warn"
+private_intra_doc_links      = "warn"
+missing_crate_level_docs     = "warn"
 invalid_codeblock_attributes = "warn"
-invalid_html_tags = "warn"
-invalid_rust_codeblocks = "warn"
-bare_urls = "warn"
-unescaped_backticks = "warn"
+invalid_html_tags            = "warn"
+invalid_rust_codeblocks      = "warn"
+bare_urls                    = "warn"
+unescaped_backticks          = "warn"
 
 [workspace.lints.clippy]
-correctness = { level = "deny", priority = -1 }
-suspicious = { level = "deny", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-style = { level = "warn", priority = -1 }
-pedantic = { level = "warn", priority = -1 }
-nursery = { level = "warn", priority = -1 }
-cargo = { level = "warn", priority = -1 }
-restriction = { level = "allow", priority = -1 }
+correctness                        = { level = "deny",  priority = -1 }
+suspicious                         = { level = "deny",  priority = -1 }
+complexity                         = { level = "warn",  priority = -1 }
+perf                               = { level = "warn",  priority = -1 }
+style                              = { level = "warn",  priority = -1 }
+pedantic                           = { level = "warn",  priority = -1 }
+nursery                            = { level = "warn",  priority = -1 }
+cargo                              = { level = "warn",  priority = -1 }
+restriction                        = { level = "allow", priority = -1 }
 
-dbg_macro = "warn"
-print_stderr = "warn"
-print_stdout = "warn"
-todo = "warn"
-unimplemented = "warn"
-panic = "warn"
-unwrap_used = "warn"
-unwrap_in_result = "warn"
-expect_used = "warn"
-panic_in_result_fn = "warn"
-indexing_slicing = "warn"
-exit = "warn"
+dbg_macro                          = "warn"
+print_stderr                       = "warn"
+print_stdout                       = "warn"
+todo                               = "warn"
+unimplemented                      = "warn"
+panic                              = "warn"
+unwrap_used                        = "warn"
+unwrap_in_result                   = "warn"
+expect_used                        = "warn"
+panic_in_result_fn                 = "warn"
+indexing_slicing                   = "warn"
+exit                               = "warn"
 
-undocumented_unsafe_blocks = "warn"
-multiple_unsafe_ops_per_block = "warn"
-mem_forget = "warn"
-clone_on_ref_ptr = "warn"
-rc_buffer = "warn"
-rc_mutex = "warn"
+undocumented_unsafe_blocks         = "warn"
+multiple_unsafe_ops_per_block      = "warn"
+mem_forget                         = "warn"
+clone_on_ref_ptr                   = "warn"
+rc_buffer                          = "warn"
+rc_mutex                           = "warn"
 
-fallible_impl_from = "warn"
-error_impl_error = "warn"
-let_underscore_must_use = "warn"
+fallible_impl_from                 = "warn"
+error_impl_error                   = "warn"
+let_underscore_must_use            = "warn"
 
-rest_pat_in_fully_bound_structs = "warn"
-fn_params_excessive_bools = "warn"
-struct_excessive_bools = "warn"
-large_types_passed_by_value = "warn"
-implicit_hasher = "warn"
-redundant_type_annotations = "warn"
+rest_pat_in_fully_bound_structs    = "warn"
+fn_params_excessive_bools          = "warn"
+struct_excessive_bools             = "warn"
+large_types_passed_by_value        = "warn"
+implicit_hasher                    = "warn"
+redundant_type_annotations         = "warn"
 
-str_to_string = "warn"
-string_lit_as_bytes = "warn"
-needless_raw_string_hashes = "warn"
-format_push_string = "warn"
+str_to_string                      = "warn"
+string_lit_as_bytes                = "warn"
+needless_raw_string_hashes         = "warn"
+format_push_string                 = "warn"
 
-cast_possible_truncation = "warn"
-cast_sign_loss = "warn"
-cast_lossless = "warn"
-as_underscore = "warn"
-cast_precision_loss = "allow"
+cast_possible_truncation           = "warn"
+cast_sign_loss                     = "warn"
+cast_lossless                      = "warn"
+as_underscore                      = "warn"
+cast_precision_loss                = "allow"
 
-future_not_send = "warn"
-await_holding_lock = "warn"
-await_holding_refcell_ref = "warn"
-significant_drop_tightening = "warn"
+future_not_send                    = "warn"
+await_holding_lock                 = "warn"
+await_holding_refcell_ref          = "warn"
+significant_drop_tightening        = "warn"
 
 match_wildcard_for_single_variants = "warn"
-match_same_arms = "warn"
-option_if_let_else = "warn"
-wildcard_enum_match_arm = "allow"
+match_same_arms                    = "warn"
+option_if_let_else                 = "warn"
+wildcard_enum_match_arm            = "allow"
 
-cognitive_complexity = "warn"
-too_many_lines = "warn"
-excessive_nesting = "warn"
+cognitive_complexity               = "warn"
+too_many_lines                     = "warn"
+excessive_nesting                  = "warn"
 
-used_underscore_binding = "warn"
-verbose_file_reads = "warn"
-tests_outside_test_module = "warn"
-unnecessary_self_imports = "warn"
-infinite_loop = "warn"
-allow_attributes_without_reason = "warn"
-missing_assert_message = "warn"
-empty_line_after_doc_comments = "warn"
-empty_line_after_outer_attr = "warn"
+used_underscore_binding            = "warn"
+verbose_file_reads                 = "warn"
+tests_outside_test_module          = "warn"
+unnecessary_self_imports           = "warn"
+infinite_loop                      = "warn"
+allow_attributes_without_reason    = "warn"
+missing_assert_message             = "warn"
+empty_line_after_doc_comments      = "warn"
+empty_line_after_outer_attr        = "warn"
 
-missing_docs_in_private_items = "allow"
-missing_errors_doc = "warn"
-missing_panics_doc = "warn"
-missing_safety_doc = "warn"
-doc_markdown = "warn"
-must_use_candidate = "warn"
-return_self_not_must_use = "warn"
+missing_docs_in_private_items      = "allow"
+missing_errors_doc                 = "warn"
+missing_panics_doc                 = "warn"
+missing_safety_doc                 = "warn"
+doc_markdown                       = "warn"
+must_use_candidate                 = "warn"
+return_self_not_must_use           = "warn"
 
-exhaustive_enums = "allow"
-exhaustive_structs = "allow"
-module_name_repetitions = "allow"
-similar_names = "allow"
-shadow_reuse = "allow"
-shadow_same = "allow"
-shadow_unrelated = "warn"
-multiple_crate_versions = "allow"
-cargo_common_metadata = "allow"
-semicolon_inside_block = "allow"
-semicolon_outside_block = "allow"
-redundant_pub_crate = "allow"
+exhaustive_enums                   = "allow"
+exhaustive_structs                 = "allow"
+# Nightly suggestion is `[] as [T; 0]`, which is `trivial_casts`.
+assert_is_empty                    = "allow"
+# serde `Deserialize` on `struct Extra {}` expands to an empty enum.
+empty_enums                        = "allow"
+module_name_repetitions            = "allow"
+similar_names                      = "allow"
+shadow_reuse                       = "allow"
+shadow_same                        = "allow"
+shadow_unrelated                   = "warn"
+multiple_crate_versions            = "allow"
+cargo_common_metadata              = "allow"
+semicolon_inside_block             = "allow"
+semicolon_outside_block            = "allow"
+redundant_pub_crate                = "allow"

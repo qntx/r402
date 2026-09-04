@@ -1,14 +1,13 @@
 [package]
-name = "r402"
-version.workspace = true
-edition.workspace = true
+name                   = "r402"
+version.workspace      = true
+edition.workspace      = true
 rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-homepage.workspace = true
-description = "x402 Payment Protocol SDK for Rust — umbrella crate."
-keywords = ["x402", "payment", "web3", "http-402", "sdk"]
-categories = [
+license.workspace      = true
+repository.workspace   = true
+description            = "x402 Payment Protocol SDK for Rust — umbrella crate."
+keywords               = ["x402", "payment", "web3", "http-402", "sdk"]
+categories             = [
     "api-bindings",
     "web-programming",
     "cryptography::cryptocurrencies",
@@ -20,19 +19,19 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-default = ["evm", "http"]
-evm = ["dep:r402-evm", "r402-evm/client", "r402-evm/server"]
-http = ["dep:r402-http", "r402-http/client", "r402-http/server"]
+default    = ["evm", "http"]
+evm        = ["dep:r402-evm", "r402-evm/client", "r402-evm/server"]
+http       = ["dep:r402-http", "r402-http/client", "r402-http/server"]
 concordium = ["dep:r402-concordium", "r402-concordium/client", "r402-concordium/server"]
 
 [dependencies]
-r402-evm = { workspace = true, optional = true }
-r402-http = { workspace = true, optional = true }
+r402-evm        = { workspace = true, optional = true }
+r402-http       = { workspace = true, optional = true }
 r402-concordium = { workspace = true, optional = true }
 
 [dev-dependencies]
 alloy-primitives = { workspace = true }
-axum = "0.8"
+axum             = "0.8"
 
 [lints]
 workspace = true
