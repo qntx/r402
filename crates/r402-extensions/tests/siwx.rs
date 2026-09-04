@@ -23,11 +23,11 @@ use r402_client::ClientExtension;
 use r402_extensions::siwx::{
     InMemoryPaidAddressStore, PaidAddressStore, SIWX_HTTP_HEADER, SIWX_KEY, SiwxChain,
     SiwxClientExtension, SiwxError, SiwxExtension, SiwxOrigin, SiwxOriginError, SiwxProof,
-    SiwxSigner,
+    SiwxProofError, SiwxSigner,
 };
 use r402_protocol::extension::Extension;
 use r402_protocol::payment::{Base64Bytes, ExtensionEntry, PaymentRequired, ResourceInfo};
-use serde_json::json;
+use serde_json::{Value, json};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -239,6 +239,20 @@ fn sample_proof_at(issued_at: &str, expiration: Option<&str>) -> SiwxProof {
 }
 
 #[test]
+fn signing_message_uses_eip4361_no_statement_blank_lines() {
+    let proof = sample_proof_at("2024-01-15T10:30:00.000Z", None);
+    let raw = proof.signing_message().unwrap();
+    assert!(
+        raw.contains("account:\n0x857b06519E91e3A54538791bDbb0E22373e36b66\n\n\nURI: "),
+        "siwx 0.6 no-statement form is address\\n\\n\\nURI:, got {raw}"
+    );
+    assert!(
+        raw.contains("Issued At: 2024-01-15T10:30:00.000Z"),
+        "issuedAt original must survive formatter: {raw}"
+    );
+}
+
+#[test]
 fn validate_rejects_stale_issued_at() {
     let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
     let proof = sample_proof_at("2020-01-01T00:00:00Z", None);
@@ -372,7 +386,7 @@ async fn solana_malformed_signature() {
     let issued = OffsetDateTime::now_utc().format(&Rfc3339).unwrap();
     let body = json!({
         "domain": origin.domain(),
-        "address": "11111111111111111111111111111111",
+        "address": "GwAF45zjfyGzUbd3i3hXxzGeuchzEZXwpRYHZM5912F1",
         "uri": origin.uri("/premium-data"),
         "version": "1",
         "chainId": "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",
@@ -385,6 +399,26 @@ async fn solana_malformed_signature() {
     let proof = SiwxProof::parse_header(&header).unwrap();
     assert_eq!(
         proof.verify(&origin, "/premium-data").await.unwrap_err(),
+        SiwxError::MalformedSignature
+    );
+}
+
+#[test]
+fn solana_identity_address_is_malformed_signature() {
+    let mut proof = unsigned_proof("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "ed25519");
+    proof.address = "11111111111111111111111111111111".into();
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
+        SiwxError::MalformedSignature
+    );
+}
+
+#[test]
+fn evm_non_eip55_address_is_malformed_signature() {
+    let mut proof = unsigned_proof("eip155:8453", "eip191");
+    proof.address = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045".into();
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
         SiwxError::MalformedSignature
     );
 }
@@ -514,4 +548,184 @@ fn proof_encode_header_roundtrips() {
     let encoded = proof.encode_header().unwrap();
     let again = SiwxProof::parse_header(&encoded).unwrap();
     assert_eq!(again, proof);
+}
+
+fn unsigned_proof(chain_id: &str, signature_type: &str) -> SiwxProof {
+    let body = json!({
+        "domain": "api.example.com",
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": "https://api.example.com/premium-data",
+        "version": "1",
+        "chainId": chain_id,
+        "type": signature_type,
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    SiwxProof::parse_header(&header).unwrap()
+}
+
+fn decode_proof_json(encoded: &str) -> Value {
+    let decoded = Base64Bytes(encoded.as_bytes().to_vec()).decode().unwrap();
+    serde_json::from_slice(&decoded).unwrap()
+}
+
+#[test]
+fn parse_rejects_version_not_one() {
+    let body = json!({
+        "domain": "api.example.com",
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": "https://api.example.com/premium-data",
+        "version": "2",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    assert_eq!(
+        SiwxProof::parse_header(&header).unwrap_err(),
+        SiwxProofError::InvalidField
+    );
+}
+
+#[test]
+fn signing_message_rejects_version_not_one() {
+    let mut proof = unsigned_proof("eip155:8453", "eip191");
+    proof.version = "2".into();
+    assert_eq!(proof.signing_message().unwrap_err(), SiwxError::Signature);
+}
+
+#[test]
+fn validate_at_does_not_check_version_or_type() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let mut proof = sample_proof_at("2020-01-01T00:00:00Z", None);
+    proof.version = "2".into();
+    proof.signature_type = "ed25519".into();
+    let now = OffsetDateTime::parse("2020-01-01T00:01:00Z", &Rfc3339).unwrap();
+    proof.validate_at(&origin, "/premium-data", now).unwrap();
+}
+
+#[test]
+fn type_eip191_with_solana_chain_is_unsupported() {
+    let proof = unsigned_proof("solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp", "eip191");
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
+        SiwxError::UnsupportedChain
+    );
+}
+
+#[test]
+fn type_ed25519_with_eip155_chain_is_unsupported() {
+    let proof = unsigned_proof("eip155:8453", "ed25519");
+    assert_eq!(
+        proof.signing_message().unwrap_err(),
+        SiwxError::UnsupportedChain
+    );
+}
+
+#[test]
+fn eip155_leading_zero_chain_id_is_chain_id() {
+    let proof = unsigned_proof("eip155:01", "eip191");
+    assert_eq!(proof.signing_message().unwrap_err(), SiwxError::ChainId);
+}
+
+#[test]
+fn eip155_zero_chain_id_is_chain_id() {
+    let proof = unsigned_proof("eip155:0", "eip191");
+    assert_eq!(proof.signing_message().unwrap_err(), SiwxError::ChainId);
+}
+
+#[test]
+fn solana_bad_charset_chain_id() {
+    let proof = unsigned_proof("solana:main.net", "ed25519");
+    assert_eq!(proof.signing_message().unwrap_err(), SiwxError::ChainId);
+}
+
+#[test]
+fn bind_origin_rejects_origin_only_uri() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let mut proof = sample_proof_at("2024-01-15T10:30:00.000Z", None);
+    proof.uri = "https://api.example.com/".into();
+    assert_eq!(
+        proof.bind_origin(&origin, "/premium-data").unwrap_err(),
+        SiwxError::UriMismatch
+    );
+}
+
+#[test]
+fn signature_scheme_roundtrips() {
+    let mut body = json!({
+        "domain": "api.example.com",
+        "address": "0x857b06519E91e3A54538791bDbb0E22373e36b66",
+        "uri": "https://api.example.com/premium-data",
+        "version": "1",
+        "chainId": "eip155:8453",
+        "type": "eip191",
+        "signatureScheme": "eip6492",
+        "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+        "issuedAt": "2024-01-15T10:30:00.000Z",
+        "signature": "0xabc"
+    });
+    let header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let proof = SiwxProof::parse_header(&header).unwrap();
+    assert_eq!(proof.signature_scheme.as_deref(), Some("eip6492"));
+    let encoded = proof.encode_header().unwrap();
+    let again = SiwxProof::parse_header(&encoded).unwrap();
+    assert_eq!(again.signature_scheme.as_deref(), Some("eip6492"));
+    assert_eq!(decode_proof_json(&encoded)["signatureScheme"], "eip6492");
+
+    body.as_object_mut().unwrap().remove("signatureScheme");
+    let none_header = Base64Bytes::encode(serde_json::to_vec(&body).unwrap()).to_string();
+    let none = SiwxProof::parse_header(&none_header).unwrap();
+    assert!(none.signature_scheme.is_none());
+    let encoded_none = none.encode_header().unwrap();
+    assert!(
+        decode_proof_json(&encoded_none)
+            .get("signatureScheme")
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn signature_scheme_is_ignored_for_eoa_verify() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let mut proof = signed_evm_proof(&origin, "/premium-data").await;
+    proof.signature_scheme = Some("eip6492".into());
+    proof.verify(&origin, "/premium-data").await.unwrap();
+}
+
+#[tokio::test]
+async fn proof_from_info_copies_chain_signature_scheme() {
+    let origin = SiwxOrigin::parse("https://api.example.com").unwrap();
+    let signer: PrivateKeySigner = FIXTURE_KEY.parse().unwrap();
+    let ext = SiwxClientExtension::new().with_signer(FixtureEvm(signer));
+    let mut required = PaymentRequired::new(ResourceInfo::new(origin.uri("/premium-data")));
+    required.extensions.insert(
+        SIWX_KEY,
+        ExtensionEntry::raw(json!({
+            "info": {
+                "domain": "api.example.com",
+                "uri": "https://api.example.com/premium-data",
+                "version": "1",
+                "nonce": "a1b2c3d4e5f67890a1b2c3d4e5f67890",
+                "issuedAt": "2024-01-15T10:30:00.000Z"
+            },
+            "supportedChains": [{
+                "chainId": "eip155:8453",
+                "type": "eip191",
+                "signatureScheme": "eip6492"
+            }]
+        })),
+    );
+    let headers = ext.on_payment_required(&required).await;
+    let header = headers
+        .get(SIWX_HTTP_HEADER)
+        .expect("SIGN-IN-WITH-X")
+        .to_str()
+        .unwrap();
+    let proof = SiwxProof::parse_header(header).unwrap();
+    assert_eq!(proof.signature_scheme.as_deref(), Some("eip6492"));
 }

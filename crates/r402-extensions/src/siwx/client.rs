@@ -102,12 +102,18 @@ async fn sign_header(
     let info = declaration.get("info")?;
     let chains = declaration.get("supportedChains")?.as_array()?;
     for signer in &extension.signers {
-        let Some((chain_id, signature_type)) = matching_chain(chains, signer.signature_type())
+        let Some((chain_id, signature_type, signature_scheme)) =
+            matching_chain(chains, signer.signature_type())
         else {
             continue;
         };
-        let Some(mut proof) = proof_from_info(info, &chain_id, &signature_type, signer.address())
-        else {
+        let Some(mut proof) = proof_from_info(
+            info,
+            &chain_id,
+            &signature_type,
+            signature_scheme,
+            signer.address(),
+        ) else {
             continue;
         };
         let Ok(message) = proof.signing_message() else {
@@ -148,7 +154,7 @@ fn challenge_bound_to_resource(declaration: &Value, resource_url: &str) -> bool 
 fn matching_chain(
     chains: &[Value],
     signature_type: &str,
-) -> Option<(CompactString, CompactString)> {
+) -> Option<(CompactString, CompactString, Option<CompactString>)> {
     for chain in chains {
         let Some(chain_type) = chain.get("type").and_then(Value::as_str) else {
             continue;
@@ -159,7 +165,11 @@ fn matching_chain(
         let Some(chain_id) = chain.get("chainId").and_then(Value::as_str) else {
             continue;
         };
-        return Some((chain_id.into(), chain_type.into()));
+        let signature_scheme = chain
+            .get("signatureScheme")
+            .and_then(Value::as_str)
+            .map(CompactString::from);
+        return Some((chain_id.into(), chain_type.into(), signature_scheme));
     }
     None
 }
@@ -168,6 +178,7 @@ fn proof_from_info(
     info: &Value,
     chain_id: &str,
     signature_type: &str,
+    signature_scheme: Option<CompactString>,
     address: CompactString,
 ) -> Option<SiwxProof> {
     Some(SiwxProof {
@@ -185,6 +196,7 @@ fn proof_from_info(
         resources: opt_str_array(info, "resources"),
         chain_id: chain_id.into(),
         signature_type: signature_type.into(),
+        signature_scheme,
     })
 }
 

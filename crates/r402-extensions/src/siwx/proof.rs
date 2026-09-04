@@ -24,6 +24,9 @@ pub enum SiwxProofError {
     /// A required proof field is missing or the wrong JSON type.
     #[error("SIGN-IN-WITH-X is missing a required field")]
     MissingField,
+    /// `version` is not `"1"`.
+    #[error("SIGN-IN-WITH-X has an invalid field")]
+    InvalidField,
 }
 
 /// Client proof carried on `SIGN-IN-WITH-X` (base64 JSON).
@@ -57,6 +60,8 @@ pub struct SiwxProof {
     pub chain_id: CompactString,
     /// Signature algorithm (`eip191` / `ed25519`).
     pub signature_type: CompactString,
+    /// Spec `signatureScheme` hint, if the client sent one.
+    pub signature_scheme: Option<CompactString>,
 }
 
 impl SiwxProof {
@@ -65,7 +70,7 @@ impl SiwxProof {
     /// # Errors
     ///
     /// [`SiwxProofError`] when the header is not base64 JSON with the
-    /// required string fields.
+    /// required string fields, or `version` is not `"1"`.
     pub fn parse_header(value: &str) -> Result<Self, SiwxProofError> {
         let decoded = Base64Bytes(value.trim().as_bytes().to_vec())
             .decode()
@@ -94,12 +99,16 @@ impl SiwxProof {
                     .collect()
             })
             .unwrap_or_default();
+        let version = field("version")?;
+        if version != "1" {
+            return Err(SiwxProofError::InvalidField);
+        }
         Ok(Self {
             address: field("address")?,
             signature: field("signature")?,
             domain: field("domain")?,
             uri: field("uri")?,
-            version: field("version")?,
+            version,
             nonce: field("nonce")?,
             issued_at: field("issuedAt")?,
             expiration_time: opt("expirationTime"),
@@ -109,6 +118,7 @@ impl SiwxProof {
             resources,
             chain_id: field("chainId")?,
             signature_type: field("type")?,
+            signature_scheme: opt("signatureScheme"),
         })
     }
 
@@ -164,15 +174,17 @@ impl SiwxProof {
 
     /// Canonical CAIP-122 signing string for this proof's fields.
     ///
-    /// Timestamp fields are echoed verbatim so the bytes match what the
-    /// wallet signed.
+    /// Renders via [`EvmVerifier::format_message`] /
+    /// [`Ed25519Verifier::format_message`]. Timestamp fields are passed
+    /// through `*_raw` so the original RFC 3339 bytes are hashed.
     ///
     /// # Errors
     ///
-    /// [`SiwxError::ChainId`] or [`SiwxError::UnsupportedChain`].
+    /// [`SiwxError::ChainId`], [`SiwxError::UnsupportedChain`], or a field
+    /// error when the proof cannot be turned into a [`SiwxMessage`].
     pub fn signing_message(&self) -> Result<String, SiwxError> {
-        let (chain_name, chain_ref) = chain_profile(&self.chain_id)?;
-        Ok(format_caip122(self, chain_name, chain_ref))
+        let (profile, message) = self.to_siwx_message()?;
+        Ok(profile.format(&message))
     }
 
     /// Field validation plus CAIP-122 signature verification at `now`.
@@ -185,18 +197,19 @@ impl SiwxProof {
         origin: &SiwxOrigin,
         path: &str,
         now: OffsetDateTime,
+        evm: &EvmVerifier,
     ) -> Result<(), SiwxError> {
         self.validate_at(origin, path, now)?;
-        self.verify_signature().await
+        self.verify_signature(evm).await
     }
 
-    /// [`Self::verify_at`] with the current UTC time.
+    /// [`Self::verify_at`] with the current UTC time and [`EvmVerifier::new`].
     ///
     /// # Errors
     ///
     /// Spec `invalid_siwx_*` codes.
     pub async fn verify(&self, origin: &SiwxOrigin, path: &str) -> Result<(), SiwxError> {
-        self.verify_at(origin, path, OffsetDateTime::now_utc())
+        self.verify_at(origin, path, OffsetDateTime::now_utc(), &EvmVerifier::new())
             .await
     }
 
@@ -216,6 +229,9 @@ impl SiwxProof {
             "type".into(),
             Value::String(self.signature_type.to_string()),
         );
+        if let Some(scheme) = &self.signature_scheme {
+            let _ = body.insert("signatureScheme".into(), Value::String(scheme.to_string()));
+        }
         let _ = body.insert("nonce".into(), Value::String(self.nonce.to_string()));
         let _ = body.insert("issuedAt".into(), Value::String(self.issued_at.to_string()));
         let _ = body.insert(
@@ -250,31 +266,88 @@ impl SiwxProof {
         Ok(Base64Bytes::encode(bytes).to_string())
     }
 
-    async fn verify_signature(&self) -> Result<(), SiwxError> {
-        let (chain_name, chain_ref) = chain_profile(&self.chain_id)?;
-        let raw = format_caip122(self, chain_name, chain_ref);
-        let message = self.to_siwx_message(chain_ref)?;
-        if chain_name == "Ethereum" {
-            let sig = decode_evm_signature(&self.signature)?;
-            map_crypto(EvmVerifier::new().verify(&message, &raw, &sig).await, false)
-        } else {
-            let sig = decode_solana_signature(&self.signature)?;
-            map_crypto(
-                Ed25519Verifier::new().verify(&message, &raw, &sig).await,
-                true,
-            )
+    async fn verify_signature(&self, evm: &EvmVerifier) -> Result<(), SiwxError> {
+        let (profile, message) = self.to_siwx_message()?;
+        let raw = profile.format(&message);
+        match profile {
+            ChainProfile::Evm => {
+                let sig = decode_evm_signature(&self.signature)?;
+                map_crypto(evm.verify(&message, &raw, &sig).await, false)
+            }
+            ChainProfile::Svm => {
+                let sig = decode_solana_signature(&self.signature)?;
+                map_crypto(
+                    Ed25519Verifier::new().verify(&message, &raw, &sig).await,
+                    true,
+                )
+            }
         }
     }
 
-    fn to_siwx_message(&self, chain_ref: &str) -> Result<SiwxMessage, SiwxError> {
-        SiwxMessage::new(
+    fn to_siwx_message(&self) -> Result<(ChainProfile, SiwxMessage), SiwxError> {
+        if self.version != "1" {
+            return Err(SiwxError::Signature);
+        }
+        let (profile, chain_ref) = chain_profile(&self.chain_id, &self.signature_type)?;
+        match profile {
+            ChainProfile::Evm => {
+                EvmVerifier::validate_chain_id(chain_ref).map_err(|err| map_message_err(&err))?;
+                if chain_ref == "0" {
+                    return Err(SiwxError::ChainId);
+                }
+            }
+            ChainProfile::Svm => {
+                Ed25519Verifier::validate_chain_id(chain_ref)
+                    .map_err(|err| map_message_err(&err))?;
+            }
+        }
+        let mut message = SiwxMessage::new(
             self.domain.as_str(),
             self.address.as_str(),
             self.uri.as_str(),
             chain_ref,
             self.nonce.as_str(),
         )
-        .map_err(|err| map_message_err(&err))
+        .map_err(|err| map_message_err(&err))?;
+        match profile {
+            ChainProfile::Evm => {
+                EvmVerifier::validate_address(self.address.as_str())
+                    .map_err(|err| map_message_err(&err))?;
+            }
+            ChainProfile::Svm => {
+                Ed25519Verifier::validate_address(self.address.as_str())
+                    .map_err(|err| map_message_err(&err))?;
+            }
+        }
+        message = message
+            .with_issued_at_raw(self.issued_at.as_str())
+            .map_err(|_| SiwxError::IssuedAt)?;
+        if let Some(statement) = &self.statement {
+            message = message
+                .with_statement(statement.as_str())
+                .map_err(|_| SiwxError::Signature)?;
+        }
+        if let Some(exp) = &self.expiration_time {
+            message = message
+                .with_expiration_time_raw(exp.as_str())
+                .map_err(|_| SiwxError::ExpirationTime)?;
+        }
+        if let Some(nbf) = &self.not_before {
+            message = message
+                .with_not_before_raw(nbf.as_str())
+                .map_err(|_| SiwxError::NotBefore)?;
+        }
+        if let Some(rid) = &self.request_id {
+            message = message
+                .with_request_id(rid.as_str())
+                .map_err(|_| SiwxError::Signature)?;
+        }
+        if !self.resources.is_empty() {
+            message = message
+                .with_resources(self.resources.iter().map(CompactString::as_str))
+                .map_err(|_| SiwxError::Signature)?;
+        }
+        Ok((profile, message))
     }
 }
 
@@ -282,18 +355,36 @@ fn parse_ts(raw: &str, on_err: SiwxError) -> Result<OffsetDateTime, SiwxError> {
     OffsetDateTime::parse(raw, &Rfc3339).map_err(|_| on_err)
 }
 
-fn chain_profile(chain_id: &str) -> Result<(&'static str, &str), SiwxError> {
-    if let Some(rest) = chain_id.strip_prefix("eip155:") {
-        if rest.is_empty() || rest.parse::<u64>().ok().is_none_or(|n| n == 0) {
-            return Err(SiwxError::ChainId);
+#[derive(Clone, Copy, Debug)]
+enum ChainProfile {
+    Evm,
+    Svm,
+}
+
+impl ChainProfile {
+    fn format(self, message: &SiwxMessage) -> String {
+        match self {
+            Self::Evm => EvmVerifier::format_message(message),
+            Self::Svm => Ed25519Verifier::format_message(message),
         }
-        return Ok(("Ethereum", rest));
+    }
+}
+
+fn chain_profile<'a>(
+    chain_id: &'a str,
+    signature_type: &str,
+) -> Result<(ChainProfile, &'a str), SiwxError> {
+    if let Some(rest) = chain_id.strip_prefix("eip155:") {
+        if signature_type != "eip191" {
+            return Err(SiwxError::UnsupportedChain);
+        }
+        return Ok((ChainProfile::Evm, rest));
     }
     if let Some(rest) = chain_id.strip_prefix("solana:") {
-        if rest.is_empty() {
-            return Err(SiwxError::ChainId);
+        if signature_type != "ed25519" {
+            return Err(SiwxError::UnsupportedChain);
         }
-        return Ok(("Solana", rest));
+        return Ok((ChainProfile::Svm, rest));
     }
     Err(SiwxError::UnsupportedChain)
 }
@@ -314,10 +405,11 @@ fn decode_solana_signature(signature: &str) -> Result<Vec<u8>, SiwxError> {
 
 fn map_crypto(result: Result<(), siwx::SiwxError>, solana: bool) -> Result<(), SiwxError> {
     result.map_err(|err| match err {
-        siwx::SiwxError::InvalidSignature(_) | siwx::SiwxError::InvalidAddress(_) => {
+        siwx::SiwxError::InvalidSignature { .. } | siwx::SiwxError::InvalidAddress { .. } => {
             SiwxError::MalformedSignature
         }
-        siwx::SiwxError::VerificationFailed(_) => SiwxError::Signature,
+        siwx::SiwxError::VerificationFailed { .. } => SiwxError::Signature,
+        siwx::SiwxError::InvalidChainId { .. } => SiwxError::ChainId,
         _ if solana => SiwxError::MalformedSignature,
         _ => SiwxError::VerifierError,
     })
@@ -325,64 +417,11 @@ fn map_crypto(result: Result<(), siwx::SiwxError>, solana: bool) -> Result<(), S
 
 const fn map_message_err(err: &siwx::SiwxError) -> SiwxError {
     match err {
-        siwx::SiwxError::InvalidNonce(_) => SiwxError::Nonce,
-        siwx::SiwxError::InvalidAddress(_) => SiwxError::MalformedSignature,
-        siwx::SiwxError::InvalidDomain(_) => SiwxError::DomainMismatch,
+        siwx::SiwxError::InvalidNonce { .. } => SiwxError::Nonce,
+        siwx::SiwxError::InvalidAddress { .. } => SiwxError::MalformedSignature,
+        siwx::SiwxError::InvalidDomain { .. } => SiwxError::DomainMismatch,
+        siwx::SiwxError::InvalidUri { .. } => SiwxError::UriMismatch,
+        siwx::SiwxError::InvalidChainId { .. } => SiwxError::ChainId,
         _ => SiwxError::Signature,
     }
-}
-
-fn format_caip122(proof: &SiwxProof, chain_name: &str, chain_ref: &str) -> String {
-    let mut out = String::with_capacity(512);
-    out.push_str(&proof.domain);
-    out.push_str(" wants you to sign in with your ");
-    out.push_str(chain_name);
-    out.push_str(" account:\n");
-    out.push_str(&proof.address);
-    out.push('\n');
-    out.push('\n');
-    if let Some(statement) = &proof.statement {
-        out.push_str(statement);
-        out.push('\n');
-        out.push('\n');
-    }
-    out.push_str("URI: ");
-    out.push_str(&proof.uri);
-    out.push('\n');
-    out.push_str("Version: ");
-    out.push_str(&proof.version);
-    out.push('\n');
-    out.push_str("Chain ID: ");
-    out.push_str(chain_ref);
-    out.push('\n');
-    out.push_str("Nonce: ");
-    out.push_str(&proof.nonce);
-    out.push('\n');
-    out.push_str("Issued At: ");
-    out.push_str(&proof.issued_at);
-    if let Some(exp) = &proof.expiration_time {
-        out.push('\n');
-        out.push_str("Expiration Time: ");
-        out.push_str(exp);
-    }
-    if let Some(nbf) = &proof.not_before {
-        out.push('\n');
-        out.push_str("Not Before: ");
-        out.push_str(nbf);
-    }
-    if let Some(rid) = &proof.request_id {
-        out.push('\n');
-        out.push_str("Request ID: ");
-        out.push_str(rid);
-    }
-    if !proof.resources.is_empty() {
-        out.push('\n');
-        out.push_str("Resources:");
-        for resource in &proof.resources {
-            out.push('\n');
-            out.push_str("- ");
-            out.push_str(resource);
-        }
-    }
-    out
 }

@@ -9,8 +9,7 @@ not in `full`. **[`r402-contract`](r402-contract/)** is an unpublished
 workspace member — not on crates.io, not in `publish.yml`. crates.io
 **`r402-core` 0.17.1** is not yanked.
 
-SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is a git dependency on
-`https://github.com/qntx/siwx` at rev `85cf7bf0e9b867088813781b5cd03a640441c583`.
+SIWX (`siwx` / `siwx-evm` / `siwx-svm`) is crates.io **0.6**.
 
 | Crate | | Description |
 | --- | --- | --- |
@@ -86,7 +85,7 @@ flowchart TB
   end
 
   protocol["r402-protocol"]
-  siwx["siwx git"]
+  siwx["siwx 0.6"]
 
   client --> protocol
   facilitator --> protocol
@@ -138,7 +137,7 @@ flowchart TB
   umbrella -.-> extra
 ```
 
-`r402-contract` has no r402 path dependency. SIWX is a git pin, not a workspace crate.
+`r402-contract` has no r402 path dependency. SIWX is crates.io 0.6, not a workspace crate.
 
 Publish order (crates.io): `r402-protocol` → `r402-client` → `r402-facilitator` → `r402-server` → `r402-extensions` → chain crates → `r402-http` / `r402-mcp` → `r402`. **`r402-contract` is not published.**
 
