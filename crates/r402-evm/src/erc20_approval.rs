@@ -422,6 +422,8 @@ pub(crate) async fn simulate_permit2_settle_with_erc20_approval<P: alloy_provide
     settle_to: Address,
     settle_calldata: alloy_primitives::Bytes,
 ) -> Result<(), crate::error::Eip155ExactError> {
+    use std::future::IntoFuture;
+
     use alloy_consensus::transaction::Transaction;
     use alloy_network::TransactionBuilder;
     use alloy_rpc_types_eth::TransactionRequest;
@@ -462,7 +464,8 @@ pub(crate) async fn simulate_permit2_settle_with_erc20_approval<P: alloy_provide
         return_full_transactions: false,
     };
 
-    let sim_fut = provider.simulate(&payload);
+    // RpcWithBlock is IntoFuture, not Future; Instrument requires Future.
+    let sim_fut = provider.simulate(&payload).into_future();
     let blocks = {
         #[cfg(feature = "telemetry")]
         {
