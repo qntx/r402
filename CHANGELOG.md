@@ -20,6 +20,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   `receipt_timeout_secs` as `send_transaction`. Does not consume a
   facilitator nonce.
 
+### Documentation
+
+- EVM Permit2 rustdoc and README lead with gasless
+  `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring` attach (HTTP
+  auto-register). `auto_approve` is spec Option A and runs only when no
+  sponsoring extension was attached. `new(signer)` stays signer-only
+  (no RPC).
+
 ## [0.20.0] — 2026-09-04
 
 ### Breaking

@@ -68,6 +68,8 @@ let app = Router::new().route(
 
 ### Send Payments (Client)
 
+EIP-3009 needs only a signer:
+
 ```rust
 use alloy_signer_local::PrivateKeySigner;
 use r402::evm::Eip155ExactClient;
@@ -79,6 +81,21 @@ let client = reqwest::Client::new().with_payments(
     X402Client::new().register(Eip155ExactClient::new(signer)),
 );
 let res = client.get("https://api.example.com/paid").send().await?;
+```
+
+Permit2 (`upto`): the 402 must advertise `eip2612GasSponsoring` and/or `erc20ApprovalGasSponsoring` (HTTP auto-register). `.provider(...)` needs `r402-evm` `client-provider`. `auto_approve(true)` is spec Option A and **only runs if no sponsoring extension was attached**. `new(signer)` cannot `readContract`; the first Permit2 payment is HTTP 412.
+
+```rust
+use r402::evm::Eip155UptoClient;
+
+let client = reqwest::Client::new().with_payments(
+    X402Client::new().register(
+        Eip155UptoClient::builder(signer)
+            .provider(alloy_provider)
+            .auto_approve(false)
+            .build(),
+    ),
+);
 ```
 
 ## Settlement Modes
