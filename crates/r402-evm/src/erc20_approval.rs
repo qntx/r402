@@ -549,12 +549,9 @@ where
     P: crate::chain::Eip155MetaTransactionProvider<Error = E> + Sync,
     crate::error::Eip155ExactError: From<E>,
 {
-    use alloy_primitives::Bytes;
     use alloy_provider::Provider;
 
     use crate::chain::contracts::IERC20;
-    use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
-    use crate::error::Eip155ExactError;
     use crate::permit2::PERMIT2_ADDRESS;
 
     let chain_id = provider.chain().inner();
@@ -581,46 +578,84 @@ where
 
     let balance = provider.inner().get_balance(payer).await?;
     let deficit = funding_deficit(approval.native_cost, balance)?;
-    if !deficit.is_zero() {
-        let tx_fut = Eip155MetaTransactionProvider::send_transaction(
-            provider,
-            MetaTransaction {
-                to: payer,
-                calldata: Bytes::new(),
-                confirmations: 1,
-                from: Some(fund_from),
-                value: deficit,
-            },
-        );
-        let receipt = {
-            #[cfg(feature = "telemetry")]
-            {
-                use tracing::Instrument;
-                tx_fut
-                    .instrument(tracing::info_span!(
-                        "erc20_approval_fund",
-                        from = %fund_from,
-                        value = %deficit,
-                        otel.kind = "client",
-                    ))
-                    .await
-            }
-            #[cfg(not(feature = "telemetry"))]
-            {
-                tx_fut.await
-            }
-        };
-        match receipt {
-            Ok(receipt) if receipt.status() => {
-                #[cfg(feature = "telemetry")]
-                tracing::info!(tx = %receipt.transaction_hash, value = %deficit, "erc20_approval_fund");
-            }
-            Ok(_) | Err(_) => return Err(Eip155ExactError::Erc20ApprovalFundingFailed),
-        }
-    }
+    fund_payer_if_needed(provider, payer, fund_from, deficit).await?;
+    let hash = broadcast_signed_approve(provider, &approval.encoded, payer, token).await?;
+    Ok(Some(hash))
+}
 
-    let raw_fut =
-        Eip155MetaTransactionProvider::send_raw_transaction(provider, &approval.encoded, 1);
+#[cfg(feature = "facilitator")]
+async fn fund_payer_if_needed<P, E>(
+    provider: &P,
+    payer: Address,
+    fund_from: Address,
+    deficit: alloy_primitives::U256,
+) -> Result<(), crate::error::Eip155ExactError>
+where
+    P: crate::chain::Eip155MetaTransactionProvider<Error = E> + Sync,
+    crate::error::Eip155ExactError: From<E>,
+{
+    use alloy_primitives::Bytes;
+
+    use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+    use crate::error::Eip155ExactError;
+
+    if deficit.is_zero() {
+        return Ok(());
+    }
+    let tx_fut = Eip155MetaTransactionProvider::send_transaction(
+        provider,
+        MetaTransaction {
+            to: payer,
+            calldata: Bytes::new(),
+            confirmations: 1,
+            from: Some(fund_from),
+            value: deficit,
+        },
+    );
+    let receipt = {
+        #[cfg(feature = "telemetry")]
+        {
+            use tracing::Instrument;
+            tx_fut
+                .instrument(tracing::info_span!(
+                    "erc20_approval_fund",
+                    from = %fund_from,
+                    value = %deficit,
+                    otel.kind = "client",
+                ))
+                .await
+        }
+        #[cfg(not(feature = "telemetry"))]
+        {
+            tx_fut.await
+        }
+    };
+    match receipt {
+        Ok(receipt) if receipt.status() => {
+            #[cfg(feature = "telemetry")]
+            tracing::info!(tx = %receipt.transaction_hash, value = %deficit, "erc20_approval_fund");
+            Ok(())
+        }
+        Ok(_) | Err(_) => Err(Eip155ExactError::Erc20ApprovalFundingFailed),
+    }
+}
+
+#[cfg(feature = "facilitator")]
+#[cfg_attr(not(feature = "telemetry"), allow(unused_variables))]
+async fn broadcast_signed_approve<P, E>(
+    provider: &P,
+    encoded: &[u8],
+    payer: Address,
+    token: Address,
+) -> Result<alloy_primitives::TxHash, crate::error::Eip155ExactError>
+where
+    P: crate::chain::Eip155MetaTransactionProvider<Error = E> + Sync,
+    crate::error::Eip155ExactError: From<E>,
+{
+    use crate::chain::Eip155MetaTransactionProvider;
+    use crate::error::Eip155ExactError;
+
+    let raw_fut = Eip155MetaTransactionProvider::send_raw_transaction(provider, encoded, 1);
     let receipt = {
         #[cfg(feature = "telemetry")]
         {
@@ -655,7 +690,7 @@ where
             receipt.transaction_hash,
         ));
     }
-    Ok(Some(receipt.transaction_hash))
+    Ok(receipt.transaction_hash)
 }
 
 #[cfg(test)]

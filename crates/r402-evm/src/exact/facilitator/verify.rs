@@ -589,8 +589,17 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
         return Err(VerificationError::InvalidSignature("invalid Permit2 signature".into()).into());
     }
 
-    // Simulate the exact proxy call settle would submit: settleWithPermit when
-    // eip2612GasSponsoring is attached, otherwise settle.
+    simulate_permit2_settlement(provider, payment, fund_from, payer, signature_bytes).await?;
+    Ok(payer)
+}
+
+async fn simulate_permit2_settlement<P: Provider>(
+    provider: &P,
+    payment: &Permit2Payment,
+    fund_from: Address,
+    payer: Address,
+    signature_bytes: Bytes,
+) -> Result<(), Eip155ExactError> {
     let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider);
     let permit = IX402Permit2Proxy::Permit {
         permitted: IX402Permit2Proxy::TokenPermissions {
@@ -625,7 +634,9 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
             )
         )
         .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
-    } else if let Some(approval) = payment.erc20_approval.as_ref() {
+        return Ok(());
+    }
+    if let Some(approval) = payment.erc20_approval.as_ref() {
         let native_balance = provider.get_balance(payer).await?;
         let fund_value = funding_deficit(approval.native_cost, native_balance)?;
         assert_facilitator_can_fund(provider, fund_from, fund_value).await?;
@@ -645,24 +656,23 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
             settle_calldata,
         )
         .await?;
-    } else {
-        let settle_call = proxy.settle(permit, payment.from, witness, signature_bytes);
-        let settle_simulation = settle_call.call().into_future();
-        traced!(
-            settle_simulation,
-            tracing::info_span!(
-                "simulate_permit2_settle",
-                from = %payer,
-                to = %payment.to,
-                token = %payment.token,
-                amount = %payment.amount,
-                otel.kind = "client",
-            )
-        )
-        .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+        return Ok(());
     }
-
-    Ok(payer)
+    let settle_call = proxy.settle(permit, payment.from, witness, signature_bytes);
+    let settle_simulation = settle_call.call().into_future();
+    traced!(
+        settle_simulation,
+        tracing::info_span!(
+            "simulate_permit2_settle",
+            from = %payer,
+            to = %payment.to,
+            token = %payment.token,
+            amount = %payment.amount,
+            otel.kind = "client",
+        )
+    )
+    .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+    Ok(())
 }
 
 pub(crate) fn permit2_extension_covers_allowance(

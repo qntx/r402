@@ -23,7 +23,7 @@
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use alloy_network::EthereumWallet;
+use alloy_network::{EthereumWallet, TransactionBuilder};
 use alloy_primitives::{Address, U256, address, hex};
 use alloy_provider::Provider;
 use alloy_signer_local::PrivateKeySigner;
@@ -311,11 +311,7 @@ impl RpcLog {
     }
 
     fn called(&self, to: Address) -> bool {
-        self.call_targets
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|addr| *addr == to)
+        self.call_targets.lock().unwrap().contains(&to)
     }
 }
 
@@ -940,8 +936,8 @@ struct AnvilGuard {
 
 impl Drop for AnvilGuard {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        self.child.kill().ok();
+        self.child.wait().ok();
     }
 }
 
@@ -959,16 +955,17 @@ fn spawn_anvil() -> Option<(AnvilGuard, Url)> {
     let home_anvil = std::env::var("HOME")
         .ok()
         .map(|home| format!("{home}/.foundry/bin/anvil"));
-    let anvil = ["anvil"]
-        .into_iter()
-        .chain(home_anvil.as_deref())
-        .find(|bin| {
-            std::process::Command::new(bin)
-                .arg("--version")
-                .output()
-                .is_ok()
-        })
-        .unwrap_or("anvil");
+    let anvil_ok = |bin: &str| {
+        std::process::Command::new(bin)
+            .arg("--version")
+            .output()
+            .is_ok()
+    };
+    let anvil = match home_anvil.as_deref() {
+        _ if anvil_ok("anvil") => "anvil",
+        Some(path) if anvil_ok(path) => path,
+        _ => "anvil",
+    };
     let child = std::process::Command::new(anvil)
         .args([
             "--port",
@@ -1068,7 +1065,6 @@ async fn token_allowance(provider: &impl Provider, token: Address, owner: Addres
         spender: PERMIT2_ADDRESS,
     }
     .abi_encode();
-    use alloy_network::TransactionBuilder;
     let result = provider
         .call(
             alloy_rpc_types_eth::TransactionRequest::default()
@@ -1134,7 +1130,8 @@ async fn prepare_anvil_erc20() -> Option<(AnvilGuard, String, Address, Address)>
     let provider = provider_wallet_at(&rpc, ANVIL_KEY);
     let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
     let raw = include_str!("mock_erc20.hex");
-    let hex_body = raw.trim().strip_prefix("0x").unwrap_or(raw.trim());
+    let trimmed = raw.trim();
+    let hex_body = trimmed.strip_prefix("0x").unwrap_or(trimmed);
     let bytecode = hex::decode(hex_body).expect("bytecode");
     anvil_set_code(inner, TOKEN, bytecode.into()).await;
     anvil_set_code(

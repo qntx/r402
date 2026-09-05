@@ -294,15 +294,15 @@ impl RpcLog {
     }
 
     fn called(&self, to: Address) -> bool {
-        self.call_targets
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|addr| *addr == to)
+        self.call_targets.lock().unwrap().contains(&to)
     }
 }
 
 #[derive(Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "RPC mock knobs, not a production state machine"
+)]
 struct RpcScript {
     asset: Address,
     payer: Address,
@@ -466,42 +466,51 @@ impl wiremock::Respond for RpcScript {
             "eth_getBalance" => ok(serde_json::json!(format!("0x{:x}", self.native_balance))),
             "eth_getTransactionCount" => ok(serde_json::json!(format!("0x{:x}", self.tx_count))),
             "eth_getBlockByNumber" => ok(latest_block_json(self.base_fee)),
-            "eth_simulateV1" => {
-                if self.simulate_missing {
-                    return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": id,
-                        "error": { "code": -32601, "message": "the method eth_simulateV1 does not exist/is not available" }
-                    }));
-                }
-                let call_count = body
-                    .get("params")
-                    .and_then(|p| p.get(0))
-                    .and_then(|p| p.get("blockStateCalls"))
-                    .and_then(|b| b.get(0))
-                    .and_then(|b| b.get("calls"))
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(2, Vec::len);
-                let mut block = latest_block_json(self.base_fee);
-                let status = if self.simulate_status { "0x1" } else { "0x0" };
-                let calls = (0..call_count)
-                    .map(|_| {
-                        serde_json::json!({
-                            "returnData": "0x",
-                            "logs": [],
-                            "gasUsed": "0x1",
-                            "status": status
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                block
-                    .as_object_mut()
-                    .expect("block object")
-                    .insert("calls".into(), serde_json::Value::Array(calls));
-                ok(serde_json::json!([block]))
-            }
+            "eth_simulateV1" => self.eth_simulate_v1(&body, &id, ok),
             _ => ok(serde_json::json!("0x")),
         }
+    }
+}
+
+impl RpcScript {
+    fn eth_simulate_v1(
+        &self,
+        body: &serde_json::Value,
+        id: &serde_json::Value,
+        ok: impl Fn(serde_json::Value) -> wiremock::ResponseTemplate,
+    ) -> wiremock::ResponseTemplate {
+        if self.simulate_missing {
+            return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "the method eth_simulateV1 does not exist/is not available" }
+            }));
+        }
+        let call_count = body
+            .get("params")
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("blockStateCalls"))
+            .and_then(|b| b.get(0))
+            .and_then(|b| b.get("calls"))
+            .and_then(serde_json::Value::as_array)
+            .map_or(2, Vec::len);
+        let mut block = latest_block_json(self.base_fee);
+        let status = if self.simulate_status { "0x1" } else { "0x0" };
+        let calls = (0..call_count)
+            .map(|_| {
+                serde_json::json!({
+                    "returnData": "0x",
+                    "logs": [],
+                    "gasUsed": "0x1",
+                    "status": status
+                })
+            })
+            .collect::<Vec<_>>();
+        block
+            .as_object_mut()
+            .expect("block object")
+            .insert("calls".into(), serde_json::Value::Array(calls));
+        ok(serde_json::json!([block]))
     }
 }
 
