@@ -14,6 +14,9 @@ use super::verify_permit2::assert_onchain_valid;
 use super::verify_witness::assert_offchain_valid_shared;
 use crate::chain::Eip155ChainReference;
 use crate::eip2612::Eip2612SignedPermit;
+use crate::erc20_approval::{
+    Erc20ApprovalGasSponsoringInfo, ValidatedErc20Approval, decode_erc20_approval_structural,
+};
 use crate::error::Eip155ExactError;
 use crate::permit2::PERMIT2_ADDRESS;
 use crate::signature::StructuredSignature;
@@ -48,6 +51,8 @@ pub(super) struct PreparedUptoPermit2 {
     pub structured_signature: StructuredSignature,
     /// Optional buyer-signed EIP-2612 permit.
     pub eip2612: Option<Eip2612SignedPermit>,
+    /// Buyer-signed ERC-20 `approve` when `erc20ApprovalGasSponsoring` is attached.
+    pub erc20_approval: Option<ValidatedErc20Approval>,
 }
 
 impl PreparedUptoPermit2 {
@@ -77,6 +82,21 @@ impl PreparedUptoPermit2 {
         let structured_signature = StructuredSignature::try_from_bytes(payload.signature.clone())?;
         let eip2612 = Eip2612SignedPermit::from_extensions(extensions)
             .map_err(|e| VerificationError::InvalidFormat(e.to_string()))?;
+        let erc20_approval = match Erc20ApprovalGasSponsoringInfo::from_extensions(extensions) {
+            Ok(Some(info)) => Some(decode_erc20_approval_structural(
+                &info,
+                auth.from,
+                auth.permitted.token,
+                chain_reference.inner(),
+            )?),
+            Ok(None) => None,
+            Err(_) => {
+                return Err(VerificationError::from_wire(
+                    "invalid_erc20_approval_extension_format",
+                )
+                .into());
+            }
+        };
 
         Ok(Self {
             from: auth.from,
@@ -90,6 +110,7 @@ impl PreparedUptoPermit2 {
             eip712_hash,
             structured_signature,
             eip2612,
+            erc20_approval,
         })
     }
 }
@@ -167,7 +188,6 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
     requirements: &payload::v2::PaymentRequirements,
     facilitator_signers: &[Address],
     clock_skew_tolerance: u64,
-    erc20_approval_enabled: bool,
 ) -> Result<Address, Eip155ExactError> {
     let chain_id: ChainId = chain.into();
     if payload.accepted.network != chain_id {
@@ -186,7 +206,7 @@ pub(super) async fn verify_permit2_upto_payment<P: Provider>(
         max_amount,
         &payload.extensions,
         clock_skew_tolerance,
-        erc20_approval_enabled,
+        chain.inner(),
     )
     .await
 }

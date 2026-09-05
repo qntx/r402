@@ -47,6 +47,8 @@ use self::verify::{
     PreparedUptoPermit2, assert_offchain_valid_settle, verify_permit2_upto_payment,
 };
 use crate::chain::Eip155MetaTransactionProvider;
+use crate::eip2612::EIP2612_GAS_SPONSORING_KEY;
+use crate::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY;
 use crate::error::Eip155ExactError;
 use crate::upto::{Eip155Upto, payload};
 
@@ -55,8 +57,6 @@ pub struct Eip155UptoFacilitator<P> {
     provider: P,
     clock_skew_tolerance: u64,
     settlement_cache: SettlementCache,
-    /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
-    erc20_approval_enabled: bool,
     builder_code: Option<BuilderCodeFacilitatorExtension>,
 }
 
@@ -83,16 +83,8 @@ impl<P> Eip155UptoFacilitator<P> {
             provider,
             clock_skew_tolerance: crate::EVM_DEFAULT_CLOCK_SKEW_TOLERANCE_SECS,
             settlement_cache,
-            erc20_approval_enabled: false,
             builder_code: None,
         }
-    }
-
-    /// Register `erc20ApprovalGasSponsoring` on this facilitator (official `getExtension`).
-    #[must_use]
-    pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
-        self.erc20_approval_enabled = true;
-        self
     }
 
     /// Appends an ERC-8021 Schema 2 suffix (`w`) on settlement transactions.
@@ -147,7 +139,6 @@ where
             &request.payment_requirements,
             &signer_addresses,
             self.clock_skew_tolerance,
-            self.erc20_approval_enabled,
         )
         .await?;
         Ok(VerifyResponse::valid(payer.to_string()))
@@ -163,42 +154,15 @@ where
             .nonce
             .into();
         let cache_key = self.permit2_cache_key(nonce);
-        if self.settlement_cache.reserve(cache_key) == Duplicate::Yes {
+        if self.settlement_cache.reserve(cache_key.clone()) == Duplicate::Yes {
             return Err(VerificationError::DuplicateSettlement.into());
         }
 
-        let actual_amount = assert_offchain_valid_settle(
-            &request.payment_payload,
-            &request.payment_requirements,
-            &signer_addresses,
-            self.clock_skew_tolerance,
-        )?;
-
-        let prepared = PreparedUptoPermit2::try_new(
-            *self.provider.chain(),
-            &request.payment_payload.payload,
-            &request.payment_payload.extensions,
-        )?;
-        let payer = prepared.from;
-        let suffix = self.data_suffix(&request.payment_payload.extensions);
-        let outcome =
-            settle_permit2_upto(&self.provider, &prepared, actual_amount, &suffix).await?;
-
-        let network = request.payment_payload.accepted.network.to_string();
-        let transaction = match outcome {
-            UptoSettleOutcome::ZeroSettle => CompactString::new(""),
-            UptoSettleOutcome::OnChain(hash) => hash.to_string().into(),
-        };
-
-        Ok(SettleResponse::Success {
-            payer: Some(payer.to_string().into()),
-            transaction,
-            network: network.into(),
-            amount: Some(actual_amount.to_string().into()),
-            extensions: Extensions::new(),
-            extension_responses: Extensions::new(),
-            extra: None,
-        })
+        let outcome = self.broadcast_upto(&request, &signer_addresses).await;
+        if should_release_cache(&outcome) {
+            self.settlement_cache.release(&cache_key);
+        }
+        outcome
     }
 
     fn supported(
@@ -225,7 +189,62 @@ where
         let _ = signers.insert(Eip155Upto.caip_family().into(), signer_strings);
         std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers)))
+            .with_signers(signers)
+            .with_extensions(vec![
+                EIP2612_GAS_SPONSORING_KEY.into(),
+                ERC20_APPROVAL_GAS_SPONSORING_KEY.into(),
+            ])))
+    }
+}
+
+fn should_release_cache(outcome: &Result<SettleResponse, FacilitatorError>) -> bool {
+    match outcome {
+        Ok(SettleResponse::Success { .. }) => false,
+        Ok(SettleResponse::Failure { transaction, .. }) => transaction.is_empty(),
+        Ok(_) | Err(_) => true,
+    }
+}
+
+impl<P> Eip155UptoFacilitator<P>
+where
+    P: Eip155MetaTransactionProvider + ChainProvider + Send + Sync,
+    P::Inner: Provider,
+    Eip155ExactError: From<P::Error>,
+{
+    async fn broadcast_upto(
+        &self,
+        request: &payload::v2::SettleRequest,
+        signer_addresses: &[Address],
+    ) -> Result<SettleResponse, FacilitatorError> {
+        let actual_amount = assert_offchain_valid_settle(
+            &request.payment_payload,
+            &request.payment_requirements,
+            signer_addresses,
+            self.clock_skew_tolerance,
+        )?;
+        let prepared = PreparedUptoPermit2::try_new(
+            *self.provider.chain(),
+            &request.payment_payload.payload,
+            &request.payment_payload.extensions,
+        )?;
+        let payer = prepared.from;
+        let suffix = self.data_suffix(&request.payment_payload.extensions);
+        let outcome =
+            settle_permit2_upto(&self.provider, &prepared, actual_amount, &suffix).await?;
+        let network = request.payment_payload.accepted.network.to_string();
+        let transaction = match outcome {
+            UptoSettleOutcome::ZeroSettle => CompactString::new(""),
+            UptoSettleOutcome::OnChain(hash) => hash.to_string().into(),
+        };
+        Ok(SettleResponse::Success {
+            payer: Some(payer.to_string().into()),
+            transaction,
+            network: network.into(),
+            amount: Some(actual_amount.to_string().into()),
+            extensions: Extensions::new(),
+            extension_responses: Extensions::new(),
+            extra: None,
+        })
     }
 }
 

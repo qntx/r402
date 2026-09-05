@@ -23,7 +23,7 @@
 )]
 
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, Bytes, U256, address, hex};
@@ -39,15 +39,17 @@ sol! {
 }
 use r402_client::SchemeClient;
 use r402_evm::chain::{Eip155ChainProvider, Eip155ChainReference};
+use r402_evm::eip2612::EIP2612_GAS_SPONSORING_KEY;
+use r402_evm::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY;
 use r402_evm::exact::payload::{ExactPayload, PaymentRequirementsExtra};
 use r402_evm::{
     AssetTransferMethod, Eip155Exact, Eip155ExactClient, Eip155ExactFacilitator, PERMIT2_ADDRESS,
-    USDC,
+    USDC, VALIDATOR_ADDRESS,
 };
 use r402_facilitator::Facilitator;
 use r402_protocol::error::{AsPaymentProblem, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
-    PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest,
+    PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest, VerifyResponse,
 };
 use r402_protocol::scheme::SchemeId;
 use r402_server::{PaymentFlowName, SchemeNetworkServer};
@@ -272,7 +274,35 @@ fn permit2_request(
     })
 }
 
+#[derive(Clone, Default)]
+struct RpcLog {
+    methods: Arc<Mutex<Vec<String>>>,
+    call_targets: Arc<Mutex<Vec<Address>>>,
+}
+
+impl RpcLog {
+    fn record_method(&self, method: &str) {
+        self.methods.lock().unwrap().push(method.to_owned());
+    }
+
+    fn record_call_to(&self, to: Address) {
+        self.call_targets.lock().unwrap().push(to);
+    }
+
+    fn methods(&self) -> Vec<String> {
+        self.methods.lock().unwrap().clone()
+    }
+
+    fn called(&self, to: Address) -> bool {
+        self.call_targets.lock().unwrap().contains(&to)
+    }
+}
+
 #[derive(Clone)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "RPC mock knobs, not a production state machine"
+)]
 struct RpcScript {
     asset: Address,
     payer: Address,
@@ -280,6 +310,61 @@ struct RpcScript {
     payer_code: Vec<u8>,
     allowance: Option<U256>,
     balance: U256,
+    native_balance: U256,
+    tx_count: u64,
+    base_fee: u64,
+    revert_settle: bool,
+    simulate_status: bool,
+    simulate_missing: bool,
+    validator_ok: bool,
+    log: RpcLog,
+}
+
+fn rpc_script(asset: Address, payer: Address, allowance: Option<U256>, balance: U256) -> RpcScript {
+    RpcScript {
+        asset,
+        payer,
+        asset_deployed: true,
+        payer_code: vec![],
+        allowance,
+        balance,
+        native_balance: U256::from(10).pow(U256::from(18)),
+        tx_count: 0,
+        base_fee: 1,
+        revert_settle: true,
+        simulate_status: true,
+        simulate_missing: false,
+        validator_ok: true,
+        log: RpcLog::default(),
+    }
+}
+
+fn latest_block_json(base_fee: u64) -> serde_json::Value {
+    let zero32 = format!("0x{}", "00".repeat(32));
+    let bloom = format!("0x{}", "00".repeat(256));
+    serde_json::json!({
+        "hash": zero32,
+        "parentHash": zero32,
+        "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "miner": "0x0000000000000000000000000000000000000000",
+        "stateRoot": zero32,
+        "transactionsRoot": zero32,
+        "receiptsRoot": zero32,
+        "logsBloom": bloom,
+        "difficulty": "0x0",
+        "number": "0x1",
+        "gasLimit": "0x1c9c380",
+        "gasUsed": "0x0",
+        "timestamp": "0x1",
+        "extraData": "0x",
+        "mixHash": zero32,
+        "nonce": "0x0000000000000000",
+        "baseFeePerGas": format!("0x{base_fee:x}"),
+        "uncles": [],
+        "transactions": [],
+        "size": "0x0",
+        "totalDifficulty": "0x0"
+    })
 }
 
 #[allow(
@@ -306,6 +391,7 @@ impl wiremock::Respond for RpcScript {
                 "result": result
             }))
         };
+        self.log.record_method(method);
         match method {
             "eth_getCode" => {
                 let addr = body
@@ -336,6 +422,12 @@ impl wiremock::Respond for RpcScript {
             }
             "eth_call" => {
                 let call = body.get("params").and_then(|p| p.get(0));
+                let to = call
+                    .and_then(|c| c.get("to"))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|s| s.parse::<Address>().ok())
+                    .unwrap_or(Address::ZERO);
+                self.log.record_call_to(to);
                 let data = call
                     .and_then(|c| c.get("data").or_else(|| c.get("input")))
                     .and_then(serde_json::Value::as_str)
@@ -356,12 +448,69 @@ impl wiremock::Respond for RpcScript {
                 if selector == "70a08231" {
                     return ok(serde_json::json!(format!("0x{:064x}", self.balance)));
                 }
+                if to == VALIDATOR_ADDRESS {
+                    let bit = u64::from(self.validator_ok);
+                    return ok(serde_json::json!(format!("0x{bit:064x}")));
+                }
+                if self.revert_settle && to == r402_evm::exact::X402_EXACT_PERMIT2_PROXY {
+                    return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": 3, "message": "execution reverted" }
+                    }));
+                }
                 ok(serde_json::json!(
                     "0x0000000000000000000000000000000000000000000000000000000000000000"
                 ))
             }
+            "eth_getBalance" => ok(serde_json::json!(format!("0x{:x}", self.native_balance))),
+            "eth_getTransactionCount" => ok(serde_json::json!(format!("0x{:x}", self.tx_count))),
+            "eth_getBlockByNumber" => ok(latest_block_json(self.base_fee)),
+            "eth_simulateV1" => self.eth_simulate_v1(&body, &id, ok),
             _ => ok(serde_json::json!("0x")),
         }
+    }
+}
+
+impl RpcScript {
+    fn eth_simulate_v1(
+        &self,
+        body: &serde_json::Value,
+        id: &serde_json::Value,
+        ok: impl Fn(serde_json::Value) -> wiremock::ResponseTemplate,
+    ) -> wiremock::ResponseTemplate {
+        if self.simulate_missing {
+            return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": { "code": -32601, "message": "the method eth_simulateV1 does not exist/is not available" }
+            }));
+        }
+        let call_count = body
+            .get("params")
+            .and_then(|p| p.get(0))
+            .and_then(|p| p.get("blockStateCalls"))
+            .and_then(|b| b.get(0))
+            .and_then(|b| b.get("calls"))
+            .and_then(serde_json::Value::as_array)
+            .map_or(2, Vec::len);
+        let mut block = latest_block_json(self.base_fee);
+        let status = if self.simulate_status { "0x1" } else { "0x0" };
+        let calls = (0..call_count)
+            .map(|_| {
+                serde_json::json!({
+                    "returnData": "0x",
+                    "logs": [],
+                    "gasUsed": "0x1",
+                    "status": status
+                })
+            })
+            .collect::<Vec<_>>();
+        block
+            .as_object_mut()
+            .expect("block object")
+            .insert("calls".into(), serde_json::Value::Array(calls));
+        ok(serde_json::json!([block]))
     }
 }
 
@@ -391,6 +540,20 @@ async fn try_new_supported_is_exact_on_provider_chain() {
     assert!(
         !supported.signers.is_empty(),
         "try_new provider must advertise signers"
+    );
+    assert!(
+        supported
+            .extensions
+            .iter()
+            .any(|e| e.as_str() == EIP2612_GAS_SPONSORING_KEY),
+        "supported must list eip2612GasSponsoring"
+    );
+    assert!(
+        supported
+            .extensions
+            .iter()
+            .any(|e| e.as_str() == ERC20_APPROVAL_GAS_SPONSORING_KEY),
+        "supported must list erc20ApprovalGasSponsoring"
     );
 }
 
@@ -661,6 +824,14 @@ async fn verify_6492_empty_allowlist_is_factory_not_allowed() {
             payer_code: vec![],
             allowance: Some(U256::from(1_000_000_u64)),
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -688,6 +859,14 @@ async fn settle_6492_empty_allowlist_is_failure_with_empty_tx() {
             payer_code: vec![],
             allowance: Some(U256::from(1_000_000_u64)),
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -725,6 +904,14 @@ async fn verify_6492_allowlisted_factory_is_not_factory_not_allowed() {
             payer_code: vec![],
             allowance: Some(U256::from(1_000_000_u64)),
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -754,6 +941,14 @@ async fn settle_6492_allowlisted_factory_is_not_factory_not_allowed() {
             payer_code: vec![],
             allowance: Some(U256::from(1_000_000_u64)),
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -787,6 +982,14 @@ async fn undeployed_asset_is_asset_not_deployed_contract() {
             payer_code: vec![],
             allowance: Some(U256::from(1_000_000_u64)),
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -813,6 +1016,14 @@ async fn permit2_allowance_rpc_err_without_extensions_is_412() {
             payer_code: vec![],
             allowance: None,
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -845,6 +1056,14 @@ async fn permit2_allowance_rpc_err_with_eip2612_continues() {
             payer_code: vec![],
             allowance: None,
             balance: U256::from(1_000_000_u64),
+            native_balance: U256::from(10).pow(U256::from(18)),
+            tx_count: 0,
+            base_fee: 1,
+            revert_settle: false,
+            simulate_status: true,
+            simulate_missing: false,
+            validator_ok: false,
+            log: RpcLog::default(),
         },
     )
     .await;
@@ -883,20 +1102,61 @@ async fn permit2_allowance_rpc_err_with_eip2612_continues() {
     );
 }
 
+fn sign_max_approve(signer: &PrivateKeySigner, token: Address) -> String {
+    use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
+    use alloy_eips::eip2718::Encodable2718;
+    use alloy_eips::eip2930::AccessList;
+    use alloy_network::TxSignerSync;
+    use alloy_primitives::TxKind;
+
+    let mut calldata = vec![0x09, 0x5e, 0xa7, 0xb3];
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(PERMIT2_ADDRESS.as_slice());
+    calldata.extend_from_slice(&U256::MAX.to_be_bytes::<32>());
+    let mut tx = TxEip1559 {
+        chain_id: 8453,
+        nonce: 0,
+        gas_limit: 80_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: TxKind::Call(token),
+        value: U256::ZERO,
+        access_list: AccessList::default(),
+        input: calldata.into(),
+    };
+    let sig = signer.sign_transaction_sync(&mut tx).expect("sign");
+    format!(
+        "0x{}",
+        hex::encode(TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718())
+    )
+}
+
+fn erc20_ext(payer: Address, asset: Address, signed: &str) -> serde_json::Value {
+    serde_json::json!({
+        "erc20ApprovalGasSponsoring": {
+            "info": {
+                "from": checksum(payer),
+                "asset": checksum(asset),
+                "spender": checksum(PERMIT2_ADDRESS),
+                "amount": U256::MAX.to_string(),
+                "signedTransaction": signed,
+                "version": "1"
+            }
+        }
+    })
+}
+
 #[tokio::test]
-async fn permit2_erc20_payload_stub_does_not_cover_without_facilitator_extension() {
+async fn permit2_erc20_stub_is_402_parse_failed() {
     let server = wiremock::MockServer::start().await;
     let payer = Address::repeat_byte(0xCC);
     let asset = USDC::base().address;
     mount_rpc(
         &server,
         RpcScript {
-            asset,
-            payer,
-            asset_deployed: true,
-            payer_code: vec![],
-            allowance: None,
-            balance: U256::from(1_000_000_u64),
+            allowance: Some(U256::ZERO),
+            revert_settle: true,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
         },
     )
     .await;
@@ -911,7 +1171,7 @@ async fn permit2_erc20_payload_stub_does_not_cover_without_facilitator_extension
                         "from": checksum(payer),
                         "asset": checksum(asset),
                         "spender": checksum(PERMIT2_ADDRESS),
-                        "amount": "1000000",
+                        "amount": U256::MAX.to_string(),
                         "signedTransaction": "0xdead",
                         "version": "1"
                     }
@@ -919,7 +1179,29 @@ async fn permit2_erc20_payload_stub_does_not_cover_without_facilitator_extension
             }),
         )))
         .await
-        .expect_err("payload-only erc20 does not cover");
+        .expect_err("invalid envelope is 402");
+    assert_eq!(verify_reason(err), "erc20_approval_tx_parse_failed");
+}
+
+#[tokio::test]
+async fn permit2_missing_erc20_key_low_allowance_is_412() {
+    let server = wiremock::MockServer::start().await;
+    let payer = Address::repeat_byte(0xCC);
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64)),
+    )
+    .await;
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &serde_json::json!({}),
+        )))
+        .await
+        .expect_err("missing covering is 412");
     assert!(matches!(
         err,
         FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
@@ -927,13 +1209,42 @@ async fn permit2_erc20_payload_stub_does_not_cover_without_facilitator_extension
 }
 
 #[tokio::test]
-async fn permit2_allowance_rpc_err_with_facilitator_erc20_and_valid_tx_continues() {
-    use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
-    use alloy_eips::eip2718::Encodable2718;
-    use alloy_eips::eip2930::AccessList;
-    use alloy_network::TxSignerSync;
-    use alloy_primitives::TxKind;
+async fn permit2_erc20_covering_skips_isolated_settle_and_calls_simulate() {
+    let server = wiremock::MockServer::start().await;
+    let (signer, _) = wallet();
+    let payer = signer.address();
+    let asset = USDC::base().address;
+    let script = RpcScript {
+        revert_settle: true,
+        simulate_status: true,
+        ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+    };
+    let log = script.log.clone();
+    mount_rpc(&server, script).await;
+    let signed = sign_max_approve(&signer, asset);
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let resp = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &erc20_ext(payer, asset, &signed),
+        )))
+        .await
+        .expect("covering simulate succeeds");
+    assert!(matches!(resp, VerifyResponse::Valid { .. }), "got {resp:?}");
+    assert!(
+        log.methods().iter().any(|m| m == "eth_simulateV1"),
+        "covering must call eth_simulateV1, got {:?}",
+        log.methods()
+    );
+    assert!(
+        !log.called(r402_evm::exact::X402_EXACT_PERMIT2_PROXY),
+        "covering must not isolated eth_call settle"
+    );
+}
 
+#[tokio::test]
+async fn permit2_erc20_simulate_status_false_is_simulation_failed() {
     let server = wiremock::MockServer::start().await;
     let (signer, _) = wallet();
     let payer = signer.address();
@@ -941,62 +1252,62 @@ async fn permit2_allowance_rpc_err_with_facilitator_erc20_and_valid_tx_continues
     mount_rpc(
         &server,
         RpcScript {
-            asset,
-            payer,
-            asset_deployed: true,
-            payer_code: vec![],
-            allowance: None,
-            balance: U256::from(1_000_000_u64),
+            revert_settle: true,
+            simulate_status: false,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
         },
     )
     .await;
-    let mut calldata = vec![0x09, 0x5e, 0xa7, 0xb3];
-    calldata.extend_from_slice(&[0u8; 12]);
-    calldata.extend_from_slice(PERMIT2_ADDRESS.as_slice());
-    calldata.extend_from_slice(&[0u8; 32]);
-    let mut tx = TxEip1559 {
-        chain_id: 8453,
-        nonce: 0,
-        gas_limit: 80_000,
-        max_fee_per_gas: 1_000_000_000,
-        max_priority_fee_per_gas: 1_000_000,
-        to: TxKind::Call(asset),
-        value: U256::ZERO,
-        access_list: AccessList::default(),
-        input: calldata.into(),
-    };
-    let sig = signer.sign_transaction_sync(&mut tx).expect("sign");
-    let signed = format!(
-        "0x{}",
-        hex::encode(TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718())
-    );
-    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri()))
-        .expect("try_new")
-        .with_erc20_approval_gas_sponsoring();
+    let signed = sign_max_approve(&signer, asset);
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
     let err = fac
         .verify(VerifyRequest::from(permit2_request(
             payer,
             asset,
-            &serde_json::json!({
-                "erc20ApprovalGasSponsoring": {
-                    "info": {
-                        "from": checksum(payer),
-                        "asset": checksum(asset),
-                        "spender": checksum(PERMIT2_ADDRESS),
-                        "amount": "1000000",
-                        "signedTransaction": signed,
-                        "version": "1"
-                    }
-                }
-            }),
+            &erc20_ext(payer, asset, &signed),
         )))
         .await
-        .expect_err("simulation after erc20 catch");
+        .expect_err("status false");
+    assert!(
+        matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::SimulationFailed(_))
+        ),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn permit2_erc20_missing_simulate_is_transport() {
+    let server = wiremock::MockServer::start().await;
+    let (signer, _) = wallet();
+    let payer = signer.address();
+    let asset = USDC::base().address;
+    mount_rpc(
+        &server,
+        RpcScript {
+            revert_settle: true,
+            simulate_missing: true,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+        },
+    )
+    .await;
+    let signed = sign_max_approve(&signer, asset);
+    let fac = Eip155ExactFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(permit2_request(
+            payer,
+            asset,
+            &erc20_ext(payer, asset, &signed),
+        )))
+        .await
+        .expect_err("missing eth_simulateV1");
+    assert!(err.is_transport(), "got {err:?}");
     assert!(
         !matches!(
             err,
-            FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+            FacilitatorError::Verification(VerificationError::SimulationFailed(_))
         ),
-        "got {err:?}"
+        "missing method must not be SimulationFailed"
     );
 }

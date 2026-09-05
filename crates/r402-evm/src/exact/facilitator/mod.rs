@@ -31,6 +31,8 @@ use r402_protocol::payment::{
 use r402_protocol::scheme::{ExactScheme, SchemeId};
 
 use crate::chain::Eip155MetaTransactionProvider;
+use crate::eip2612::EIP2612_GAS_SPONSORING_KEY;
+use crate::erc20_approval::{ERC20_APPROVAL_GAS_SPONSORING_KEY, ValidatedErc20Approval};
 use crate::exact::{Eip155Exact, ExactPayload, payload};
 
 /// Awaits a future, optionally instrumenting it with a tracing span.
@@ -136,6 +138,8 @@ pub struct Permit2Payment {
     pub signature: Bytes,
     /// Buyer-signed EIP-2612 permit when `eip2612GasSponsoring` is attached.
     pub eip2612: Option<crate::eip2612::Eip2612SignedPermit>,
+    /// Buyer-signed ERC-20 `approve` when `erc20ApprovalGasSponsoring` is attached.
+    pub erc20_approval: Option<ValidatedErc20Approval>,
 }
 
 /// Facilitator for EIP-155 exact scheme payments.
@@ -161,8 +165,6 @@ pub struct Eip155ExactFacilitator<P> {
     eip6492_allowed_factories: Vec<Address>,
     /// Broadcast-but-unconfirmed settlement hashes keyed by signature hex.
     pending: Arc<dyn PendingSettlementStore>,
-    /// Whether `erc20ApprovalGasSponsoring` is registered on this facilitator.
-    erc20_approval_enabled: bool,
     /// Optional ERC-8021 builder-code suffix at settle (`w` + echoed `a`/`s`).
     builder_code: Option<BuilderCodeFacilitatorExtension>,
 }
@@ -202,7 +204,6 @@ impl<P> Eip155ExactFacilitator<P> {
             settlement_cache,
             eip6492_allowed_factories: Vec::new(),
             pending: Arc::new(InMemoryPendingSettlementStore::new()),
-            erc20_approval_enabled: false,
             builder_code: None,
         }
     }
@@ -218,13 +219,6 @@ impl<P> Eip155ExactFacilitator<P> {
     #[must_use]
     pub fn with_pending_store(mut self, store: Arc<dyn PendingSettlementStore>) -> Self {
         self.pending = store;
-        self
-    }
-
-    /// Register `erc20ApprovalGasSponsoring` on this facilitator (official `getExtension`).
-    #[must_use]
-    pub const fn with_erc20_approval_gas_sponsoring(mut self) -> Self {
-        self.erc20_approval_enabled = true;
         self
     }
 
@@ -361,7 +355,6 @@ where
                     payload,
                     requirements,
                     self.clock_skew_tolerance,
-                    self.erc20_approval_enabled,
                 )
                 .await
                 {
@@ -377,7 +370,13 @@ where
                 };
                 let payer = payment.from;
                 let suffix = self.data_suffix(&payload.extensions);
-                match settle_permit2_payment(&self.provider, &payment, &suffix).await {
+                let fund_from = match crate::erc20_approval::first_hot_wallet(&self.provider) {
+                    Ok(addr) => addr,
+                    Err(err) => {
+                        return self.map_settle_error(err.into(), pending_key, payer, network);
+                    }
+                };
+                match settle_permit2_payment(&self.provider, &payment, &suffix, fund_from).await {
                     Ok(tx_hash) => {
                         self.pending.delete(pending_key);
                         Ok(settle_success(payer, tx_hash, network, amount))
@@ -541,11 +540,16 @@ where
                     payload,
                     requirements,
                     self.clock_skew_tolerance,
-                    self.erc20_approval_enabled,
                 )
                 .await?;
-                let payer =
-                    verify_permit2_payment(self.provider.inner(), &payment, &eip712_domain).await?;
+                let fund_from = crate::erc20_approval::first_hot_wallet(&self.provider)?;
+                let payer = verify_permit2_payment(
+                    self.provider.inner(),
+                    &payment,
+                    &eip712_domain,
+                    fund_from,
+                )
+                .await?;
                 Ok(VerifyResponse::valid(payer.to_string()))
             }
         }
@@ -607,7 +611,11 @@ where
         );
         std::future::ready(Ok(SupportedResponse::new()
             .with_kinds(kinds)
-            .with_signers(signers)))
+            .with_signers(signers)
+            .with_extensions(vec![
+                EIP2612_GAS_SPONSORING_KEY.into(),
+                ERC20_APPROVAL_GAS_SPONSORING_KEY.into(),
+            ])))
     }
 }
 

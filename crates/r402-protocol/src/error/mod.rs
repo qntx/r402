@@ -211,6 +211,9 @@ pub enum FacilitatorTransportKind {
     /// Connect, DNS, TLS, body-read, or auth-header resolution failed.
     #[error("facilitator I/O failure")]
     Io,
+    /// Chain JSON-RPC does not implement a method the facilitator requires.
+    #[error("chain RPC missing a required method")]
+    RpcMethodMissing,
 }
 
 /// Top-level facilitator failure.
@@ -370,6 +373,18 @@ mod tests {
         assert!(
             err.as_payment_problem().is_none(),
             "I/O transport is HTTP 502, not a 402 payment problem"
+        );
+    }
+
+    #[test]
+    fn rpc_method_missing_is_transport_not_payment_problem() {
+        let kind = FacilitatorTransportKind::RpcMethodMissing;
+        assert_eq!(kind.to_string(), "chain RPC missing a required method");
+        let err = FacilitatorError::transport(kind);
+        assert!(err.is_transport());
+        assert!(
+            err.as_payment_problem().is_none(),
+            "missing RPC method is HTTP 502, not a 402 payment problem"
         );
     }
 

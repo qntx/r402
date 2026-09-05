@@ -20,6 +20,7 @@ use super::{Eip3009Payment, Permit2Payment};
 use crate::chain::contracts::IERC20;
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
 use crate::eip2612::Eip2612SignedPermit;
+use crate::erc20_approval::relay_erc20_approval;
 use crate::error::Eip155ExactError;
 use crate::exact::X402_EXACT_PERMIT2_PROXY;
 use crate::signature::{ClassifiedSignature, classify_with_code};
@@ -352,11 +353,19 @@ pub(super) async fn settle_permit2_payment<P, E>(
     provider: &P,
     payment: &Permit2Payment,
     data_suffix: &[u8],
+    fund_from: Address,
 ) -> Result<TxHash, Eip155ExactError>
 where
     P: Eip155MetaTransactionProvider<Error = E> + Sync,
     Eip155ExactError: From<E>,
 {
+    if payment.eip2612.is_none()
+        && let Some(approval) = payment.erc20_approval.as_ref()
+    {
+        let _ = relay_erc20_approval(provider, approval, payment.from, payment.amount, fund_from)
+            .await?;
+    }
+
     let proxy = IX402Permit2Proxy::new(X402_EXACT_PERMIT2_PROXY, provider.inner());
 
     let permit = IX402Permit2Proxy::Permit {
