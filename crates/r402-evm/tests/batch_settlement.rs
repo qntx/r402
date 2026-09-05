@@ -388,18 +388,16 @@ impl Eip155MetaTransactionProvider for RecordingProvider {
     }
 }
 
-#[tokio::test]
-async fn recording_provider_send_raw_transaction_unused() {
-    let provider = RecordingProvider {
+fn unused_recording_provider() -> RecordingProvider {
+    RecordingProvider {
         inner: dummy_provider(),
         sent: Arc::new(Mutex::new(Vec::new())),
         send_mode: Arc::new(Mutex::new(SendMode::Success)),
-    };
-    let err = provider
-        .send_raw_transaction(&[0x02], 1)
-        .await
-        .expect_err("recording double does not relay raw envelopes");
-    match &err {
+    }
+}
+
+fn assert_raw_path_unused(err: MetaTransactionSendError) {
+    match err {
         MetaTransactionSendError::Custom(msg) => {
             assert_eq!(
                 msg, "send_raw_transaction not used",
@@ -408,20 +406,24 @@ async fn recording_provider_send_raw_transaction_unused() {
         }
         other => panic!("expected Custom, got {other:?}"),
     }
-    let wrapped = Arc::new(provider);
-    let err = wrapped
+}
+
+#[tokio::test]
+async fn recording_provider_send_raw_transaction_unused() {
+    let err = unused_recording_provider()
+        .send_raw_transaction(&[0x02], 1)
+        .await
+        .expect_err("recording double does not relay raw envelopes");
+    assert_raw_path_unused(err);
+}
+
+#[tokio::test]
+async fn arc_recording_provider_forwards_send_raw_transaction() {
+    let err = Arc::new(unused_recording_provider())
         .send_raw_transaction(&[0x02], 1)
         .await
         .expect_err("Arc double must forward send_raw_transaction");
-    match err {
-        MetaTransactionSendError::Custom(msg) => {
-            assert_eq!(
-                msg, "send_raw_transaction not used",
-                "Arc forwarding must preserve Custom"
-            );
-        }
-        other => panic!("expected Custom, got {other:?}"),
-    }
+    assert_raw_path_unused(err);
 }
 
 fn provider_at(rpc: &str) -> Eip155ChainProvider {
