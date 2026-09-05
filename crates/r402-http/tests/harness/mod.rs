@@ -27,7 +27,9 @@ use axum_core::response::Response;
 use compact_str::CompactString;
 use http::{HeaderValue, StatusCode};
 use r402_facilitator::Facilitator;
-use r402_http::server::{PAYMENT_SIGNATURE, PriceTagSource, X402Layer, X402Middleware};
+use r402_http::server::{
+    PAYMENT_REQUIRED, PAYMENT_SIGNATURE, PriceTagSource, X402Layer, X402Middleware,
+};
 use r402_protocol::error::{ErrorReason, FacilitatorError, FacilitatorTransportKind};
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{
@@ -116,6 +118,8 @@ pub struct FakeFacilitator {
     pub verify: Mutex<VerifyScript>,
     pub settle: Mutex<SettleScript>,
     pub supported: Mutex<SupportedScript>,
+    pub supported_kinds: Mutex<Option<Vec<SupportedPaymentKind>>>,
+    pub supported_extensions: Mutex<Vec<CompactString>>,
     pub settle_hold: Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
@@ -128,6 +132,8 @@ impl FakeFacilitator {
             verify: Mutex::new(VerifyScript::Valid),
             settle: Mutex::new(SettleScript::Ok),
             supported: Mutex::new(SupportedScript::Ok),
+            supported_kinds: Mutex::new(None),
+            supported_extensions: Mutex::new(Vec::new()),
             settle_hold: Mutex::new(None),
         }
     }
@@ -219,9 +225,18 @@ impl Facilitator for FakeFacilitator {
             SupportedScript::Ok => {
                 let mut signers = HashMap::new();
                 signers.insert("eip155:1".into(), vec!["0xfeePayer".into()]);
+                signers.insert("eip155:8453".into(), vec!["0xfeePayer".into()]);
+                let kinds = self
+                    .supported_kinds
+                    .lock()
+                    .unwrap()
+                    .clone()
+                    .unwrap_or_else(|| vec![SupportedPaymentKind::new(2, "exact", "eip155:1")]);
+                let extensions = self.supported_extensions.lock().unwrap().clone();
                 Ok(SupportedResponse::new()
-                    .with_kinds(vec![SupportedPaymentKind::new(2, "exact", "eip155:1")])
-                    .with_signers(signers))
+                    .with_kinds(kinds)
+                    .with_signers(signers)
+                    .with_extensions(extensions))
             }
             SupportedScript::Empty => Ok(SupportedResponse::new()),
             SupportedScript::Transport => Err(FacilitatorError::transport(
@@ -406,6 +421,17 @@ where
 {
     let mut svc = layer.layer(inner);
     svc.call(req).await.expect("infallible")
+}
+
+pub fn decode_payment_required(response: &Response) -> serde_json::Value {
+    let header = response
+        .headers()
+        .get(PAYMENT_REQUIRED)
+        .expect("Payment-Required");
+    let decoded = Base64Bytes::from(header.as_bytes())
+        .decode()
+        .expect("base64");
+    serde_json::from_slice(&decoded).expect("json")
 }
 
 pub async fn json_body(response: Response) -> serde_json::Value {

@@ -8,6 +8,7 @@ use std::task::{Context, Poll};
 
 use axum_core::extract::Request;
 use axum_core::response::Response;
+use r402_protocol::extension::Extension;
 use r402_protocol::network::ChainIdPattern;
 use r402_protocol::payment::{PriceTag, ResourceInfo};
 use r402_server::{BackgroundSettlementTracker, ResourceServer, SchemeNetworkServer};
@@ -209,6 +210,13 @@ impl<TSource> X402Layer<TSource> {
         scheme: impl SchemeNetworkServer + 'static,
     ) -> Self {
         self.server.register_scheme(network, scheme);
+        self
+    }
+
+    /// Registers a protocol extension advertised on 402 responses.
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl Extension + 'static) -> Self {
+        self.server = self.server.with_extension(extension);
         self
     }
 
