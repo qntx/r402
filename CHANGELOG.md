@@ -6,11 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-09-05
+
 ### Breaking
 
 - `r402-evm` `MetaTransaction` now has `value: U256`. `new()` and existing
   literals use `U256::ZERO`. `send_transaction` applies
   `TransactionRequest::with_value`.
+- `Eip155ExactFacilitator` / `Eip155UptoFacilitator`
+  `with_erc20_approval_gas_sponsoring` is gone. ERC-20 covering is always
+  on. `supported()` lists `eip2612GasSponsoring` and
+  `erc20ApprovalGasSponsoring`.
+- `SchemePaymentRequiredContext` carries `network: &'a ChainId`.
+  `new()` takes it. Enrich may add `extra` keys only on the matching
+  `(scheme, network)` accept.
 
 ### Added
 
@@ -19,6 +28,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
   for the receipt with the same confirmation count and
   `receipt_timeout_secs` as `send_transaction`. Does not consume a
   facilitator nonce.
+- Permit2 ERC-20 covering (spec Option B): verify `eth_simulateV1` of
+  optional native fund + unsigned approve + settle (`validation: false`,
+  copied gas/fees, `calls[].status`). Missing method is
+  `FacilitatorTransportKind::RpcMethodMissing` (HTTP 502). Settle
+  funds native if needed (deficit cap 0.002 ETH), `send_raw` the
+  buyer-signed approve, then `settle`. Per-payer+token mutex;
+  allowance-first skip; pinned `fund_from`. Invalid ERC-20 envelope
+  is 402 `erc20_approval_*`. Isolated `settle` eth_call is not the
+  covering path.
+- `X402Middleware::with_extension` and `X402Layer::with_extension`.
+  402-build inserts `eip2612GasSponsoring` on every Permit2 accept;
+  `erc20ApprovalGasSponsoring` only when `/supported.extensions` lists
+  it. EIP-3009 accepts do not gain the keys.
+- `Eip155Upto::price_tag` copies EIP-712 `name` / `version` (Base USDC
+  `"USD Coin"` / `"2"`).
+
+### Changed
+
+- Workspace version **0.21.0**. Path workspace deps use `version = "0.21"`.
+
+### Fixed
+
+- Scheme 402 enrich is bound to the accept network. Two EVM nets in one
+  402 no longer trip the mutation policy (HTTP 500).
 
 ### Documentation
 
@@ -742,6 +775,7 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.21.0]: https://github.com/qntx/r402/releases/tag/v0.21.0
 [0.20.0]: https://github.com/qntx/r402/releases/tag/v0.20.0
 [0.19.1]: https://github.com/qntx/r402/releases/tag/v0.19.1
 [0.19.0]: https://github.com/qntx/r402/releases/tag/v0.19.0
