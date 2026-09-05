@@ -7,33 +7,33 @@ resolver        = "3"
 # Fields below are shared across every member crate via `field.workspace =
 # true`. `keywords` and `categories` stay per-crate so crates.io search
 # matches each crate's audience.
-version      = "0.20.0"
+version      = "0.21.0"
 edition      = "2024"
 rust-version = "1.95"
 license      = "MIT OR Apache-2.0"
 repository   = "https://github.com/qntx/r402"
 
 [workspace.dependencies]
-r402-protocol    = { version = "0.20", path = "crates/r402-protocol" }
-r402-client      = { version = "0.20", path = "crates/r402-client" }
-r402-facilitator = { version = "0.20", path = "crates/r402-facilitator", default-features = false }
-r402-server      = { version = "0.20", path = "crates/r402-server" }
-r402-extensions  = { version = "0.20", path = "crates/r402-extensions", default-features = false }
-r402-http        = { version = "0.20", path = "crates/r402-http", default-features = false }
-r402-mcp         = { version = "0.20", path = "crates/r402-mcp", default-features = false }
-r402-evm         = { version = "0.20", path = "crates/r402-evm", default-features = false }
-r402-svm         = { version = "0.20", path = "crates/r402-svm", default-features = false }
-r402-near        = { version = "0.20", path = "crates/r402-near", default-features = false }
-r402-xrpl        = { version = "0.20", path = "crates/r402-xrpl", default-features = false }
-r402-hedera      = { version = "0.20", path = "crates/r402-hedera", default-features = false }
-r402-avm         = { version = "0.20", path = "crates/r402-avm", default-features = false }
-r402-aptos       = { version = "0.20", path = "crates/r402-aptos", default-features = false }
-r402-keeta       = { version = "0.20", path = "crates/r402-keeta", default-features = false }
-r402-tvm         = { version = "0.20", path = "crates/r402-tvm", default-features = false }
-r402-stellar     = { version = "0.20", path = "crates/r402-stellar", default-features = false }
-r402-concordium  = { version = "0.20", path = "crates/r402-concordium", default-features = false }
-r402-tron        = { version = "0.20", path = "crates/r402-tron", default-features = false }
-r402-casper      = { version = "0.20", path = "crates/r402-casper", default-features = false }
+r402-protocol    = { version = "0.21", path = "crates/r402-protocol" }
+r402-client      = { version = "0.21", path = "crates/r402-client" }
+r402-facilitator = { version = "0.21", path = "crates/r402-facilitator", default-features = false }
+r402-server      = { version = "0.21", path = "crates/r402-server" }
+r402-extensions  = { version = "0.21", path = "crates/r402-extensions", default-features = false }
+r402-http        = { version = "0.21", path = "crates/r402-http", default-features = false }
+r402-mcp         = { version = "0.21", path = "crates/r402-mcp", default-features = false }
+r402-evm         = { version = "0.21", path = "crates/r402-evm", default-features = false }
+r402-svm         = { version = "0.21", path = "crates/r402-svm", default-features = false }
+r402-near        = { version = "0.21", path = "crates/r402-near", default-features = false }
+r402-xrpl        = { version = "0.21", path = "crates/r402-xrpl", default-features = false }
+r402-hedera      = { version = "0.21", path = "crates/r402-hedera", default-features = false }
+r402-avm         = { version = "0.21", path = "crates/r402-avm", default-features = false }
+r402-aptos       = { version = "0.21", path = "crates/r402-aptos", default-features = false }
+r402-keeta       = { version = "0.21", path = "crates/r402-keeta", default-features = false }
+r402-tvm         = { version = "0.21", path = "crates/r402-tvm", default-features = false }
+r402-stellar     = { version = "0.21", path = "crates/r402-stellar", default-features = false }
+r402-concordium  = { version = "0.21", path = "crates/r402-concordium", default-features = false }
+r402-tron        = { version = "0.21", path = "crates/r402-tron", default-features = false }
+r402-casper      = { version = "0.21", path = "crates/r402-casper", default-features = false }
 # CAIP-122 (SIWX). crates.io 0.6.1; never restore a git or path pin.
 siwx             = "0.6"
 siwx-evm         = "0.6"

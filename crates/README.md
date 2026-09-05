@@ -1,6 +1,6 @@
 # Crates
 
-Workspace **0.20.0**. Path dependencies match the graph below. Umbrella
+Workspace **0.21.0**. Path dependencies match the graph below. Umbrella
 `default = ["evm", "http"]`. Other production chains and MCP are umbrella
 features (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`,
 `stellar`, `concordium`, `mcp`). `full` enables those plus `client` /

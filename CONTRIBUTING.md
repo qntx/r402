@@ -80,10 +80,10 @@ format check.
 Crate version is `[workspace.package].version`. The git tag is `v` plus
 that string.
 
-Path workspace deps use the **minor** (`version = "0.20"`, i.e. `^0.20`)
+Path workspace deps use the **minor** (`version = "0.21"`, i.e. `^0.21`)
 so `cargo publish` can rewrite them to crates.io. **Patch** bumps
-(`0.20.0` → `0.20.1`) leave path `version = "0.20"`. **Minor / major**
-(`0.20` → `0.21` or `1.0`) update that field in the **same PR** as
+(`0.21.0` → `0.21.1`) leave path `version = "0.21"`. **Minor / major**
+(`0.21` → `0.22` or `1.0`) update that field in the **same PR** as
 `workspace.package.version`.
 
 `publish.yml` Test is `cargo test --workspace` with **default features**,

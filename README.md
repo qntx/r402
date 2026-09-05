@@ -31,11 +31,11 @@ Protocol version **2** only. Schemes `exact` / `upto`. Deployments: **EVM, SVM (
 
 ```toml
 [dependencies]
-r402 = { version = "0.20", features = ["evm", "http"] }
+r402 = { version = "0.21", features = ["evm", "http"] }
 # SVM + MCP, same crate:
-# r402 = { version = "0.20", features = ["evm", "svm", "http", "mcp"] }
+# r402 = { version = "0.21", features = ["evm", "svm", "http", "mcp"] }
 # Every production chain + HTTP + MCP:
-# r402 = { version = "0.20", features = ["full"] }
+# r402 = { version = "0.21", features = ["full"] }
 ```
 
 `default = ["evm", "http"]` so a first `r402` dep does not compile Solana, protobuf, or gRPC. Enable chains as features (`svm`, `near`, `xrpl`, `hedera`, `avm`, `aptos`, `keeta`, `tvm`, `stellar`, `concordium`). `tron` and `casper` are opt-in and not in `full`. Individual `r402-*` crates remain for binaries that want one crate and no facade.
@@ -108,7 +108,7 @@ Permit2 (`upto`): 402 carries `eip2612GasSponsoring` without `with_extension`. `
 `.provider(...)` needs `r402-evm` `client-provider`. Umbrella `r402` `evm` does not enable it:
 
 ```toml
-r402-evm = { version = "0.20", features = ["client-provider"] }
+r402-evm = { version = "0.21", features = ["client-provider"] }
 ```
 
 ```rust
