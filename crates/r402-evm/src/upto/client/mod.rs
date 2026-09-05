@@ -2,6 +2,29 @@
 //!
 //! Produces Permit2 `PermitWitnessTransferFrom` signatures authorising **up to**
 //! the amount declared in the server's price tag.
+//!
+//! # Permit2 allowance
+//!
+//! 1. The 402 must carry `eip2612GasSponsoring` and/or
+//!    `erc20ApprovalGasSponsoring`. Register them with
+//!    `ResourceServer::with_extension` (`Eip2612GasSponsoringExtension` /
+//!    `Erc20ApprovalGasSponsoringExtension`).
+//! 2. Client (`.provider` needs `r402-evm` `client-provider`; umbrella `r402`
+//!    `evm` does not enable it):
+//!
+//! ```ignore
+//! let client = Eip155UptoClient::builder(signer)
+//!     .provider(alloy_provider)
+//!     .auto_approve(false)
+//!     .build();
+//! ```
+//!
+//! 3. [`auto_approve`](Eip155UptoClientBuilder::auto_approve) (default `true`)
+//!    is spec Option A (buyer-paid `approve(Permit2, MAX)`) and **only runs if
+//!    no sponsoring extension was attached**.
+//! 4. [`new`](Eip155UptoClient::new) cannot `readContract`, so it cannot
+//!    attach sponsoring. The first payment is HTTP 412
+//!    (`Permit2AllowanceRequired`).
 
 pub mod eip2612;
 mod signing;
@@ -27,6 +50,13 @@ use crate::signer::SignerLike;
 use crate::upto::{Eip155Upto, payload};
 
 /// Client for signing EIP-155 upto scheme payments (Permit2 only).
+///
+/// See the [module-level Permit2 allowance](crate::upto::client#permit2-allowance).
+/// Gasless attach needs a 402 that carries `eip2612GasSponsoring` /
+/// `erc20ApprovalGasSponsoring` and a provider for `readContract`.
+/// [`auto_approve`](Eip155UptoClientBuilder::auto_approve) (default `true`) is
+/// spec Option A and **only runs if no sponsoring extension was attached**.
+/// [`new`](Self::new) cannot attach; first payment is HTTP 412.
 pub struct Eip155UptoClient<S> {
     signer: S,
     approver: Option<Arc<dyn Permit2Approver>>,
@@ -44,7 +74,12 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155UptoClient<S> {
 }
 
 impl<S> Eip155UptoClient<S> {
-    /// Creates a client with no Permit2 allowance management.
+    /// Creates a client with no RPC provider.
+    ///
+    /// Cannot attach `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring` (no
+    /// `readContract`). The first payment is HTTP 412
+    /// (`Permit2AllowanceRequired`). Use [`builder`](Self::builder) with a
+    /// provider.
     pub const fn new(signer: S) -> Self {
         Self {
             signer,
@@ -53,7 +88,14 @@ impl<S> Eip155UptoClient<S> {
         }
     }
 
-    /// Returns a builder for Permit2 auto-approve configuration.
+    /// Builder for a provider (gasless Permit2 attach) and Option A auto-approve.
+    ///
+    /// ```ignore
+    /// let client = Eip155UptoClient::builder(signer)
+    ///     .provider(alloy_provider)
+    ///     .auto_approve(false)
+    ///     .build();
+    /// ```
     pub fn builder(signer: S) -> Eip155UptoClientBuilder<S> {
         Eip155UptoClientBuilder {
             signer,
@@ -63,7 +105,12 @@ impl<S> Eip155UptoClient<S> {
     }
 }
 
-/// Builder for [`Eip155UptoClient`] with optional Permit2 auto-approve.
+/// Builder for [`Eip155UptoClient`].
+///
+/// Attach a provider so the client can `readContract` and sign advertised
+/// `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring`.
+/// [`auto_approve`](Self::auto_approve) (default `true`) is spec Option A and
+/// **only runs if no sponsoring extension was attached**.
 pub struct Eip155UptoClientBuilder<S> {
     signer: S,
     approver: Option<Arc<dyn Permit2Approver>>,
@@ -81,21 +128,37 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155UptoClientBuilder<S> {
 }
 
 impl<S> Eip155UptoClientBuilder<S> {
-    /// Attaches a custom [`Permit2Approver`] implementation.
+    /// Sets the [`Permit2Approver`] used for `readContract` and Option A approve.
+    ///
+    /// Gasless attach needs [`Permit2Approver::supports_gas_sponsoring_rpc`].
+    /// Prefer `.provider(...)` when the `client-provider` feature is on.
     #[must_use]
     pub fn approver<A: Permit2Approver + 'static>(mut self, approver: A) -> Self {
         self.approver = Some(Arc::new(approver));
         self
     }
 
-    /// Controls whether the client sends `approve` when allowance is insufficient.
+    /// Spec Option A: buyer-paid `approve(Permit2, MAX)` when allowance is short.
+    ///
+    /// Builder default is `true`. **No-op if a sponsoring extension was already
+    /// attached.** `false` returns [`ClientError::PreConditionFailed`] instead.
+    /// Has no effect without an [`approver`](Self::approver).
     #[must_use]
     pub const fn auto_approve(mut self, auto_approve: bool) -> Self {
         self.auto_approve = auto_approve;
         self
     }
 
-    /// Attaches an Alloy provider as a Permit2 approver.
+    /// Alloy provider for `readContract` (sponsoring attach) and Option A approve.
+    ///
+    /// ```ignore
+    /// let client = Eip155UptoClient::builder(signer)
+    ///     .provider(alloy_provider)
+    ///     .auto_approve(false)
+    ///     .build();
+    /// ```
+    ///
+    /// Requires **`client-provider`**.
     #[cfg(feature = "client-provider")]
     #[must_use]
     pub fn provider<P: alloy_provider::Provider + Send + Sync + 'static>(

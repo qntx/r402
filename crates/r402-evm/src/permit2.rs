@@ -1,4 +1,4 @@
-//! Canonical Uniswap Permit2 address, wire permissions, and client auto-approve.
+//! Canonical Uniswap Permit2 address, wire permissions, and client allowance helpers.
 
 use alloy_primitives::{Address, address};
 use serde::{Deserialize, Serialize};
@@ -36,16 +36,20 @@ use r402_protocol::error::ClientError;
 type GasSponsoringFeeFut<'a> =
     Pin<Box<dyn Future<Output = Result<(u128, u128), ClientError>> + Send + 'a>>;
 
-/// Abstraction for on-chain interactions needed by the Permit2 auto-approve flow.
+/// On-chain reads (and optional buyer-paid `approve`) for Permit2 payments.
 ///
-/// Implement this trait to enable automatic Permit2 allowance management.
-/// When an approver is provided via a scheme client builder, the client will:
+/// Attach via a scheme-client builder. The client:
 ///
-/// 1. **Before each Permit2 payment**, call [`check_permit2_allowance`](Self::check_permit2_allowance)
-///    to query the current ERC-20 allowance granted to the canonical Permit2 contract.
-/// 2. **If the allowance is insufficient**, call [`approve_permit2`](Self::approve_permit2)
-///    to send an on-chain `approve(Permit2, MAX)` transaction.
-/// 3. **Proceed with normal Permit2 EIP-712 signing** once allowance is confirmed.
+/// 1. If the 402 advertised `eip2612GasSponsoring` or
+///    `erc20ApprovalGasSponsoring` and
+///    [`supports_gas_sponsoring_rpc`](Self::supports_gas_sponsoring_rpc) is
+///    true, reads nonce/fees and attaches that extension.
+/// 2. Else, if builder `auto_approve` is true (spec Option A), calls
+///    [`approve_permit2`](Self::approve_permit2). This **does not run** when a
+///    sponsoring extension was attached.
+///
+/// `new(signer)` installs no approver: no `readContract`, no attach, HTTP 412
+/// on the first Permit2 payment.
 #[cfg(feature = "client")]
 pub trait Permit2Approver: Send + Sync {
     /// Queries the current ERC-20 allowance that `owner` has granted to the

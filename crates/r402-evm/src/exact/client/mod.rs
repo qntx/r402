@@ -5,25 +5,29 @@
 //! transfer methods. The transfer method is selected automatically based
 //! on the server's `PaymentRequirements.extra.assetTransferMethod`.
 //!
-//! # Permit2 Auto-Approve
+//! # Permit2 allowance
 //!
-//! Permit2 payments require a one-time ERC-20 `approve(Permit2, MAX)` before
-//! the first payment. By default, the client does **not** manage this — users
-//! must approve manually, or the facilitator will reject with
-//! `Permit2AllowanceInsufficient`.
-//!
-//! To enable automatic approval, construct the client with a [`Permit2Approver`]
-//! via [`Eip155ExactClientBuilder`]:
+//! 1. The 402 must carry `eip2612GasSponsoring` and/or
+//!    `erc20ApprovalGasSponsoring`. Register them with
+//!    `ResourceServer::with_extension` (`Eip2612GasSponsoringExtension` /
+//!    `Erc20ApprovalGasSponsoringExtension`).
+//! 2. Build with a provider so the client can `readContract` and attach.
+//!    `.provider` needs `r402-evm` `client-provider` (umbrella `r402` `evm`
+//!    does not enable it):
 //!
 //! ```ignore
 //! let client = Eip155ExactClient::builder(signer)
-//!     .approver(my_provider)
+//!     .provider(alloy_provider)
+//!     .auto_approve(false)
 //!     .build();
 //! ```
 //!
-//! When an approver is set, the client checks allowances before each Permit2
-//! payment and sends an `approve` transaction if needed, making the experience
-//! as seamless as EIP-3009.
+//! 3. [`auto_approve`](Eip155ExactClientBuilder::auto_approve) (default `true`)
+//!    is spec Option A (buyer-paid `approve(Permit2, MAX)`) and **only runs if
+//!    no sponsoring extension was attached**.
+//! 4. [`new`](Eip155ExactClient::new) cannot `readContract`, so it cannot
+//!    attach sponsoring. The first Permit2 payment is HTTP 412
+//!    (`Permit2AllowanceRequired`). EIP-3009 does not need a provider.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -160,32 +164,26 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
 ///
 /// # Construction
 ///
-/// - [`new`](Self::new) — Minimal client for EIP-3009 payments (no provider needed).
-/// - [`builder`](Self::builder) — Fluent builder for advanced configuration including
-///   Permit2 auto-approve via a [`Permit2Approver`].
+/// - [`new`](Self::new) — EIP-3009. No provider; cannot attach Permit2 sponsoring.
+/// - [`builder`](Self::builder) — Permit2: provider + advertised
+///   `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring`.
 ///
-/// # Permit2 Auto-Approve
+/// # Permit2 allowance
 ///
-/// When constructed with a [`Permit2Approver`], the client automatically manages
-/// Permit2 ERC-20 allowances:
-///
-/// - **Without approver** (default): Permit2 payments require the user to have
-///   previously called `token.approve(Permit2, MAX)`. If the allowance is
-///   insufficient, the facilitator rejects with `Permit2AllowanceInsufficient`.
-///
-/// - **With approver**: The client checks allowance before each Permit2 payment
-///   and automatically sends an `approve` transaction if needed (one-time,
-///   ~46k gas). This makes Permit2 as frictionless as EIP-3009.
+/// See the [module-level Permit2 allowance](crate::exact::client#permit2-allowance).
+/// Gasless attach needs a 402 that carries those extensions and a provider for
+/// `readContract`. [`auto_approve`](Eip155ExactClientBuilder::auto_approve)
+/// (default `true`) is spec Option A and **only runs if no sponsoring
+/// extension was attached**.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // Simple: EIP-3009 only, no provider needed
 /// let client = Eip155ExactClient::new(signer);
 ///
-/// // With Permit2 auto-approve
 /// let client = Eip155ExactClient::builder(signer)
-///     .approver(my_provider)
+///     .provider(alloy_provider)
+///     .auto_approve(false)
 ///     .build();
 /// ```
 pub struct Eip155ExactClient<S> {
@@ -205,13 +203,14 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155ExactClient<S> {
 }
 
 impl<S> Eip155ExactClient<S> {
-    /// Creates a new EIP-155 exact scheme client with the given signer.
+    /// Creates a client with no RPC provider.
     ///
-    /// This is the simplest construction path. EIP-3009 payments work
-    /// immediately; Permit2 payments require the user to have approved
-    /// the Permit2 contract manually beforehand.
+    /// EIP-3009 payments work immediately. Permit2 cannot attach
+    /// `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring` (no
+    /// `readContract`); the first Permit2 payment is HTTP 412
+    /// (`Permit2AllowanceRequired`).
     ///
-    /// For automatic Permit2 approval, use [`builder`](Self::builder) instead.
+    /// For Permit2, use [`builder`](Self::builder) with a provider.
     pub const fn new(signer: S) -> Self {
         Self {
             signer,
@@ -220,14 +219,12 @@ impl<S> Eip155ExactClient<S> {
         }
     }
 
-    /// Returns a builder for advanced client configuration.
-    ///
-    /// Use the builder to attach a [`Permit2Approver`] for automatic
-    /// allowance management:
+    /// Builder for a provider (gasless Permit2 attach) and Option A auto-approve.
     ///
     /// ```ignore
     /// let client = Eip155ExactClient::builder(signer)
-    ///     .approver(my_provider)
+    ///     .provider(alloy_provider)
+    ///     .auto_approve(false)
     ///     .build();
     /// ```
     pub fn builder(signer: S) -> Eip155ExactClientBuilder<S> {
@@ -239,25 +236,19 @@ impl<S> Eip155ExactClient<S> {
     }
 }
 
-/// Builder for constructing an [`Eip155ExactClient`] with optional Permit2
-/// auto-approve capabilities.
+/// Builder for [`Eip155ExactClient`].
 ///
-/// Created via [`Eip155ExactClient::builder`].
+/// Created via [`Eip155ExactClient::builder`]. Attach a provider so Permit2
+/// can `readContract` and sign advertised `eip2612GasSponsoring` /
+/// `erc20ApprovalGasSponsoring`. [`auto_approve`](Self::auto_approve) (default
+/// `true`) is spec Option A and **only runs if no sponsoring extension was
+/// attached**.
 ///
 /// # Examples
 ///
 /// ```ignore
-/// // Minimal (equivalent to Eip155ExactClient::new(signer))
-/// let client = Eip155ExactClient::builder(signer).build();
-///
-/// // With Permit2 auto-approve (recommended for AI agents)
 /// let client = Eip155ExactClient::builder(signer)
-///     .approver(my_provider)
-///     .build();
-///
-/// // Check-only mode: detect insufficient allowance without auto-approving
-/// let client = Eip155ExactClient::builder(signer)
-///     .approver(my_provider)
+///     .provider(alloy_provider)
 ///     .auto_approve(false)
 ///     .build();
 /// ```
@@ -278,56 +269,40 @@ impl<S: std::fmt::Debug> std::fmt::Debug for Eip155ExactClientBuilder<S> {
 }
 
 impl<S> Eip155ExactClientBuilder<S> {
-    /// Sets the [`Permit2Approver`] for automatic allowance management.
+    /// Sets the [`Permit2Approver`] used for `readContract` and Option A approve.
     ///
-    /// When set, the client will check Permit2 allowances before signing
-    /// and, if [`auto_approve`](Self::auto_approve) is `true` (the default),
-    /// automatically send an `approve(Permit2, MAX)` transaction when needed.
+    /// Gasless attach needs [`Permit2Approver::supports_gas_sponsoring_rpc`].
+    /// Prefer `.provider(...)` when the `client-provider` feature is on.
     #[must_use]
     pub fn approver<A: Permit2Approver + 'static>(mut self, approver: A) -> Self {
         self.approver = Some(Arc::new(approver));
         self
     }
 
-    /// Controls whether the client automatically sends `approve` transactions
-    /// when Permit2 allowance is insufficient.
+    /// Spec Option A: buyer-paid `approve(Permit2, MAX)` when allowance is short.
     ///
-    /// - `true` (default): Automatically approve — seamless experience.
-    /// - `false`: Return [`ClientError::PreConditionFailed`] with a descriptive
-    ///   message, giving callers a chance to handle the approval themselves.
-    ///
-    /// Has no effect if no [`approver`](Self::approver) is set.
+    /// Builder default is `true`. **No-op if a sponsoring extension was already
+    /// attached.** `false` returns [`ClientError::PreConditionFailed`] instead.
+    /// Has no effect without an [`approver`](Self::approver).
     #[must_use]
     pub const fn auto_approve(mut self, auto_approve: bool) -> Self {
         self.auto_approve = auto_approve;
         self
     }
 
-    /// Attaches an Alloy [`Provider`](alloy_provider::Provider) for automatic
-    /// Permit2 allowance management.
+    /// Alloy provider for `readContract` (sponsoring attach) and Option A approve.
     ///
-    /// This is the **recommended, batteries-included** way to enable Permit2
-    /// auto-approve. The provider must have a wallet/signer configured that
-    /// matches the payment signer, so it can send `approve` transactions.
-    ///
-    /// Internally creates a built-in [`Permit2Approver`] — no trait
-    /// implementation required from the caller.
-    ///
-    /// # Example
+    /// Option A (`auto_approve(true)`) needs a wallet on the provider that
+    /// matches the payment signer.
     ///
     /// ```ignore
-    /// let provider = ProviderBuilder::new()
-    ///     .wallet(EthereumWallet::new(signer.clone()))
-    ///     .connect_http(rpc_url);
-    ///
     /// let client = Eip155ExactClient::builder(signer)
-    ///     .provider(provider)
+    ///     .provider(alloy_provider)
+    ///     .auto_approve(false)
     ///     .build();
     /// ```
     ///
-    /// # Feature
-    ///
-    /// Requires the **`client-provider`** feature flag.
+    /// Requires **`client-provider`**.
     #[cfg(feature = "client-provider")]
     #[must_use]
     pub fn provider<P: alloy_provider::Provider + Send + Sync + 'static>(
