@@ -723,6 +723,156 @@ async fn create_payment_required_omits_authorization_payment_flow() {
     assert!(is_authorization_payment_flow(extra));
 }
 
+fn upto_accept(network: &str) -> PaymentRequirements {
+    PaymentRequirements::new(
+        "upto".into(),
+        network.parse().unwrap(),
+        "1".into(),
+        "0xa".into(),
+        "0xb".into(),
+        60,
+    )
+}
+
+fn insert_fee_payer(req: &mut PaymentRequirements) -> bool {
+    if req
+        .extra
+        .as_ref()
+        .and_then(Value::as_object)
+        .is_some_and(|extra| extra.contains_key("feePayer"))
+    {
+        return false;
+    }
+    let mut extra = req
+        .extra
+        .take()
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    extra.insert("feePayer".into(), Value::String("0xfee".into()));
+    req.extra = Some(Value::Object(extra));
+    true
+}
+
+/// Writes `feePayer` only on the accept bound to this enrich invocation.
+struct BoundNetworkUpto;
+
+impl SchemeNetworkServer for BoundNetworkUpto {
+    fn scheme(&self) -> &'static str {
+        "upto"
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        "permit2"
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        static FLOWS: std::sync::LazyLock<HashMap<String, PaymentFlowConfig>> =
+            std::sync::LazyLock::new(|| {
+                HashMap::from([("permit2".into(), PaymentFlowConfig::authorization_only())])
+            });
+        &FLOWS
+    }
+
+    fn enrich_payment_required_response<'a>(
+        &'a self,
+        ctx: &'a r402_server::SchemePaymentRequiredContext<'a>,
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
+        let mut accepts = ctx.requirements.to_vec();
+        let changed = accepts.iter_mut().fold(false, |acc, req| {
+            acc | (req.scheme.as_str() == "upto"
+                && req.network == *ctx.network
+                && insert_fee_payer(req))
+        });
+        std::future::ready(changed.then_some(accepts))
+    }
+}
+
+/// Writes `feePayer` onto every same-scheme accept (the pre-fix bug).
+struct CrossNetworkUpto;
+
+impl SchemeNetworkServer for CrossNetworkUpto {
+    fn scheme(&self) -> &'static str {
+        "upto"
+    }
+
+    fn default_asset_transfer_method(&self) -> &'static str {
+        "permit2"
+    }
+
+    fn payment_flows(&self) -> &HashMap<String, PaymentFlowConfig> {
+        static FLOWS: std::sync::LazyLock<HashMap<String, PaymentFlowConfig>> =
+            std::sync::LazyLock::new(|| {
+                HashMap::from([("permit2".into(), PaymentFlowConfig::authorization_only())])
+            });
+        &FLOWS
+    }
+
+    fn enrich_payment_required_response<'a>(
+        &'a self,
+        ctx: &'a r402_server::SchemePaymentRequiredContext<'a>,
+    ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
+        let mut accepts = ctx.requirements.to_vec();
+        let changed = accepts.iter_mut().fold(false, |acc, req| {
+            acc | (req.scheme.as_str() == "upto" && insert_fee_payer(req))
+        });
+        std::future::ready(changed.then_some(accepts))
+    }
+}
+
+fn two_network_upto_accepts() -> Vec<PaymentRequirements> {
+    vec![upto_accept("eip155:143"), upto_accept("eip155:10143")]
+}
+
+#[tokio::test]
+async fn create_payment_required_two_networks_enriches_each_row() {
+    let rs = ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), BoundNetworkUpto);
+    let built = rs
+        .create_payment_required_response(
+            two_network_upto_accepts(),
+            PaymentRequiredBuildContext {
+                resource: ResourceInfo::new("https://example.com/paid"),
+                error: None,
+                extensions: Extensions::new(),
+                supported: SupportedResponse::default(),
+                payment_payload: None,
+            },
+        )
+        .await
+        .expect("bound enrich must not trip accepts mutation policy");
+    assert_eq!(built.accepts.len(), 2);
+    for accept in &built.accepts {
+        let extra = accept.extra.as_ref().and_then(Value::as_object);
+        assert_eq!(
+            extra
+                .and_then(|map| map.get("feePayer"))
+                .and_then(Value::as_str),
+            Some("0xfee"),
+            "each network gets its own enrich pass"
+        );
+    }
+}
+
+#[tokio::test]
+async fn create_payment_required_rejects_cross_network_enrich() {
+    let rs = ResourceServer::new(mock_ok()).with_scheme(eip155_wildcard(), CrossNetworkUpto);
+    let err = rs
+        .create_payment_required_response(
+            two_network_upto_accepts(),
+            PaymentRequiredBuildContext {
+                resource: ResourceInfo::new("https://example.com/paid"),
+                error: None,
+                extensions: Extensions::new(),
+                supported: SupportedResponse::default(),
+                payment_payload: None,
+            },
+        )
+        .await
+        .expect_err("writing extra onto the unbound network must fail closed");
+    let msg = err.to_string();
+    assert!(msg.contains("only matching accepts"), "{msg}");
+    assert!(msg.contains("index 1"), "{msg}");
+}
+
 struct OfferStub;
 
 impl Extension for OfferStub {
