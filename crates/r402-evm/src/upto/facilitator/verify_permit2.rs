@@ -125,10 +125,11 @@ const fn permit_and_witness(
     )
 }
 
-/// On-chain preconditions: Permit2 allowance, balance, and `eth_call` of `proxy.settle`.
+/// On-chain preconditions: Permit2 allowance, balance, then simulate.
 ///
-/// Allowance RPC failure and insufficient allowance are fail-closed (412) unless a
-/// valid `eip2612GasSponsoring` or registered `erc20ApprovalGasSponsoring` covers them.
+/// EIP-2612: `eth_call` `settleWithPermit`. ERC-20 covering: `eth_simulateV1`.
+/// Else isolated `eth_call` `settle`. Low allowance without a covering
+/// extension is 412.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
 #[allow(
     clippy::cognitive_complexity,

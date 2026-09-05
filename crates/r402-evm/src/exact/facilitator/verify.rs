@@ -535,16 +535,11 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     Ok((erc20, payment, domain))
 }
 
-/// Verifies a Permit2 payment by checking the EIP-712 signature **and**
-/// simulating the on-chain `x402ExactPermit2Proxy.settle` call via
-/// `eth_call` (Fix-7).
+/// Verifies a Permit2 payment by checking the EIP-712 signature and
+/// simulating settlement.
 ///
-/// Signature validity alone does not guarantee the settlement transaction
-/// will succeed: the buyer may have burned the nonce, revoked the
-/// allowance, or set a short deadline that expires between verify and
-/// settle. Running `eth_call` on the exact call that `settle_permit2_payment`
-/// would submit catches all of these revert conditions before the
-/// facilitator commits gas.
+/// EIP-2612 and no-covering paths `eth_call` `settleWithPermit` / `settle`.
+/// ERC-20 covering uses `eth_simulateV1` (fund, unsigned approve, settle).
 ///
 /// # Errors
 ///

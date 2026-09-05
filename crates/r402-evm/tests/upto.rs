@@ -1,4 +1,8 @@
-//! In-process upto-scheme tests. No live RPC. No HTTP E2E.
+//! In-process upto-scheme tests. No HTTP E2E.
+//!
+//! Covering e2e (`anvil_erc20_*`) spawns Foundry `anvil` (PATH or
+//! `~/.foundry/bin/anvil`). Skips if the binary is missing or
+//! `R402_ANVIL=0`. Wiremock tests do not need Anvil.
 
 #![allow(unused_crate_dependencies, reason = "sibling tests consume them")]
 #![allow(
@@ -562,6 +566,33 @@ async fn permit2_allowance_rpc_err_without_extensions_is_412() {
 }
 
 #[tokio::test]
+async fn permit2_missing_erc20_key_low_allowance_is_412() {
+    let server = wiremock::MockServer::start().await;
+    let (payload, requirements, payer, asset) = signed_upto_payload().await;
+    mount_rpc(
+        &server,
+        RpcScript {
+            revert_settle: false,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+        },
+    )
+    .await;
+    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect_err("missing covering is 412");
+    assert!(matches!(
+        err,
+        FacilitatorError::Verification(VerificationError::Permit2AllowanceRequired)
+    ));
+}
+
+#[tokio::test]
 async fn permit2_allowance_rpc_err_with_eip2612_continues() {
     let server = wiremock::MockServer::start().await;
     let (mut payload, requirements, payer, asset) = signed_upto_payload().await;
@@ -914,7 +945,14 @@ impl Drop for AnvilGuard {
     }
 }
 
+fn anvil_e2e_enabled() -> bool {
+    !matches!(std::env::var("R402_ANVIL"), Ok(value) if value == "0")
+}
+
 fn spawn_anvil() -> Option<(AnvilGuard, Url)> {
+    if !anvil_e2e_enabled() {
+        return None;
+    }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").ok()?;
     let port = listener.local_addr().ok()?.port();
     drop(listener);
@@ -1087,9 +1125,11 @@ async fn signed_upto_erc20_for(
     (payload, serde_json::to_value(&reqs).expect("reqs"))
 }
 
-async fn prepare_anvil_erc20() -> (AnvilGuard, String, Address, Address) {
-    let (guard, url) = spawn_anvil().expect("anvil must be on PATH");
-    assert!(wait_anvil(&url).await, "anvil did not become ready");
+async fn prepare_anvil_erc20() -> Option<(AnvilGuard, String, Address, Address)> {
+    let (guard, url) = spawn_anvil()?;
+    if !wait_anvil(&url).await {
+        return None;
+    }
     let rpc = url.to_string();
     let provider = provider_wallet_at(&rpc, ANVIL_KEY);
     let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
@@ -1106,12 +1146,14 @@ async fn prepare_anvil_erc20() -> (AnvilGuard, String, Address, Address) {
     let payer = payer_wallet().address();
     mint_tokens(&provider, TOKEN, payer, U256::from(1_000_000_000u64)).await;
     anvil_set_balance(inner, payer, U256::ZERO).await;
-    (guard, rpc, payer, TOKEN)
+    Some((guard, rpc, payer, TOKEN))
 }
 
 #[tokio::test]
 async fn anvil_erc20_verify_and_settle_funds_approves_and_settles() {
-    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let Some((_guard, rpc, payer, token)) = prepare_anvil_erc20().await else {
+        return;
+    };
     let provider = provider_wallet_at(&rpc, ANVIL_KEY);
     let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
     let fac = Eip155UptoFacilitator::try_new(provider_wallet_at(&rpc, ANVIL_KEY)).expect("try_new");
@@ -1152,7 +1194,9 @@ async fn anvil_erc20_verify_and_settle_funds_approves_and_settles() {
 
 #[tokio::test]
 async fn anvil_erc20_retry_skips_second_approve() {
-    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let Some((_guard, rpc, payer, token)) = prepare_anvil_erc20().await else {
+        return;
+    };
     let provider = provider_wallet_at(&rpc, ANVIL_KEY);
     let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
     let fac = Eip155UptoFacilitator::try_new(provider_wallet_at(&rpc, ANVIL_KEY)).expect("try_new");
@@ -1205,7 +1249,9 @@ async fn anvil_erc20_retry_skips_second_approve() {
 
 #[tokio::test]
 async fn anvil_erc20_parallel_settles_share_one_approve() {
-    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let Some((_guard, rpc, payer, token)) = prepare_anvil_erc20().await else {
+        return;
+    };
     let provider = provider_wallet_at(&rpc, ANVIL_KEY);
     let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
     let fac = Arc::new(

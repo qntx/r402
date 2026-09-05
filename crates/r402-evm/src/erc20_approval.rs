@@ -105,8 +105,6 @@ pub struct ValidatedErc20Approval {
 }
 
 /// Structural signed-tx checks (no RPC nonce / base-fee).
-///
-/// Used by the 412-gate and by `PreparedUptoPermit2::try_new`.
 #[cfg(feature = "facilitator")]
 pub(crate) fn decode_erc20_approval_structural(
     info: &Erc20ApprovalGasSponsoringInfo,
@@ -117,7 +115,7 @@ pub(crate) fn decode_erc20_approval_structural(
     decode_erc20_approval_envelope(info, payer, token, chain_id)
 }
 
-/// Full RPC-field validation. Cap is applied by the caller after `get_balance`.
+/// Full RPC-field validation. Has no balance argument and does not cap funding.
 ///
 /// # Errors
 ///
@@ -324,7 +322,7 @@ pub(crate) async fn assert_facilitator_can_fund<P: alloy_provider::Provider>(
     Ok(())
 }
 
-/// First configured hot-wallet address. Does not advance round-robin.
+/// First configured hot-wallet address.
 #[cfg(feature = "facilitator")]
 pub(crate) fn first_hot_wallet(
     provider: &impl r402_protocol::network::ChainProvider,
