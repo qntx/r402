@@ -103,6 +103,7 @@ where
             calldata,
             confirmations: 1,
             from: Some(prepared.facilitator),
+            value: U256::ZERO,
         }
         .with_data_suffix(data_suffix),
     );
