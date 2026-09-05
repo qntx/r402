@@ -83,7 +83,13 @@ let client = reqwest::Client::new().with_payments(
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
 
-Permit2 (`upto`): the 402 must advertise `eip2612GasSponsoring` and/or `erc20ApprovalGasSponsoring` (HTTP auto-register). `.provider(...)` needs `r402-evm` `client-provider`. `auto_approve(true)` is spec Option A and **only runs if no sponsoring extension was attached**. `new(signer)` cannot `readContract`; the first Permit2 payment is HTTP 412.
+Permit2 (`upto`): the 402 must carry `eip2612GasSponsoring` and/or `erc20ApprovalGasSponsoring` (`ResourceServer::with_extension`). `auto_approve(true)` is spec Option A and **only runs if no sponsoring extension was attached**. `new(signer)` cannot `readContract`; the first Permit2 payment is HTTP 412.
+
+`.provider(...)` needs `r402-evm` `client-provider`. Umbrella `r402` `evm` does not enable it:
+
+```toml
+r402-evm = { version = "0.20", features = ["client-provider"] }
+```
 
 ```rust
 use r402::evm::Eip155UptoClient;

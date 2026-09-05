@@ -7,19 +7,20 @@
 //!
 //! # Permit2 allowance
 //!
-//! 1. The 402 must advertise `eip2612GasSponsoring` and/or
-//!    `erc20ApprovalGasSponsoring` (HTTP auto-register).
-//! 2. Build with a provider so the client can `readContract` and attach:
+//! 1. The 402 must carry `eip2612GasSponsoring` and/or
+//!    `erc20ApprovalGasSponsoring`. Register them with
+//!    `ResourceServer::with_extension` (`Eip2612GasSponsoringExtension` /
+//!    `Erc20ApprovalGasSponsoringExtension`).
+//! 2. Build with a provider so the client can `readContract` and attach.
+//!    `.provider` needs `r402-evm` `client-provider` (umbrella `r402` `evm`
+//!    does not enable it):
 //!
 //! ```ignore
-//! let client = Eip155UptoClient::builder(signer)
+//! let client = Eip155ExactClient::builder(signer)
 //!     .provider(alloy_provider)
 //!     .auto_approve(false)
 //!     .build();
 //! ```
-//!
-//! [`Eip155UptoClient`](crate::upto::Eip155UptoClient) and
-//! [`Eip155ExactClient::builder`] share this construction.
 //!
 //! 3. [`auto_approve`](Eip155ExactClientBuilder::auto_approve) (default `true`)
 //!    is spec Option A (buyer-paid `approve(Permit2, MAX)`) and **only runs if
@@ -170,10 +171,10 @@ pub async fn sign_erc3009_authorization<S: SignerLike + Sync>(
 /// # Permit2 allowance
 ///
 /// See the [module-level Permit2 allowance](crate::exact::client#permit2-allowance).
-/// Gasless attach needs a 402 that advertises those extensions (HTTP
-/// auto-register) and a provider for `readContract`.
-/// [`auto_approve`](Eip155ExactClientBuilder::auto_approve) (default `true`)
-/// is spec Option A and **only runs if no sponsoring extension was attached**.
+/// Gasless attach needs a 402 that carries those extensions and a provider for
+/// `readContract`. [`auto_approve`](Eip155ExactClientBuilder::auto_approve)
+/// (default `true`) is spec Option A and **only runs if no sponsoring
+/// extension was attached**.
 ///
 /// # Examples
 ///

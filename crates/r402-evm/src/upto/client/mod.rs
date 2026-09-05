@@ -5,9 +5,12 @@
 //!
 //! # Permit2 allowance
 //!
-//! 1. The 402 must advertise `eip2612GasSponsoring` and/or
-//!    `erc20ApprovalGasSponsoring` (HTTP auto-register).
-//! 2. Client:
+//! 1. The 402 must carry `eip2612GasSponsoring` and/or
+//!    `erc20ApprovalGasSponsoring`. Register them with
+//!    `ResourceServer::with_extension` (`Eip2612GasSponsoringExtension` /
+//!    `Erc20ApprovalGasSponsoringExtension`).
+//! 2. Client (`.provider` needs `r402-evm` `client-provider`; umbrella `r402`
+//!    `evm` does not enable it):
 //!
 //! ```ignore
 //! let client = Eip155UptoClient::builder(signer)
@@ -49,12 +52,11 @@ use crate::upto::{Eip155Upto, payload};
 /// Client for signing EIP-155 upto scheme payments (Permit2 only).
 ///
 /// See the [module-level Permit2 allowance](crate::upto::client#permit2-allowance).
-/// Gasless attach needs a 402 that advertises `eip2612GasSponsoring` /
-/// `erc20ApprovalGasSponsoring` (HTTP auto-register) and a provider for
-/// `readContract`. [`auto_approve`](Eip155UptoClientBuilder::auto_approve)
-/// (default `true`) is spec Option A and **only runs if no sponsoring
-/// extension was attached**. [`new`](Self::new) cannot attach; first payment
-/// is HTTP 412.
+/// Gasless attach needs a 402 that carries `eip2612GasSponsoring` /
+/// `erc20ApprovalGasSponsoring` and a provider for `readContract`.
+/// [`auto_approve`](Eip155UptoClientBuilder::auto_approve) (default `true`) is
+/// spec Option A and **only runs if no sponsoring extension was attached**.
+/// [`new`](Self::new) cannot attach; first payment is HTTP 412.
 pub struct Eip155UptoClient<S> {
     signer: S,
     approver: Option<Arc<dyn Permit2Approver>>,

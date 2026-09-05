@@ -23,10 +23,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Documentation
 
 - EVM Permit2 rustdoc and README lead with gasless
-  `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring` attach (HTTP
-  auto-register). `auto_approve` is spec Option A and runs only when no
+  `eip2612GasSponsoring` / `erc20ApprovalGasSponsoring` attach.
+  `auto_approve` is spec Option A and runs only when no
   sponsoring extension was attached. `new(signer)` stays signer-only
-  (no RPC).
+  (no RPC). `.provider` needs `r402-evm` `client-provider`.
 
 ## [0.20.0] — 2026-09-04
 
