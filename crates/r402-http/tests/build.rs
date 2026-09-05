@@ -273,6 +273,18 @@ fn usdc_upto_tag() -> PriceTag {
     Eip155Upto::price_tag(pay_to(), USDC::base().amount(1_000_000u64))
 }
 
+/// `upto` / `eip155:8453` with no extra — scheme default ATM is the Permit2 match.
+fn upto_8453_no_extra_tag() -> PriceTag {
+    PriceTag::new(PaymentRequirements::new(
+        "upto".into(),
+        "eip155:8453".parse().unwrap(),
+        "1000000".into(),
+        "0xpay".into(),
+        "0xasset".into(),
+        60,
+    ))
+}
+
 fn usdc_exact_eip3009_tag() -> PriceTag {
     Eip155Exact::price_tag(pay_to(), USDC::base().amount(1_000_000u64), None)
 }
@@ -313,6 +325,35 @@ async fn upto_402_has_2612_without_with_extension() {
     let response = call_layer(layer, OkInner, unpaid_request()).await;
     assert_eq!(response.status(), StatusCode::PAYMENT_REQUIRED);
     let body = decode_payment_required(&response);
+    assert_ext(&body, EIP2612_GAS_SPONSORING_KEY, true);
+    assert_ext(&body, ERC20_APPROVAL_GAS_SPONSORING_KEY, false);
+}
+
+#[tokio::test]
+async fn upto_402_without_extra_atm_matches_scheme_default_permit2() {
+    let fac = fac_kind("upto", "eip155:8453");
+    let layer = X402Middleware::from_facilitator(Arc::clone(&fac))
+        .with_base_url(base_url())
+        .with_scheme(ChainIdPattern::wildcard("eip155"), Eip155Upto)
+        .with_price_tag(upto_8453_no_extra_tag())
+        .unwrap();
+    let response = call_layer(layer, OkInner, unpaid_request()).await;
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "unpaid upto with no extra must still 402"
+    );
+    let body = decode_payment_required(&response);
+    let extra = body
+        .get("accepts")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|accepts| accepts.first())
+        .and_then(|accept| accept.get("extra"));
+    let atm = extra.and_then(|e| e.get("assetTransferMethod"));
+    assert!(
+        atm.is_none(),
+        "fixture must omit extra ATM so the scheme default is the match, got {extra:?}"
+    );
     assert_ext(&body, EIP2612_GAS_SPONSORING_KEY, true);
     assert_ext(&body, ERC20_APPROVAL_GAS_SPONSORING_KEY, false);
 }
