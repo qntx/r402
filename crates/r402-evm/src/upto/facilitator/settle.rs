@@ -10,6 +10,7 @@ use super::contract::IX402UptoPermit2Proxy;
 use super::verify::PreparedUptoPermit2;
 use super::verify_permit2::{assert_eip2612_supported_signature_kind, build_eip2612_abi};
 use crate::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+use crate::erc20_approval::relay_erc20_approval;
 use crate::error::Eip155ExactError;
 use crate::signature::{ClassifiedSignature, classify_with_code};
 use crate::upto::X402_UPTO_PERMIT2_PROXY;
@@ -44,6 +45,19 @@ where
         #[cfg(feature = "telemetry")]
         tracing::event!(Level::INFO, "upto zero-settle: skipping on-chain tx");
         return Ok(UptoSettleOutcome::ZeroSettle);
+    }
+
+    if prepared.eip2612.is_none()
+        && let Some(approval) = prepared.erc20_approval.as_ref()
+    {
+        let _ = relay_erc20_approval(
+            provider,
+            approval,
+            prepared.from,
+            actual_amount,
+            prepared.facilitator,
+        )
+        .await?;
     }
 
     let classified = classify_with_code(

@@ -17,13 +17,16 @@
 )]
 
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alloy_network::EthereumWallet;
 use alloy_primitives::{Address, U256, address, hex};
+use alloy_provider::Provider;
 use alloy_signer_local::PrivateKeySigner;
 use r402_client::SchemeClient;
 use r402_evm::chain::{ChecksummedAddress, Eip155ChainProvider, Eip155ChainReference};
+use r402_evm::eip2612::EIP2612_GAS_SPONSORING_KEY;
+use r402_evm::erc20_approval::ERC20_APPROVAL_GAS_SPONSORING_KEY;
 use r402_evm::upto::payload::UptoPaymentRequirementsExtra;
 use r402_evm::{
     Eip155Upto, Eip155UptoClient, Eip155UptoFacilitator, PERMIT2_ADDRESS, USDC,
@@ -32,7 +35,7 @@ use r402_evm::{
 use r402_facilitator::Facilitator;
 use r402_protocol::error::{AsPaymentProblem, ErrorReason, FacilitatorError, VerificationError};
 use r402_protocol::payment::{
-    PaymentRequired, ResourceInfo, SettleRequest, VerifyRequest, VerifyResponse,
+    PaymentRequired, ResourceInfo, SettleRequest, SettleResponse, VerifyRequest, VerifyResponse,
 };
 use r402_protocol::scheme::SchemeId;
 use r402_server::{PaymentFlowName, SchemeNetworkServer};
@@ -148,6 +151,18 @@ async fn try_new_supported_is_upto_on_provider_chain() {
         Some("permit2")
     );
     assert!(extra.get("facilitatorAddress").is_some());
+    assert!(
+        supported
+            .extensions
+            .iter()
+            .any(|e| e.as_str() == EIP2612_GAS_SPONSORING_KEY)
+    );
+    assert!(
+        supported
+            .extensions
+            .iter()
+            .any(|e| e.as_str() == ERC20_APPROVAL_GAS_SPONSORING_KEY)
+    );
 }
 
 #[tokio::test]
@@ -272,12 +287,92 @@ fn checksum(addr: Address) -> String {
     addr.to_checksum(None)
 }
 
+#[derive(Clone, Default)]
+struct RpcLog {
+    methods: Arc<Mutex<Vec<String>>>,
+    call_targets: Arc<Mutex<Vec<Address>>>,
+}
+
+impl RpcLog {
+    fn record_method(&self, method: &str) {
+        self.methods.lock().unwrap().push(method.to_owned());
+    }
+
+    fn record_call_to(&self, to: Address) {
+        self.call_targets.lock().unwrap().push(to);
+    }
+
+    fn methods(&self) -> Vec<String> {
+        self.methods.lock().unwrap().clone()
+    }
+
+    fn called(&self, to: Address) -> bool {
+        self.call_targets
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|addr| *addr == to)
+    }
+}
+
 #[derive(Clone)]
 struct RpcScript {
     asset: Address,
+    #[allow(dead_code, reason = "kept for RPC script identity")]
     payer: Address,
     allowance: Option<U256>,
     balance: U256,
+    native_balance: U256,
+    tx_count: u64,
+    base_fee: u64,
+    revert_settle: bool,
+    simulate_status: bool,
+    simulate_missing: bool,
+    log: RpcLog,
+}
+
+fn rpc_script(asset: Address, payer: Address, allowance: Option<U256>, balance: U256) -> RpcScript {
+    RpcScript {
+        asset,
+        payer,
+        allowance,
+        balance,
+        native_balance: U256::from(10).pow(U256::from(18)),
+        tx_count: 0,
+        base_fee: 1,
+        revert_settle: true,
+        simulate_status: true,
+        simulate_missing: false,
+        log: RpcLog::default(),
+    }
+}
+
+fn latest_block_json(base_fee: u64) -> serde_json::Value {
+    let zero32 = format!("0x{}", "00".repeat(32));
+    let bloom = format!("0x{}", "00".repeat(256));
+    serde_json::json!({
+        "hash": zero32,
+        "parentHash": zero32,
+        "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+        "miner": "0x0000000000000000000000000000000000000000",
+        "stateRoot": zero32,
+        "transactionsRoot": zero32,
+        "receiptsRoot": zero32,
+        "logsBloom": bloom,
+        "difficulty": "0x0",
+        "number": "0x1",
+        "gasLimit": "0x1c9c380",
+        "gasUsed": "0x0",
+        "timestamp": "0x1",
+        "extraData": "0x",
+        "mixHash": zero32,
+        "nonce": "0x0000000000000000",
+        "baseFeePerGas": format!("0x{base_fee:x}"),
+        "uncles": [],
+        "transactions": [],
+        "size": "0x0",
+        "totalDifficulty": "0x0"
+    })
 }
 
 #[allow(
@@ -304,6 +399,7 @@ impl wiremock::Respond for RpcScript {
                 "result": result
             }))
         };
+        self.log.record_method(method);
         match method {
             "eth_getCode" => {
                 let addr = body
@@ -314,8 +410,6 @@ impl wiremock::Respond for RpcScript {
                     .unwrap_or(Address::ZERO);
                 let code = if addr == self.asset {
                     "0x6080604052"
-                } else if addr == self.payer {
-                    "0x"
                 } else {
                     "0x"
                 };
@@ -323,6 +417,12 @@ impl wiremock::Respond for RpcScript {
             }
             "eth_call" => {
                 let call = body.get("params").and_then(|p| p.get(0));
+                let to = call
+                    .and_then(|c| c.get("to"))
+                    .and_then(serde_json::Value::as_str)
+                    .and_then(|s| s.parse::<Address>().ok())
+                    .unwrap_or(Address::ZERO);
+                self.log.record_call_to(to);
                 let data = call
                     .and_then(|c| c.get("data").or_else(|| c.get("input")))
                     .and_then(serde_json::Value::as_str)
@@ -343,9 +443,53 @@ impl wiremock::Respond for RpcScript {
                 if selector == "70a08231" {
                     return ok(serde_json::json!(format!("0x{:064x}", self.balance)));
                 }
+                if self.revert_settle && to == X402_UPTO_PERMIT2_PROXY {
+                    return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": 3, "message": "execution reverted" }
+                    }));
+                }
                 ok(serde_json::json!(
                     "0x0000000000000000000000000000000000000000000000000000000000000000"
                 ))
+            }
+            "eth_getBalance" => ok(serde_json::json!(format!("0x{:x}", self.native_balance))),
+            "eth_getTransactionCount" => ok(serde_json::json!(format!("0x{:x}", self.tx_count))),
+            "eth_getBlockByNumber" => ok(latest_block_json(self.base_fee)),
+            "eth_simulateV1" => {
+                if self.simulate_missing {
+                    return wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32601, "message": "the method eth_simulateV1 does not exist/is not available" }
+                    }));
+                }
+                let call_count = body
+                    .get("params")
+                    .and_then(|p| p.get(0))
+                    .and_then(|p| p.get("blockStateCalls"))
+                    .and_then(|b| b.get(0))
+                    .and_then(|b| b.get("calls"))
+                    .and_then(serde_json::Value::as_array)
+                    .map_or(2, Vec::len);
+                let mut block = latest_block_json(self.base_fee);
+                let status = if self.simulate_status { "0x1" } else { "0x0" };
+                let calls = (0..call_count)
+                    .map(|_| {
+                        serde_json::json!({
+                            "returnData": "0x",
+                            "logs": [],
+                            "gasUsed": "0x1",
+                            "status": status
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                block
+                    .as_object_mut()
+                    .expect("block object")
+                    .insert("calls".into(), serde_json::Value::Array(calls));
+                ok(serde_json::json!([block]))
             }
             _ => ok(serde_json::json!("0x")),
         }
@@ -397,10 +541,8 @@ async fn permit2_allowance_rpc_err_without_extensions_is_412() {
     mount_rpc(
         &server,
         RpcScript {
-            asset,
-            payer,
-            allowance: None,
-            balance: U256::from(1_000_000_u64),
+            revert_settle: false,
+            ..rpc_script(asset, payer, None, U256::from(1_000_000_u64))
         },
     )
     .await;
@@ -444,10 +586,8 @@ async fn permit2_allowance_rpc_err_with_eip2612_continues() {
     mount_rpc(
         &server,
         RpcScript {
-            asset,
-            payer,
-            allowance: None,
-            balance: U256::from(1_000_000_u64),
+            revert_settle: false,
+            ..rpc_script(asset, payer, None, U256::from(1_000_000_u64))
         },
     )
     .await;
@@ -463,17 +603,45 @@ async fn permit2_allowance_rpc_err_with_eip2612_continues() {
     assert!(matches!(resp, VerifyResponse::Valid { .. }), "got {resp:?}");
 }
 
-#[tokio::test]
-async fn permit2_allowance_rpc_err_with_facilitator_erc20_and_valid_tx_continues() {
+fn sign_max_approve(signer: &PrivateKeySigner, token: Address) -> String {
     use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_eips::eip2930::AccessList;
     use alloy_network::TxSignerSync;
     use alloy_primitives::TxKind;
 
-    let server = wiremock::MockServer::start().await;
+    let mut calldata = vec![0x09, 0x5e, 0xa7, 0xb3];
+    calldata.extend_from_slice(&[0u8; 12]);
+    calldata.extend_from_slice(PERMIT2_ADDRESS.as_slice());
+    calldata.extend_from_slice(&U256::MAX.to_be_bytes::<32>());
+    let mut tx = TxEip1559 {
+        chain_id: 8453,
+        nonce: 0,
+        gas_limit: 80_000,
+        max_fee_per_gas: 1_000_000_000,
+        max_priority_fee_per_gas: 1_000_000,
+        to: TxKind::Call(token),
+        value: U256::ZERO,
+        access_list: AccessList::default(),
+        input: calldata.into(),
+    };
+    let sig = signer.sign_transaction_sync(&mut tx).expect("sign");
+    format!(
+        "0x{}",
+        hex::encode(TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718())
+    )
+}
+
+async fn signed_upto_with_erc20() -> (
+    serde_json::Value,
+    serde_json::Value,
+    Address,
+    Address,
+    RpcLog,
+) {
     let (signer, _) = wallet();
     let payer = signer.address();
+    let asset = USDC::base().address;
     let client = Eip155UptoClient::new(Arc::new(signer.clone()));
     let tag = Eip155Upto::price_tag_with_facilitator(
         pay_to(),
@@ -493,61 +661,155 @@ async fn permit2_allowance_rpc_err_with_facilitator_erc20_and_valid_tx_continues
         .decode()
         .expect("b64");
     let mut payload: serde_json::Value = serde_json::from_slice(&json).expect("json");
-    let asset = USDC::base().address;
-    let mut calldata = vec![0x09, 0x5e, 0xa7, 0xb3];
-    calldata.extend_from_slice(&[0u8; 12]);
-    calldata.extend_from_slice(PERMIT2_ADDRESS.as_slice());
-    calldata.extend_from_slice(&[0u8; 32]);
-    let mut tx = TxEip1559 {
-        chain_id: 8453,
-        nonce: 0,
-        gas_limit: 80_000,
-        max_fee_per_gas: 1_000_000_000,
-        max_priority_fee_per_gas: 1_000_000,
-        to: TxKind::Call(asset),
-        value: U256::ZERO,
-        access_list: AccessList::default(),
-        input: calldata.into(),
-    };
-    let sig = signer.sign_transaction_sync(&mut tx).expect("sign");
-    let signed = format!(
-        "0x{}",
-        hex::encode(TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718())
-    );
+    let signed = sign_max_approve(&signer, asset);
     payload["extensions"] = serde_json::json!({
         "erc20ApprovalGasSponsoring": {
             "info": {
                 "from": checksum(payer),
                 "asset": checksum(asset),
                 "spender": checksum(PERMIT2_ADDRESS),
-                "amount": "1000000",
+                "amount": U256::MAX.to_string(),
                 "signedTransaction": signed,
+                "version": "1"
+            }
+        }
+    });
+    (
+        payload,
+        serde_json::to_value(&tag.requirements).expect("requirements"),
+        payer,
+        asset,
+        RpcLog::default(),
+    )
+}
+
+#[tokio::test]
+async fn permit2_erc20_stub_is_402_parse_failed() {
+    let server = wiremock::MockServer::start().await;
+    let (mut payload, requirements, payer, asset) = signed_upto_payload().await;
+    payload["extensions"] = serde_json::json!({
+        "erc20ApprovalGasSponsoring": {
+            "info": {
+                "from": checksum(payer),
+                "asset": checksum(asset),
+                "spender": checksum(PERMIT2_ADDRESS),
+                "amount": U256::MAX.to_string(),
+                "signedTransaction": "0xdead",
                 "version": "1"
             }
         }
     });
     mount_rpc(
         &server,
-        RpcScript {
-            asset,
-            payer,
-            allowance: None,
-            balance: U256::from(1_000_000_u64),
-        },
+        rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64)),
     )
     .await;
-    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri()))
-        .expect("try_new")
-        .with_erc20_approval_gas_sponsoring();
+    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect_err("invalid envelope is 402");
+    match err {
+        FacilitatorError::Verification(e) => {
+            assert_eq!(
+                e.as_payment_problem().reason().as_str(),
+                "erc20_approval_tx_parse_failed"
+            );
+        }
+        other => panic!("expected verification, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn permit2_erc20_covering_skips_isolated_settle_and_calls_simulate() {
+    let server = wiremock::MockServer::start().await;
+    let (payload, requirements, payer, asset, _) = signed_upto_with_erc20().await;
+    let script = RpcScript {
+        revert_settle: true,
+        simulate_status: true,
+        ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+    };
+    let log = script.log.clone();
+    mount_rpc(&server, script).await;
+    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
     let resp = fac
         .verify(VerifyRequest::from(serde_json::json!({
             "x402Version": 2,
             "paymentPayload": payload,
-            "paymentRequirements": tag.requirements,
+            "paymentRequirements": requirements,
         })))
         .await
-        .expect("erc20 catch continues past 412");
+        .expect("covering simulate succeeds");
     assert!(matches!(resp, VerifyResponse::Valid { .. }), "got {resp:?}");
+    assert!(
+        log.methods().iter().any(|m| m == "eth_simulateV1"),
+        "covering must call eth_simulateV1, got {:?}",
+        log.methods()
+    );
+    assert!(
+        !log.called(X402_UPTO_PERMIT2_PROXY),
+        "covering must not isolated eth_call settle"
+    );
+}
+
+#[tokio::test]
+async fn permit2_erc20_simulate_status_false_is_simulation_failed() {
+    let server = wiremock::MockServer::start().await;
+    let (payload, requirements, payer, asset, _) = signed_upto_with_erc20().await;
+    mount_rpc(
+        &server,
+        RpcScript {
+            revert_settle: true,
+            simulate_status: false,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+        },
+    )
+    .await;
+    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect_err("status false");
+    assert!(
+        matches!(
+            err,
+            FacilitatorError::Verification(VerificationError::SimulationFailed(_))
+        ),
+        "got {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn permit2_erc20_missing_simulate_is_transport() {
+    let server = wiremock::MockServer::start().await;
+    let (payload, requirements, payer, asset, _) = signed_upto_with_erc20().await;
+    mount_rpc(
+        &server,
+        RpcScript {
+            revert_settle: true,
+            simulate_missing: true,
+            ..rpc_script(asset, payer, Some(U256::ZERO), U256::from(1_000_000_u64))
+        },
+    )
+    .await;
+    let fac = Eip155UptoFacilitator::try_new(provider_at(&server.uri())).expect("try_new");
+    let err = fac
+        .verify(VerifyRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect_err("missing eth_simulateV1");
+    assert!(err.is_transport(), "got {err:?}");
 }
 
 #[tokio::test]
@@ -633,4 +895,350 @@ async fn client_attaches_eip2612_when_advertised_and_allowance_low() {
     let payload: r402_evm::upto::payload::v2::PaymentPayload =
         serde_json::from_slice(&json).expect("payload");
     assert!(payload.extensions.get(EIP2612_GAS_SPONSORING_KEY).is_some());
+}
+
+/// Anvil account 1 — 0-ETH payer distinct from the facilitator hot wallet.
+const ANVIL_KEY_1: &str = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const TOKEN: Address = address!("0x00000000000000000000000000000000000000aa");
+const ALWAYS_SUCCEED: [u8; 1] = [0x00];
+const ALWAYS_REVERT: [u8; 3] = [0x5f, 0x5f, 0xfd];
+
+struct AnvilGuard {
+    child: std::process::Child,
+}
+
+impl Drop for AnvilGuard {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn spawn_anvil() -> Option<(AnvilGuard, Url)> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").ok()?;
+    let port = listener.local_addr().ok()?.port();
+    drop(listener);
+    let home_anvil = std::env::var("HOME")
+        .ok()
+        .map(|home| format!("{home}/.foundry/bin/anvil"));
+    let anvil = ["anvil"]
+        .into_iter()
+        .chain(home_anvil.as_deref())
+        .find(|bin| {
+            std::process::Command::new(bin)
+                .arg("--version")
+                .output()
+                .is_ok()
+        })
+        .unwrap_or("anvil");
+    let child = std::process::Command::new(anvil)
+        .args([
+            "--port",
+            &port.to_string(),
+            "--chain-id",
+            "8453",
+            "--silent",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    let url = Url::parse(&format!("http://127.0.0.1:{port}")).ok()?;
+    Some((AnvilGuard { child }, url))
+}
+
+async fn wait_anvil(url: &Url) -> bool {
+    for _ in 0..50 {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", url.port().unwrap_or(8545))
+                .parse()
+                .expect("addr"),
+            std::time::Duration::from_millis(100),
+        )
+        .is_ok()
+        {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    false
+}
+
+fn payer_wallet() -> PrivateKeySigner {
+    PrivateKeySigner::from_str(ANVIL_KEY_1).expect("anvil key 1")
+}
+
+fn provider_wallet_at(rpc: &str, key: &str) -> Eip155ChainProvider {
+    let signer = PrivateKeySigner::from_str(key).expect("key");
+    let wallet = EthereumWallet::from(signer);
+    let url = Url::parse(rpc).expect("url");
+    Eip155ChainProvider::new(
+        Eip155ChainReference::new(8453),
+        wallet,
+        &[(url, None)],
+        true,
+        false,
+        15,
+    )
+    .expect("provider")
+}
+
+async fn anvil_set_code(provider: &impl Provider, addr: Address, code: alloy_primitives::Bytes) {
+    let _: serde_json::Value = provider
+        .raw_request("anvil_setCode".into(), (addr, code))
+        .await
+        .expect("anvil_setCode");
+}
+
+async fn anvil_set_balance(provider: &impl Provider, addr: Address, value: U256) {
+    let _: serde_json::Value = provider
+        .raw_request("anvil_setBalance".into(), (addr, value))
+        .await
+        .expect("anvil_setBalance");
+}
+
+async fn mint_tokens(provider: &Eip155ChainProvider, token: Address, to: Address, amount: U256) {
+    use alloy_primitives::Bytes;
+    use alloy_sol_types::{SolCall, sol};
+    use r402_evm::chain::{Eip155MetaTransactionProvider, MetaTransaction};
+
+    sol! {
+        function mint(address to, uint256 amount);
+    }
+    let calldata: Bytes = mintCall { to, amount }.abi_encode().into();
+    Eip155MetaTransactionProvider::send_transaction(
+        provider,
+        MetaTransaction {
+            to: token,
+            calldata,
+            confirmations: 1,
+            from: None,
+            value: U256::ZERO,
+        },
+    )
+    .await
+    .expect("mint");
+}
+
+async fn token_allowance(provider: &impl Provider, token: Address, owner: Address) -> U256 {
+    use alloy_sol_types::{SolCall, sol};
+    sol! {
+        function allowance(address owner, address spender) external view returns (uint256);
+    }
+    let data = allowanceCall {
+        owner,
+        spender: PERMIT2_ADDRESS,
+    }
+    .abi_encode();
+    use alloy_network::TransactionBuilder;
+    let result = provider
+        .call(
+            alloy_rpc_types_eth::TransactionRequest::default()
+                .with_to(token)
+                .with_input(data),
+        )
+        .await
+        .expect("allowance");
+    U256::from_be_slice(result.as_ref())
+}
+
+async fn signed_upto_erc20_for(
+    payer: &PrivateKeySigner,
+    asset: Address,
+    facilitator: Address,
+) -> (serde_json::Value, serde_json::Value) {
+    let client = Eip155UptoClient::new(Arc::new(payer.clone()));
+    let tag = Eip155Upto::price_tag_with_facilitator(
+        pay_to(),
+        USDC::base().amount(1_000_000u64),
+        facilitator,
+    );
+    let mut reqs = tag.requirements.clone();
+    reqs.asset = checksum(asset).into();
+    let required = PaymentRequired::new(ResourceInfo::new("https://api.example.com/paid"))
+        .with_accepts(vec![reqs.clone()]);
+    let b64 = client
+        .accept(&required)
+        .first()
+        .expect("candidate")
+        .sign()
+        .await
+        .expect("sign");
+    let json = r402_protocol::payment::Base64Bytes(b64.into_bytes())
+        .decode()
+        .expect("b64");
+    let mut payload: serde_json::Value = serde_json::from_slice(&json).expect("json");
+    payload["accepted"]["asset"] = serde_json::json!(checksum(asset));
+    payload["payload"]["permit2Authorization"]["permitted"]["token"] =
+        serde_json::json!(checksum(asset));
+    let signed = sign_max_approve(payer, asset);
+    payload["extensions"] = serde_json::json!({
+        "erc20ApprovalGasSponsoring": {
+            "info": {
+                "from": checksum(payer.address()),
+                "asset": checksum(asset),
+                "spender": checksum(PERMIT2_ADDRESS),
+                "amount": U256::MAX.to_string(),
+                "signedTransaction": signed,
+                "version": "1"
+            }
+        }
+    });
+    (payload, serde_json::to_value(&reqs).expect("reqs"))
+}
+
+async fn prepare_anvil_erc20() -> (AnvilGuard, String, Address, Address) {
+    let (guard, url) = spawn_anvil().expect("anvil must be on PATH");
+    assert!(wait_anvil(&url).await, "anvil did not become ready");
+    let rpc = url.to_string();
+    let provider = provider_wallet_at(&rpc, ANVIL_KEY);
+    let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
+    let raw = include_str!("mock_erc20.hex");
+    let hex_body = raw.trim().strip_prefix("0x").unwrap_or(raw.trim());
+    let bytecode = hex::decode(hex_body).expect("bytecode");
+    anvil_set_code(inner, TOKEN, bytecode.into()).await;
+    anvil_set_code(
+        inner,
+        X402_UPTO_PERMIT2_PROXY,
+        ALWAYS_SUCCEED.to_vec().into(),
+    )
+    .await;
+    let payer = payer_wallet().address();
+    mint_tokens(&provider, TOKEN, payer, U256::from(1_000_000_000u64)).await;
+    anvil_set_balance(inner, payer, U256::ZERO).await;
+    (guard, rpc, payer, TOKEN)
+}
+
+#[tokio::test]
+async fn anvil_erc20_verify_and_settle_funds_approves_and_settles() {
+    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let provider = provider_wallet_at(&rpc, ANVIL_KEY);
+    let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
+    let fac = Eip155UptoFacilitator::try_new(provider_wallet_at(&rpc, ANVIL_KEY)).expect("try_new");
+    let payer_signer = payer_wallet();
+    let (payload, requirements) =
+        signed_upto_erc20_for(&payer_signer, token, facilitator_addr()).await;
+    let nonce_before = inner.get_transaction_count(payer).await.expect("nonce");
+    let verify = fac
+        .verify(VerifyRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect("verify");
+    assert!(matches!(verify, VerifyResponse::Valid { .. }));
+    let settle = fac
+        .settle(SettleRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect("settle");
+    assert!(matches!(settle, SettleResponse::Success { .. }));
+    assert_eq!(
+        token_allowance(inner, token, payer).await,
+        U256::MAX,
+        "approve must land at maxUint256"
+    );
+    let nonce_after = inner.get_transaction_count(payer).await.expect("nonce");
+    assert_eq!(
+        nonce_after,
+        nonce_before + 1,
+        "exactly one payer approve tx"
+    );
+}
+
+#[tokio::test]
+async fn anvil_erc20_retry_skips_second_approve() {
+    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let provider = provider_wallet_at(&rpc, ANVIL_KEY);
+    let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
+    let fac = Eip155UptoFacilitator::try_new(provider_wallet_at(&rpc, ANVIL_KEY)).expect("try_new");
+    let payer_signer = payer_wallet();
+    let (payload, requirements) =
+        signed_upto_erc20_for(&payer_signer, token, facilitator_addr()).await;
+    fac.verify(VerifyRequest::from(serde_json::json!({
+        "x402Version": 2,
+        "paymentPayload": payload,
+        "paymentRequirements": requirements,
+    })))
+    .await
+    .expect("verify");
+    anvil_set_code(
+        inner,
+        X402_UPTO_PERMIT2_PROXY,
+        ALWAYS_REVERT.to_vec().into(),
+    )
+    .await;
+    let first = fac
+        .settle(SettleRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await;
+    assert!(first.is_err(), "proxy revert must fail settle: {first:?}");
+    let nonce_after_fail = inner.get_transaction_count(payer).await.expect("nonce");
+    anvil_set_code(
+        inner,
+        X402_UPTO_PERMIT2_PROXY,
+        ALWAYS_SUCCEED.to_vec().into(),
+    )
+    .await;
+    let second = fac
+        .settle(SettleRequest::from(serde_json::json!({
+            "x402Version": 2,
+            "paymentPayload": payload,
+            "paymentRequirements": requirements,
+        })))
+        .await
+        .expect("retry settle");
+    assert!(matches!(second, SettleResponse::Success { .. }));
+    let nonce_after_ok = inner.get_transaction_count(payer).await.expect("nonce");
+    assert_eq!(
+        nonce_after_ok, nonce_after_fail,
+        "retry must not send a second approve"
+    );
+}
+
+#[tokio::test]
+async fn anvil_erc20_parallel_settles_share_one_approve() {
+    let (_guard, rpc, payer, token) = prepare_anvil_erc20().await;
+    let provider = provider_wallet_at(&rpc, ANVIL_KEY);
+    let inner = r402_evm::chain::Eip155MetaTransactionProvider::inner(&provider);
+    let fac = Arc::new(
+        Eip155UptoFacilitator::try_new(provider_wallet_at(&rpc, ANVIL_KEY)).expect("try_new"),
+    );
+    let payer_signer = payer_wallet();
+    let (p1, r1) = signed_upto_erc20_for(&payer_signer, token, facilitator_addr()).await;
+    let (p2, r2) = signed_upto_erc20_for(&payer_signer, token, facilitator_addr()).await;
+    let nonce_before = inner.get_transaction_count(payer).await.expect("nonce");
+    let fac_a = Arc::clone(&fac);
+    let fac_b = Arc::clone(&fac);
+    let a = tokio::spawn(async move {
+        fac_a
+            .settle(SettleRequest::from(serde_json::json!({
+                "x402Version": 2,
+                "paymentPayload": p1,
+                "paymentRequirements": r1,
+            })))
+            .await
+    });
+    let b = tokio::spawn(async move {
+        fac_b
+            .settle(SettleRequest::from(serde_json::json!({
+                "x402Version": 2,
+                "paymentPayload": p2,
+                "paymentRequirements": r2,
+            })))
+            .await
+    });
+    let ra = a.await.expect("join a").expect("settle a");
+    let rb = b.await.expect("join b").expect("settle b");
+    assert!(matches!(ra, SettleResponse::Success { .. }));
+    assert!(matches!(rb, SettleResponse::Success { .. }));
+    let nonce_after = inner.get_transaction_count(payer).await.expect("nonce");
+    assert_eq!(nonce_after, nonce_before + 1, "one approve for two settles");
 }

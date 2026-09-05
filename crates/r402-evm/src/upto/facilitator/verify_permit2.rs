@@ -16,6 +16,10 @@ use super::verify::PreparedUptoPermit2;
 use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::contracts::{IERC20, Validator6492};
 use crate::eip2612::Eip2612SignedPermit;
+use crate::erc20_approval::{
+    assert_facilitator_can_fund, funding_deficit, rpc_validate_covering_approval,
+    simulate_permit2_settle_with_erc20_approval,
+};
 use crate::error::Eip155ExactError;
 use crate::exact::facilitator::{permit2_allowance_gate, permit2_extension_covers_allowance};
 use crate::permit2::PERMIT2_ADDRESS;
@@ -137,7 +141,7 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
     required_amount: U256,
     extensions: &Extensions,
     clock_skew_tolerance: u64,
-    erc20_approval_enabled: bool,
+    chain_id: u64,
 ) -> Result<Address, Eip155ExactError> {
     let classified = classify_with_code(
         provider,
@@ -163,8 +167,8 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
                 extensions,
                 prepared.from,
                 prepared.token,
+                chain_id,
                 clock_skew_tolerance,
-                erc20_approval_enabled,
             )? {
                 if allowance_rpc_failed {
                     #[cfg(feature = "telemetry")]
@@ -179,6 +183,27 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
         && balance < required_amount
     {
         return Err(VerificationError::InsufficientFunds.into());
+    }
+
+    let covering_needed = matches!(
+        permit2_allowance_gate(allowance_for_gate, required_amount, false, false),
+        Err(VerificationError::Permit2AllowanceRequired)
+    );
+    let mut erc20_approval = prepared.erc20_approval.clone();
+    if covering_needed
+        && prepared.eip2612.is_none()
+        && let Some(approval) = erc20_approval.as_ref()
+    {
+        erc20_approval = Some(
+            rpc_validate_covering_approval(
+                provider,
+                approval,
+                prepared.from,
+                prepared.token,
+                chain_id,
+            )
+            .await?,
+        );
     }
 
     let proxy = IX402UptoPermit2Proxy::new(X402_UPTO_PERMIT2_PROXY, provider);
@@ -254,6 +279,32 @@ pub(super) async fn assert_onchain_valid<P: Provider>(
                     )
                 )
                 .map_err(classify_settle_call_error)?;
+            } else if let Some(approval) = erc20_approval.as_ref() {
+                let native_balance = provider.get_balance(prepared.from).await?;
+                let fund_value = funding_deficit(approval.native_cost, native_balance)?;
+                assert_facilitator_can_fund(provider, prepared.facilitator, fund_value).await?;
+                let settle_calldata = proxy
+                    .settle(
+                        permit,
+                        prepared.max_amount,
+                        prepared.from,
+                        witness,
+                        sig_bytes,
+                    )
+                    .calldata()
+                    .clone();
+                simulate_permit2_settle_with_erc20_approval(
+                    provider,
+                    approval,
+                    prepared.from,
+                    prepared.facilitator,
+                    prepared.facilitator,
+                    prepared.token,
+                    fund_value,
+                    X402_UPTO_PERMIT2_PROXY,
+                    settle_calldata,
+                )
+                .await?;
             } else {
                 let call = proxy.settle(
                     permit,

@@ -26,7 +26,10 @@ use crate::asset::VALIDATOR_ADDRESS;
 use crate::chain::Eip155ChainReference;
 use crate::chain::contracts::{IERC20, Validator6492};
 use crate::eip2612::Eip2612SignedPermit;
-use crate::erc20_approval::Erc20ApprovalGasSponsoringInfo;
+use crate::erc20_approval::{
+    Erc20ApprovalGasSponsoringInfo, assert_facilitator_can_fund, decode_erc20_approval_structural,
+    funding_deficit, rpc_validate_covering_approval, simulate_permit2_settle_with_erc20_approval,
+};
 use crate::error::Eip155ExactError;
 use crate::exact::payload::{TokenPermissions as SolTokenPermissions, Witness as SolWitness};
 use crate::exact::{
@@ -362,6 +365,10 @@ async fn simulate_eip6492_transfer<P: Provider>(
 /// following the same checks as the official Go SDK's `VerifyPermit2`:
 /// spender, recipient, deadline, validAfter, amount, and token.
 #[cfg_attr(feature = "telemetry", instrument(skip_all, err))]
+#[allow(
+    clippy::too_many_lines,
+    reason = "permit2 preconditions plus ERC-20 covering"
+)]
 pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     provider: P,
     chain: &Eip155ChainReference,
@@ -369,7 +376,6 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
     payload: &payload::v2::PaymentPayload,
     requirements: &payload::v2::PaymentRequirements,
     clock_skew_tolerance: u64,
-    erc20_approval_enabled: bool,
 ) -> Result<(IERC20::IERC20Instance<P>, Permit2Payment, Eip712Domain), Eip155ExactError> {
     let accepted = &payload.accepted;
     assert_requirements_match(accepted, requirements)?;
@@ -443,8 +449,8 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
                 &payload.extensions,
                 auth.from,
                 token_address,
+                chain.inner(),
                 clock_skew_tolerance,
-                erc20_approval_enabled,
             )? {
                 if allowance_rpc_failed {
                     #[cfg(feature = "telemetry")]
@@ -476,6 +482,42 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         validate_eip2612_permit_for_payment(info, auth.from, token_address, clock_skew_tolerance)?;
     }
 
+    let covering_needed = matches!(
+        permit2_allowance_gate(allowance_for_gate, required_amount, false, false),
+        Err(VerificationError::Permit2AllowanceRequired)
+    );
+    let mut erc20_approval =
+        match Erc20ApprovalGasSponsoringInfo::from_extensions(&payload.extensions) {
+            Ok(Some(info)) => Some(decode_erc20_approval_structural(
+                &info,
+                auth.from,
+                token_address,
+                chain.inner(),
+            )?),
+            Ok(None) => None,
+            Err(_) => {
+                return Err(VerificationError::from_wire(
+                    "invalid_erc20_approval_extension_format",
+                )
+                .into());
+            }
+        };
+    if covering_needed
+        && eip2612.is_none()
+        && let Some(approval) = erc20_approval.as_ref()
+    {
+        erc20_approval = Some(
+            rpc_validate_covering_approval(
+                erc20.provider(),
+                approval,
+                auth.from,
+                token_address,
+                chain.inner(),
+            )
+            .await?,
+        );
+    }
+
     let payment = Permit2Payment {
         from: auth.from,
         to: auth.witness.to,
@@ -487,6 +529,7 @@ pub(super) async fn assert_valid_permit2_payment<P: Provider>(
         valid_after: auth.witness.valid_after.into(),
         signature: permit2.signature.clone(),
         eip2612,
+        erc20_approval,
     };
 
     Ok((erc20, payment, domain))
@@ -511,6 +554,7 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
     provider: &P,
     payment: &Permit2Payment,
     eip712_domain: &Eip712Domain,
+    fund_from: Address,
 ) -> Result<Address, Eip155ExactError> {
     let permit_witness = PermitWitnessTransferFrom {
         permitted: SolTokenPermissions {
@@ -586,6 +630,26 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
             )
         )
         .map_err(|e| VerificationError::SimulationFailed(e.to_string()))?;
+    } else if let Some(approval) = payment.erc20_approval.as_ref() {
+        let native_balance = provider.get_balance(payer).await?;
+        let fund_value = funding_deficit(approval.native_cost, native_balance)?;
+        assert_facilitator_can_fund(provider, fund_from, fund_value).await?;
+        let settle_calldata = proxy
+            .settle(permit, payment.from, witness, signature_bytes)
+            .calldata()
+            .clone();
+        simulate_permit2_settle_with_erc20_approval(
+            provider,
+            approval,
+            payer,
+            fund_from,
+            fund_from,
+            payment.token,
+            fund_value,
+            X402_EXACT_PERMIT2_PROXY,
+            settle_calldata,
+        )
+        .await?;
     } else {
         let settle_call = proxy.settle(permit, payment.from, witness, signature_bytes);
         let settle_simulation = settle_call.call().into_future();
@@ -606,14 +670,12 @@ pub(super) async fn verify_permit2_payment<P: Provider>(
     Ok(payer)
 }
 
-const APPROVE_SELECTOR: [u8; 4] = [0x09, 0x5e, 0xa7, 0xb3];
-
 pub(crate) fn permit2_extension_covers_allowance(
     extensions: &Extensions,
     payer: Address,
     token: Address,
+    chain_id: u64,
     clock_skew_tolerance: u64,
-    erc20_approval_enabled: bool,
 ) -> Result<bool, Eip155ExactError> {
     match Eip2612SignedPermit::from_extensions(extensions) {
         Ok(Some(info)) => {
@@ -625,12 +687,9 @@ pub(crate) fn permit2_extension_covers_allowance(
             return Err(VerificationError::from_wire("invalid_eip2612_extension_format").into());
         }
     }
-    if !erc20_approval_enabled {
-        return Ok(false);
-    }
     match Erc20ApprovalGasSponsoringInfo::from_extensions(extensions) {
         Ok(Some(info)) => {
-            validate_erc20_approval_for_payment(&info, payer, token)?;
+            decode_erc20_approval_structural(&info, payer, token, chain_id)?;
             Ok(true)
         }
         Ok(None) => Ok(false),
@@ -661,102 +720,6 @@ fn validate_eip2612_permit_for_payment(
         .saturating_add(clock_skew_tolerance);
     if deadline < threshold {
         return Err(VerificationError::from_wire("eip2612_deadline_expired"));
-    }
-    Ok(())
-}
-
-fn validate_erc20_approval_for_payment(
-    info: &Erc20ApprovalGasSponsoringInfo,
-    payer: Address,
-    token: Address,
-) -> Result<(), VerificationError> {
-    if info.from != payer {
-        return Err(VerificationError::from_wire("erc20_approval_from_mismatch"));
-    }
-    if info.asset != token {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_asset_mismatch",
-        ));
-    }
-    if info.spender != PERMIT2_ADDRESS {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_spender_not_permit2",
-        ));
-    }
-    if info.version.is_empty() {
-        return Err(VerificationError::from_wire(
-            "invalid_erc20_approval_extension_format",
-        ));
-    }
-    validate_erc20_approval_signed_tx(&info.signed_transaction, payer, token)
-}
-
-fn validate_erc20_approval_signed_tx(
-    signed_transaction: &str,
-    payer: Address,
-    token: Address,
-) -> Result<(), VerificationError> {
-    use alloy_consensus::TxEnvelope;
-    use alloy_consensus::transaction::{SignerRecoverable, Transaction};
-    use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::hex;
-
-    let hex_body = signed_transaction
-        .strip_prefix("0x")
-        .or_else(|| signed_transaction.strip_prefix("0X"))
-        .unwrap_or(signed_transaction);
-    let bytes = hex::decode(hex_body)
-        .map_err(|_| VerificationError::from_wire("erc20_approval_tx_parse_failed"))?;
-    let tx = TxEnvelope::decode_2718(&mut bytes.as_slice())
-        .map_err(|_| VerificationError::from_wire("erc20_approval_tx_parse_failed"))?;
-    let Some(to) = tx.to() else {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_wrong_target",
-        ));
-    };
-    if to != token {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_wrong_target",
-        ));
-    }
-    let data = tx.input();
-    let Some(selector) = data.get(..4) else {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_wrong_selector",
-        ));
-    };
-    if selector != APPROVE_SELECTOR {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_wrong_selector",
-        ));
-    }
-    let Some(spender_word) = data.get(4..36) else {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_invalid_calldata",
-        ));
-    };
-    let Some(spender_bytes) = spender_word.get(12..) else {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_invalid_calldata",
-        ));
-    };
-    let Ok(spender) = Address::try_from(spender_bytes) else {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_invalid_calldata",
-        ));
-    };
-    if spender != PERMIT2_ADDRESS {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_wrong_spender",
-        ));
-    }
-    let recovered = tx
-        .recover_signer()
-        .map_err(|_| VerificationError::from_wire("erc20_approval_tx_invalid_signature"))?;
-    if recovered != payer {
-        return Err(VerificationError::from_wire(
-            "erc20_approval_tx_signer_mismatch",
-        ));
     }
     Ok(())
 }
@@ -884,104 +847,17 @@ mod tests {
         assert!(permit2_allowance_gate(Ok(required), required, false, false).is_ok());
     }
 
-    fn sign_approve_tx(
-        signer: &alloy_signer_local::PrivateKeySigner,
-        token: Address,
-        spender: Address,
-    ) -> String {
-        use alloy_consensus::{SignableTransaction, TxEip1559, TxEnvelope};
-        use alloy_eips::eip2718::Encodable2718;
-        use alloy_eips::eip2930::AccessList;
-        use alloy_network::TxSignerSync;
-        use alloy_primitives::{TxKind, hex};
-
-        let mut calldata = Vec::from(APPROVE_SELECTOR);
-        calldata.extend_from_slice(&[0u8; 12]);
-        calldata.extend_from_slice(spender.as_slice());
-        calldata.extend_from_slice(&[0u8; 32]);
-        let mut tx = TxEip1559 {
-            chain_id: 8453,
-            nonce: 0,
-            gas_limit: 80_000,
-            max_fee_per_gas: 1_000_000_000,
-            max_priority_fee_per_gas: 1_000_000,
-            to: TxKind::Call(token),
-            value: U256::ZERO,
-            access_list: AccessList::default(),
-            input: calldata.into(),
-        };
-        let sig = signer.sign_transaction_sync(&mut tx).expect("sign tx");
-        let encoded = TxEnvelope::Eip1559(tx.into_signed(sig)).encoded_2718();
-        format!("0x{}", hex::encode(encoded))
-    }
-
-    fn erc20_info(
-        from: Address,
-        token: Address,
-        spender: Address,
-        signed_transaction: String,
-    ) -> Erc20ApprovalGasSponsoringInfo {
-        Erc20ApprovalGasSponsoringInfo {
-            from,
-            asset: token,
-            spender,
-            amount: "1000000".into(),
-            signed_transaction,
-            version: "1".into(),
-        }
-    }
-
     #[test]
-    fn erc20_approval_payload_stub_does_not_cover_without_signed_tx() {
+    fn permit2_extension_missing_erc20_key_does_not_cover() {
         let payer = Address::repeat_byte(0x11);
         let token = Address::repeat_byte(0xAA);
-        let info = erc20_info(payer, token, PERMIT2_ADDRESS, "0xdead".into());
-        let err = validate_erc20_approval_for_payment(&info, payer, token).unwrap_err();
-        assert_eq!(
-            err.as_payment_problem().reason().as_str(),
-            "erc20_approval_tx_parse_failed"
-        );
+        let covers = permit2_extension_covers_allowance(&Extensions::new(), payer, token, 8453, 6)
+            .expect("absent key is not an error");
+        assert!(!covers);
     }
 
     #[test]
-    fn erc20_approval_valid_signed_tx_covers() {
-        use std::str::FromStr;
-
-        use alloy_signer_local::PrivateKeySigner;
-        let signer = PrivateKeySigner::from_str(
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        )
-        .unwrap();
-        let payer = signer.address();
-        let token = Address::repeat_byte(0xAA);
-        let signed = sign_approve_tx(&signer, token, PERMIT2_ADDRESS);
-        let info = erc20_info(payer, token, PERMIT2_ADDRESS, signed);
-        validate_erc20_approval_for_payment(&info, payer, token).expect("valid approve tx");
-    }
-
-    #[test]
-    fn erc20_approval_wrong_target_is_rejected() {
-        use std::str::FromStr;
-
-        use alloy_signer_local::PrivateKeySigner;
-        let signer = PrivateKeySigner::from_str(
-            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
-        )
-        .unwrap();
-        let payer = signer.address();
-        let token = Address::repeat_byte(0xAA);
-        let other = Address::repeat_byte(0xBB);
-        let signed = sign_approve_tx(&signer, other, PERMIT2_ADDRESS);
-        let info = erc20_info(payer, token, PERMIT2_ADDRESS, signed);
-        let err = validate_erc20_approval_for_payment(&info, payer, token).unwrap_err();
-        assert_eq!(
-            err.as_payment_problem().reason().as_str(),
-            "erc20_approval_tx_wrong_target"
-        );
-    }
-
-    #[test]
-    fn permit2_extension_ignores_erc20_when_facilitator_has_no_extension() {
+    fn permit2_extension_invalid_envelope_is_402() {
         let payer = Address::repeat_byte(0x11);
         let token = Address::repeat_byte(0xAA);
         let mut extensions = Extensions::new();
@@ -991,13 +867,21 @@ mod tests {
                 "from": format!("{payer:#x}"),
                 "asset": format!("{token:#x}"),
                 "spender": format!("{PERMIT2_ADDRESS:#x}"),
-                "amount": "1000000",
+                "amount": U256::MAX.to_string(),
                 "signedTransaction": "0xdead",
                 "version": "1",
             })),
         );
-        let covers = permit2_extension_covers_allowance(&extensions, payer, token, 6, false)
-            .expect("payload-only stub is ignored");
-        assert!(!covers);
+        let err = permit2_extension_covers_allowance(&extensions, payer, token, 8453, 6)
+            .expect_err("stub envelope is 402");
+        match err {
+            Eip155ExactError::PaymentVerification(e) => {
+                assert_eq!(
+                    e.as_payment_problem().reason().as_str(),
+                    "erc20_approval_tx_parse_failed"
+                );
+            }
+            other => panic!("expected PaymentVerification, got {other:?}"),
+        }
     }
 }

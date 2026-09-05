@@ -37,12 +37,28 @@ pub enum Eip155ExactError {
     /// Payment verification failed.
     #[error(transparent)]
     PaymentVerification(#[from] VerificationError),
+    /// Buyer-signed ERC-20 `approve` was included but reverted.
+    #[error("erc20_approval_tx_failed: {0}")]
+    Erc20ApprovalTxFailed(TxHash),
+    /// Native-gas funding transfer to the payer failed.
+    #[error("erc20_approval_funding_failed")]
+    Erc20ApprovalFundingFailed,
+    /// Chain JSON-RPC does not implement a required method (`eth_simulateV1`).
+    #[error("chain RPC missing a required method")]
+    RpcMethodMissing,
 }
 
 impl From<Eip155ExactError> for FacilitatorError {
     fn from(value: Eip155ExactError) -> Self {
         match value {
-            Eip155ExactError::Transport(_)
+            Eip155ExactError::RpcMethodMissing => {
+                Self::transport(r402_protocol::error::FacilitatorTransportKind::RpcMethodMissing)
+            }
+            Eip155ExactError::Erc20ApprovalTxFailed(hash) => {
+                Self::Onchain(format!("erc20_approval_tx_failed: {hash}"))
+            }
+            Eip155ExactError::Erc20ApprovalFundingFailed
+            | Eip155ExactError::Transport(_)
             | Eip155ExactError::PendingTransaction(_)
             | Eip155ExactError::TransactionReverted(_)
             | Eip155ExactError::TransferEventMismatch(_)
@@ -99,6 +115,49 @@ impl From<alloy_contract::Error> for Eip155ExactError {
             | alloy_contract::Error::AbiError(_) => Self::ContractCall(e.to_string()),
             alloy_contract::Error::TransportError(e) => Self::Transport(e),
             alloy_contract::Error::PendingTransactionError(e) => Self::PendingTransaction(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_primitives::TxHash;
+    use r402_protocol::error::{FacilitatorError, FacilitatorTransportKind};
+
+    use super::Eip155ExactError;
+
+    #[test]
+    fn rpc_method_missing_maps_to_transport_not_onchain() {
+        let err = FacilitatorError::from(Eip155ExactError::RpcMethodMissing);
+        assert!(err.is_transport());
+        assert!(
+            matches!(
+                err,
+                FacilitatorError::Transport {
+                    kind: FacilitatorTransportKind::RpcMethodMissing
+                }
+            ),
+            "got {err:?}"
+        );
+        assert!(
+            err.as_payment_problem().is_none(),
+            "RpcMethodMissing must not become a 402 payment problem"
+        );
+    }
+
+    #[test]
+    fn erc20_approval_tx_failed_maps_to_onchain_with_hash() {
+        let hash = TxHash::repeat_byte(0xAB);
+        let err = FacilitatorError::from(Eip155ExactError::Erc20ApprovalTxFailed(hash));
+        match err {
+            FacilitatorError::Onchain(message) => {
+                assert!(
+                    message.contains("erc20_approval_tx_failed"),
+                    "got {message}"
+                );
+                assert!(message.contains(&hash.to_string()), "got {message}");
+            }
+            other => panic!("expected Onchain, got {other:?}"),
         }
     }
 }
