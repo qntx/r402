@@ -16,9 +16,10 @@
 
 mod harness;
 
+use std::cell::RefCell;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once};
 use std::time::Duration;
 
 use alloy_signer::Signer;
@@ -38,6 +39,7 @@ use r402_protocol::payment::{Base64Bytes, PaymentRequired};
 use serde_json::Value;
 use tracing::field::{Field, Visit};
 use tracing::span::{Attributes, Id, Record};
+use tracing::subscriber::Interest;
 use tracing::{Event, Metadata, Subscriber};
 
 use crate::harness::{
@@ -592,22 +594,8 @@ impl LogCapture {
             .map(|event| event.message.clone())
             .collect()
     }
-}
 
-impl Subscriber for LogCapture {
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        metadata.target() == "r402_http::server::siwx"
-    }
-
-    fn new_span(&self, _span: &Attributes<'_>) -> Id {
-        Id::from_u64(1)
-    }
-
-    fn record(&self, _span: &Id, _values: &Record<'_>) {}
-
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
-
-    fn event(&self, event: &Event<'_>) {
+    fn record_event(&self, event: &Event<'_>) {
         let mut visitor = FieldVisitor {
             message: String::new(),
             fields: Vec::new(),
@@ -621,10 +609,81 @@ impl Subscriber for LogCapture {
                 fields: visitor.fields,
             });
     }
+}
+
+const SIWX_LOG_TARGET: &str = "r402_http::server::siwx";
+
+thread_local! {
+    static CAPTURE: RefCell<Option<LogCapture>> = const { RefCell::new(None) };
+}
+
+/// `set_default` races tracing's process-global callsite interest cache:
+/// a parallel test dropping its guard can rebuild `siwx` debug events to
+/// `Interest::never`, so the capturing test records `[]`.
+struct SiwxTestSubscriber;
+
+impl Subscriber for SiwxTestSubscriber {
+    fn register_callsite(&self, metadata: &Metadata<'_>) -> Interest {
+        if metadata.target() == SIWX_LOG_TARGET {
+            Interest::always()
+        } else {
+            Interest::never()
+        }
+    }
+
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.target() == SIWX_LOG_TARGET
+    }
+
+    fn new_span(&self, _span: &Attributes<'_>) -> Id {
+        Id::from_u64(1)
+    }
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        if event.metadata().target() != SIWX_LOG_TARGET {
+            return;
+        }
+        CAPTURE.with(|slot| {
+            if let Some(capture) = slot.borrow().as_ref() {
+                capture.record_event(event);
+            }
+        });
+    }
 
     fn enter(&self, _span: &Id) {}
 
     fn exit(&self, _span: &Id) {}
+}
+
+struct CaptureGuard;
+
+impl Drop for CaptureGuard {
+    fn drop(&mut self) {
+        CAPTURE.with(|slot| {
+            slot.replace(None);
+        });
+    }
+}
+
+fn install_siwx_test_subscriber() {
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        tracing::subscriber::set_global_default(SiwxTestSubscriber)
+            .expect("siwx tests set the process tracing subscriber once");
+    });
+}
+
+fn capture_logs() -> (LogCapture, CaptureGuard) {
+    install_siwx_test_subscriber();
+    let capture = LogCapture::default();
+    CAPTURE.with(|slot| {
+        slot.replace(Some(capture.clone()));
+    });
+    (capture, CaptureGuard)
 }
 
 fn assert_no_proof_leak(dump: &str, header: &str) {
@@ -648,8 +707,7 @@ async fn parse_denied_logs_error_not_header() {
         .unwrap();
     let header = "not-valid-base64!!!";
     let req = siwx_request(HeaderValue::from_static(header), "api.example.com");
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let response = call_layer(layer, OkInner, req).await;
     assert_eq!(
         response.status(),
@@ -695,8 +753,7 @@ async fn invalid_field_parse_denied_logs_error() {
         HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
         "api.example.com",
     );
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let response = call_layer(layer, OkInner, req).await;
     assert_eq!(
         response.status(),
@@ -736,8 +793,7 @@ async fn verify_denied_logs_spec_code() {
         HeaderValue::from_bytes(encoded.as_ref()).unwrap(),
         "api.example.com",
     );
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let response = call_layer(layer, OkInner, req).await;
     assert_eq!(
         response.status(),
@@ -770,8 +826,7 @@ async fn valid_unpaid_logs_unpaid() {
     let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
     let (_, header) = sign_challenge(&info).await;
     let header_str = header.to_str().unwrap().to_owned();
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let response = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
     assert_eq!(
         response.status(),
@@ -806,8 +861,7 @@ async fn nonce_replay_logs_replay() {
     .await;
     assert_eq!(first.status(), StatusCode::OK, "first consume must grant");
     let header_str = header.to_str().unwrap().to_owned();
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let second = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
     assert_eq!(
         second.status(),
@@ -835,8 +889,7 @@ async fn grant_logs_granted() {
     let info = decode_required(&challenge)["extensions"][SIWX_KEY]["info"].clone();
     let (_, header) = sign_challenge(&info).await;
     let header_str = header.to_str().unwrap().to_owned();
-    let capture = LogCapture::default();
-    let _guard = tracing::subscriber::set_default(capture.clone());
+    let (capture, _guard) = capture_logs();
     let response = call_layer(layer, OkInner, siwx_request(header, "api.example.com")).await;
     assert_eq!(response.status(), StatusCode::OK, "auth_only must grant");
     assert_eq!(fac.verify_count(), 0, "grant must skip /verify");
