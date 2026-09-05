@@ -33,6 +33,9 @@ server       = [
     "dep:axum-core",
     "dep:compact_str",
     "dep:http",
+    "dep:r402-extensions",
+    "r402-extensions/ext-eip2612",
+    "r402-extensions/ext-erc20-approval",
     "dep:r402-facilitator",
     "dep:r402-protocol",
     "dep:r402-server",
@@ -76,7 +79,11 @@ http               = { workspace = true }
 http-body-util     = "0.1"
 r402-client        = { workspace = true }
 r402-evm           = { workspace = true, features = ["client", "server", "facilitator"] }
-r402-extensions    = { workspace = true, default-features = false, features = ["siwx"] }
+r402-extensions    = { workspace = true, default-features = false, features = [
+    "ext-eip2612",
+    "ext-erc20-approval",
+    "siwx",
+] }
 r402-facilitator   = { workspace = true, features = ["http-client"] }
 r402-protocol      = { workspace = true }
 r402-server        = { workspace = true }

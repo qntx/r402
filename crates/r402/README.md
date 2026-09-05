@@ -35,6 +35,26 @@ let app = Router::new().route(
 );
 ```
 
+EVM `upto` (and `exact` with Permit2) 402 responses include `eip2612GasSponsoring` without `with_extension`. `erc20ApprovalGasSponsoring` is included only when the facilitator `/supported.extensions` lists that key. `X402Middleware::with_extension` / `X402Layer::with_extension` remain the operator override.
+
+```rust
+use r402::evm::Eip155Upto;
+
+let x402 = X402Middleware::try_new("https://facilitator.example.com")?
+    .with_base_url("https://api.example.com".parse()?)
+    .with_scheme("eip155:*".parse()?, Eip155Upto);
+
+let app = Router::new().route(
+    "/paid-upto",
+    get(handler).layer(
+        x402.with_price_tag(Eip155Upto::price_tag(
+            address!("0xYourPayToAddress"),
+            USDC::base().amount(1_000_000u64),
+        ))?,
+    ),
+);
+```
+
 ## Send Payments (Client)
 
 ```rust
@@ -49,6 +69,8 @@ let client = reqwest::Client::new().with_payments(
 );
 let res = client.get("https://api.example.com/paid").send().await?;
 ```
+
+EIP-3009 buyers keep `Eip155ExactClient::new(signer)`. Permit2 / `upto` 402 already carries `eip2612GasSponsoring`; `erc20ApprovalGasSponsoring` only if the facilitator `/supported` lists it.
 
 ## Settlement Modes
 

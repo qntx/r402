@@ -110,6 +110,14 @@ fn price_tag_is_permit2_max_without_facilitator() {
             .and_then(serde_json::Value::as_str),
         Some("permit2")
     );
+    assert_eq!(
+        extra.get("name").and_then(serde_json::Value::as_str),
+        Some("USD Coin")
+    );
+    assert_eq!(
+        extra.get("version").and_then(serde_json::Value::as_str),
+        Some("2")
+    );
     assert!(extra.get("facilitatorAddress").is_none());
 }
 
@@ -123,6 +131,8 @@ fn price_tag_with_facilitator_pins_address() {
     let extra: UptoPaymentRequirementsExtra =
         serde_json::from_value(tag.requirements.extra.unwrap()).unwrap();
     assert_eq!(extra.facilitator_address.0, facilitator_addr());
+    assert_eq!(extra.name, "USD Coin");
+    assert_eq!(extra.version, "2");
 }
 
 fn try_new_question_mark() -> Result<(), FacilitatorError> {

@@ -68,9 +68,7 @@ impl Eip155Upto {
         asset: DeployedTokenAmount<U256, Eip155TokenDeployment>,
     ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
-        let extra = serde_json::json!({
-            "assetTransferMethod": UptoAssetTransferMethod::Permit2,
-        });
+        let extra = serde_json::Value::Object(permit2_extra(&asset));
         let requirements = base_requirements(pay_to, &asset, &chain_id, Some(extra));
         PriceTag::new(requirements)
     }
@@ -87,13 +85,40 @@ impl Eip155Upto {
     ) -> PriceTag {
         let chain_id: ChainId = asset.token.chain_reference.into();
         let facilitator: ChecksummedAddress = facilitator_address.into();
-        let extra = serde_json::json!({
-            "assetTransferMethod": UptoAssetTransferMethod::Permit2,
-            "facilitatorAddress": facilitator.to_string(),
-        });
-        let requirements = base_requirements(pay_to, &asset, &chain_id, Some(extra));
+        let mut extra = permit2_extra(&asset);
+        extra.insert(
+            "facilitatorAddress".to_owned(),
+            serde_json::Value::String(facilitator.to_string()),
+        );
+        let requirements = base_requirements(
+            pay_to,
+            &asset,
+            &chain_id,
+            Some(serde_json::Value::Object(extra)),
+        );
         PriceTag::new(requirements)
     }
+}
+
+fn permit2_extra(
+    asset: &DeployedTokenAmount<U256, Eip155TokenDeployment>,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut extra = serde_json::Map::new();
+    extra.insert(
+        "assetTransferMethod".to_owned(),
+        serde_json::json!(UptoAssetTransferMethod::Permit2),
+    );
+    if let Some(eip712) = &asset.token.eip712 {
+        extra.insert(
+            "name".to_owned(),
+            serde_json::Value::String(eip712.name.clone()),
+        );
+        extra.insert(
+            "version".to_owned(),
+            serde_json::Value::String(eip712.version.clone()),
+        );
+    }
+    extra
 }
 
 fn base_requirements<A: Into<ChecksummedAddress>>(
@@ -207,6 +232,8 @@ mod tests {
             Some("permit2")
         );
         assert!(!extra.contains_key("facilitatorAddress"));
+        assert!(!extra.contains_key("name"));
+        assert!(!extra.contains_key("version"));
 
         let facilitator = Address::repeat_byte(0xFA);
         let supported = supported_with_facilitator(facilitator);
@@ -255,6 +282,69 @@ mod tests {
                 .get("assetTransferMethod")
                 .and_then(serde_json::Value::as_str),
             Some("permit2")
+        );
+        assert_eq!(
+            extra
+                .get("facilitatorAddress")
+                .and_then(serde_json::Value::as_str),
+            Some(facilitator.to_checksum(None).as_str())
+        );
+        assert!(!extra.contains_key("name"));
+        assert!(!extra.contains_key("version"));
+    }
+
+    #[test]
+    fn price_tag_copies_eip712_name_and_version() {
+        let pay_to = ChecksummedAddress::from(Address::repeat_byte(0xCC));
+        let tag =
+            Eip155Upto::price_tag(pay_to, crate::USDC::base().amount(U256::from(1_000_000u64)));
+        let extra = tag
+            .requirements
+            .extra
+            .as_ref()
+            .expect("permit2 extra")
+            .as_object()
+            .expect("extra serialises to a JSON object");
+        assert_eq!(
+            extra
+                .get("assetTransferMethod")
+                .and_then(serde_json::Value::as_str),
+            Some("permit2")
+        );
+        assert_eq!(
+            extra.get("name").and_then(serde_json::Value::as_str),
+            Some("USD Coin")
+        );
+        assert_eq!(
+            extra.get("version").and_then(serde_json::Value::as_str),
+            Some("2")
+        );
+        assert!(!extra.contains_key("facilitatorAddress"));
+    }
+
+    #[test]
+    fn price_tag_with_facilitator_copies_eip712_name_and_version() {
+        let pay_to = ChecksummedAddress::from(Address::repeat_byte(0xCC));
+        let facilitator = Address::repeat_byte(0xFA);
+        let tag = Eip155Upto::price_tag_with_facilitator(
+            pay_to,
+            crate::USDC::base().amount(U256::from(1_000_000u64)),
+            facilitator,
+        );
+        let extra = tag
+            .requirements
+            .extra
+            .as_ref()
+            .expect("explicit facilitator should populate extra immediately")
+            .as_object()
+            .expect("extra serialises to a JSON object");
+        assert_eq!(
+            extra.get("name").and_then(serde_json::Value::as_str),
+            Some("USD Coin")
+        );
+        assert_eq!(
+            extra.get("version").and_then(serde_json::Value::as_str),
+            Some("2")
         );
         assert_eq!(
             extra

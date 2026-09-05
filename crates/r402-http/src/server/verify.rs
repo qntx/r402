@@ -1,11 +1,16 @@
 //! Steps 3–5: extract `Payment-Signature`, match, verify, skip-handler, settle-before.
 
 use http::HeaderMap;
+use r402_extensions::{
+    EIP2612_GAS_SPONSORING_KEY, ERC20_APPROVAL_GAS_SPONSORING_KEY, Eip2612GasSponsoringExtension,
+    Erc20ApprovalGasSponsoringExtension,
+};
 use r402_facilitator::DynFacilitator;
 use r402_protocol::error::FacilitatorError;
+use r402_protocol::extension::{AdvertiseContext, Extension};
 use r402_protocol::payment::{
     Base64Bytes, Extensions, PaymentRequired, PaymentRequirements, SettleResponse,
-    SettlementOverrides, VerifyResponse,
+    SettlementOverrides, SupportedResponse, VerifyResponse,
 };
 use r402_server::{
     CancelReason, CompletedSettlement, PaymentFlowName, PaymentFlowPhases,
@@ -81,7 +86,7 @@ impl Gate {
             .collect();
         validate_accepts_against_supported(&self.server, &reqs, &supported)
             .map_err(GateError::FacilitatorSupport)?;
-        let built = self
+        let mut built = self
             .server
             .create_payment_required_response(
                 reqs,
@@ -89,12 +94,13 @@ impl Gate {
                     resource: self.resource.clone(),
                     error: None,
                     extensions: Extensions::new(),
-                    supported,
+                    supported: supported.clone(),
                     payment_payload: None,
                 },
             )
             .await
             .map_err(|err| GateError::PaymentRequiredBuild(err.to_string()))?;
+        advertise_permit2_gas_sponsoring(&mut built, &supported, &self.server);
         self.payment_required = Some(built);
         Ok(())
     }
@@ -229,4 +235,56 @@ pub(crate) const HANDLER_FAILED: &str = "handler returned error status";
 
 pub(crate) const fn handler_failed_reason() -> CancelReason {
     CancelReason::HandlerFailed
+}
+
+fn advertise_permit2_gas_sponsoring(
+    body: &mut PaymentRequired,
+    supported: &SupportedResponse,
+    server: &ResourceServer,
+) {
+    if !body.accepts.iter().any(|req| is_evm_permit2(req, server)) {
+        return;
+    }
+    if body.extensions.get(EIP2612_GAS_SPONSORING_KEY).is_none() {
+        let entry = Eip2612GasSponsoringExtension::new().advertise(
+            &AdvertiseContext::for_payment_required(&body.resource, &body.accepts, None),
+        );
+        if let Some(entry) = entry {
+            body.extensions.insert(EIP2612_GAS_SPONSORING_KEY, entry);
+        }
+    }
+    let erc20_listed = supported
+        .extensions
+        .iter()
+        .any(|e| e.as_str() == ERC20_APPROVAL_GAS_SPONSORING_KEY);
+    if erc20_listed
+        && body
+            .extensions
+            .get(ERC20_APPROVAL_GAS_SPONSORING_KEY)
+            .is_none()
+    {
+        let entry = Erc20ApprovalGasSponsoringExtension::new().advertise(
+            &AdvertiseContext::for_payment_required(&body.resource, &body.accepts, None),
+        );
+        if let Some(entry) = entry {
+            body.extensions
+                .insert(ERC20_APPROVAL_GAS_SPONSORING_KEY, entry);
+        }
+    }
+}
+
+fn is_evm_permit2(req: &PaymentRequirements, server: &ResourceServer) -> bool {
+    if extra_atm(req) == Some("permit2") {
+        return true;
+    }
+    server
+        .registered_scheme(req.scheme.as_str(), &req.network)
+        .is_some_and(|s| s.default_asset_transfer_method() == "permit2")
+}
+
+fn extra_atm(req: &PaymentRequirements) -> Option<&str> {
+    req.extra
+        .as_ref()
+        .and_then(|extra| extra.get("assetTransferMethod"))
+        .and_then(serde_json::Value::as_str)
 }

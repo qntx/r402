@@ -6,6 +6,7 @@ use std::sync::Arc;
 use compact_str::CompactString;
 use http::{HeaderMap, Uri};
 use r402_facilitator::{Facilitator, FacilitatorClient, FacilitatorClientError};
+use r402_protocol::extension::Extension;
 use r402_protocol::network::{ChainId, ChainIdPattern};
 use r402_protocol::payment::PriceTag;
 use r402_server::{
@@ -146,6 +147,13 @@ impl X402Middleware {
         scheme: impl SchemeNetworkServer + 'static,
     ) -> Self {
         self.server.register_scheme(network, scheme);
+        self
+    }
+
+    /// Registers a protocol extension advertised on 402 responses.
+    #[must_use]
+    pub fn with_extension(mut self, extension: impl Extension + 'static) -> Self {
+        self.server = self.server.with_extension(extension);
         self
     }
 
