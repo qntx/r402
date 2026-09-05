@@ -7,7 +7,7 @@
 //! - [`Eip155ChainReference`] — numeric chain ID (e.g. `8453` for Base)
 //! - [`Eip155ChainProvider`] — RPC + wallet provider
 //! - [`Eip155TokenDeployment`] — token address, decimals, EIP-712 domain
-//! - [`MetaTransaction`] — target, calldata, confirmations
+//! - [`MetaTransaction`] — target, calldata, confirmations, value
 use alloy_primitives::Bytes;
 
 pub mod account;

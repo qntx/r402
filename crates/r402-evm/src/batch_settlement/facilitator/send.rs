@@ -1,7 +1,7 @@
 //! Simulate-then-broadcast helper shared by deposit / claim / settle / refund.
 
 use alloy_network::TransactionBuilder;
-use alloy_primitives::{Address, Bytes};
+use alloy_primitives::{Address, Bytes, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::TransactionRequest;
 use compact_str::CompactString;
@@ -53,6 +53,7 @@ where
             calldata: spec.calldata,
             confirmations: 1,
             from: None,
+            value: U256::ZERO,
         },
     )
     .await

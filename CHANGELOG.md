@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Breaking
+
+- `r402-evm` `MetaTransaction` now has `value: U256`. `new()` and existing
+  literals use `U256::ZERO`. `send_transaction` applies
+  `TransactionRequest::with_value`.
+
+### Added
+
+- `Eip155MetaTransactionProvider::send_raw_transaction` broadcasts a
+  buyer-signed EIP-2718 envelope via `eth_sendRawTransaction` and waits
+  for the receipt with the same confirmation count and
+  `receipt_timeout_secs` as `send_transaction`. Does not consume a
+  facilitator nonce.
+
 ## [0.20.0] — 2026-09-04
 
 ### Breaking

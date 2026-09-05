@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use alloy_network::{Ethereum as AlloyEthereum, EthereumWallet, NetworkWallet, TransactionBuilder};
-use alloy_primitives::{Address, Bytes, TxHash};
+use alloy_primitives::{Address, Bytes, TxHash, U256};
 use alloy_provider::fillers::{
     BlobGasFiller, ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller, WalletFiller,
 };
@@ -250,7 +250,8 @@ pub enum MetaTransactionSendError {
     Custom(String),
 }
 
-/// Meta-transaction parameters: target address, calldata, and required confirmations.
+/// Meta-transaction parameters: target address, calldata, required
+/// confirmations, and native value.
 #[derive(Debug, Clone)]
 pub struct MetaTransaction {
     /// Target contract address.
@@ -265,10 +266,12 @@ pub struct MetaTransaction {
     /// transaction from that exact address (used by the upto scheme to
     /// satisfy `msg.sender == witness.facilitator`).
     pub from: Option<Address>,
+    /// Native token amount attached to the transaction.
+    pub value: U256,
 }
 
 impl MetaTransaction {
-    /// Builds a meta-transaction with no signer pinning.
+    /// Builds a meta-transaction with no signer pinning and zero native value.
     #[must_use]
     pub const fn new(to: Address, calldata: Bytes, confirmations: u64) -> Self {
         Self {
@@ -276,6 +279,7 @@ impl MetaTransaction {
             calldata,
             confirmations,
             from: None,
+            value: U256::ZERO,
         }
     }
 
@@ -324,6 +328,20 @@ pub trait Eip155MetaTransactionProvider {
         &self,
         tx: MetaTransaction,
     ) -> impl Future<Output = Result<TransactionReceipt, Self::Error>> + Send;
+
+    /// `eth_sendRawTransaction` of a buyer-signed EIP-2718 envelope.
+    ///
+    /// Does not consume a facilitator nonce.
+    ///
+    /// # Errors
+    ///
+    /// Returns a transport error if broadcast fails, or a receipt-wait error if
+    /// the transaction is not confirmed within the provider timeout.
+    fn send_raw_transaction(
+        &self,
+        encoded: &[u8],
+        confirmations: u64,
+    ) -> impl Future<Output = Result<TransactionReceipt, Self::Error>> + Send;
 }
 
 impl<T: Eip155MetaTransactionProvider> Eip155MetaTransactionProvider for Arc<T> {
@@ -343,6 +361,14 @@ impl<T: Eip155MetaTransactionProvider> Eip155MetaTransactionProvider for Arc<T> 
         tx: MetaTransaction,
     ) -> impl Future<Output = Result<TransactionReceipt, Self::Error>> + Send {
         (**self).send_transaction(tx)
+    }
+
+    fn send_raw_transaction(
+        &self,
+        encoded: &[u8],
+        confirmations: u64,
+    ) -> impl Future<Output = Result<TransactionReceipt, Self::Error>> + Send {
+        (**self).send_raw_transaction(encoded, confirmations)
     }
 }
 
@@ -415,7 +441,8 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
         let mut txr = TransactionRequest::default()
             .with_to(tx.to)
             .with_from(from_address)
-            .with_input(tx.calldata);
+            .with_input(tx.calldata)
+            .with_value(tx.value);
 
         if !self.eip1559 {
             let provider = &self.inner;
@@ -470,6 +497,26 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
             }
         }
     }
+
+    async fn send_raw_transaction(
+        &self,
+        encoded: &[u8],
+        confirmations: u64,
+    ) -> Result<TransactionReceipt, Self::Error> {
+        let pending_tx = self.inner.send_raw_transaction(encoded).await?;
+        let timeout = std::time::Duration::from_secs(self.receipt_timeout_secs);
+        let tx_hash = *pending_tx.tx_hash();
+        let watcher = pending_tx
+            .with_required_confirmations(confirmations)
+            .with_timeout(Some(timeout));
+        match watcher.get_receipt().await {
+            Ok(receipt) => Ok(receipt),
+            Err(e) => Err(MetaTransactionSendError::ReceiptWait {
+                hash: tx_hash,
+                source: e,
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -479,7 +526,12 @@ impl Eip155MetaTransactionProvider for Eip155ChainProvider {
     reason = "test assertions on known-valid fixtures"
 )]
 mod tests {
+    use std::str::FromStr;
+    use std::sync::{Arc, Mutex};
+
     use super::*;
+
+    const RAW_TX_HASH: TxHash = TxHash::repeat_byte(0x11);
 
     fn chain_id() -> ChainId {
         "eip155:8453".parse().expect("fixture chain id")
@@ -511,5 +563,241 @@ mod tests {
         let url = Url::parse("https://mainnet.base.org").expect("fixture rpc url");
         Eip155ChainProvider::rpc_client(&chain_id(), &[(url, None)])
             .expect("HTTPS endpoint must construct");
+    }
+
+    #[test]
+    fn meta_transaction_new_defaults_value_zero() {
+        let tx = MetaTransaction::new(Address::ZERO, Bytes::new(), 1);
+        assert_eq!(tx.value, U256::ZERO, "new() defaults value to zero");
+        assert_eq!(tx.from, None, "new() does not pin a signer");
+        let pinned = Address::repeat_byte(0x42);
+        let tx = tx.with_from(pinned);
+        assert_eq!(tx.from, Some(pinned), "with_from pins signer");
+        assert_eq!(tx.value, U256::ZERO, "with_from leaves value unchanged");
+    }
+
+    #[test]
+    fn with_data_suffix_preserves_value() {
+        let mut tx = MetaTransaction::new(Address::ZERO, Bytes::from_static(&[0x01]), 2);
+        tx.value = U256::from(9u64);
+        let tx = tx.with_data_suffix(&[0xaa]);
+        assert_eq!(tx.value, U256::from(9u64), "suffix must not clobber value");
+        assert_eq!(
+            tx.calldata.as_ref(),
+            &[0x01, 0xaa],
+            "suffix appends calldata"
+        );
+        assert_eq!(tx.confirmations, 2, "suffix must not clobber confirmations");
+    }
+
+    fn anvil_wallet() -> EthereumWallet {
+        let signer = alloy_signer_local::PrivateKeySigner::from_str(
+            "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        )
+        .expect("anvil key");
+        EthereumWallet::from(signer)
+    }
+
+    fn provider_http(rpc: &str, receipt_timeout_secs: u64) -> Eip155ChainProvider {
+        let url = Url::parse(rpc).expect("rpc url");
+        Eip155ChainProvider::new(
+            Eip155ChainReference::new(8453),
+            anvil_wallet(),
+            &[(url, None)],
+            true,
+            false,
+            receipt_timeout_secs,
+        )
+        .expect("provider")
+    }
+
+    fn mined_receipt_json(hash: TxHash) -> serde_json::Value {
+        serde_json::json!({
+            "transactionHash": hash,
+            "transactionIndex": "0x0",
+            "blockHash": "0x2222222222222222222222222222222222222222222222222222222222222222",
+            "blockNumber": "0x1",
+            "from": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+            "to": "0x4020074e9dF2ce1deE5A9C1b5c3f541D02a10003",
+            "cumulativeGasUsed": "0x1",
+            "gasUsed": "0x1",
+            "effectiveGasPrice": "0x1",
+            "contractAddress": null,
+            "logs": [],
+            "logsBloom": format!("0x{}", "0".repeat(512)),
+            "status": "0x1",
+            "type": "0x2"
+        })
+    }
+
+    fn rpc_result(
+        id: &serde_json::Value,
+        result: &serde_json::Value,
+    ) -> wiremock::ResponseTemplate {
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result
+        }))
+    }
+
+    fn rpc_error(id: &serde_json::Value, message: &str) -> wiremock::ResponseTemplate {
+        wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "error": { "code": -32000, "message": message }
+        }))
+    }
+
+    fn raw_tx_hex(body: &serde_json::Value) -> Option<String> {
+        body.get("params")
+            .and_then(serde_json::Value::as_array)
+            .and_then(|params| params.first())
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    }
+
+    #[derive(Clone, Copy)]
+    enum RawRpcMode {
+        BroadcastFail,
+        ReceiptRpcFail,
+        ReceiptTimeout,
+        Mined,
+    }
+
+    #[derive(Clone)]
+    struct RawRpc {
+        mode: RawRpcMode,
+        captured: Arc<Mutex<Option<String>>>,
+    }
+
+    impl RawRpc {
+        fn remember_raw(&self, body: &serde_json::Value) {
+            let Some(hex) = raw_tx_hex(body) else {
+                return;
+            };
+            *self.captured.lock().expect("captured") = Some(hex);
+        }
+    }
+
+    impl wiremock::Respond for RawRpc {
+        fn respond(&self, request: &wiremock::Request) -> wiremock::ResponseTemplate {
+            let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap_or_default();
+            let id = body
+                .get("id")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!(1));
+            let method = body
+                .get("method")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if method == "eth_sendRawTransaction" {
+                self.remember_raw(&body);
+                return match self.mode {
+                    RawRpcMode::BroadcastFail => rpc_error(&id, "broadcast failed"),
+                    _ => rpc_result(&id, &serde_json::json!(RAW_TX_HASH)),
+                };
+            }
+            if method == "eth_getTransactionReceipt" {
+                return match self.mode {
+                    RawRpcMode::Mined => rpc_result(&id, &mined_receipt_json(RAW_TX_HASH)),
+                    RawRpcMode::ReceiptRpcFail => rpc_error(&id, "receipt failed"),
+                    _ => rpc_result(&id, &serde_json::Value::Null),
+                };
+            }
+            if method == "eth_blockNumber" {
+                return rpc_result(&id, &serde_json::json!("0x1"));
+            }
+            rpc_result(&id, &serde_json::json!("0x"))
+        }
+    }
+
+    async fn mount_raw_rpc(
+        server: &wiremock::MockServer,
+        mode: RawRpcMode,
+    ) -> Arc<Mutex<Option<String>>> {
+        let captured = Arc::new(Mutex::new(None));
+        let script = RawRpc {
+            mode,
+            captured: Arc::clone(&captured),
+        };
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(script)
+            .mount(server)
+            .await;
+        captured
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_broadcast_error_is_transport() {
+        let server = wiremock::MockServer::start().await;
+        let captured = mount_raw_rpc(&server, RawRpcMode::BroadcastFail).await;
+        let provider = provider_http(&server.uri(), 1);
+        let encoded = [0x02, 0xaa, 0xbb];
+        let err = provider
+            .send_raw_transaction(&encoded, 1)
+            .await
+            .expect_err("broadcast failure must not succeed");
+        assert!(
+            matches!(err, MetaTransactionSendError::Transport(_)),
+            "broadcast RPC error must be Transport, got {err}"
+        );
+        let hex = captured.lock().expect("captured").clone();
+        assert_eq!(
+            hex.as_deref(),
+            Some("0x02aabb"),
+            "raw envelope must be forwarded as hex"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_waits_for_receipt() {
+        let server = wiremock::MockServer::start().await;
+        mount_raw_rpc(&server, RawRpcMode::Mined).await;
+        let provider = provider_http(&server.uri(), 5);
+        let receipt = provider
+            .send_raw_transaction(&[0x02], 1)
+            .await
+            .expect("mined raw tx");
+        assert_eq!(
+            receipt.transaction_hash, RAW_TX_HASH,
+            "receipt hash must match eth_sendRawTransaction result"
+        );
+        assert!(receipt.status(), "fixture receipt is successful");
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_receipt_rpc_error_is_receipt_wait() {
+        let server = wiremock::MockServer::start().await;
+        mount_raw_rpc(&server, RawRpcMode::ReceiptRpcFail).await;
+        let provider = provider_http(&server.uri(), 1);
+        let err = provider
+            .send_raw_transaction(&[0x02], 1)
+            .await
+            .expect_err("receipt RPC failure must not succeed");
+        match err {
+            MetaTransactionSendError::ReceiptWait { hash, .. } => {
+                assert_eq!(
+                    hash, RAW_TX_HASH,
+                    "ReceiptWait must carry the broadcast hash"
+                );
+            }
+            other => panic!("expected ReceiptWait, got {other}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn send_raw_transaction_receipt_timeout_is_receipt_wait() {
+        let server = wiremock::MockServer::start().await;
+        mount_raw_rpc(&server, RawRpcMode::ReceiptTimeout).await;
+        let provider = provider_http(&server.uri(), 1);
+        let err = provider
+            .send_raw_transaction(&[0x02], 1)
+            .await
+            .expect_err("missing receipt must time out");
+        assert!(
+            matches!(err, MetaTransactionSendError::ReceiptWait { .. }),
+            "timeout must be ReceiptWait, got {err}"
+        );
     }
 }

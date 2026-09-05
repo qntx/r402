@@ -405,6 +405,7 @@ where
             calldata: cf.factory_calldata.clone(),
             confirmations: 1,
             from: None,
+            value: alloy_primitives::U256::ZERO,
         },
     )
     .await

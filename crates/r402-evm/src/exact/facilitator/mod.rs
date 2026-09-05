@@ -647,6 +647,11 @@ mod tests {
         );
         let calldata = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
         let tx = MetaTransaction::new(Address::ZERO, calldata, 1).with_data_suffix(&suffix);
+        assert_eq!(
+            tx.value,
+            U256::ZERO,
+            "new() must default native value to zero"
+        );
         assert!(
             tx.calldata.as_ref().ends_with(&suffix),
             "settlement calldata must end with the ERC-8021 suffix"

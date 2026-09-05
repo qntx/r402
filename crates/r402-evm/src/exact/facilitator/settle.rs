@@ -220,6 +220,7 @@ where
                         calldata: transfer_call.tx.calldata().clone(),
                         confirmations: 1,
                         from: None,
+                        value: U256::ZERO,
                     }
                     .with_data_suffix(data_suffix),
                 );
@@ -252,6 +253,7 @@ where
                         calldata: aggregate_call.abi_encode().into(),
                         confirmations: 1,
                         from: None,
+                        value: U256::ZERO,
                     }
                     .with_data_suffix(data_suffix),
                 );
@@ -276,6 +278,7 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
+                    value: U256::ZERO,
                 }
                 .with_data_suffix(data_suffix),
             );
@@ -298,6 +301,7 @@ where
                     calldata: transfer_call.tx.calldata().clone(),
                     confirmations: 1,
                     from: None,
+                    value: U256::ZERO,
                 }
                 .with_data_suffix(data_suffix),
             );
@@ -393,6 +397,7 @@ where
             calldata,
             confirmations: 1,
             from: None,
+            value: U256::ZERO,
         }
         .with_data_suffix(data_suffix),
     );
@@ -446,6 +451,13 @@ fn check_receipt(
     Ok(receipt.transaction_hash)
 }
 
+#[cfg_attr(
+    not(feature = "telemetry"),
+    allow(
+        clippy::missing_const_for_fn,
+        reason = "telemetry branch calls tracing::event"
+    )
+)]
 fn receipt_reverted(
     receipt: &alloy_rpc_types_eth::TransactionReceipt,
     #[cfg_attr(
@@ -480,6 +492,13 @@ fn check_receipt_transfer(
     ))
 }
 
+#[cfg_attr(
+    not(feature = "telemetry"),
+    allow(
+        clippy::missing_const_for_fn,
+        reason = "telemetry branch calls tracing::event"
+    )
+)]
 fn log_receipt_ok(
     #[cfg_attr(
         not(feature = "telemetry"),
