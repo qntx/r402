@@ -178,7 +178,7 @@ impl<S: Signer + Send + Sync> UptoSvmScheme<S> {
         let authorizer = self.receiver_authorizer.pubkey().to_string();
         let mut accepts = ctx.requirements.to_vec();
         for req in &mut accepts {
-            if req.scheme.as_str() != UptoScheme::VALUE {
+            if req.scheme.as_str() != UptoScheme::VALUE || req.network != *ctx.network {
                 continue;
             }
             enrich_requirement(
@@ -383,6 +383,7 @@ mod tests {
             &payment_required.resource,
             &payment_required,
             &supported,
+            &accept.network,
         );
         let enriched = scheme
             .enrich_payment_required_response(&ctx)

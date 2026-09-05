@@ -33,6 +33,8 @@ pub struct SchemePaymentRequiredContext<'a> {
     pub payment_required_response: &'a PaymentRequired,
     /// Facilitator `GET /supported` snapshot.
     pub supported: &'a SupportedResponse,
+    /// CAIP-2 of the accept this enrich invocation is bound to.
+    pub network: &'a ChainId,
 }
 
 impl<'a> SchemePaymentRequiredContext<'a> {
@@ -43,6 +45,7 @@ impl<'a> SchemePaymentRequiredContext<'a> {
         resource: &'a ResourceInfo,
         payment_required_response: &'a PaymentRequired,
         supported: &'a SupportedResponse,
+        network: &'a ChainId,
     ) -> Self {
         Self {
             requirements,
@@ -51,6 +54,7 @@ impl<'a> SchemePaymentRequiredContext<'a> {
             error: None,
             payment_required_response,
             supported,
+            network,
         }
     }
 }
