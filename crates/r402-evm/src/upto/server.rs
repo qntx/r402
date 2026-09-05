@@ -47,6 +47,7 @@ impl SchemeNetworkServer for Eip155Upto {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
             acc | (req.scheme.as_str() == UptoScheme::VALUE
+                && req.network == *ctx.network
                 && apply_facilitator_address(req, ctx.supported))
         });
         std::future::ready(changed.then_some(accepts))
@@ -352,6 +353,57 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some(facilitator.to_checksum(None).as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn enrich_only_mutates_the_bound_network() {
+        let pay_to = ChecksummedAddress::from(Address::repeat_byte(0xCC));
+        let main =
+            Eip155Upto::price_tag(pay_to, token_8453().amount(U256::from(1_u64))).requirements;
+        let sepolia = Eip155Upto::price_tag(
+            pay_to,
+            Eip155TokenDeployment {
+                chain_reference: Eip155ChainReference::new(84_532),
+                address: Address::ZERO,
+                decimals: 6,
+                eip712: None,
+            }
+            .amount(U256::from(1_u64)),
+        )
+        .requirements;
+        let facilitator = Address::repeat_byte(0xFA);
+        let mut signers: HashMap<CompactString, Vec<CompactString>> = HashMap::new();
+        let _ = signers.insert(
+            "eip155:*".into(),
+            vec![facilitator.to_checksum(None).into()],
+        );
+        let supported = SupportedResponse::new().with_signers(signers);
+        let reqs = vec![main, sepolia];
+        let resource = r402_protocol::payment::ResourceInfo::new("https://example.com/x");
+        let payment_required = r402_protocol::payment::PaymentRequired::new(resource.clone());
+        let ctx = SchemePaymentRequiredContext::new(
+            &reqs,
+            &resource,
+            &payment_required,
+            &supported,
+            &reqs[0].network,
+        );
+        let enriched = Eip155Upto
+            .enrich_payment_required_response(&ctx)
+            .await
+            .expect("8453 extra changed");
+        let extra0 = enriched[0]
+            .extra
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("8453 extra");
+        let extra1 = enriched[1]
+            .extra
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .expect("84532 extra");
+        assert!(extra0.contains_key("facilitatorAddress"));
+        assert!(!extra1.contains_key("facilitatorAddress"));
     }
 
     #[test]

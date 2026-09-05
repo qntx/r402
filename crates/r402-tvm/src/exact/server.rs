@@ -43,7 +43,7 @@ impl SchemeNetworkServer for TvmExact {
     ) -> impl Future<Output = Option<Vec<payment::PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
-            acc | apply_tvm_are_fees_sponsored(req, ctx.supported)
+            acc | (req.network == *ctx.network && apply_tvm_are_fees_sponsored(req, ctx.supported))
         });
         std::future::ready(changed.then_some(accepts))
     }

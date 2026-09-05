@@ -40,9 +40,9 @@ impl SchemeNetworkServer for XrplExact {
         ctx: &'a SchemePaymentRequiredContext<'a>,
     ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
-        let changed = accepts
-            .iter_mut()
-            .fold(false, |acc, req| acc | apply_xrpl_unsponsored(req));
+        let changed = accepts.iter_mut().fold(false, |acc, req| {
+            acc | (req.network == *ctx.network && apply_xrpl_unsponsored(req))
+        });
         std::future::ready(changed.then_some(accepts))
     }
 }

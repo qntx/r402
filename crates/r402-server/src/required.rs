@@ -116,6 +116,7 @@ impl ResourceServer {
                     error: response.error.as_deref(),
                     payment_required_response: response,
                     supported,
+                    network: &network,
                 };
                 scheme.enrich_payment_required_response(&ctx).await
             };

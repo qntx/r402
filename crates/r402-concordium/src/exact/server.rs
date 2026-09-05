@@ -66,7 +66,7 @@ impl SchemeNetworkServer for ConcordiumExact {
     ) -> impl Future<Output = Option<Vec<PaymentRequirements>>> + Send + 'a {
         let mut accepts = ctx.requirements.to_vec();
         let changed = accepts.iter_mut().fold(false, |acc, req| {
-            acc | apply_concordium_fee_payer(req, ctx.supported)
+            acc | (req.network == *ctx.network && apply_concordium_fee_payer(req, ctx.supported))
         });
         std::future::ready(changed.then_some(accepts))
     }
@@ -456,6 +456,7 @@ mod tests {
             &resource,
             &payment_required,
             &supported,
+            &req.network,
         );
         let enriched = scheme
             .enrich_payment_required_response(&ctx)
@@ -495,6 +496,7 @@ mod tests {
             &resource,
             &payment_required,
             &supported,
+            &req.network,
         );
         let enriched = scheme
             .enrich_payment_required_response(&ctx)

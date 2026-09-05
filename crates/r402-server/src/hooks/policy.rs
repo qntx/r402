@@ -496,6 +496,72 @@ mod tests {
     }
 
     #[test]
+    fn scheme_enrich_rejects_new_extra_on_unbound_network() {
+        let main = PaymentRequirements::new(
+            "upto".into(),
+            "eip155:143".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            300,
+        );
+        let testnet = PaymentRequirements::new(
+            "upto".into(),
+            "eip155:10143".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            300,
+        );
+        let baseline = snapshot_payment_requirements_list(&[main, testnet]);
+        let mut current = snapshot_payment_requirements_list(&baseline);
+        current[0].extra = Some(json!({"facilitatorAddress": "0xfa"}));
+        current[1].extra = Some(json!({"facilitatorAddress": "0xfa"}));
+        let err = assert_accepts_additive_extra_after_scheme_enrich(
+            &baseline,
+            &current,
+            "upto",
+            "eip155:143",
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("index 1"), "{msg}");
+        assert!(msg.contains("only matching accepts"), "{msg}");
+    }
+
+    #[test]
+    fn scheme_enrich_allows_new_extra_only_on_bound_network() {
+        let main = PaymentRequirements::new(
+            "upto".into(),
+            "eip155:143".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            300,
+        );
+        let testnet = PaymentRequirements::new(
+            "upto".into(),
+            "eip155:10143".parse().unwrap(),
+            "1".into(),
+            "0xa".into(),
+            "0xb".into(),
+            300,
+        );
+        let baseline = snapshot_payment_requirements_list(&[main, testnet]);
+        let mut current = snapshot_payment_requirements_list(&baseline);
+        current[0].extra = Some(json!({"facilitatorAddress": "0xfa"}));
+        assert!(
+            assert_accepts_additive_extra_after_scheme_enrich(
+                &baseline,
+                &current,
+                "upto",
+                "eip155:143",
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
     fn scheme_enrich_rejects_injected_payment_flow_on_matching_accept() {
         let baseline =
             snapshot_payment_requirements_list(&[sample_req().with_extra(json!({"name": "USDC"}))]);
