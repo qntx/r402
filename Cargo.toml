@@ -202,7 +202,7 @@ metrics      = "0.24"
 proptest = "1"
 # Offer-receipt JWS (ES256 / ES256K). alloy-primitives already pulls k256;
 # pin here so r402-extensions does not take an unpinned transitive.
-p256     = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
+p256     = { version = "0.14", default-features = false, features = ["ecdsa", "std"] }
 k256     = { version = "0.13", default-features = false, features = ["ecdsa", "std"] }
 
 [profile.release]
