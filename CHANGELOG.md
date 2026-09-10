@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+### Breaking
+
+- Direct `k256` / `p256` 0.14. `JwsPublicKey` now wraps 0.14
+  `VerifyingKey` types. Alloy workspace pins are 2.4 / alloy-core 1.7.
+
+### Changed
+
+- Workspace dependencies: `rmcp` 3.2, `reqwest` 0.13.5, `serde_with`
+  3.23. `data-encoding`, `num-bigint`, `num-traits`, `axum`, and
+  `http-body-util` are workspace pins. rustfmt `style_edition = "2024"`.
+- Solana stays on the 3.x client/tx line: `solana-client` 4.2.2's upper
+  bounds (`pubkey <4.3`, `message <4.5`, `transaction <4.2`,
+  `signature <3.5`) do not co-resolve with
+  `solana-compute-budget-interface` 3.1. Stellar RPC stays on 27
+  (`stellar-rpc-client` 28 is still rc). `bincode` stays 1. `dashmap`
+  stays 6 (7 is rc). `num-bigint` stays 0.4 (`tonlib-core` 0.26).
+
 ## [0.21.0] — 2026-09-05
 
 ### Breaking

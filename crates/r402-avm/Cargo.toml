@@ -34,7 +34,7 @@ full        = ["telemetry", "client", "server", "facilitator"]
 [dependencies]
 base64        = { workspace = true }
 compact_str   = { workspace = true }
-data-encoding = "2"
+data-encoding = { workspace = true }
 r402-protocol = { workspace = true }
 serde         = { workspace = true }
 serde_json    = { workspace = true }
