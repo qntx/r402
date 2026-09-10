@@ -2,10 +2,7 @@
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use ed25519_dalek::{
-    Signature as EdSignature, SigningKey as EdSigningKey, Verifier as EdVerifier,
-    VerifyingKey as EdVk,
-};
+use ed25519_dalek::{Signature as EdSignature, SigningKey as EdSigningKey, VerifyingKey as EdVk};
 use k256::ecdsa::signature::Signer as K256Signer;
 use k256::ecdsa::{
     Signature as K256Signature, SigningKey as K256SigningKey, VerifyingKey as K256Vk,

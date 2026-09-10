@@ -72,11 +72,11 @@ alloy-primitives   = { workspace = true }
 alloy-provider     = { workspace = true }
 alloy-signer       = { workspace = true }
 alloy-signer-local = { workspace = true }
-axum               = "0.8"
+axum               = { workspace = true }
 axum-core          = { workspace = true }
 compact_str        = { workspace = true }
 http               = { workspace = true }
-http-body-util     = "0.1"
+http-body-util     = { workspace = true }
 r402-client        = { workspace = true }
 r402-evm           = { workspace = true, features = ["client", "server", "facilitator"] }
 r402-extensions    = { workspace = true, default-features = false, features = [

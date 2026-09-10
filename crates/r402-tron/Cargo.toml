@@ -43,7 +43,7 @@ full        = ["telemetry", "client", "server", "facilitator"]
 [dependencies]
 alloy-primitives = { workspace = true }
 alloy-sol-types  = { workspace = true, optional = true }
-bs58             = "0.5"
+bs58             = { workspace = true }
 compact_str      = { workspace = true }
 r402-protocol    = { workspace = true }
 serde            = { workspace = true }
