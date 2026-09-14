@@ -59,7 +59,7 @@ near-jsonrpc-client     = { workspace = true, optional = true }
 near-jsonrpc-primitives = { workspace = true, optional = true }
 near-primitives         = { workspace = true, optional = true }
 # Same reqwest line as near-jsonrpc-client 0.22. Do not use workspace 0.13.
-reqwest                 = { version = "0.12", default-features = false, features = ["json"], optional = true }
+reqwest                 = { version = "0.13", default-features = false, features = ["json"], optional = true }
 r402-client             = { workspace = true, optional = true }
 r402-facilitator        = { workspace = true, optional = true }
 r402-server             = { workspace = true, optional = true }
