@@ -127,7 +127,7 @@ alloy-transport-http = "2.4"
 # do not co-resolve, and jumping to 4.2 would *downgrade* pubkey 4.3 and
 # signature 3.5. Revisit when compute-budget-interface publishes 4.x
 # with matching upper bounds.
-solana-account                  = "3"
+solana-account                  = "5"
 solana-client                   = "3"
 solana-commitment-config        = "3"
 solana-compute-budget-interface = "3"
