@@ -7,6 +7,82 @@ all-features = true
 [advisories]
 yanked       = "warn"
 unmaintained = "none"
+ignore       = [
+  # --- The five rustls / rustls-webpki advisories below ---
+  # Fixes need rustls >= 0.23.45/0.23.46 and rustls-webpki >= 0.103.16, all
+  # of which require aws-lc-rs ^1.18 in the resolved graph. aws-lc-rs is
+  # pinned at =1.16.2 by an UNCONDITIONAL dependency of near-crypto 0.37.4
+  # (near tree via r402-near), and aws-lc-sys's `links` attribute forbids a
+  # second copy, so `cargo update -p rustls --precise 0.23.46` fails with
+  # "failed to select a version for `aws-lc-rs` ... required by package
+  # `rustls v0.23.46` ... previously selected package `aws-lc-rs v1.16.2`
+  # ... required by `near-crypto v0.37.4`". There is no lockfile- or
+  # feature-only escape: reqwest's `rustls` feature hard-enables
+  # `__rustls-aws-lc-rs`, and `rustls-no-provider` would need a code-level
+  # CryptoProvider install. The pin relaxes only in near-* 0.38.x
+  # (near-crypto 0.38.1 wants "1.18.2") — a semver-major bump of the whole
+  # near-* family inside r402-near, tracked as a manifest/API change.
+  #
+  # Exposure note: r402 is a library-only workspace (no bins/examples —
+  # every target is lib/test), so this lockfile only governs r402's own CI
+  # and tests; downstream users resolve their own rustls. The known
+  # downstream user qntx/facilitator IS exposed and carries the same
+  # ignores with its own reachability notes.
+  #
+  # Reachability per id (rustls 0.23.43, rustls-webpki 0.103.13; rustls is
+  # reached via reqwest/hyper-rustls/tokio-rustls and tungstenite — all
+  # outbound-TLS clients; nothing terminates TLS):
+  # - 0285: REACHABLE as a TLS client to a malicious/MITM'd endpoint, which
+  #   could send unencrypted handshake messages rustls wrongly accepts.
+  #   Advisory: transcript still authenticated — no handshake forgery.
+  # - 0346: not reachable — needs a custom ClientSessionStore impl that
+  #   Debug-formats session values; none in workspace or registry deps.
+  # - 0348: not reachable — needs the non-default `brotli` feature; off in
+  #   this graph (`cargo tree -e features -i rustls`).
+  # - 0349: REACHABLE in principle (outbound TLS + session cache), but no
+  #   practical impact: `prefer-post-quantum` is off, so X25519MLKEM768 is
+  #   already last in DEFAULT_KX_GROUPS and a forced classical share is
+  #   the default anyway; also needs a hybrid-preferring server.
+  # - 0382: REACHABLE — certificate verification through rustls-webpki with
+  #   webpki-roots anchors (reqwest 0.12.28 `rustls-tls-webpki-roots`,
+  #   tungstenite); webpki-roots 1.0.10 still ships the emSign roots, so
+  #   chains through the distrusted intermediates can build. Attacker
+  #   needs a MITM or malicious RPC endpoint. Not reached via the
+  #   rustls-platform-verifier path (OS verifies) used by reqwest 0.13.x.
+  #
+  # Revisit: when r402-* moves to near-* 0.38.x, run
+  # `cargo update -p rustls -p rustls-webpki` and remove these entries;
+  # review by 2027-02-27.
+  { id = "RUSTSEC-2026-0285", reason = "REACHABLE via outbound TLS to a malicious/MITM endpoint (plaintext handshake msgs wrongly accepted; advisory notes no auth bypass); fix needs aws-lc-rs ^1.18, pinned =1.16.2 by near-crypto until the near-* 0.38 bump; review by 2027-02-27" },
+  { id = "RUSTSEC-2026-0346", reason = "not reachable: needs a custom ClientSessionStore that Debug-formats session values — none in this graph (built-in cache redacts); fix blocked by near-crypto's aws-lc-rs =1.16.2 pin; review by 2027-02-27" },
+  { id = "RUSTSEC-2026-0348", reason = "not reachable: needs rustls's non-default `brotli` feature, off in this graph; fix blocked by near-crypto's aws-lc-rs =1.16.2 pin; review by 2027-02-27" },
+  { id = "RUSTSEC-2026-0349", reason = "REACHABLE in principle via outbound TLS + session cache but no practical impact — prefer-post-quantum off, hybrid kx already last; fix blocked by near-crypto's aws-lc-rs =1.16.2 pin; review by 2027-02-27" },
+  { id = "RUSTSEC-2026-0382", reason = "REACHABLE: webpki verifies against webpki-roots (reqwest 0.12.28, tungstenite) and webpki-roots 1.0.10 still ships emSign roots — a MITM/malicious endpoint can present a distrusted-intermediate chain; fix blocked by near-crypto's aws-lc-rs =1.16.2 pin; review by 2027-02-27" },
+  # crypto-bigint timing variability in ops intended constant-time
+  # (subtraction, division, Montgomery mul, limb equality, inversion):
+  # patched only in >= 0.7.6. The lockfile holds 0.5.5 via elliptic-curve
+  # 0.13.8 / alloy-signer 2.4.1 (requires ^0.5.1) and 0.6.1 via
+  # keetanetwork-crypto 0.3.0 (requires ^0.6.1) — neither upstream offers
+  # an in-range fix.
+  # REACHABLE: the EVM signing path (alloy-signer-local -> k256 ->
+  # elliptic-curve -> crypto-bigint 0.5.5) and the keeta path
+  # (keetanetwork-crypto -> 0.6.1) run secret-scalar arithmetic through
+  # the affected ops; exploitation needs a timing/microarchitectural side
+  # channel (typically local or co-resident observation).
+  # Revisit: remove when alloy moves to elliptic-curve 0.14 and
+  # keetanetwork-* move off crypto-bigint 0.6; review by 2027-02-27.
+  { id = "RUSTSEC-2026-0387", reason = "REACHABLE: EVM/keeta signing runs secret scalars through affected ops (crypto-bigint 0.5.5 via alloy-signer->elliptic-curve, 0.6.1 via keetanetwork-crypto); exploit needs a local/co-resident timing channel; no in-range patch; review by 2027-02-27" },
+  # url <= 2.5.8: `Url::origin()` recurses once per nested `blob:` prefix
+  # and can overflow the stack. Across the workspace and every registry
+  # crate in Cargo.lock the only caller (nothing calls
+  # `url::quirks::origin()`) is r402-extensions' `SiwxOrigin::parse`
+  # (crates/r402-extensions/src/siwx/origin.rs:63), which rejects every
+  # non-http(s) scheme before `.origin()` — `blob:` can never reach it.
+  # Fixed in 2.5.9, published 2026-11-20T23:03Z.
+  # Revisit: from 2026-11-28 (7-day rule) run `cargo update -p url` to
+  # 2.5.9 and remove this entry.
+  { id = "RUSTSEC-2026-0592", reason = "not reachable: sole Url::origin() caller r402-extensions SiwxOrigin::parse rejects non-http(s) before .origin(), so blob: never reaches it; bump url to 2.5.9 and remove from 2026-11-28" },
+]
 
 [licenses]
 allow                = [
