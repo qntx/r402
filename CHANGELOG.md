@@ -8,8 +8,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ### Breaking
 
+- `r402-near` NEAR crates 0.37 → 0.38 (`near-jsonrpc-client` 0.22 →
+  0.23). The API shape is unchanged, but `near_crypto` /
+  `near_primitives` types in the public surface are now the 0.38 line;
+  downstream NEAR deps must move to 0.38 too.
 - Direct `k256` / `p256` 0.14. `JwsPublicKey` now wraps 0.14
   `VerifyingKey` types. Alloy workspace pins are 2.4 / alloy-core 1.7.
+
+### Security
+
+- Cleared the rustls advisory set: `rustls` 0.23.43 → 0.23.46 and
+  `rustls-webpki` 0.103.13 → 0.103.17 close RUSTSEC-2026-0285,
+  RUSTSEC-2026-0346, RUSTSEC-2026-0348, RUSTSEC-2026-0349, and
+  RUSTSEC-2026-0382; `url` 2.5.8 → 2.5.9 closes RUSTSEC-2026-0592.
+  The near-* 0.38 bump relaxes `aws-lc-rs` to ^1.18 (resolved 1.19.0),
+  which is what the rustls fixes require.
+- `RUSTSEC-2026-0387` (`crypto-bigint`) stays ignored: patched only in
+  >= 0.7.6 while `alloy-signer` still requires elliptic-curve 0.13
+  (crypto-bigint 0.5) and `keetanetwork-crypto` 0.3.0 requires
+  crypto-bigint ^0.6.1. No in-range upstream release exists.
 
 ### Changed
 
