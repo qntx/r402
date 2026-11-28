@@ -147,13 +147,15 @@ spl-token-2022-interface        = "3.1"
 
 # NEAR
 #
-# near-jsonrpc-client 0.22 pulls reqwest ^0.12. Workspace reqwest stays
+# near-jsonrpc-client 0.23 pulls reqwest ^0.12. Workspace reqwest stays
 # 0.13; multiple versions are allowed by deny.toml. Do not add workspace
-# reqwest to r402-near.
-near-jsonrpc-client     = "0.22"
-near-crypto             = "0.37"
-near-primitives         = "0.37"
-near-jsonrpc-primitives = "0.37"
+# reqwest to r402-near. The 0.37 -> 0.38 bump relaxes near-crypto's
+# aws-lc-rs pin (=1.16.2 -> ^1.18.2), unblocking rustls 0.23.46 and
+# rustls-webpki 0.103.16+ for the rustls advisory set.
+near-jsonrpc-client     = "0.23"
+near-crypto             = "0.38"
+near-primitives         = "0.38"
+near-jsonrpc-primitives = "0.38"
 borsh                   = "1.3"
 
 # XRPL
