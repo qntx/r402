@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-11-28
+
 ### Breaking
 
 - `r402-near` NEAR crates 0.37 → 0.38 (`near-jsonrpc-client` 0.22 →
@@ -31,14 +33,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) 
 ### Changed
 
 - Workspace dependencies: `rmcp` 3.2, `reqwest` 0.13.5, `serde_with`
-  3.23. `data-encoding`, `num-bigint`, `num-traits`, `axum`, and
-  `http-body-util` are workspace pins. rustfmt `style_edition = "2024"`.
+  3.23, `sha2` 0.11. `data-encoding`, `num-bigint`, `num-traits`,
+  `axum`, and `http-body-util` are workspace pins. rustfmt
+  `style_edition = "2024"`.
 - Solana stays on the 3.x client/tx line: `solana-client` 4.2.2's upper
   bounds (`pubkey <4.3`, `message <4.5`, `transaction <4.2`,
   `signature <3.5`) do not co-resolve with
   `solana-compute-budget-interface` 3.1. Stellar RPC stays on 27
   (`stellar-rpc-client` 28 is still rc). `bincode` stays 1. `dashmap`
   stays 6 (7 is rc). `num-bigint` stays 0.4 (`tonlib-core` 0.26).
+- Workspace version **0.22.0**. Path workspace deps use `version = "0.22"`.
+
+### Documentation
+
+- Top-level README is the QuantX project postcard; long-form content
+  moves to `docs/` (`index.mdx` + `meta.json` stub, ingested via
+  `ci-docs.yml`).
 
 ## [0.21.0] — 2026-09-05
 
@@ -809,6 +819,7 @@ rather than protocol semantics.
 - `BoxFuture`-returning variants of `Facilitator::verify` / `settle` / `supported`; call sites should move to the AFIT signatures or use the `DynFacilitator` shim.
 - `as_registered` builder method on `BazaarExtension` — renamed to `registered` to satisfy `clippy::wrong_self_convention`.
 
+[0.22.0]: https://github.com/qntx/r402/releases/tag/v0.22.0
 [0.21.0]: https://github.com/qntx/r402/releases/tag/v0.21.0
 [0.20.0]: https://github.com/qntx/r402/releases/tag/v0.20.0
 [0.19.1]: https://github.com/qntx/r402/releases/tag/v0.19.1
