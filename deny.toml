@@ -72,46 +72,34 @@ ignore       = [
   # Revisit: remove when alloy moves to elliptic-curve 0.14 and
   # keetanetwork-* move off crypto-bigint 0.6; review by 2027-02-27.
   { id = "RUSTSEC-2026-0387", reason = "REACHABLE: EVM/keeta signing runs secret scalars through affected ops (crypto-bigint 0.5.5 via alloy-signer->elliptic-curve, 0.6.1 via keetanetwork-crypto); exploit needs a local/co-resident timing channel; no in-range patch; review by 2027-02-27" },
-  # url <= 2.5.8: `Url::origin()` recurses once per nested `blob:` prefix
-  # and can overflow the stack. Across the workspace and every registry
-  # crate in Cargo.lock the only caller (nothing calls
-  # `url::quirks::origin()`) is r402-extensions' `SiwxOrigin::parse`
-  # (crates/r402-extensions/src/siwx/origin.rs:63), which rejects every
-  # non-http(s) scheme before `.origin()` — `blob:` can never reach it.
-  # Fixed in 2.5.9, published 2026-11-20T23:03Z.
-  # Revisit: from 2026-11-28 (7-day rule) run `cargo update -p url` to
-  # 2.5.9 and remove this entry.
-  { id = "RUSTSEC-2026-0592", reason = "not reachable: sole Url::origin() caller r402-extensions SiwxOrigin::parse rejects non-http(s) before .origin(), so blob: never reaches it; bump url to 2.5.9 and remove from 2026-11-28" },
 ]
 
 [licenses]
-allow                = [
-    "MIT",
-    "Apache-2.0",
-    "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "OpenSSL",
-    "Zlib",
-    "Unicode-3.0",
-    "Unicode-DFS-2016",
-    "CC0-1.0",
-    "MPL-2.0",
-    "CDLA-Permissive-2.0",
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "OpenSSL",
+  "Zlib",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "CC0-1.0",
+  "MPL-2.0",
+  "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 # tonlib-core (r402-tvm) depends on nacl.
-exceptions           = [
-    { crate = "nacl", allow = ["LGPL-3.0-or-later"] },
-]
+exceptions = [{ crate = "nacl", allow = ["LGPL-3.0-or-later"] }]
 
 [bans]
 multiple-versions = "allow"
-wildcards         = "allow"
+wildcards = "allow"
 
 [sources]
 unknown-registry = "warn"
-unknown-git      = "warn"
-allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
-allow-git        = []
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
