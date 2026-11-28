@@ -143,7 +143,7 @@ spl-token                       = { version = "9", features = ["no-entrypoint"] 
 # all of which live here without dragging in the processor (and the broken
 # `token_group/processor.rs` in `spl-token-2022 v10.0.0`), confidential
 # transfer, or ZK proof code. Drops dozens of transitive deps too.
-spl-token-2022-interface        = "3.1"
+spl-token-2022-interface        = "4.0"
 
 # NEAR
 #
